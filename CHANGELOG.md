@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-24
+
+### Fixed
+
+- 防止 centrifuge 客户端级 `publication` 与 subscription 级监听重复派发同一消息：client 级现在跳过已有 subscription 的 topic，仅处理 server-side subscription 的 publication。
+- `PortReaper.dispose()` 关闭并停止所有追踪中的 session，避免 SharedWorker 关闭时遗留 WebSocket 连接。
+- `PortReaper.reap()` 对 `target.close()`/`target.stop()` 加 try-catch，单个异常 port 不再瘫痪后续死 tab 的回收。
+
 ## [0.1.0] - 2026-08-24
 
 首次公开发布。

@@ -77,10 +77,19 @@ export class PortReaper {
     this.schedule();
   }
 
-  /** Clear all state and stop the reaper (worker shutdown). */
+  /** Clear all state and stop the reaper. Closes and stops every tracked
+   * session so the SharedWorker does not leak WebSockets on shutdown. */
   dispose(): void {
     if (this.handle !== null) this.clearTimer(this.handle);
     this.handle = null;
+    for (const target of this.targets.values()) {
+      try {
+        target.close();
+        target.stop();
+      } catch {
+        // A failing target must not prevent the rest from being cleaned up.
+      }
+    }
     this.targets.clear();
     this.lastSeenAt.clear();
     this.sessionTimeoutMs.clear();
@@ -121,8 +130,13 @@ export class PortReaper {
       // `disconnected` status back to the port, which must not reach a live
       // but slow main thread, and a closed port can never deliver a later
       // message that would resurrect the session outside the reaper's tracking.
-      target.close();
-      target.stop();
+      try {
+        target.close();
+        target.stop();
+      } catch {
+        // A failing target must not prevent the rest from being reaped or
+        // leave the reaper in a broken state for subsequent ticks.
+      }
       reapedAny = true;
     }
     // Recompute the cadence (and clear the interval if the last port was reaped).
