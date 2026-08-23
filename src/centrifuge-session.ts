@@ -57,7 +57,15 @@ export class CentrifugeSession<TData = unknown> {
     client.on('connected', () => this.post({ type: 'STATUS', status: 'connected' }));
     client.on('disconnected', () => this.post({ type: 'STATUS', status: 'disconnected' }));
     client.on('error', context => this.postError(context));
-    client.on('publication', (context: PublicationContext) => this.postPublication(context.channel || getPayloadTopic(context.data), context.data));
+    // Client-level publications are only for server-side subscriptions (where
+    // no client Subscription object exists). For topics we have an active
+    // subscription for, the subscription-level 'publication' listener handles
+    // dispatch — skip here to avoid delivering the same message twice.
+    client.on('publication', (context: PublicationContext) => {
+      const topic = context.channel || getPayloadTopic(context.data);
+      if (!topic || this.subscriptions.has(topic)) return;
+      this.postPublication(topic, context.data);
+    });
     client.connect();
   }
 
