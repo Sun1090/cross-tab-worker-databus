@@ -1,0 +1,71 @@
+{
+  "name": "cross-tab-worker-databus",
+  "version": "0.1.0",
+  "description": "Framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering and Centrifuge support.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Sun1090",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sun1090/cross-tab-worker-databus.git"
+  },
+  "homepage": "https://github.com/Sun1090/cross-tab-worker-databus#readme",
+  "bugs": {
+    "url": "https://github.com/Sun1090/cross-tab-worker-databus/issues"
+  },
+  "keywords": [
+    "broadcast-channel",
+    "cross-tab",
+    "data-bus",
+    "dedicated-worker",
+    "shared-worker",
+    "centrifuge",
+    "websocket"
+  ],
+  "files": [
+    "dist",
+    "docs",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./centrifuge": {
+      "types": "./dist/centrifuge.d.ts",
+      "import": "./dist/centrifuge.js"
+    },
+    "./centrifuge.worker": "./dist/centrifuge.worker.js",
+    "./centrifuge.shared.worker": "./dist/centrifuge.shared.worker.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "examples": "node scripts/serve-examples.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm build && playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "centrifuge": "^5.5.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@10.14.0"
+}
