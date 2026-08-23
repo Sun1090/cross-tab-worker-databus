@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+dist/
+*.tgz
+.DS_Store
+.repl-*
+test-results/
+playwright-report/
+playwright/.cache/

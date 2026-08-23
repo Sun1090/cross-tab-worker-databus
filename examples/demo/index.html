@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>跨 Tab 数据总线演示</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "centrifuge": "/node_modules/centrifuge/build/index.mjs"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22">
+            <path d="M4 6h7M4 12h4M4 18h9M11 4v4h9M15 10v4h5M13 16v4h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <div>
+          <h1>跨 Tab 数据总线演示</h1>
+          <p>Centrifuge + Worker 集群实时数据流</p>
+        </div>
+      </div>
+      <div class="badges">
+        <span class="badge" id="tabBadge">Tab -</span>
+        <span class="badge" id="backendBadge">后端 -</span>
+        <span class="badge status" id="statusBadge">未连接</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="main-col">
+        <div class="panel sdk-overview">
+          <div class="panel-head">
+            <h2>SDK 能力</h2>
+            <span class="badge" id="overviewCoordination">检测中</span>
+          </div>
+          <div class="overview-grid">
+            <div class="overview-item">
+              <div class="overview-icon" style="background:#eef0ff;color:#4f46e5;">📡</div>
+              <div>
+                <strong>跨 Tab 数据分发</strong>
+                <span>任意 Tab 发布消息，集群自动路由到所有订阅 Tab</span>
+              </div>
+            </div>
+            <div class="overview-item">
+              <div class="overview-icon" style="background:#edf9ef;color:#2f9e44;">⚙️</div>
+              <div>
+                <strong>Worker 集群协调</strong>
+                <span id="overviewClusterInfo">通过 BroadcastChannel 与 localStorage 协调 Worker 角色与心跳</span>
+              </div>
+            </div>
+            <div class="overview-item">
+              <div class="overview-icon" style="background:#fdeee4;color:#d9480f;">🔀</div>
+              <div>
+                <strong>Topic 路由与首次分配</strong>
+                <span id="overviewRoutingInfo">复用已有 owner，新 Topic 按负载分配，owner 退出后迁移</span>
+              </div>
+            </div>
+          </div>
+          <div class="overview-stats">
+            <span><strong id="overviewActiveWorkers">0</strong> 活跃 Worker</span>
+            <span><strong id="overviewStandbyWorkers">0</strong> 等待 Worker</span>
+            <span><strong id="overviewVisibleTabs">0</strong> 可见 Tab</span>
+            <span><strong id="overviewHiddenTabs">0</strong> 隐藏 Tab</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>数据流</h2>
+            <div class="legend">
+              <span class="legend-item publish"><i></i>发布</span>
+              <span class="legend-item receive"><i></i>接收</span>
+              <span class="legend-item cluster"><i></i>集群</span>
+            </div>
+          </div>
+          <div class="flow-wrap">
+            <svg id="flowSvg" viewBox="0 0 960 280" role="img" aria-label="跨 Tab 数据流图">
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                  <path d="M0 0 L6 3 L0 6 Z" fill="#9b9b92" />
+                </marker>
+              </defs>
+              <path id="edgeThisCluster" class="edge" d="M160 70 C 210 70 230 70 260 70" marker-end="url(#arrowhead)" />
+              <path id="edgeClusterWorker" class="edge" d="M440 70 C 460 70 480 70 500 70" marker-end="url(#arrowhead)" />
+              <path id="edgeWorkerServer" class="edge" d="M670 70 C 700 70 730 70 760 70" marker-end="url(#arrowhead)" />
+              <path id="edgeClusterOthers" class="edge vertical" d="M350 100 L 350 190" marker-end="url(#arrowhead)" />
+              <g class="node">
+                <rect x="20" y="40" width="140" height="60" rx="8" />
+                <text x="90" y="67" class="node-title">本标签页</text>
+                <text id="nodeThisSub" x="90" y="86" class="node-sub">-</text>
+              </g>
+              <g class="node cluster-node">
+                <rect x="260" y="40" width="180" height="60" rx="8" />
+                <text x="350" y="67" class="node-title">跨 Tab 集群</text>
+                <text x="350" y="86" class="node-sub">BroadcastChannel</text>
+              </g>
+              <g class="node">
+                <rect x="500" y="40" width="170" height="60" rx="8" />
+                <text x="585" y="67" class="node-title">Worker / 会话</text>
+                <text id="nodeWorkerSub" x="585" y="86" class="node-sub">-</text>
+              </g>
+              <g class="node server-node">
+                <rect x="760" y="40" width="180" height="60" rx="8" />
+                <text x="850" y="67" class="node-title">服务器</text>
+                <text id="nodeServerSub" x="850" y="86" class="node-sub">-</text>
+              </g>
+              <g class="node others-node">
+                <rect x="260" y="190" width="180" height="56" rx="8" />
+                <text x="350" y="216" class="node-title">其他标签页</text>
+                <text id="nodeOthersSub" x="350" y="234" class="node-sub">-</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>事件流</h2>
+            <div class="panel-actions">
+              <span class="counter" id="eventCounter">0 条</span>
+              <button class="btn ghost" id="clearLog" type="button">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                清空
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="event-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>方向</th>
+                  <th>类型</th>
+                  <th>Topic</th>
+                  <th>载荷</th>
+                  <th>来源</th>
+                </tr>
+              </thead>
+              <tbody id="eventBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-col">
+        <div class="panel">
+          <div class="panel-head"><h2>连接</h2></div>
+          <div class="field">
+            <label>运行模式</label>
+            <div class="segmented" id="modeSwitch">
+              <button class="seg active" data-mode="centrifugo" type="button">Centrifugo</button>
+              <button class="seg" data-mode="local" type="button">本地广播</button>
+            </div>
+          </div>
+          <div class="field" id="urlField">
+            <label for="endpointPreset">端点</label>
+            <select id="endpointPreset">
+              <option value="local">本地演示（无需外网）</option>
+              <option value="public">公共演示（faye）</option>
+              <option value="custom">自定义</option>
+            </select>
+            <label for="urlInput">WebSocket 地址</label>
+            <input id="urlInput" type="url" spellcheck="false" />
+          </div>
+          <p class="hint" id="connectionHint" hidden></p>
+          <div class="field" id="workerModeField">
+            <label for="workerMode">Worker 模式</label>
+            <select id="workerMode">
+              <option value="dedicated">dedicated（默认）</option>
+              <option value="shared">shared</option>
+              <option value="auto">auto</option>
+            </select>
+          </div>
+          <div class="field check-field" id="transferableField">
+            <label class="check">
+              <input id="transferable" type="checkbox" checked />
+              <span>Transferable 二进制传输</span>
+            </label>
+          </div>
+          <div class="field">
+            <label for="topicInput">Topic</label>
+            <input id="topicInput" type="text" spellcheck="false" value="demo.flow" />
+          </div>
+          <button class="btn primary" id="applyConnection" type="button">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            应用连接
+          </button>
+        </div>
+
+        <div class="panel" id="configPanel">
+          <div class="panel-head">
+            <h2>当前配置</h2>
+            <span class="badge" id="configModeBadge">-</span>
+          </div>
+          <div class="config-grid">
+            <div class="config-row">
+              <span class="config-label">运行模式</span>
+              <span class="config-value" id="configTransport">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">Worker 模式</span>
+              <span class="config-value" id="configWorkerMode">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">后端类型</span>
+              <span class="config-value" id="configBackend">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">Transferable</span>
+              <span class="config-value" id="configTransferable">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">集群 Key</span>
+              <span class="config-value config-key" id="configClusterKey">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">Tab ID</span>
+              <span class="config-value config-key" id="configTabId">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">Topic</span>
+              <span class="config-value config-key" id="configTopic">-</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">端点</span>
+              <span class="config-value config-key" id="configEndpoint">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>发布</h2>
+            <button class="btn ghost" id="openTab" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M14 4h6v6M20 4l-8 8M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              新标签页
+            </button>
+          </div>
+          <div class="field">
+            <label for="payloadInput">JSON 载荷</label>
+            <input id="payloadInput" type="text" spellcheck="false" value='{"note":"cross-tab demo"}' />
+          </div>
+          <div class="button-row">
+            <button class="btn primary" id="publishJson" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              发送 JSON
+            </button>
+            <button class="btn" id="publishBinary" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 6h16M7 6v12M12 6v12M17 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+              二进制
+            </button>
+          </div>
+          <label class="check">
+            <input id="autoPublish" type="checkbox" />
+            <span>自动发布</span>
+          </label>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>指标</h2></div>
+          <div class="metric-grid">
+            <div class="metric"><span>发布</span><strong id="metricPublished">0</strong></div>
+            <div class="metric"><span>接收</span><strong id="metricReceived">0</strong></div>
+            <div class="metric"><span>分发 P50</span><strong id="metricP50">-</strong></div>
+            <div class="metric"><span>分发 P95</span><strong id="metricP95">-</strong></div>
+            <div class="metric"><span>分发平均</span><strong id="metricAvg">-</strong></div>
+            <div class="metric"><span>往返</span><strong id="metricRtt">-</strong></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>集群状态</h2>
+            <span class="badge" id="coordinationBadge">检测中</span>
+          </div>
+          <div class="cluster-summary">
+            <span>订阅 <strong id="subscribedCount">0</strong></span>
+            <span>分配 <strong id="assignedCount">0</strong></span>
+            <span>在线 <strong id="workerCount">0</strong></span>
+          </div>
+          <div class="role-stats">
+            <div class="role-stat active">
+              <span>活跃</span>
+              <strong id="activeWorkerCount">0</strong>
+            </div>
+            <div class="role-stat standby">
+              <span>等待</span>
+              <strong id="standbyWorkerCount">0</strong>
+            </div>
+            <div class="role-stat visible">
+              <span>可见</span>
+              <strong id="visibleTabCount">0</strong>
+            </div>
+            <div class="role-stat hidden">
+              <span>隐藏</span>
+              <strong id="hiddenTabCount">0</strong>
+            </div>
+          </div>
+          <div class="table-wrap compact">
+            <table class="state-table">
+              <thead>
+                <tr><th>Tab</th><th>角色</th><th>状态</th><th>负载</th></tr>
+              </thead>
+              <tbody id="workersBody"></tbody>
+            </table>
+          </div>
+          <div class="table-wrap compact">
+            <table class="state-table">
+              <thead>
+                <tr><th>Topic 路由</th><th>归属</th></tr>
+              </thead>
+              <tbody id="routesBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script type="module" src="./demo.js"></script>
+  </body>
+</html>
