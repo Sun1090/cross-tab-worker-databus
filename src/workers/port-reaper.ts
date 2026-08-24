@@ -60,10 +60,15 @@ export class PortReaper {
     this.lastSeenAt.set(port, this.now());
   }
 
-  /** Override a port's session timeout from its INIT heartbeat config. */
+  /** Override a port's session timeout from its INIT heartbeat config.
+   * A non-finite or non-positive value falls back to the default so a bad
+   * payload cannot degenerate the reaper into a busy loop or silence it. */
   setTimeout(port: MessagePort, heartbeatIntervalMs: number): void {
     if (!this.targets.has(port)) return;
-    this.sessionTimeoutMs.set(port, heartbeatIntervalMs * DEFAULT_SESSION_TIMEOUT_MULTIPLIER);
+    const safe = Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
+      ? heartbeatIntervalMs
+      : DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.sessionTimeoutMs.set(port, safe * DEFAULT_SESSION_TIMEOUT_MULTIPLIER);
     this.schedule();
   }
 

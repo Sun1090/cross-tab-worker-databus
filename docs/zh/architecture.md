@@ -377,6 +377,8 @@ sequenceDiagram
 4. owner 通过 BroadcastChannel 广播 `EVENT/DATABUS_PUBLICATION`；自身 Tab 也有本地订阅时直接分发一次。BroadcastChannel 从不把消息回传给发送者，因此不会重复分发。
 5. 其余每个 Tab 收到 `EVENT` 后，仅当自己持有该 Topic 的 `subscriber:{topicKey}:{tabId}` 记录时才调用本地 handler；没有本地订阅的 Tab 直接丢弃。
 
+在 transport 层，Centrifuge 客户端可能同时在 `client` 对象和对应 `Subscription` 对象上触发同一 publication。为避免把同一条服务器 publication 分发两次，CentrifugeSession 的 client 级 `publication` 监听只处理**没有客户端订阅**的 topic（即服务端订阅）；已有活跃订阅的 topic 仅由 subscription 级监听派发。
+
 ```mermaid
 sequenceDiagram
   participant Pub as 发布方 Tab A

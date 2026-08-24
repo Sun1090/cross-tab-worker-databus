@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-24
+
+### Fixed
+
+- `BatchingStorageWriter` 在结构性写失败（如某 key 让底层 storage 持续抛错）时不再无限重试：每个 key 最多重试 5 次后丢弃并 `console.warn`，避免协调平面永久卡住。
+- `PortReaper.setTimeout` 校验 `heartbeatIntervalMs` 为有限正数，`0`/`NaN`/负数回退默认值，防止 reaper 退化为忙循环或沉睡。
+- `CentrifugeSession.unsubscribe` 先移除 subscription 监听器再退订，避免迟到的 `unsubscribed` 事件删除重订阅后的 subscription（幽灵订阅竞态）。
+- `rememberTopic` FIFO 淘汰改为向前扫描首个非 own 条目，`knownTopics` 在有非 own 条目时真正不超 `MAX_KNOWN_TOPICS` 上限。
+- `DataBusTraceReporter.pause()` 清零 `intervalStartedAt`，避免 stop 后手动 flush 算出异常大的 `durationMs`。
+
+### Documentation
+
+- 架构文档（中英）补充 transport 层 client 级与 subscription 级 publication 去重说明。
+- 配置文档（中英）补充 SharedWorker reaper 的失败隔离与关闭清理行为。
+
 ## [0.1.1] - 2026-08-24
 
 ### Fixed

@@ -132,6 +132,8 @@ const bus = createCentrifugeDataBus({
 - **会话超时**：`3 × heartbeatIntervalMs`（默认 `30000` ms）。超过超时未收到消息的端口会被回收：其会话停止，WebSocket 关闭。这与 Core 集群心跳（默认 `3000` ms，通过 localStorage 跟踪 worker 存活）相互独立——见下方说明。
 - **自适应频率**：回收器以所有活动端口中最小的心跳间隔运行，使短心跳端口的会话能被及时回收。当最后一个端口断开时，回收器定时器清除，避免长时间存在的 SharedWorker 在连接爆发间隙运行永久的空循环。
 - **先关闭端口再停止会话**：回收端口时，先关闭端口，再停止会话。关闭端口会丢弃会话的 `disconnected` 状态通知（使其不会到达可能仍在运行但缓慢的主线程），并保证已关闭的端口永远无法传递后续消息，从而在回收器追踪之外复活僵尸会话。
+- **失败隔离**：回收与 `dispose()` 都用 try-catch 包裹 `target.close()`/`target.stop()`，单个异常端口不会中断本轮回收，也不会让后续死 Tab 无人回收。
+- **关闭清理**：SharedWorker 关闭时，`PortReaper.dispose()` 停止定时器并关闭/停止**所有**仍被追踪的会话，确保没有任何 `CentrifugeSession` 或 WebSocket 比 reaper 活得更久。这补充了按端口回收——后者只覆盖 reaper 运行期间静默的端口。
 
 这是从崩溃（未发送 `STOP`）的 Tab 中恢复会话的机制。降低 `heartbeatIntervalMs` 可更快回收死会话，代价是端口上更频繁的 PING 消息。
 

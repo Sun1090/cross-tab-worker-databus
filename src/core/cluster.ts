@@ -845,9 +845,14 @@ export class WorkerClusterRuntime {
     // plaintext topic. Never evict a key this worker still owns, or those reads
     // would silently return null for an assigned topic.
     if (this.knownTopics.size > MAX_KNOWN_TOPICS) {
-      const oldest = this.knownTopics.keys().next().value;
-      if (oldest !== undefined && oldest !== topicKey && !this.assignedTopics.has(oldest)) {
-        this.knownTopics.delete(oldest);
+      // Evict the oldest non-owned entry (FIFO). Scan from the front so the
+      // cap holds as long as at least one tracked topic is not owned. Only
+      // when every entry is owned (degenerate) do we let the cap slip — owned
+      // topics must stay resolvable for the storage-less read path.
+      for (const candidate of this.knownTopics.keys()) {
+        if (candidate === topicKey || this.assignedTopics.has(candidate)) continue;
+        this.knownTopics.delete(candidate);
+        break;
       }
     }
     return topicKey;

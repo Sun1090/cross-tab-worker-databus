@@ -374,6 +374,8 @@ A publication travels publisher → current Topic owner → transport/server →
 4. The owner broadcasts `EVENT/DATABUS_PUBLICATION` over the BroadcastChannel and, if its own Tab also has a local subscription, dispatches once directly. BroadcastChannel never echoes to the sender, so there is no duplicate dispatch.
 5. Every other Tab receives the `EVENT` but invokes its local handlers only when it holds a `subscriber:{topicKey}:{tabId}` record for that topic; Tabs without a local subscription drop the message.
 
+At the transport layer, a Centrifuge client can emit a publication both on the `client` object and on the matching `Subscription` object. To avoid dispatching the same server publication twice, the Centrifuge session only handles the client-level `publication` for topics that have **no active client-side subscription** (server-side subscriptions); topics with an active subscription are delivered solely through the subscription-level listener.
+
 ```mermaid
 sequenceDiagram
   participant Pub as Publisher Tab A
