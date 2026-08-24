@@ -144,6 +144,7 @@ export class DataBusTraceReporter {
   pause(): void {
     if (this.intervalHandle) clearInterval(this.intervalHandle);
     this.intervalHandle = null;
+    this.intervalStartedAt = 0;
     this.resetMetrics();
   }
 

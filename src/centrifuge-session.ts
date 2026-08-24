@@ -89,12 +89,17 @@ export class CentrifugeSession<TData = unknown> {
     subscription.subscribe();
   }
 
-  /** Unsubscribe from a Centrifuge channel and clean up the local reference. */
+  /** Unsubscribe from a Centrifuge channel and clean up the local reference.
+   * Listeners are removed before unsubscribing so a late `unsubscribed` event
+   * cannot delete a subscription that a subsequent `subscribe()` re-added. */
   private unsubscribe(topic: string): void {
     const subscription = this.subscriptions.get(topic) ?? this.client?.getSubscription(topic);
     if (!subscription) return;
-    subscription.unsubscribe();
+    subscription.removeAllListeners('publication');
+    subscription.removeAllListeners('error');
+    subscription.removeAllListeners('unsubscribed');
     this.subscriptions.delete(topic);
+    subscription.unsubscribe();
   }
 
   /** Publish a message to the Centrifuge channel. */

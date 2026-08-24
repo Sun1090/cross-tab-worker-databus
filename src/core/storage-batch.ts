@@ -9,6 +9,10 @@ import type { StorageLike } from './environment';
 
 const INITIAL_RETRY_DELAY_MS = 50;
 const MAX_RETRY_DELAY_MS = 1_600;
+// Max retry attempts per key before giving up and dropping the write, so a
+// structurally failing key (e.g. a payload the underlying storage rejects)
+// cannot stall coordination forever. The local transport remains usable.
+const MAX_RETRY_ATTEMPTS = 5;
 
 /**
  * Coalesces synchronous storage writes and applies them in one pass, with
@@ -17,6 +21,8 @@ const MAX_RETRY_DELAY_MS = 1_600;
 export class BatchingStorageWriter implements StorageLike {
   /** Coalesced write set. A `null` value represents a pending delete. */
   private readonly pending = new Map<string, string | null>();
+  /** Per-key retry counter, reset on a successful write. */
+  private readonly retryCount = new Map<string, number>();
   private flushScheduled = false;
   private retryHandle: ReturnType<typeof setTimeout> | null = null;
   private retryDelayMs = INITIAL_RETRY_DELAY_MS;
@@ -36,6 +42,7 @@ export class BatchingStorageWriter implements StorageLike {
     this.flushScheduled = false;
     this.storage.clear();
     this.cancelRetry();
+    this.retryCount.clear();
     // Reset backoff so a burst of clear()/flush() cycles does not leave the
     // writer stuck at an elevated retry delay.
     this.retryDelayMs = INITIAL_RETRY_DELAY_MS;
@@ -72,14 +79,32 @@ export class BatchingStorageWriter implements StorageLike {
         if (value === null) this.storage.removeItem(key);
         else this.storage.setItem(key, value);
         this.pending.delete(key);
+        this.retryCount.delete(key);
       } catch {
-        // A failed write (e.g. quota exceeded) retries with backoff; remaining
-        // pending writes stay queued for the next attempt.
+        const attempts = (this.retryCount.get(key) ?? 0) + 1;
+        // A persistently failing key (e.g. a payload the storage rejects)
+        // is dropped after MAX_RETRY_ATTEMPTS so coordination is not stuck
+        // forever. Best-effort: the local transport stays usable without it.
+        if (attempts >= MAX_RETRY_ATTEMPTS) {
+          this.pending.delete(key);
+          this.retryCount.delete(key);
+          if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+            console.warn('[cross-tab-worker-databus] storage write gave up after retries, dropping key:', key);
+          }
+          continue;
+        }
+        this.retryCount.set(key, attempts);
+        // Remaining pending writes stay queued for the next attempt, which
+        // retries with backoff. Coalescing is preserved by setting the gate
+        // so a concurrent scheduleFlush cannot start a second overlapping pass.
         this.scheduleRetry();
         break;
       }
     }
-    if (this.pending.size === 0) this.retryDelayMs = INITIAL_RETRY_DELAY_MS;
+    if (this.pending.size === 0) {
+      this.retryDelayMs = INITIAL_RETRY_DELAY_MS;
+      this.retryCount.clear();
+    }
   }
 
   /** Union of persisted keys and pending writes, minus pending deletes. */
