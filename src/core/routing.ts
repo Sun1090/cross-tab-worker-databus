@@ -7,14 +7,17 @@
  */
 import type { WorkerRecord, WorkerRoute } from './types';
 
-/** Default cap on the number of Workers that can own topics concurrently. */
+/** Default cap on the number of Workers that can own topics concurrently.
+ * Limits fan-out breadth: only N workers are eligible to be new-route
+ * owners, so a cluster of 20 tabs still concentrates ownership on a few. */
 export const DEFAULT_MAX_ACTIVE_WORKERS = 3;
 
 /**
  * Pick the Worker with the fewest owned topics, optionally preferring a
  * specific sticky owner when it is still in the candidate set.
  * Uses a single reduce pass instead of a full sort — O(n) — and breaks
- * load ties by workerId for deterministic routing across tabs.
+ * load ties by workerId for deterministic routing across tabs (the
+ * comparison is code-unit based, not locale-based, for cross-host stability).
  */
 export function selectLeastLoadedWorker(
   workers: readonly WorkerRecord[],
@@ -26,7 +29,10 @@ export function selectLeastLoadedWorker(
     if (!least) return worker;
     const byLoad = worker.load - least.load;
     if (byLoad !== 0) return byLoad < 0 ? worker : least;
-    return worker.workerId.localeCompare(least.workerId) < 0 ? worker : least;
+    // Tie-break by workerId with a locale-independent comparison so routing
+    // is deterministic regardless of the host's collation order.
+    if (worker.workerId < least.workerId) return worker;
+    return least;
   }, undefined);
 }
 
@@ -51,7 +57,8 @@ export function selectActiveWorkers(
   return candidates
     .sort(
       (left, right) =>
-        left.registeredAt - right.registeredAt || left.workerId.localeCompare(right.workerId)
+        left.registeredAt - right.registeredAt ||
+        (left.workerId < right.workerId ? -1 : left.workerId > right.workerId ? 1 : 0)
     )
     .slice(0, maxActiveWorkers);
 }

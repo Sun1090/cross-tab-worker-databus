@@ -28,6 +28,8 @@ sharedWorkerScope.addEventListener('connect', event => {
   if (!port) return;
   const session = new CentrifugeSession({
     post: (message, transfer) => {
+      // Transferable buffers are forwarded when present (zero-copy ArrayBuffer);
+      // otherwise the message is structured-cloned normally.
       if (transfer) port.postMessage(message, transfer as Transferable[]);
       else port.postMessage(message);
     }

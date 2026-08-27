@@ -10,23 +10,33 @@ graph TB
     subgraph TabA["Tab A"]
       AppA["业务模块"] --> BusA["CrossTabDataBus"]
       BusA --> RuntimeA["WorkerClusterRuntime"]
-      BusA --> WorkerA["Dedicated / Shared Worker A"]
+      BusA --> TransportA["CentrifugeWorkerTransport"]
+      TransportA --> WorkerA["Dedicated / Shared Worker A"]
     end
     subgraph TabB["Tab B"]
       AppB["业务模块"] --> BusB["CrossTabDataBus"]
       BusB --> RuntimeB["WorkerClusterRuntime"]
-      BusB --> WorkerB["Dedicated / Shared Worker B"]
+      BusB --> TransportB["CentrifugeWorkerTransport"]
+      TransportB --> WorkerB["Dedicated / Shared Worker B"]
     end
   end
 
   RuntimeA <--> Channel["BroadcastChannel 控制面"]
   RuntimeB <--> Channel
-  RuntimeA <--> Registry["localStorage Worker 注册表"]
-  RuntimeB <--> Registry
-  RuntimeA <--> Routes["localStorage Topic 路由表"]
-  RuntimeB <--> Routes
-  WorkerA --> Server["Centrifuge / 实时服务器"]
-  WorkerB --> Server
+  RuntimeA --> BatchA["BatchingStorageWriter"]
+  RuntimeB --> BatchB["BatchingStorageWriter"]
+  BatchA <--> Registry["localStorage Worker 注册表"]
+  BatchB <--> Registry
+  BatchA <--> Routes["localStorage Topic 路由表"]
+  BatchB <--> Routes
+  WorkerA --> SessionA["CentrifugeSession"]
+  WorkerB --> SessionB["CentrifugeSession"]
+  SessionA --> Server["Centrifuge / 实时服务器"]
+  SessionB --> Server
+  subgraph SW["SharedWorker 进程（backend = shared 时）"]
+    Reaper["PortReaper"] -.-> SessionA
+    Reaper -.-> SessionB
+  end
 ```
 
 默认 `workerMode: 'dedicated'` 时，每个 Tab 使用独立的 transport Worker。配置为 `shared` 或 `auto` 且浏览器支持 SharedWorker 时，同源 Tab 复用同一个 SharedWorker；SharedWorker 内每个连接 port 各自维护独立的 `CentrifugeSession`，一个 Tab 刷新或停止不会影响其他 Tab。`auto` 模式按 **SharedWorker → Dedicated Worker → 主线程 WebSocket** 降级，`dedicated` 模式按 **Dedicated Worker → SharedWorker → 主线程 WebSocket** 降级。`BroadcastChannel` 只负责控制消息和实时 publication 转发；localStorage 只负责最终一致的协调元数据。

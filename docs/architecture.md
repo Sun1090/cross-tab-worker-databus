@@ -10,23 +10,33 @@ graph TB
     subgraph TabA["Tab A"]
       AppA["Business Module"] --> BusA["CrossTabDataBus"]
       BusA --> RuntimeA["WorkerClusterRuntime"]
-      BusA --> WorkerA["Dedicated / Shared Worker A"]
+      BusA --> TransportA["CentrifugeWorkerTransport"]
+      TransportA --> WorkerA["Dedicated / Shared Worker A"]
     end
     subgraph TabB["Tab B"]
       AppB["Business Module"] --> BusB["CrossTabDataBus"]
       BusB --> RuntimeB["WorkerClusterRuntime"]
-      BusB --> WorkerB["Dedicated / Shared Worker B"]
+      BusB --> TransportB["CentrifugeWorkerTransport"]
+      TransportB --> WorkerB["Dedicated / Shared Worker B"]
     end
   end
 
   RuntimeA <--> Channel["BroadcastChannel Control Plane"]
   RuntimeB <--> Channel
-  RuntimeA <--> Registry["localStorage Worker Registration"]
-  RuntimeB <--> Registry
-  RuntimeA <--> Routes["localStorage Topic Routes"]
-  RuntimeB <--> Routes
-  WorkerA --> Server["Centrifuge / realtime server"]
-  WorkerB --> Server
+  RuntimeA --> BatchA["BatchingStorageWriter"]
+  RuntimeB --> BatchB["BatchingStorageWriter"]
+  BatchA <--> Registry["localStorage Worker Registration"]
+  BatchB <--> Registry
+  BatchA <--> Routes["localStorage Topic Routes"]
+  BatchB <--> Routes
+  WorkerA --> SessionA["CentrifugeSession"]
+  WorkerB --> SessionB["CentrifugeSession"]
+  SessionA --> Server["Centrifuge / realtime server"]
+  SessionB --> Server
+  subgraph SW["SharedWorker process (when backend = shared)"]
+    Reaper["PortReaper"] -.-> SessionA
+    Reaper -.-> SessionB
+  end
 ```
 
 By default, when `workerMode: 'dedicated'`, each Tab has its own dedicated transport Worker. When configured as `shared` or `auto` and the browser supports SharedWorker, same-origin tabs share the same SharedWorker; each connection port within the SharedWorker creates its own independent `CentrifugeSession`, so one Tab refreshing or stopping does not affect other Tabs. The `auto` mode degrades in order of **SharedWorker → Dedicated Worker → Local mode**, while the `dedicated` mode degrades in order of **Dedicated Worker → SharedWorker → Local mode**. `BroadcastChannel` is only responsible for control messages and real-time publication forwarding; localStorage is only responsible for eventually-consistent coordination metadata.

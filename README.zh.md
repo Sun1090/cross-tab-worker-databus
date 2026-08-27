@@ -31,6 +31,15 @@
 pnpm add cross-tab-worker-databus
 ```
 
+核心包零运行时依赖。Centrifuge transport（`cross-tab-worker-databus/centrifuge`）
+将 `centrifuge` 声明为可选 peer 依赖——仅在使用内置 Centrifuge 后端时安装：
+
+```bash
+pnpm add cross-tab-worker-databus centrifuge
+```
+
+仅使用本地 BroadcastChannel 数据总线（不连 WebSocket 服务）的 Tab 无需安装 `centrifuge`。
+
 ## 快速接入
 
 ```ts

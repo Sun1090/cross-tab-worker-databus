@@ -1,6 +1,6 @@
 {
   "name": "cross-tab-worker-databus",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering and Centrifuge support.",
   "type": "module",
   "license": "MIT",
@@ -54,8 +54,13 @@
     "test:e2e": "pnpm build && playwright test",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
+  "peerDependencies": {
     "centrifuge": "^5.5.3"
+  },
+  "peerDependenciesMeta": {
+    "centrifuge": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
