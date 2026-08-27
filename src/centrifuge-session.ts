@@ -35,14 +35,32 @@ export class CentrifugeSession<TData = unknown> {
 
   constructor(private readonly sink: CentrifugeSessionSink<TData>) {}
 
-  /** Dispatch an incoming Worker message to the matching operation. */
+  /** Dispatch an incoming Worker message to the matching operation.
+   * Unknown message types are ignored rather than thrown, so a future protocol
+   * extension adding a new variant cannot crash an older session. */
   handle(message: CentrifugeWorkerInput): void {
-    if (message.type === 'INIT') this.initialize(message.url, message.config, message.transferable === true);
-    if (message.type === 'SUBSCRIBE') this.subscribe(message.topic);
-    if (message.type === 'UNSUBSCRIBE') this.unsubscribe(message.topic);
-    if (message.type === 'PUBLISH') this.publish(message.topic, message.data);
-    if (message.type === 'PUBLISH_BIN') this.publish(message.topic, message.data);
-    if (message.type === 'STOP') this.stop();
+    switch (message.type) {
+      case 'INIT':
+        this.initialize(message.url, message.config, message.transferable === true);
+        return;
+      case 'SUBSCRIBE':
+        this.subscribe(message.topic);
+        return;
+      case 'UNSUBSCRIBE':
+        this.unsubscribe(message.topic);
+        return;
+      case 'PUBLISH':
+      case 'PUBLISH_BIN':
+        // Binary and JSON publish share the same Centrifuge client call; the
+        // transport layer decides whether to transfer the ArrayBuffer.
+        this.publish(message.topic, message.data);
+        return;
+      case 'STOP':
+        this.stop();
+        return;
+      default:
+        return;
+    }
   }
 
   /** Create the Centrifuge client, wire up lifecycle listeners, and connect. */
@@ -69,9 +87,20 @@ export class CentrifugeSession<TData = unknown> {
     client.connect();
   }
 
-  /** Subscribe to a Centrifuge channel. Reuses an existing subscription if one exists. */
+  /** Subscribe to a Centrifuge channel. Reuses an existing subscription if one exists.
+   * Listeners are only registered once per subscription object — a repeated
+   * SUBSCRIBE for an already-tracked topic skips the listener wiring entirely,
+   * avoiding the removeAllListeners + re-on churn on every duplicate message. */
   private subscribe(topic: string): void {
     if (!this.client) return this.postError(new Error('Centrifuge client is not initialized.'));
+    // If we already track this subscription, it already has our listeners —
+    // a duplicate SUBSCRIBE is a no-op (idempotent), matching the transport
+    // contract. Only a fresh subscription needs listener wiring.
+    const existing = this.subscriptions.get(topic);
+    if (existing) {
+      existing.subscribe();
+      return;
+    }
     let subscription = this.client.getSubscription(topic);
     if (!subscription) subscription = this.client.newSubscription(topic);
     // Remove only our own listeners so that any Centrifuge internal listeners
@@ -108,7 +137,10 @@ export class CentrifugeSession<TData = unknown> {
     void this.client.publish(topic, data).catch(error => this.postError(error));
   }
 
-  /** Forward a publication to the transport, using Transferable for binary data when enabled. */
+  /** Forward a publication to the transport. Binary payloads take the
+   * zero-copy `MESSAGE_BIN` path when `transferable` is enabled; everything
+   * else is structured-cloned via `MESSAGE`. An empty topic means the
+   * publication carried no channel info and is silently dropped. */
   private postPublication(topic: string, data: unknown): void {
     if (!topic) return;
     if (this.transferable && data instanceof ArrayBuffer) {
@@ -141,18 +173,25 @@ export class CentrifugeSession<TData = unknown> {
   }
 }
 
-/** Extract a topic from a Centrifuge publication payload if one is present. */
+/** Extract a topic from a Centrifuge publication payload if one is present.
+ * Handles both direct `channel` fields and the nested `push.channel` shape
+ * that Centrifugo uses for some server-side push types. */
 function getPayloadTopic(data: unknown): string {
   if (!data || typeof data !== 'object') return '';
-  const payload = data as { channel?: unknown; push?: { channel?: unknown } };
-  const topic = payload.push?.channel ?? payload.channel;
+  const payload = data as Record<string, unknown>;
+  // Prefer nested push.channel (server-side push) then fall back to top-level channel.
+  const push = payload.push;
+  const nested = typeof push === 'object' && push !== null ? (push as Record<string, unknown>).channel : undefined;
+  const topic = nested ?? payload.channel;
   return typeof topic === 'string' ? topic : '';
 }
 
-/** Map a Centrifuge state string to the DataBus's status vocabulary. */
+/** Map a Centrifuge state string to the DataBus's status vocabulary.
+ * 'connecting' and 'connected' pass through; anything else (e.g. 'reconnecting',
+ * 'disconnected') maps to 'disconnected'. */
+const LIVE_STATES = new Set(['connecting', 'connected']);
 function normalizeStatus(status: string): 'connecting' | 'connected' | 'disconnected' {
-  if (status === 'connecting' || status === 'connected') return status;
-  return 'disconnected';
+  return LIVE_STATES.has(status) ? (status as 'connecting' | 'connected') : 'disconnected';
 }
 
 /** Convert an arbitrary error into a structured-cloneable form for postMessage. */

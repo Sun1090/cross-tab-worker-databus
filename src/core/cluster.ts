@@ -19,6 +19,7 @@ import type {
   WorkerClusterMessage,
   WorkerControlAction,
   WorkerRecord,
+  WorkerRole,
   WorkerRoute,
   WorkerStatus
 } from './types';
@@ -37,15 +38,24 @@ export interface WorkerClusterHandlers {
 }
 
 export interface WorkerClusterOptions {
-  /** Namespace for the cluster's storage keys and BroadcastChannel. */
+  /** Namespace for the cluster's storage keys and BroadcastChannel.
+   * Two DataBus instances with different clusterKeys operate in isolation. */
   clusterKey: string;
+  /** Callbacks the cluster invokes to drive the transport and lifecycle. */
   handlers: WorkerClusterHandlers;
+  /** Inject a custom environment (for tests or SSR). Defaults to browser. */
   environment?: ClusterEnvironment;
+  /** Override the storage key prefix (default 'cross-tab-worker-databus'). */
   storagePrefix?: string;
+  /** Inject a stable tab ID (for tests). Defaults to sessionStorage-derived. */
   tabId?: string;
+  /** Inject a worker ID (for tests). Defaults to 'worker-<tabId>-<random>'. */
   workerId?: string;
+  /** Cap on concurrently active owners (default 3). See DEFAULT_MAX_ACTIVE_WORKERS. */
   maxActiveWorkers?: number;
+  /** Heartbeat + reconcile interval in ms (default 3000). */
   heartbeatIntervalMs?: number;
+  /** TTL after which a silent worker is pruned (default 10000). */
   workerTtlMs?: number;
 }
 
@@ -71,7 +81,9 @@ const DEFAULT_STORAGE_PREFIX = 'cross-tab-worker-databus';
 // unbounded memory leak from a misbehaving or malicious peer.
 const MAX_KNOWN_TOPICS = 500;
 
-/** Parse a JSON value from storage, returning null on malformed or missing data. */
+/** Parse a JSON value from storage, returning null on malformed or missing data.
+ * Never throws — a corrupt route/worker record is treated as absent so the
+ * reconcile cycle can recreate it. */
 function readJson<T>(storage: StorageLike, key: string): T | null {
   try {
     const value = storage.getItem(key);
@@ -81,7 +93,9 @@ function readJson<T>(storage: StorageLike, key: string): T | null {
   }
 }
 
-/** Write a JSON value to storage, swallowing storage errors (coordination is best-effort). */
+/** Write a JSON value to storage, swallowing storage errors (coordination is
+ * best-effort; a failed write does not break the local transport). The actual
+ * write may be coalesced by BatchingStorageWriter — this just calls setItem. */
 function writeJson(storage: StorageLike, key: string, value: unknown): void {
   try {
     storage.setItem(key, JSON.stringify(value));
@@ -99,6 +113,16 @@ function listKeys(storage: StorageLike, prefix: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** Read and parse every JSON record whose key starts with `prefix`.
+ * Duplicates the `listKeys` + `readJson` loop found in readWorkers,
+ * cleanupOrphanedRoutes, cleanupOrphanedSubscribers, and getSnapshot —
+ * extracted so each call site reads its records in one line. */
+function readAllByPrefix<T>(storage: StorageLike, prefix: string): Array<{ key: string; value: T }> {
+  return listKeys(storage, prefix)
+    .map(key => ({ key, value: readJson<T>(storage, key) }))
+    .filter((entry): entry is { key: string; value: T } => entry.value !== null);
 }
 
 /**
@@ -192,6 +216,9 @@ export class WorkerClusterRuntime {
   /**
    * Stop the cluster: pause heartbeats, hand off assigned topics, remove
    * the worker record, and clean up lifecycle listeners. Idempotent.
+   * The .clear() calls after pause() are safe no-ops when pause already
+   * cleared the maps (the handoff path), but ensure a full teardown in the
+   * stop() path where callers expect every Set/Map to be empty afterwards.
    */
   stop(): void {
     if (!this.started && !this.suspended) return;
@@ -212,7 +239,11 @@ export class WorkerClusterRuntime {
     if (this.started) return;
     this.started = true;
     // Create the BroadcastChannel for cross-tab messaging. If storage is
-    // unavailable, we cannot coordinate — skip the channel.
+    // unavailable, we cannot coordinate — skip the channel. If the channel
+    // itself fails to construct (sandboxed iframe, permissions policy),
+    // null out storage too: without a channel the storage writes have no
+    // peer to observe them, so the BatchingStorageWriter would write for
+    // nothing and the degraded code paths must take over.
     this.channel = this.storage ? this.environment.createChannel(this.channelName) : null;
     if (!this.channel) this.storage = null;
     this.channel?.addEventListener('message', this.handleMessage);
@@ -226,12 +257,12 @@ export class WorkerClusterRuntime {
     this.refreshRole(this.readWorkers());
     this.writeRecord(true);
     // Re-subscribe any topics that were subscribed before the cluster started.
-    if (!this.storage) {
-      for (const topic of this.subscribedTopics) {
-        this.sendControl(this.workerId, 'SUBSCRIBE', topic, this.rememberTopic(topic));
-      }
-    } else {
-      for (const topic of this.subscribedTopics) this.writeSubscriber(this.rememberTopic(topic));
+    // rememberTopic is called once per topic regardless of branch so the reverse
+    // cache is populated before either the control message or the subscriber write.
+    for (const topic of this.subscribedTopics) {
+      const topicKey = this.rememberTopic(topic);
+      if (!this.storage) this.sendControl(this.workerId, 'SUBSCRIBE', topic, topicKey);
+      else this.writeSubscriber(topicKey);
     }
     this.reconcile();
     // Periodic heartbeat + reconciliation.
@@ -294,8 +325,8 @@ export class WorkerClusterRuntime {
     this.writeSubscriber(topicKey);
     const workers = this.readWorkers();
     const existingRoute = this.readRoute(topicKey);
-    if (existingRoute && workers.some(worker => worker.workerId === existingRoute.workerId)) {
-      return existingRoute.workerId === this.workerId;
+    if (this.routeOwnerIsLive(existingRoute, workers)) {
+      return existingRoute?.workerId === this.workerId;
     }
 
     const activeWorkers = selectActiveWorkers(workers, this.maxActiveWorkers);
@@ -314,24 +345,26 @@ export class WorkerClusterRuntime {
    * subscribers remain, deletes the route so the owning Worker can unsubscribe.
    */
   unsubscribe(topic: string): void {
-    const topicKey = this.rememberTopic(topic);
     this.subscribedTopics.delete(topic);
-    this.releaseSubscription(topic);
+    const topicKey = this.releaseSubscription(topic);
     // Keep the topic in knownTopics if we remain the owner (we may still fan out).
-    if (!this.assignedTopics.has(topicKey)) this.knownTopics.delete(topicKey);
+    if (topicKey && !this.assignedTopics.has(topicKey)) this.knownTopics.delete(topicKey);
   }
 
-  /** Remove this tab's subscriber record and, when it was the last one, delete the route. */
-  private releaseSubscription(topic: string, notifyOwner = true): void {
+  /** Remove this tab's subscriber record and, when it was the last one, delete
+   * the route. Returns the topicKey (so callers like `unsubscribe` can reuse
+   * it instead of re-hashing the topic to evict the reverse cache). */
+  private releaseSubscription(topic: string, notifyOwner = true): string {
     const topicKey = this.rememberTopic(topic);
     this.removeStorage(this.subscriberStorageKey(topicKey, this.tabId));
     const route = this.readRoute(topicKey);
-    if (!route) return;
+    if (!route) return topicKey;
     const subscribers = this.readSubscriberTabIds(topicKey, this.readWorkers());
     if (subscribers.length === 0) {
       this.removeStorage(this.routeStorageKey(topicKey));
       if (notifyOwner) this.sendControl(route.workerId, 'UNSUBSCRIBE', topic, topicKey);
     }
+    return topicKey;
   }
 
   /** Transfer assigned topics to other active workers so subscribers are not orphaned during pause. */
@@ -346,7 +379,8 @@ export class WorkerClusterRuntime {
     const projectedLoads = new Map(activeWorkers.map(worker => [worker.workerId, worker.load]));
 
     for (const [topicKey, topic] of this.assignedTopics) {
-      if (this.readRoute(topicKey)?.workerId !== this.workerId) continue;
+      const previous = this.readRoute(topicKey);
+      if (previous?.workerId !== this.workerId) continue;
       const subscribers = this.readSubscriberTabIds(topicKey, remainingWorkers);
       if (subscribers.length === 0) {
         this.removeStorage(this.routeStorageKey(topicKey));
@@ -357,23 +391,15 @@ export class WorkerClusterRuntime {
       );
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
-      const previous = this.readRoute(topicKey);
-      this.writeRoute(topicKey, owner, previous?.workerId, (previous?.generation ?? 0) + 1);
+      const generation = (previous?.generation ?? 0) + 1;
+      this.writeRoute(topicKey, owner, previous?.workerId, generation);
       // Make the new route visible before the target confirms it. This also
       // leaves a durable unconfirmed assignment when unload drops CONTROL.
       this.flushStorage();
-      const generation = (previous?.generation ?? 0) + 1;
       // Release the old server subscription before authorizing the new owner.
       // The ACK is sent after the transport operation has been requested.
       this.handlers.onControl('UNSUBSCRIBE', topic);
-      this.send({
-        type: 'ROUTE_RELEASED',
-        sourceWorkerId: this.workerId,
-        targetWorkerId: owner.workerId,
-        topic,
-        topicKey,
-        generation
-      });
+      this.sendRouteReleased(owner.workerId, topic, topicKey, generation);
     }
   }
 
@@ -387,10 +413,16 @@ export class WorkerClusterRuntime {
     const topicKey = this.rememberTopic(topic);
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
-    const target = route && workers.some(worker => worker.workerId === route.workerId)
-      ? route.workerId
-      : this.workerId;
-    return this.sendControl(target ?? this.workerId, 'PUBLISH', topic, topicKey, data);
+    const target = this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
+    return this.sendControl(target, 'PUBLISH', topic, topicKey, data);
+  }
+
+  /** True when `route` exists and its owner worker is among `workers`.
+   * Shared by subscribe (skip re-assignment) and publish (route to owner).
+   * Intentionally returns a plain boolean (not a type guard) so the caller
+   * can still access `route?.generation` in the false branch. */
+  private routeOwnerIsLive(route: WorkerRoute | null, workers: readonly WorkerRecord[]): boolean {
+    return Boolean(route && workers.some(worker => worker.workerId === route.workerId));
   }
 
   /** Broadcast an event to every tab — used to fan out transport publications. */
@@ -415,7 +447,13 @@ export class WorkerClusterRuntime {
 
   /** True if this worker is among the active set (eligible to own topics). */
   isActiveWorker(): boolean {
-    return selectActiveWorkers(this.readWorkers(), this.maxActiveWorkers).some(
+    return this.isActiveAmong(this.readWorkers());
+  }
+
+  /** True when this workerId is in the active subset of `workers`. Shared by
+   * isActiveWorker() and refreshRole() so both compute role identically. */
+  private isActiveAmong(workers: readonly WorkerRecord[]): boolean {
+    return selectActiveWorkers(workers, this.maxActiveWorkers).some(
       worker => worker.workerId === this.workerId
     );
   }
@@ -427,22 +465,21 @@ export class WorkerClusterRuntime {
 
   /** Read-only snapshot of the cluster state (workers, routes, assignments). */
   getSnapshot(): WorkerClusterSnapshot {
-    const routes = listKeysSafe(this.storage, this.routePrefix)
-      .map(key => (this.storage ? readJson<WorkerRoute>(this.storage, key) : null))
-      .filter((route): route is WorkerRoute => Boolean(route))
-      .map(route => ({
-        ...route,
-        topic: this.knownTopics.get(route.topicKey) ?? null
-      }));
+    const routes = this.storage
+      ? readAllByPrefix<WorkerRoute>(this.storage, this.routePrefix).map(({ value }) => ({
+          ...value,
+          topic: this.knownTopics.get(value.topicKey) ?? null
+        }))
+      : [];
     return {
       coordinated: Boolean(this.storage && this.channel),
       suspended: this.suspended,
       currentWorker: { ...this.currentRecord },
       workers: this.readWorkers().map(worker => ({ ...worker })),
       routes,
-      subscribedTopics: [...this.subscribedTopics],
-      assignedTopics: [...this.assignedTopics.values()],
-      knownTopics: [...this.knownTopics.entries()].map(([topicKey, topic]) => ({ topicKey, topic }))
+      subscribedTopics: Array.from(this.subscribedTopics),
+      assignedTopics: Array.from(this.assignedTopics.values()),
+      knownTopics: Array.from(this.knownTopics.entries(), ([topicKey, topic]) => ({ topicKey, topic }))
     };
   }
 
@@ -485,13 +522,19 @@ export class WorkerClusterRuntime {
   private readonly handleMessage = (event: MessageEvent<WorkerClusterMessage>) => {
     const message = event.data;
     if (!message || message.sourceWorkerId === this.workerId) return;
-    if (message.type === 'CONTROL') return this.handleControlMessage(message);
-    if (message.type === 'ROUTE_RELEASED') return this.handleRouteReleasedMessage(message);
-    if (message.type === 'EVENT') {
-      this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId);
-      return;
+    switch (message.type) {
+      case 'CONTROL':
+        return this.handleControlMessage(message);
+      case 'ROUTE_RELEASED':
+        return this.handleRouteReleasedMessage(message);
+      case 'EVENT':
+        this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId);
+        return;
+      case 'REGISTRY':
+      default:
+        this.reconcile();
+        return;
     }
-    this.reconcile();
   };
 
   /** Handle a point-to-point CONTROL message (SUBSCRIBE / UNSUBSCRIBE / PUBLISH). */
@@ -500,12 +543,18 @@ export class WorkerClusterRuntime {
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
     this.rememberTopic(message.topic);
-    if (message.action === 'SUBSCRIBE') {
-      this.assignedTopics.set(message.topicKey, message.topic);
-      this.confirmRoute(message.topicKey);
-    }
-    if (message.action === 'UNSUBSCRIBE') {
-      if (this.releaseHandoffOnUnsubscribe(message)) return;
+    switch (message.action) {
+      case 'SUBSCRIBE':
+        this.assignedTopics.set(message.topicKey, message.topic);
+        this.confirmRoute(message.topicKey);
+        break;
+      case 'UNSUBSCRIBE':
+        // A graceful handoff release short-circuits the generic dispatch.
+        if (this.releaseHandoffOnUnsubscribe(message)) return;
+        break;
+      case 'PUBLISH':
+      default:
+        break;
     }
     this.handlers.onControl(message.action, message.topic, message.data);
     if (message.action !== 'PUBLISH') this.updateLoad();
@@ -524,16 +573,27 @@ export class WorkerClusterRuntime {
     const route = this.readRoute(message.topicKey);
     if (route?.handoffFromWorkerId !== this.workerId) return false;
     this.handlers.onControl('UNSUBSCRIBE', message.topic, undefined);
+    this.sendRouteReleased(route.workerId, message.topic, message.topicKey, route.generation);
+    this.updateLoad();
+    return true;
+  }
+
+  /** Post a ROUTE_RELEASED ACK to the new owner, carrying the current route
+   * generation so only the matching new owner may act on it. */
+  private sendRouteReleased(
+    targetWorkerId: string,
+    topic: string,
+    topicKey: string,
+    generation: number
+  ): void {
     this.send({
       type: 'ROUTE_RELEASED',
       sourceWorkerId: this.workerId,
-      targetWorkerId: route.workerId,
-      topic: message.topic,
-      topicKey: message.topicKey,
-      generation: route.generation
+      targetWorkerId,
+      topic,
+      topicKey,
+      generation
     });
-    this.updateLoad();
-    return true;
   }
 
   /**
@@ -546,16 +606,25 @@ export class WorkerClusterRuntime {
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
     const route = this.readRoute(message.topicKey);
-    if (
-      !route ||
-      route.workerId !== this.workerId ||
-      route.handoffFromWorkerId !== message.sourceWorkerId ||
-      route.generation < message.generation
-    ) return;
+    if (!route || this.isStaleRouteRelease(route, message)) return;
     this.assignedTopics.set(message.topicKey, message.topic);
     this.confirmRoute(message.topicKey);
     this.handlers.onControl('SUBSCRIBE', message.topic, undefined);
     this.updateLoad();
+  }
+
+  /** A ROUTE_RELEASED is stale (and must be dropped) unless the route still
+   * points to us, the release comes from the recorded previous owner, and
+   * the release generation is at least as new as ours. */
+  private isStaleRouteRelease(
+    route: WorkerRoute,
+    message: Extract<WorkerClusterMessage, { type: 'ROUTE_RELEASED' }>
+  ): boolean {
+    return (
+      route.workerId !== this.workerId ||
+      route.handoffFromWorkerId !== message.sourceWorkerId ||
+      route.generation < message.generation
+    );
   }
 
   /** Full reconciliation cycle: workers, subscriptions, and assigned topics. */
@@ -568,7 +637,9 @@ export class WorkerClusterRuntime {
     this.updateLoad();
   }
 
-  /** Prune stale workers/subscribers/routes and refresh role. Returns the live worker list. */
+  /** Prune stale workers/subscribers/routes and refresh role. Returns the live worker list.
+   * Subscribers are cleaned before routes so cleanupOrphanedRoutes sees the
+   * updated subscriber set when deciding whether a route is truly orphaned. */
   private reconcileWorkers(): WorkerRecord[] {
     const workers = this.readWorkers();
     this.cleanupOrphanedSubscribers(workers);
@@ -620,19 +691,12 @@ export class WorkerClusterRuntime {
   /** Drop assignments where the route no longer points to this worker. */
   private reconcileAssignedTopics(): void {
     for (const [topicKey, topic] of [...this.assignedTopics]) {
-      if (this.readRoute(topicKey)?.workerId === this.workerId) continue;
+      const route = this.readRoute(topicKey);
+      if (route?.workerId === this.workerId) continue;
       this.assignedTopics.delete(topicKey);
       this.handlers.onControl('UNSUBSCRIBE', topic, undefined);
-      const route = this.readRoute(topicKey);
       if (route?.handoffFromWorkerId === this.workerId) {
-        this.send({
-          type: 'ROUTE_RELEASED',
-          sourceWorkerId: this.workerId,
-          targetWorkerId: route.workerId,
-          topic,
-          topicKey,
-          generation: route.generation
-        });
+        this.sendRouteReleased(route.workerId, topic, topicKey, route.generation);
       }
       if (!this.subscribedTopics.has(topic)) this.knownTopics.delete(topicKey);
     }
@@ -651,11 +715,18 @@ export class WorkerClusterRuntime {
     data?: unknown
   ): boolean {
     if (targetWorkerId === this.workerId) {
-      if (action === 'SUBSCRIBE') {
-        this.assignedTopics.set(topicKey, topic);
-        this.confirmRoute(topicKey);
+      switch (action) {
+        case 'SUBSCRIBE':
+          this.assignedTopics.set(topicKey, topic);
+          this.confirmRoute(topicKey);
+          break;
+        case 'UNSUBSCRIBE':
+          this.assignedTopics.delete(topicKey);
+          break;
+        case 'PUBLISH':
+        default:
+          break;
       }
-      if (action === 'UNSUBSCRIBE') this.assignedTopics.delete(topicKey);
       this.handlers.onControl(action, topic, data);
       if (action !== 'PUBLISH') this.updateLoad();
       return true;
@@ -687,9 +758,7 @@ export class WorkerClusterRuntime {
     if (!this.storage) return [this.currentRecord];
     const now = this.environment.now();
     const workers: WorkerRecord[] = [];
-    for (const key of listKeys(this.storage, this.workerPrefix)) {
-      const worker = readJson<WorkerRecord>(this.storage, key);
-      if (!worker) continue;
+    for (const { key, value: worker } of readAllByPrefix<WorkerRecord>(this.storage, this.workerPrefix)) {
       if (worker.workerId !== this.workerId && now - worker.heartbeatAt > this.workerTtlMs) {
         this.removeStorage(key);
         continue;
@@ -702,35 +771,48 @@ export class WorkerClusterRuntime {
 
   /** Enumerate all tab IDs that have a subscriber record for `topicKey`. */
   private readSubscriberTabIds(topicKey: string, workers: readonly WorkerRecord[]): string[] {
-    if (!this.storage) return this.subscribedTopics.has(this.knownTopics.get(topicKey) ?? '') ? [this.tabId] : [];
+    if (!this.storage) {
+      // Degraded mode: only this tab can be a subscriber. Recover the plaintext
+      // topic to check local interest — without it we cannot know if we care.
+      const topic = this.knownTopics.get(topicKey);
+      return topic && this.subscribedTopics.has(topic) ? [this.tabId] : [];
+    }
     const activeTabIds = new Set(workers.map(worker => worker.tabId));
     const subscribers = new Set<string>();
-    for (const key of listKeys(this.storage, `${this.subscriberPrefix}${topicKey}:`)) {
-      const record = readJson<TopicSubscriberRecord>(this.storage, key);
-      if (!record || !activeTabIds.has(record.tabId)) {
+    for (const { key, value: record } of readAllByPrefix<TopicSubscriberRecord>(
+      this.storage,
+      `${this.subscriberPrefix}${topicKey}:`
+    )) {
+      if (!activeTabIds.has(record.tabId)) {
         this.removeStorage(key);
         continue;
       }
       subscribers.add(record.tabId);
     }
-    return [...subscribers];
+    return Array.from(subscribers);
   }
 
   /** Read the current route for `topicKey`, returning null when no storage layer exists. */
   private readRoute(topicKey: string): WorkerRoute | null {
-    if (!this.storage) {
-      const topic = this.knownTopics.get(topicKey);
-      return topic && (this.subscribedTopics.has(topic) || this.assignedTopics.has(topicKey))
-        ? {
-            topicKey,
-            workerId: this.workerId,
-            tabId: this.tabId,
-            updatedAt: this.environment.now(),
-            generation: 1
-          }
-        : null;
-    }
+    if (!this.storage) return this.buildLocalRoute(topicKey);
     return readJson<WorkerRoute>(this.storage, this.routeStorageKey(topicKey));
+  }
+
+  /** Synthesize a self-owned route when storage is unavailable (degraded mode).
+   * The plaintext topic must be recoverable from the knownTopics cache; a
+   * missing entry means we never subscribed to or were assigned the topic,
+   * so there is no route to report. */
+  private buildLocalRoute(topicKey: string): WorkerRoute | null {
+    const topic = this.knownTopics.get(topicKey);
+    if (!topic) return null;
+    if (!this.subscribedTopics.has(topic) && !this.assignedTopics.has(topicKey)) return null;
+    return {
+      topicKey,
+      workerId: this.workerId,
+      tabId: this.tabId,
+      updatedAt: this.environment.now(),
+      generation: 1
+    };
   }
 
   /** Persist a route assignment, mapping `topicKey` to the owning Worker. */
@@ -741,14 +823,26 @@ export class WorkerClusterRuntime {
     generation = 1
   ): void {
     if (!this.storage) return;
-    writeJson(this.storage, this.routeStorageKey(topicKey), {
+    writeJson(this.storage, this.routeStorageKey(topicKey), this.buildRouteRecord(topicKey, owner, handoffFromWorkerId, generation));
+  }
+
+  /** Construct a WorkerRoute record from the owner + handoff fields. Extracted
+   * so writeRoute and confirmRoute share the same shape; confirmedAt is added
+   * by confirmRoute via spread. */
+  private buildRouteRecord(
+    topicKey: string,
+    owner: WorkerRecord,
+    handoffFromWorkerId: string | undefined,
+    generation: number
+  ): WorkerRoute {
+    return {
       topicKey,
       workerId: owner.workerId,
       tabId: owner.tabId,
       updatedAt: this.environment.now(),
       generation,
       ...(handoffFromWorkerId ? { handoffFromWorkerId } : {})
-    } satisfies WorkerRoute);
+    };
   }
 
   /** Stamp a route as confirmed once the owning Worker has acknowledged the assignment. */
@@ -766,9 +860,8 @@ export class WorkerClusterRuntime {
   private cleanupOrphanedRoutes(workers: readonly WorkerRecord[]): void {
     if (!this.storage) return;
     const now = this.environment.now();
-    for (const key of listKeys(this.storage, this.routePrefix)) {
-      const route = readJson<WorkerRoute>(this.storage, key);
-      if (!route || now - route.updatedAt <= this.workerTtlMs) continue;
+    for (const { key, value: route } of readAllByPrefix<WorkerRoute>(this.storage, this.routePrefix)) {
+      if (now - route.updatedAt <= this.workerTtlMs) continue;
       if (this.readSubscriberTabIds(route.topicKey, workers).length > 0) continue;
       this.removeStorage(key);
     }
@@ -778,9 +871,8 @@ export class WorkerClusterRuntime {
   private cleanupOrphanedSubscribers(workers: readonly WorkerRecord[]): void {
     if (!this.storage) return;
     const activeTabIds = new Set(workers.map(worker => worker.tabId));
-    for (const key of listKeys(this.storage, this.subscriberPrefix)) {
-      const record = readJson<TopicSubscriberRecord>(this.storage, key);
-      if (!record || !activeTabIds.has(record.tabId)) this.removeStorage(key);
+    for (const { key, value: record } of readAllByPrefix<TopicSubscriberRecord>(this.storage, this.subscriberPrefix)) {
+      if (!activeTabIds.has(record.tabId)) this.removeStorage(key);
     }
   }
 
@@ -793,7 +885,12 @@ export class WorkerClusterRuntime {
     } satisfies TopicSubscriberRecord);
   }
 
-  /** Persist the current worker record with an updated heartbeat timestamp. */
+  /** Persist the current worker record with an updated heartbeat timestamp.
+   * @param notify — when true, broadcast a REGISTRY nudge so peers reconcile
+   *   immediately instead of waiting for the next heartbeat. False on the
+   *   periodic heartbeat tick (peers will notice on their own heartbeat) to
+   *   avoid a REGISTRY storm every 3 s; true on status/role changes that
+   *   peers should observe promptly. */
   private writeRecord(notify: boolean): void {
     this.currentRecord = { ...this.currentRecord, heartbeatAt: this.environment.now() };
     if (this.storage) writeJson(this.storage, this.workerStorageKey(this.workerId), this.currentRecord);
@@ -807,9 +904,7 @@ export class WorkerClusterRuntime {
 
   /** Recompute whether this worker is active (eligible to own topics) or standby. Returns true when changed. */
   private refreshRole(workers: readonly WorkerRecord[]): boolean {
-    const role = selectActiveWorkers(workers, this.maxActiveWorkers).some(worker => worker.workerId === this.workerId)
-      ? 'active'
-      : 'standby';
+    const role: WorkerRole = this.isActiveAmong(workers) ? 'active' : 'standby';
     if (role === this.currentRecord.role) return false;
     this.currentRecord = { ...this.currentRecord, role };
     return true;
@@ -849,6 +944,11 @@ export class WorkerClusterRuntime {
       // cap holds as long as at least one tracked topic is not owned. Only
       // when every entry is owned (degenerate) do we let the cap slip — owned
       // topics must stay resolvable for the storage-less read path.
+      // Scan from the front (oldest insertion) for the first non-owned entry.
+      // `break` after one eviction: we only need to get back under the cap, and
+      // evicting more would unnecessarily drop resolvable topics. If every
+      // entry is owned (degenerate), the loop completes without evicting —
+      // owned topics must stay resolvable for the storage-less read path.
       for (const candidate of this.knownTopics.keys()) {
         if (candidate === topicKey || this.assignedTopics.has(candidate)) continue;
         this.knownTopics.delete(candidate);
@@ -882,8 +982,4 @@ export class WorkerClusterRuntime {
   private flushStorage(): void {
     if (this.storage instanceof BatchingStorageWriter) this.storage.flush();
   }
-}
-
-function listKeysSafe(storage: StorageLike | null, prefix: string): string[] {
-  return storage ? listKeys(storage, prefix) : [];
 }

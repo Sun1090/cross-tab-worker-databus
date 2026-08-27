@@ -117,15 +117,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
       worker: this.workerFactory !== undefined,
       sharedWorker: this.sharedWorkerFactory !== undefined
     });
-    const input: CentrifugeWorkerInput = {
-      type: 'INIT',
-      url: config.url,
-      config: config.options ?? {},
-      ...(this.transferable ? { transferable: true } : {}),
-      ...(this.heartbeatIntervalMs !== DEFAULT_HEARTBEAT_INTERVAL_MS
-        ? { heartbeatIntervalMs: this.heartbeatIntervalMs }
-        : {})
-    };
+    const input = this.buildInitInput(config);
     if (backend === 'shared') {
       this.startSharedWorker(input);
       this.backend = 'shared';
@@ -183,6 +175,21 @@ export class CentrifugeWorkerTransport<TData = unknown>
     this.handlers = null;
   }
 
+  /** Build the INIT payload sent to the Worker / local session. Optional fields
+   * are only included when they deviate from the defaults, so the Worker's own
+   * default-resolution logic kicks in for the common case. */
+  private buildInitInput(config: CentrifugeDataBusConfig): CentrifugeWorkerInput {
+    return {
+      type: 'INIT',
+      url: config.url,
+      config: config.options ?? {},
+      ...(this.transferable ? { transferable: true } : {}),
+      ...(this.heartbeatIntervalMs !== DEFAULT_HEARTBEAT_INTERVAL_MS
+        ? { heartbeatIntervalMs: this.heartbeatIntervalMs }
+        : {})
+    };
+  }
+
   /** Create and initialise a dedicated Worker, then send the INIT message. */
   private startDedicatedWorker(input: CentrifugeWorkerInput): void {
     this.backendGeneration = ++this.generation;
@@ -218,7 +225,9 @@ export class CentrifugeWorkerTransport<TData = unknown>
     this.handleOutput(message);
   };
 
-  /** Route a Worker output message to the appropriate handler callback. */
+  /** Route a Worker output message to the appropriate handler callback.
+   * Shared by the Worker message listener, the SharedWorker port listener,
+   * and the local-session sink — all three feed into this single dispatcher. */
   private handleOutput(message: CentrifugeWorkerOutput<TData>): void {
     if (message.type === 'STATUS') this.handlers?.onStatus(message.status);
     if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data });
@@ -228,7 +237,9 @@ export class CentrifugeWorkerTransport<TData = unknown>
 
   /** Handle a Worker-level failure (crash, message decode error). Discards the
    * dead backend so a later start()/reopen can rebuild from scratch, and
-   * signals an error status so the DataBus can trigger recovery. */
+   * signals an error status so the DataBus can trigger recovery.
+   * Only invoked when the generation guard confirms the failing backend is
+   * still current — late errors from a superseded Worker are silently dropped. */
   private onWorkerFailed(message: string): void {
     // Remove the message listener and release the old backend before recovery
     // reopens, so late messages from the failed Worker/port cannot be routed
@@ -297,13 +308,11 @@ export class CentrifugeWorkerTransport<TData = unknown>
    */
   private post(message: CentrifugeWorkerInput, transfer?: ArrayBuffer[]): void {
     if (this.worker) {
-      if (transfer) this.worker.postMessage(message, transfer as Transferable[]);
-      else this.worker.postMessage(message);
+      postToPortLike(this.worker, message, transfer);
       return;
     }
     if (this.port) {
-      if (transfer) this.port.postMessage(message, transfer as Transferable[]);
-      else this.port.postMessage(message);
+      postToPortLike(this.port, message, transfer);
       return;
     }
     if (this.localSession) {
@@ -380,12 +389,12 @@ function createDefaultSharedWorker(): SharedWorker {
   });
 }
 
-/**
- * Validate the SharedWorker PING heartbeat interval. A value of `0`, a negative
+/** Validate the SharedWorker PING heartbeat interval. A value of `0`, a negative
  * number, or `NaN` would otherwise make `setInterval` degenerate into a 0ms busy
  * loop, driving the reaper and the main-thread PING out of control. `Infinity`
- * is allowed and disables heartbeats entirely.
- */
+ * is allowed and disables heartbeats entirely (for environments where the
+ * SharedWorker reaper is not needed, e.g. a single-tab deployment).
+ * @throws {TypeError} when `value` is not a positive finite number or Infinity. */
 function assertHeartbeatInterval(value: number): void {
   if (value === Infinity) return;
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return;
@@ -394,11 +403,13 @@ function assertHeartbeatInterval(value: number): void {
   );
 }
 
-/**
- * Validate that `value` is structured-cloneable. Throws early so config errors
- * surface on the main thread rather than silently failing inside the Worker.
- * Skips validation when `structuredClone` is unavailable (older browsers).
- */
+/** Validate that `value` is structured-cloneable. Throws early so config errors
+ * surface on the main thread rather than silently failing inside the Worker
+ * (where a DataCloneError would be reported as a generic Worker error with no
+ * actionable message). Skips validation when `structuredClone` is unavailable
+ * (older browsers without the API) — the Worker will still throw on its own.
+ * @throws {TypeError} when `value` contains non-cloneable members (functions,
+ *   Symbols, DOM nodes, etc.). */
 function assertStructuredCloneable(value: unknown): void {
   if (typeof structuredClone !== 'function') return;
   try {
@@ -411,7 +422,23 @@ function assertStructuredCloneable(value: unknown): void {
   }
 }
 
-/** Reconstruct an Error instance from its serialised form (Error cannot be cloned via postMessage). */
+/** Post `message` to a Worker or MessagePort, forwarding `transfer` buffers
+ * when present. Both targets share the `postMessage(message, transfer?)`
+ * signature, so a single helper eliminates the duplicated if/else at each
+ * call site. */
+function postToPortLike(
+  target: Pick<Worker, 'postMessage'>,
+  message: CentrifugeWorkerInput,
+  transfer?: ArrayBuffer[]
+): void {
+  if (transfer) target.postMessage(message, transfer as Transferable[]);
+  else target.postMessage(message);
+}
+
+/** Reconstruct an Error instance from its serialised form. Error objects cannot
+ * be structured-cloned across the Worker boundary, so the Worker serialises them
+ * into {@link SerializedWorkerError} and the main thread rebuilds the Error here
+ * so the caller's `onError` handler receives a real Error with name/stack. */
 function deserializeWorkerError(error: SerializedWorkerError): Error {
   const result = new Error(error.message);
   result.name = error.name;

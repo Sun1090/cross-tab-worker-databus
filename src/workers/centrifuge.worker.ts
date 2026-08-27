@@ -15,6 +15,8 @@ const workerScope = self as DedicatedWorkerGlobalScope;
 // One session per dedicated Worker — this process owns exactly one connection.
 const session = new CentrifugeSession({
   post: (message, transfer) => {
+    // Transferable buffers are forwarded when present (zero-copy ArrayBuffer);
+    // otherwise the message is structured-cloned normally.
     if (transfer) workerScope.postMessage(message, transfer as Transferable[]);
     else workerScope.postMessage(message);
   }

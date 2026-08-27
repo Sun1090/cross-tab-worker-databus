@@ -175,4 +175,92 @@ describe('PortReaper', () => {
     expect(reaper['handle']).toBeNull();
     vi.useRealTimers();
   });
+
+  it('dispose closes and stops every tracked target', () => {
+    const { reaper, register } = makeReaper();
+    const { port: p1, session: s1 } = register('t1');
+    const { port: p2, session: s2 } = register('t2');
+    const { port: p3, session: s3 } = register('t3');
+
+    reaper.dispose();
+
+    expect(p1.closed && p2.closed && p3.closed).toBe(true);
+    expect(s1.stopped + s2.stopped + s3.stopped).toBe(3);
+  });
+
+  it('touch on an unregistered port is a silent no-op', () => {
+    const { reaper } = makeReaper();
+    const stray = new PortDouble();
+    // Must not throw and must not affect the reaper's internal state.
+    expect(() => reaper.touch(stray as unknown as MessagePort)).not.toThrow();
+    expect(reaper['targets'].size).toBe(0);
+  });
+
+  it('falls back to the default interval for non-positive or NaN heartbeat configs', () => {
+    vi.useFakeTimers();
+    const sets: number[] = [];
+    const reaper = new PortReaper(
+      Date.now,
+      (callback, ms) => {
+        sets.push(ms);
+        return setInterval(callback, ms) as unknown as number;
+      },
+      clearInterval
+    );
+    const port = new PortDouble();
+    const session = new SessionDouble();
+    reaper.register(port as unknown as MessagePort, {
+      close: () => port.close(),
+      stop: () => session.stop()
+    });
+    sets.length = 0; // reset after the initial register
+
+    // Bad values should fall back to the default (10s heartbeat → 30s timeout).
+    for (const bad of [0, -1, NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      reaper.setTimeout(port as unknown as MessagePort, bad);
+    }
+    // schedule() is idempotent when the interval does not change, so no new set.
+    expect(sets).toEqual([]);
+
+    // 40s probe: 40s > 30s default timeout → reaped.
+    vi.advanceTimersByTime(41_000);
+    expect(port.closed).toBe(true);
+    expect(session.stopped).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it('runs at the smallest heartbeat interval among active ports', () => {
+    vi.useFakeTimers();
+    const sets: number[] = [];
+    const reaper = new PortReaper(
+      Date.now,
+      (callback, ms) => {
+        sets.push(ms);
+        return setInterval(callback, ms) as unknown as number;
+      },
+      clearInterval
+    );
+    const makeTarget = () => {
+      const p = new PortDouble();
+      const s = new SessionDouble();
+      return { port: p, target: { close: () => p.close(), stop: () => s.stop() } as const, session: s };
+    };
+
+    const a = makeTarget();
+    reaper.register(a.port as unknown as MessagePort, a.target);
+    reaper.setTimeout(a.port as unknown as MessagePort, 5_000); // cadence 5s
+    sets.length = 0;
+
+    const b = makeTarget();
+    reaper.register(b.port as unknown as MessagePort, b.target);
+    // Adding a 5s port when one already exists at 5s → no cadence change.
+    expect(sets).toEqual([]);
+
+    const c = makeTarget();
+    reaper.register(c.port as unknown as MessagePort, c.target);
+    reaper.setTimeout(c.port as unknown as MessagePort, 2_000); // cadence 2s → recompute down
+    expect(sets).toEqual([2_000]);
+
+    vi.useRealTimers();
+  });
 });

@@ -9,6 +9,10 @@
 import type { WorkerStatus } from './types';
 
 /** Trace reporting mode: record only events, only metrics, or both. */
+/** Selects which trace categories the reporter emits.
+ * - `events` — lifecycle/status/subscription/coordination/error events only.
+ * - `metrics` — periodic `message_metrics` snapshots only.
+ * - `all` — both event streams and metrics snapshots. */
 export type DataBusTraceMode = 'events' | 'metrics' | 'all';
 
 /** Emitted when the DataBus starts, stops, suspends, or resumes. */
@@ -85,14 +89,21 @@ type DataBusTraceEventInput = DataBusTraceEvent extends infer TEvent
     : never
   : never;
 
+/** Configuration for {@link DataBusTraceReporter}. `sink` receives every
+ * emitted event (filtered by `mode`); all other fields are optional. */
 export interface DataBusTraceOptions {
+  /** When `false`, the reporter is inert (no events emitted). Default `true`. */
   enabled?: boolean;
+  /** Which event categories to emit. Default `all`. */
   mode?: DataBusTraceMode;
+  /** Aggregation window for `message_metrics` events. Default 5 s. */
   metricsIntervalMs?: number;
+  /** Callback invoked for each emitted trace event. */
   sink: (event: DataBusTraceEvent) => void;
 }
 
 // Default bounds for the metrics aggregation window.
+/** Default metrics aggregation window: 5 s between snapshots. */
 const DEFAULT_METRICS_INTERVAL_MS = 5_000;
 const MAX_PENDING_TOPICS = 1_000;
 const MAX_PENDING_MESSAGES_PER_TOPIC = 256;
@@ -133,7 +144,8 @@ export class DataBusTraceReporter {
     this.now = now;
   }
 
-  /** Start the periodic metrics flush interval. No-op when mode is 'events'. */
+  /** Start the periodic metrics flush interval. No-op when mode is 'events'
+   * (no metrics to emit), when disabled, or when already running. */
   start(): void {
     if (!this.enabled || this.intervalHandle || this.mode === 'events') return;
     this.intervalStartedAt = this.now();
@@ -160,17 +172,19 @@ export class DataBusTraceReporter {
 
   /** Record that a message was received on `topic`; stores its timestamp for latency tracking. */
   recordReceived(topic: string): void {
-    if (!this.enabled || this.mode === 'events') return;
+    if (!this.metricsActive) return;
     this.received += 1;
     this.topics.add(topic);
     const queue = this.receivedAt.get(topic);
+    // First receive for this topic creates a new FIFO queue (subject to the
+    // topic cap); subsequent receives append to the existing queue (subject to
+    // the per-topic cap). Both caps prevent a single misbehaving topic from
+    // exhausting memory.
     if (!queue) {
-      // Cap the number of tracked topics to avoid unbounded memory growth.
       if (this.receivedAt.size >= MAX_PENDING_TOPICS) return;
       this.receivedAt.set(topic, [this.now()]);
       return;
     }
-    // Cap per-topic queue length so a single busy topic cannot starve others.
     if (queue.length >= MAX_PENDING_MESSAGES_PER_TOPIC) return;
     queue.push(this.now());
   }
@@ -181,7 +195,7 @@ export class DataBusTraceReporter {
    * with a stale receive timestamp.
    */
   recordDiscarded(topic: string): void {
-    if (!this.enabled || this.mode === 'events') return;
+    if (!this.metricsActive) return;
     const queue = this.receivedAt.get(topic);
     if (!queue) return;
     queue.shift();
@@ -195,7 +209,7 @@ export class DataBusTraceReporter {
    * as dispatched but do not produce a latency sample.
    */
   recordDispatched(topic: string): void {
-    if (!this.enabled || this.mode === 'events') return;
+    if (!this.metricsActive) return;
     this.dispatched += 1;
     this.topics.add(topic);
     const queue = this.receivedAt.get(topic);
@@ -210,14 +224,24 @@ export class DataBusTraceReporter {
     this.latencySumMs += delayMs;
   }
 
+  /** True when metrics recording is active: enabled and mode includes metrics.
+   * Extracted so the four record / flush methods share one guard expression
+   * instead of repeating `!this.enabled || this.mode === 'events'` at each. */
+  private get metricsActive(): boolean {
+    return this.enabled && this.mode !== 'events';
+  }
+
   /** Emit the accumulated metrics snapshot if the interval is active. */
   flush(): void {
-    if (!this.enabled || this.mode === 'events') return;
+    if (!this.metricsActive) return;
     this.flushNow();
   }
 
   private flushNow(): void {
     const timestamp = this.now();
+    // Only emit when there was activity in this window — an all-zero metrics
+    // snapshot adds noise without information. The interval still advances
+    // intervalStartedAt so the next window's duration is measured correctly.
     if (this.received > 0 || this.dispatched > 0) {
       const samples = this.latencySamples;
       this.emit({
@@ -262,7 +286,8 @@ export class DataBusTraceReporter {
   }
 }
 
-/** Validate the metrics interval, falling back to the default when omitted. */
+/** Validate the metrics interval, falling back to the default when omitted.
+ * @throws {RangeError} when `value` is not a positive finite number. */
 function normalizeInterval(value: number | undefined): number {
   if (value === undefined) return DEFAULT_METRICS_INTERVAL_MS;
   if (!Number.isFinite(value) || value <= 0) {
@@ -288,7 +313,8 @@ function percentileMs(buckets: readonly number[], sampleCount: number, percentil
   return buckets.length * LATENCY_BUCKET_SIZE_MS;
 }
 
-/** Round to one decimal place for stable, readable metrics output. */
+/** Round to one decimal place for stable, readable metrics output.
+ * Avoids floating-point noise like 12.300000000001 in the trace sink. */
 function roundMs(value: number): number {
   return Math.round(value * 10) / 10;
 }

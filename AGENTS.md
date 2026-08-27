@@ -39,9 +39,15 @@ src/
 tests/
   cluster.test.ts               # WorkerClusterRuntime tests
   data-bus.test.ts              # CrossTabDataBus integration tests
-  routing.test.ts               # Pure function tests
-  storage-batch.test.ts         # Write coalescing tests
-  (plus centrifuge, port-reaper, worker-mode tests)
+  routing.test.ts               # Pure function tests (owner selection, load balancing)
+  storage-batch.test.ts         # BatchingStorageWriter write coalescing + backoff
+  centrifuge.test.ts            # CentrifugeWorkerTransport backend selection + lifecycle
+  centrifuge-session.test.ts    # CentrifugeSession subscribe/publish/stop protocol
+  port-reaper.test.ts           # PortReaper adaptive cadence + session timeout
+  worker-mode.test.ts           # selectWorkerBackend capability detection + degradation
+  hash.test.ts                 # createOpaqueKey determinism + collision properties
+  fakes.ts                      # Shared test doubles (MemoryStorage, FakeTransport, etc.)
+  demo-centrifuge-server.test.ts # Demo server contract tests
 e2e/
   demo.spec.ts                  # Playwright multi-tab browser E2E
 docs/

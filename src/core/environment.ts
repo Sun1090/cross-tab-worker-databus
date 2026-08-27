@@ -31,24 +31,40 @@ export interface ClusterChannel {
  * Tests inject a fake environment to control timing, storage, and lifecycle.
  */
 export interface ClusterEnvironment {
-  /** localStorage (or null if unavailable). */
+  /** localStorage (or null if unavailable). Wrapped by BatchingStorageWriter. */
   storage: StorageLike | null;
   /** sessionStorage (or null if unavailable). Used for stable tab IDs. */
   sessionStorage: StorageLike | null;
+  /** Monotonic clock; injected so tests can control time. */
   now: () => number;
+  /** Generates a random ID (UUID when crypto is available, else Math.random). */
   randomId: () => string;
+  /** Creates a BroadcastChannel by name, or null if unsupported. */
   createChannel: (name: string) => ClusterChannel | null;
+  /** Sets an interval; returns a handle for clearInterval. */
   setInterval: (callback: () => void, intervalMs: number) => unknown;
+  /** Clears a handle from setInterval. */
   clearInterval: (handle: unknown) => void;
+  /** Current tab visibility ('visible' or 'hidden'). */
   getVisibilityState: () => TabVisibilityState;
+  /** Register a listener for visibilitychange events. */
   addVisibilityChangeListener: (listener: () => void) => void;
+  /** Remove a previously-added visibilitychange listener. */
   removeVisibilityChangeListener: (listener: () => void) => void;
+  /** Register a listener for pagehide (BFCache entry). */
   addPageHideListener: (listener: () => void) => void;
+  /** Remove a previously-added pagehide listener. */
   removePageHideListener: (listener: () => void) => void;
+  /** Register a listener for pageshow (BFCache exit / restore). */
   addPageShowListener: (listener: () => void) => void;
+  /** Remove a previously-added pageshow listener. */
   removePageShowListener: (listener: () => void) => void;
 }
 
+/** Resolve a Web Storage interface by name, or null in non-browser contexts.
+ * The `typeof window` guard short-circuits in SSR / Node (where `window` is
+ * undefined) before touching it; the try/catch covers sandboxed or
+ * storage-disabled browsers that throw on property access. */
 function getStorage(name: 'localStorage' | 'sessionStorage'): StorageLike | null {
   try {
     return typeof window === 'undefined' ? null : window[name];
@@ -116,7 +132,9 @@ export function createBrowserEnvironment(): ClusterEnvironment {
 /**
  * Probe a storage instance with a write-read-delete round-trip.
  * Returns a type guard so the caller can narrow the type after a successful check.
- * Catches quota errors, disabled-storage, or opaque exceptions.
+ * Catches quota errors, disabled-storage (Safari private mode), or opaque
+ * exceptions — any of which means the storage is not usable for coordination
+ * and the Runtime must degrade to local mode.
  */
 export function canUseStorage(storage: StorageLike | null, probeKey: string): storage is StorageLike {
   if (!storage) return false;

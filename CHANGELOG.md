@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-27
+
+### Changed
+
+- `centrifuge` 从 `dependencies` 改为 optional `peerDependencies`：仅在使用内置 Centrifuge 后端时需要安装，核心包零运行时依赖。
+- `CentrifugeSession.handle()` 由连续 `if` 改为 `switch` + `default`，未知消息类型静默忽略，为未来协议扩展留出兼容余地。
+- `routing.ts` 的 workerId 平局处理由 `localeCompare` 改为数值比较，消除宿主 locale 对路由确定性的影响。
+- `port-reaper.ts` 提取 `computeMinHeartbeat()` 方法，reap 迭代改用 `Array.from` 快照，reaper 节奏计算与计时器逻辑解耦。
+- `centrifuge-protocol.ts` 新增 `DEFAULT_SESSION_TIMEOUT_MS` 派生常量，消除 `port-reaper` 中重复的字面量计算。
+- `CentrifugeWorkerTransport` 提取 `buildInitInput()` 与 `postToPortLike()` helper，消除 `start()`/`post()` 中的重复构造逻辑。
+- `cluster.ts` 提取 `readAllByPrefix()` helper，统一 `readWorkers`/`cleanupOrphanedRoutes`/`cleanupOrphanedSubscribers`/`getSnapshot` 的 listKeys+readJson 循环；删除无调用点的 `listKeysSafe`。
+- `cluster.ts` 提取 `buildLocalRoute()`，将 `readRoute` 的无 storage 降级分支独立命名并补文档；`readSubscriberTabIds` 同类分支拆为多行可读形式。
+- `cluster.ts` 提取 `sendRouteReleased()` helper，消除三处 `ROUTE_RELEASED` 消息构造的重复；`handoffAssignedTopics` 的 generation 计算复用单次求值；`reconcileAssignedTopics` 去除同一 topicKey 的二次 `readRoute` 调用。
+- `cluster.ts` `releaseSubscription` 返回 topicKey，`unsubscribe` 复用而非重新哈希；`handleMessage`/`handleControlMessage`/`sendControl` 连续 `if` 改 `switch`；`getSnapshot` 的序列化改用 `Array.from`。
+- `data-bus.ts` `onControl` 连续 `if` 改 `switch`；提取 `invokeHandlers()` 统一 dispatch/status/error 三处 handler 遍历的 try-catch 隔离；提取 `formatWorkerTrace`/`formatRouteTrace` 格式化函数。
+- `trace.ts` 提取 `metricsActive` getter，统一四个 record/flush 方法的守卫表达式。
+- `cluster.ts` 提取 `routeOwnerIsLive()` 与 `isActiveAmong()`，消除 subscribe/publish 和 isActiveWorker/refreshRole 中的重复 route+workers.some / selectActiveWorkers+some 模式。
+- `cluster.ts` 提取 `isStaleRouteRelease()`，命名 handleRouteReleasedMessage 的守卫条件。
+- `cluster.ts` `activate()` 合并两个分支的 rememberTopic 调用为单循环；`handoffAssignedTopics` 去掉同一 topicKey 的二次 readRoute。
+- `cluster.ts` `readSubscriberTabIds` 改用 `readAllByPrefix` + `Array.from`；`getSnapshot` 序列化改用 `Array.from` + mapping callback。
+- `data-bus.ts` 提取 `formatWorkerTrace`/`formatRouteTrace` 格式化函数；`invokeHandlers` 的 label 参数改为联合类型字面量而非自由字符串。
+- 多处 JSDoc/注释补全：writeRecord notify 参数、activate channel 判空、reconcileWorkers cleanup 顺序、rememberTopic eviction break、suspendTransport pendingStop 守卫、reopenTransport startPromise 检查、trace flushNow 条件、storage-batch flush break / scheduleFlush 降级 / scheduleRetry、port-reaper 各方法守卫、centrifuge assertHeartbeatInterval/assertStructuredCloneable/deserializeWorkerError、environment canUseStorage。
+
+### Documentation (JSDoc 全覆盖)
+
+- `hash.ts` 提取 seed/prime/avalanche 常量与 `avalancheMix()` 函数，补非 ASCII 字符处理注释。
+- `types.ts` 全部类型（WorkerRecord/WorkerRoute/WorkerClusterMessage/DataBusTransport/DataBusMessage/handler 别名）字段级 JSDoc 补全。
+- `centrifuge-protocol.ts` 全部协议变体（WorkerUnsafeOption/CentrifugeWorkerConfig/CentrifugeWorkerInput 各变体/CentrifugeWorkerOutput 各变体/SerializedWorkerError）JSDoc 补全。
+- `worker-mode.ts` WorkerMode/WorkerBackend/WorkerAvailability/selectWorkerBackend JSDoc 补全。
+- `routing.ts` DEFAULT_MAX_ACTIVE_WORKERS/selectLeastLoadedWorker JSDoc 增强。
+- `storage-batch.ts` INITIAL/MAX_RETRY 常量 + BatchingStorageWriter 类 + pendingSize getter JSDoc 补全。
+- `trace.ts` normalizeInterval/roundMs JSDoc 补全。
+- `environment.ts` ClusterEnvironment 各字段 + canUseStorage JSDoc 补全。
+- `cluster.ts` readJson/writeJson/WorkerClusterOptions 各字段 JSDoc 补全。
+- `data-bus.ts` PUBLICATION_EVENT/getStatus/getClusterSnapshot/CrossTabDataBusOptions JSDoc 补全。
+- `centrifuge.ts` handleOutput/onWorkerFailed JSDoc 补全。
+
+### Documentation
+
+- 架构运行时图（中英）补全 `BatchingStorageWriter`、`PortReaper`、`CentrifugeSession`、`CentrifugeWorkerTransport` 节点，与代码结构对齐。
+- `AGENTS.md` 目录注释明确列出每个测试文件职责。
+- `README`（中英）补充 `centrifuge` 为可选 peer 依赖的安装说明。
+- `trace.ts`、`environment.ts` 补充 JSDoc：trace 模式与选项字段含义、SSR 场景的 storage/ BroadcastChannel 检测说明。
+
 ## [0.1.2] - 2026-08-24
 
 ### Fixed

@@ -111,3 +111,111 @@ describe('CentrifugeSession', () => {
     expect(sink).not.toHaveBeenCalled();
   });
 });
+
+describe('CentrifugeSession additional coverage', () => {
+  it('transfers an ArrayBuffer via MESSAGE_BIN when transferable is enabled', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({
+      post: (message: CentrifugeWorkerOutput, transfer?: ArrayBuffer[]) => sink(message, transfer)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {},
+      transferable: true
+    });
+
+    const client = FakeCentrifuge.instances[0]!;
+    // Subscribe so a subscription-level publication listener exists.
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const subscription = client.getSubscription('market.tick')!;
+
+    // PUBLISH_BIN with an ArrayBuffer — accepted by the publish path without error.
+    client.publish = vi.fn().mockResolvedValue({});
+    const pubBuffer = new ArrayBuffer(4);
+    session.handle({ type: 'PUBLISH_BIN', topic: 'market.tick', data: pubBuffer });
+    await vi.waitFor(() => expect(client.publish).toHaveBeenCalled());
+    expect(client.publish).toHaveBeenCalledWith('market.tick', pubBuffer);
+
+    // Simulate a server-side publication delivering an ArrayBuffer back on the
+    // subscription's 'publication' listener — this exercises the zero-copy
+    // MESSAGE_BIN sink path with the ArrayBuffer in the transfer list.
+    const payload = new ArrayBuffer(8);
+    new Uint8Array(payload).set([10, 20, 30, 40]);
+    const publicationListeners = subscription.listeners.get('publication');
+    expect(publicationListeners?.size).toBeGreaterThan(0);
+    for (const listener of publicationListeners ?? []) {
+      (listener as (context: unknown) => void)({ data: payload });
+    }
+
+    expect(sink).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'MESSAGE_BIN', topic: 'market.tick', data: payload }),
+      [payload]
+    );
+  });
+
+  it('reuses an existing subscription when subscribing to the same topic twice', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+
+    const client = FakeCentrifuge.instances[0]!;
+    const newSubscriptionSpy = vi.spyOn(client, 'newSubscription');
+
+    // First SUBSCRIBE creates a new subscription.
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    expect(newSubscriptionSpy).toHaveBeenCalledTimes(1);
+
+    // Second SUBSCRIBE on the same topic — should reuse the existing subscription
+    // via getSubscription, so newSubscription is not called again.
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    expect(newSubscriptionSpy).toHaveBeenCalledTimes(1);
+
+    // The same subscription object is reused.
+    expect(client.getSubscription('market.tick')).toBe(client.getSubscription('market.tick'));
+  });
+
+  it('posts a disconnected STATUS on STOP and leaves the session usable', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+
+    session.handle({ type: 'STOP' });
+    expect(sink).toHaveBeenCalledWith(expect.objectContaining({ type: 'STATUS', status: 'disconnected' }));
+
+    // After STOP, client is null. A subsequent SUBSCRIBE should not throw.
+    expect(() => session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' })).not.toThrow();
+  });
+
+  it('ignores unknown message types without throwing', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+
+    expect(() => session.handle({ type: 'UNKNOWN' as never })).not.toThrow();
+    // No additional sink calls beyond the normal INIT flow.
+    expect(sink).not.toHaveBeenCalled();
+  });
+});

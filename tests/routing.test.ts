@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createOpaqueKey } from '../src/core/hash';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
+  hasActiveOwner,
   selectActiveWorkers,
   selectLeastLoadedWorker,
   selectRebalanceTarget
@@ -77,5 +78,67 @@ describe('routing selection', () => {
     expect(key).toBe(createOpaqueKey(topic));
     expect(key).toHaveLength(32);
     expect(key).not.toContain('private-context');
+  });
+});
+
+describe('routing edge cases', () => {
+  const makeWorker = (overrides: Partial<WorkerRecord> = {}): WorkerRecord => ({
+    workerId: 'w1',
+    tabId: 't1',
+    load: 0,
+    role: 'active',
+    status: 'connected',
+    visibilityState: 'visible',
+    heartbeatAt: 0,
+    registeredAt: 0,
+    ...overrides
+  });
+
+  it('selectLeastLoadedWorker returns undefined for an empty array', () => {
+    expect(selectLeastLoadedWorker([])).toBeUndefined();
+  });
+
+  it('selectLeastLoadedWorker returns the sole worker for a single-element array', () => {
+    const sole = makeWorker({ workerId: 'only' });
+    expect(selectLeastLoadedWorker([sole])).toBe(sole);
+  });
+
+  it('selectLeastLoadedWorker breaks load ties by workerId ascending', () => {
+    const a = makeWorker({ workerId: 'worker-z', load: 2 });
+    const b = makeWorker({ workerId: 'worker-a', load: 2 });
+    // Equal load → smallest workerId wins, regardless of array order.
+    expect(selectLeastLoadedWorker([a, b])?.workerId).toBe('worker-a');
+    expect(selectLeastLoadedWorker([b, a])?.workerId).toBe('worker-a');
+  });
+
+  it('selectLeastLoadedWorker ignores a preferred id that is not in the list', () => {
+    const a = makeWorker({ workerId: 'w1', load: 5 });
+    const b = makeWorker({ workerId: 'w2', load: 1 });
+    expect(selectLeastLoadedWorker([a, b], 'absent')?.workerId).toBe('w2');
+  });
+
+  it('selectActiveWorkers returns an empty array for an empty input', () => {
+    expect(selectActiveWorkers([])).toEqual([]);
+  });
+
+  it('selectActiveWorkers falls back to all workers when none is healthy', () => {
+    // All disconnected → healthyWorkers is empty, so the fallback uses everyone.
+    const dead = makeWorker({ workerId: 'w1', status: 'disconnected' });
+    const dead2 = makeWorker({ workerId: 'w2', status: 'disconnected', registeredAt: 2 });
+    expect(selectActiveWorkers([dead, dead2]).map(w => w.workerId)).toEqual(['w1', 'w2']);
+  });
+
+  it('hasActiveOwner returns false for a null route', () => {
+    expect(hasActiveOwner(null, [makeWorker()])).toBe(false);
+  });
+
+  it('hasActiveOwner returns false when the owner is absent from the worker set', () => {
+    const route = { topicKey: 'k', workerId: 'ghost', tabId: 't', updatedAt: 0, generation: 1 };
+    expect(hasActiveOwner(route, [makeWorker({ workerId: 'real' })])).toBe(false);
+  });
+
+  it('hasActiveOwner returns true when the owner is alive', () => {
+    const route = { topicKey: 'k', workerId: 'w1', tabId: 't', updatedAt: 0, generation: 1 };
+    expect(hasActiveOwner(route, [makeWorker({ workerId: 'w1' })])).toBe(true);
   });
 });

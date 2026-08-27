@@ -31,6 +31,17 @@ See the [Capabilities Matrix](./docs/capabilities.md) for the full list of imple
 pnpm add cross-tab-worker-databus
 ```
 
+The core package has zero runtime dependencies. The Centrifuge transport
+(`cross-tab-worker-databus/centrifuge`) declares `centrifuge` as an optional
+peer dependency — install it only when you use the built-in Centrifuge backend:
+
+```bash
+pnpm add cross-tab-worker-databus centrifuge
+```
+
+Tabs that only use the local BroadcastChannel data bus (no WebSocket server)
+do not need to install `centrifuge` at all.
+
 ## Getting Started
 
 ```ts

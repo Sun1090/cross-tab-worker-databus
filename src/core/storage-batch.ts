@@ -7,7 +7,10 @@
  */
 import type { StorageLike } from './environment';
 
+/** Initial retry delay for a failed storage write (ms). */
 const INITIAL_RETRY_DELAY_MS = 50;
+/** Maximum retry delay after exponential backoff (ms). Caps at 1.6 s so a
+ * persistently failing key retries roughly every 1-2 s, not every minute. */
 const MAX_RETRY_DELAY_MS = 1_600;
 // Max retry attempts per key before giving up and dropping the write, so a
 // structurally failing key (e.g. a payload the underlying storage rejects)
@@ -17,6 +20,15 @@ const MAX_RETRY_ATTEMPTS = 5;
 /**
  * Coalesces synchronous storage writes and applies them in one pass, with
  * exponential backoff when the underlying storage rejects a write.
+ */
+/**
+ * Coalesces synchronous storage writes and applies them in one pass, with
+ * exponential backoff when the underlying storage rejects a write.
+ *
+ * Wraps a {@link StorageLike} so callers (WorkerClusterRuntime) see a normal
+ * storage interface; reads transparently see pending writes before they flush.
+ * The coalescing window is one microtask, so a burst of heartbeat + route +
+ * subscriber writes in the same task becomes a single localStorage flush.
  */
 export class BatchingStorageWriter implements StorageLike {
   /** Coalesced write set. A `null` value represents a pending delete. */
@@ -29,6 +41,9 @@ export class BatchingStorageWriter implements StorageLike {
 
   constructor(private readonly storage: StorageLike) {}
 
+  /** Number of writes queued in memory but not yet flushed to storage.
+   * Used by tests to assert the coalescing window and by flush() to detect
+   * the all-drained state. */
   get pendingSize(): number {
     return this.pending.size;
   }
@@ -74,7 +89,10 @@ export class BatchingStorageWriter implements StorageLike {
     this.cancelRetry();
     // Apply writes from a snapshot so a concurrent scheduleFlush during the
     // loop cannot re-enter or corrupt the pending map mid-iteration.
-    for (const [key, value] of [...this.pending]) {
+    // Array.from is preferred over [...this.pending] here: it avoids the
+    // spread's intermediate iterator allocation on a hot path that heartbeats
+    // and route writes hit every few seconds.
+    for (const [key, value] of Array.from(this.pending)) {
       try {
         if (value === null) this.storage.removeItem(key);
         else this.storage.setItem(key, value);
@@ -97,6 +115,10 @@ export class BatchingStorageWriter implements StorageLike {
         // Remaining pending writes stay queued for the next attempt, which
         // retries with backoff. Coalescing is preserved by setting the gate
         // so a concurrent scheduleFlush cannot start a second overlapping pass.
+        // `break` stops the flush at the first failure so the retry loop can
+        // re-attempt this key (and the remaining pending entries) together,
+        // rather than continuing to apply later keys while an earlier one is
+        // still in a failed-and-retrying state.
         this.scheduleRetry();
         break;
       }
@@ -118,11 +140,13 @@ export class BatchingStorageWriter implements StorageLike {
       if (value === null) keys.delete(key);
       else keys.add(key);
     }
-    return [...keys];
+    return Array.from(keys);
   }
 
   // Coalesce all synchronous writes within one task into a single microtask
   // flush, avoiding a localStorage write per heartbeat/route/subscriber update.
+  // The queueMicrotask fallback to setTimeout handles older runtimes and
+  // non-browser environments where queueMicrotask is absent.
   private scheduleFlush(): void {
     if (this.flushScheduled) return;
     this.flushScheduled = true;
@@ -134,6 +158,9 @@ export class BatchingStorageWriter implements StorageLike {
     else setTimeout(flush, 0);
   }
 
+  // Schedule a single retry timer. The guard ensures only one retry is in
+  // flight at a time; subsequent scheduleRetry calls during the wait are
+  // no-ops because the first retry will re-flush all pending keys together.
   private scheduleRetry(): void {
     if (this.retryHandle !== null) return;
     this.retryHandle = setTimeout(() => {

@@ -23,8 +23,14 @@ import type { DataBusTraceOptions } from './trace';
  * The cluster's `onEvent` handler filters on this to distinguish databus
  * publications from other control-plane events.
  */
+/** Event type used to broadcast topic publications across tabs via the cluster.
+ * The cluster's `onEvent` handler filters on this to distinguish databus
+ * publications from other control-plane events. */
 const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
 
+/** Constructor options for {@link CrossTabDataBus}. Extends WorkerClusterOptions
+ * (cluster coordination config) with the transport, initial connection config,
+ * and trace options. */
 export interface CrossTabDataBusOptions<TConfig, TData>
   extends Omit<WorkerClusterOptions, 'handlers'> {
   transport: DataBusTransport<TConfig, TData>;
@@ -91,22 +97,33 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // The cluster calls `onControl` when it receives a SUBSCRIBE/UNSUBSCRIBE/PUBLISH
         // control message — meaning the owning Worker has delegated the action to us.
         onControl: (action, topic, data) => {
-          if (action === 'SUBSCRIBE') {
-            if (this.subscribeTransport(topic)) this.traceSubscription('subscribe', topic);
+          switch (action) {
+            case 'SUBSCRIBE':
+              if (this.subscribeTransport(topic)) this.traceSubscription('subscribe', topic);
+              break;
+            case 'UNSUBSCRIBE':
+              if (this.unsubscribeTransport(topic)) this.traceSubscription('unsubscribe', topic);
+              break;
+            case 'PUBLISH':
+              this.runTransport(() => this.transport.publish(topic, data));
+              break;
+            default:
+              break;
           }
-          if (action === 'UNSUBSCRIBE') {
-            if (this.unsubscribeTransport(topic)) this.traceSubscription('unsubscribe', topic);
-          }
-          if (action === 'PUBLISH') this.runTransport(() => this.transport.publish(topic, data));
         },
         // The cluster calls `onEvent` when a publication broadcast arrives from
-        // another tab. Dispatch locally if we have subscribers.
+        // another tab. Dispatch locally if we have subscribers. The payload is
+        // typed `unknown` at the cluster boundary (the cluster is transport-
+        // agnostic); here we narrow it to DataBusMessage — the sender is our
+        // own broadcastEvent call, which always posts a DataBusMessage.
         onEvent: (eventType, payload) => {
           if (eventType !== PUBLICATION_EVENT) return;
           const message = payload as DataBusMessage<TData>;
           if (this.cluster.hasLocalSubscriber(message.topic)) this.dispatch(message);
         },
         onSuspend: () => {
+          // Suppress the suspend trace event during an explicit stop() so
+          // the trace log ends on 'stop' rather than 'suspend'→'stop'.
           if (!this.stopping) this.trace.event({ type: 'lifecycle', action: 'suspend' });
           this.trace.pause();
           this.suspendTransport();
@@ -150,6 +167,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // Replay subscriptions that were registered before start() or that were lost
     // during a previous failure recovery. The cluster.stop() call in the failure
     // path clears subscribedTopics, but topicHandlers retains the intent.
+    // Iterating topicHandlers (not transportSubscribedTopics) because the
+    // transport hasn't subscribed to anything yet on a fresh start.
     for (const topic of this.topicHandlers.keys()) {
       this.cluster.subscribe(topic);
     }
@@ -158,8 +177,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       type: 'coordination',
       coordinated: snapshot.coordinated,
       activeWorkers: snapshot.workers.filter(worker => worker.role === 'active').length,
-      workers: snapshot.workers.map(w => `${w.workerId}|${w.status}|load=${w.load}|tab=${w.tabId}`),
-      routes: snapshot.routes.map(r => `${r.topicKey}@${r.workerId}|confirmed=${r.confirmedAt !== undefined}`)
+      workers: snapshot.workers.map(formatWorkerTrace),
+      routes: snapshot.routes.map(formatRouteTrace)
     });
     // Once startup settles (success or failure), clear the pending gate so a
     // later start()/resumeTransport() can open a fresh operation. Guard against
@@ -226,9 +245,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // transport.stop(). If suspendTransport() already chained a stop for
         // the tab hiding mid-open, reuse it instead of stopping twice.
         if (!this.pendingStop) {
-          this.pendingStop = Promise.resolve()
-            .then(() => this.transport.stop())
-            .catch(stopError => this.reportError(stopError));
+          this.pendingStop = this.createStopPromise();
         }
         this.updateStatus('error');
         this.reportError(error);
@@ -286,7 +303,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return () => this.unsubscribe(topic, handler);
   }
 
-  /** Remove a specific handler, or all handlers for `topic`. */
+  /** Remove a specific handler, or all handlers for `topic`.
+   * When `handler` is omitted, clears every handler for the topic — the
+   * caller used the `unsubscribe(topic)` form expecting a full teardown.
+   * The cluster is only notified on the n→0 transition (handlers.size === 0). */
   unsubscribe(topic: string, handler?: DataBusMessageHandler<TData>): void {
     const handlers = this.topicHandlers.get(topic);
     if (!handlers) return;
@@ -329,7 +349,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return this.status;
   }
 
-  /** Snapshot of the cluster state (workers, routes, assignments). */
+  /** Snapshot of the cluster state (workers, routes, assignments).
+   * For diagnostics only — the returned object is a shallow copy but
+   * nested arrays are snapshots at call time. */
   getClusterSnapshot() {
     return this.cluster.getSnapshot();
   }
@@ -389,13 +411,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Deliver a message to every local handler registered for its topic. */
   private dispatch(message: DataBusMessage<TData>): void {
     this.trace.recordDispatched(message.topic);
-    for (const handler of this.topicHandlers.get(message.topic) ?? []) {
-      try {
-        handler(message);
-      } catch (error) {
-        this.reportError(error);
-      }
-    }
+    this.invokeHandlers(this.topicHandlers.get(message.topic) ?? [], handler => handler(message));
   }
 
   /**
@@ -431,27 +447,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         }, CrossTabDataBus.RECOVERY_COOLDOWN_MS);
       }
     }
-    for (const handler of this.statusHandlers) {
-      try {
-        handler(status);
-      } catch (error) {
-        this.reportError(error);
-      }
-    }
+    this.invokeHandlers(this.statusHandlers, handler => handler(status));
   }
 
   private reportError(error: unknown): void {
     this.trace.event({ type: 'error', source: 'transport' });
-    for (const handler of this.errorHandlers) {
-      try {
-        handler(error);
-      } catch (handlerError) {
-        // A failing error handler must not break the others or the call stack.
-        if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-          console.warn('[cross-tab-worker-databus] error handler threw:', handlerError);
-        }
-      }
-    }
+    this.invokeHandlers(this.errorHandlers, handler => handler(error), 'error handler');
   }
 
   private traceSubscription(action: 'subscribe' | 'unsubscribe', topic: string): void {
@@ -477,6 +478,31 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return true;
   }
 
+  /** Invoke `callback` for each item in `handlers`, isolating a throwing
+   * callback so the remaining ones still run. Dispatch/status handler failures
+   * are routed to `reportError` (which surfaces them to error subscribers);
+   * error-handler failures are logged to the console to avoid infinite
+   * recursion through reportError itself. */
+  private invokeHandlers<T>(
+    handlers: Iterable<T>,
+    callback: (handler: T) => void,
+    label: 'dispatch' | 'status' | 'error handler' = 'dispatch'
+  ): void {
+    for (const handler of handlers) {
+      try {
+        callback(handler);
+      } catch (error) {
+        if (label === 'error handler') {
+          if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+            console.warn('[cross-tab-worker-databus] error handler threw:', error);
+          }
+        } else {
+          this.reportError(error);
+        }
+      }
+    }
+  }
+
   /**
    * Suspend the transport when the tab goes hidden. Stops the transport and
    * clears subscription state so it will be re-established on resume.
@@ -489,8 +515,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.updateStatus('disconnected');
     // A failed open already owns a stop cleanup; reuse it so the suspend does
     // not stop an already-stopped transport. Resume/reopen chain after the
-    // same pendingStop gate.
+    // same pendingStop gate. Without this guard, suspendTransport would issue
+    // a second transport.stop() that races with the failed-open cleanup.
     if (this.pendingStop) return;
+    // Chain the stop after any in-flight start so an async open settles first.
+    // startPromise and pendingStop MUST be the same promise so reopenTransport's
+    // `startPromise !== pendingStop` check can distinguish a suspend-stop gate
+    // from a resume opening — do not wrap one without wrapping the other.
     const pending = this.startPromise ?? Promise.resolve();
     const stopping = pending
       .catch(() => undefined)
@@ -498,6 +529,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       .catch(error => this.reportError(error));
     this.startPromise = stopping;
     this.pendingStop = stopping;
+  }
+
+  /** Create an immediate stop promise (no prior chain). Used by openTransport's
+   * failure path where there is no in-flight start to wait for. */
+  private createStopPromise(): Promise<void> {
+    return Promise.resolve()
+      .then(() => this.transport.stop())
+      .catch(stopError => this.reportError(stopError));
   }
 
   /**
@@ -520,8 +559,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.stopping || this.activeConfig === undefined) return Promise.resolve();
     // A resume/recovery already has an opening in flight. Reuse it so a stale
     // recovery timer or a second caller cannot open a second transport. A
-    // page-hide stop gate must not be reused as an opening, so the reopen
-    // still chains after that stop below.
+    // page-hide stop gate (startPromise === pendingStop) must not be reused
+    // as an opening — that would make resume return a promise that resolves
+    // on stop completion, not on a ready transport. Instead, fall through and
+    // chain the new open after that pending stop.
     if (this.startPromise && this.startPromise !== this.pendingStop) return this.startPromise;
     const config = this.activeConfig;
     // A resume/recovery means the bus is meant to keep running, even after an
@@ -595,4 +636,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     const starting = this.start(this.initialConfig as TConfig);
     void starting.catch(() => undefined);
   }
+}
+
+/** Format a WorkerRecord for the coordination trace event. */
+function formatWorkerTrace(worker: { workerId: string; status: string; load: number; tabId: string }): string {
+  return `${worker.workerId}|${worker.status}|load=${worker.load}|tab=${worker.tabId}`;
+}
+
+/** Format a route for the coordination trace event. */
+function formatRouteTrace(route: { topicKey: string; workerId: string; confirmedAt?: number }): string {
+  return `${route.topicKey}@${route.workerId}|confirmed=${route.confirmedAt !== undefined}`;
 }
