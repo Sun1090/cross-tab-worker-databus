@@ -12,7 +12,8 @@ import { createOpaqueKey } from './hash';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
   selectActiveWorkers,
-  selectLeastLoadedWorker
+  selectLeastLoadedWorker,
+  topicMatchesPattern
 } from './routing';
 import type {
   TopicSubscriberRecord,
@@ -442,6 +443,13 @@ export class WorkerClusterRuntime {
     // not yet been flushed through the BatchingStorageWriter, causing a message
     // destined for this worker to be dropped during the write window.
     if (this.assignedTopics.has(topicKey)) return true;
+    // Wildcard assignments: this worker owns the transport subscription for a
+    // pattern (e.g. "chat.*"), so publications arriving under a matching
+    // concrete topic (e.g. "chat.room.1", as delivered by pattern-aware
+    // servers) belong to the same route and must fan out from here too.
+    for (const pattern of this.assignedTopics.values()) {
+      if (pattern !== topic && topicMatchesPattern(pattern, topic)) return true;
+    }
     return this.readRoute(topicKey)?.workerId === this.workerId;
   }
 
@@ -458,9 +466,14 @@ export class WorkerClusterRuntime {
     );
   }
 
-  /** True when this tab has a local subscriber registered for `topic`. */
+  /** True when this tab has a local subscriber registered for `topic` —
+   * exactly, or via a wildcard subscription that matches it. */
   hasLocalSubscriber(topic: string): boolean {
-    return this.subscribedTopics.has(topic);
+    if (this.subscribedTopics.has(topic)) return true;
+    for (const pattern of this.subscribedTopics) {
+      if (pattern !== topic && topicMatchesPattern(pattern, topic)) return true;
+    }
+    return false;
   }
 
   /** Read-only snapshot of the cluster state (workers, routes, assignments). */

@@ -7,6 +7,7 @@
  */
 import { WorkerClusterRuntime } from './cluster';
 import type { WorkerClusterOptions } from './cluster';
+import { topicMatchesPattern } from './routing';
 import type {
   DataBusErrorHandler,
   DataBusMessage,
@@ -408,10 +409,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.trace.recordDiscarded(message.topic);
   }
 
-  /** Deliver a message to every local handler registered for its topic. */
+  /** Deliver a message to every local handler registered for its topic,
+   * plus every handler registered with a wildcard subscription that matches
+   * (e.g. a handler subscribed to "chat.*" receives "chat.room.1"). */
   private dispatch(message: DataBusMessage<TData>): void {
     this.trace.recordDispatched(message.topic);
     this.invokeHandlers(this.topicHandlers.get(message.topic) ?? [], handler => handler(message));
+    for (const [pattern, handlers] of this.topicHandlers) {
+      if (pattern !== message.topic && topicMatchesPattern(pattern, message.topic)) {
+        this.invokeHandlers(handlers, handler => handler(message));
+      }
+    }
   }
 
   /**

@@ -3,9 +3,11 @@ import { createOpaqueKey } from '../src/core/hash';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
   hasActiveOwner,
+  isWildcardTopic,
   selectActiveWorkers,
   selectLeastLoadedWorker,
-  selectRebalanceTarget
+  selectRebalanceTarget,
+  topicMatchesPattern
 } from '../src/core/routing';
 import type { WorkerRecord } from '../src/core/types';
 
@@ -167,5 +169,34 @@ describe('routing selection edge branches', () => {
     const z = makeWorker({ workerId: 'worker-z', registeredAt: 1 });
     const a = makeWorker({ workerId: 'worker-a', registeredAt: 1 });
     expect(selectActiveWorkers([z, a]).map(w => w.workerId)).toEqual(['worker-a', 'worker-z']);
+  });
+});
+
+describe('wildcard topic matching', () => {
+  it('classifies wildcard patterns', () => {
+    expect(isWildcardTopic('*')).toBe(true);
+    expect(isWildcardTopic('chat.*')).toBe(true);
+    expect(isWildcardTopic('chat.room.*')).toBe(true);
+    expect(isWildcardTopic('chat.room.1')).toBe(false);
+    expect(isWildcardTopic('chat.*.room')).toBe(false);
+    expect(isWildcardTopic('')).toBe(false);
+  });
+
+  it('matches concrete topics against suffix wildcards', () => {
+    expect(topicMatchesPattern('chat.*', 'chat.room.1')).toBe(true);
+    expect(topicMatchesPattern('chat.*', 'chat.deep.nested.topic')).toBe(true);
+    expect(topicMatchesPattern('chat.room.*', 'chat.room.1')).toBe(true);
+    // The prefix must respect segment boundaries: "chat.*" does not match
+    // "chatter.1" even though the string starts with "chat".
+    expect(topicMatchesPattern('chat.*', 'chatter.1')).toBe(false);
+    expect(topicMatchesPattern('chat.*', 'other.topic')).toBe(false);
+  });
+
+  it('treats "*" as match-everything and exact patterns as identity-only', () => {
+    expect(topicMatchesPattern('*', 'anything.at.all')).toBe(true);
+    expect(topicMatchesPattern('chat.room.1', 'chat.room.1')).toBe(true);
+    expect(topicMatchesPattern('chat.room.1', 'chat.room.2')).toBe(false);
+    expect(topicMatchesPattern('', '')).toBe(false);
+    expect(topicMatchesPattern('a.*', '')).toBe(false);
   });
 });
