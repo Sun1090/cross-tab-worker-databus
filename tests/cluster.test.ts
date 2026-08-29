@@ -513,3 +513,224 @@ describe('WorkerClusterRuntime', () => {
     expect(runtime.isAssigned('fill-topic-599')).toBe(false);
   });
 });
+
+describe('WorkerClusterRuntime resilience', () => {
+  function makeRuntime(options: {
+    storage: MemoryStorage;
+    hub?: ChannelHub;
+    now?: () => number;
+    clusterKey?: string;
+    tabId: string;
+    workerId: string;
+    workerTtlMs?: number;
+    onControl?: (action: string, topic: string, data?: unknown) => void;
+  }) {
+    const env = createFakeEnvironment({
+      storage: options.storage,
+      ...(options.hub ? { hub: options.hub } : {}),
+      now: options.now ?? (() => 1_000),
+      randomId: options.workerId
+    });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: options.clusterKey ?? 'resilience',
+      environment: env.environment,
+      tabId: options.tabId,
+      workerId: options.workerId,
+      ...(options.workerTtlMs !== undefined ? { workerTtlMs: options.workerTtlMs } : {}),
+      handlers: { onControl: options.onControl ?? vi.fn(), onEvent: vi.fn() }
+    });
+    return { env, runtime };
+  }
+
+  it('treats a corrupt route record as absent instead of throwing', () => {
+    const storage = new MemoryStorage();
+    const { runtime } = makeRuntime({ storage, tabId: 'tab-a', workerId: 'worker-a' });
+    runtime.start();
+    runtime.subscribe('topic-a');
+    // Corrupt every route record on disk.
+    for (const [key, value] of storage.entries()) {
+      if (key.includes(':route:')) storage.setItem(key, `${value}{corrupted`);
+    }
+    expect(() => runtime.getSnapshot()).not.toThrow();
+    expect(runtime.getSnapshot().routes).toEqual([]);
+    // isAssigned falls back to the in-memory assignment.
+    expect(runtime.isAssigned('topic-a')).toBe(true);
+  });
+
+  it('keeps the runtime usable when storage writes start failing mid-session', () => {
+    const storage = new MemoryStorage();
+    let failWrites = false;
+    const flaky = new (class extends MemoryStorage {
+      override setItem(key: string, value: string): void {
+        if (failWrites) throw new Error('QuotaExceededError');
+        super.setItem(key, value);
+      }
+      override removeItem(key: string): void {
+        if (failWrites) throw new Error('QuotaExceededError');
+        super.removeItem(key);
+      }
+    })();
+    // Seed the shared storage so canUseStorage passes at construction.
+    const { env, runtime } = makeRuntime({ storage, tabId: 'tab-a', workerId: 'worker-a' });
+    env.environment.storage = flaky;
+    runtime.start();
+    runtime.subscribe('topic-a');
+    failWrites = true;
+    expect(() => {
+      runtime.subscribe('topic-b');
+      env.runIntervals();
+      runtime.unsubscribe('topic-a');
+    }).not.toThrow();
+  });
+
+  it('prunes a crashed worker and its records after the TTL expires', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', workerTtlMs: 5_000 });
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b', workerTtlMs: 5_000 });
+    a.runtime.start();
+    b.runtime.start();
+    a.env.runIntervals();
+    b.env.runIntervals();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().workers.map(w => w.workerId)).toEqual(['worker-a', 'worker-b']);
+
+    // Worker A crashes: no pagehide, no stop — heartbeats just stop.
+    now += 5_001;
+    b.env.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(b.runtime.getSnapshot().workers.map(w => w.workerId)).toEqual(['worker-b']);
+  });
+
+  it('removes subscriber records whose tab is no longer active', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', workerTtlMs: 5_000 });
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b', workerTtlMs: 5_000 });
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    // Worker A crashes with a subscriber record on disk.
+    const subscriberEntry = storage.entries().find(([key]) => key.includes(':subscriber:'));
+    expect(subscriberEntry).toBeDefined();
+    now += 5_001;
+    b.env.runIntervals();
+    await Promise.resolve();
+
+    expect(storage.entries().some(([key]) => key.includes(':subscriber:'))).toBe(false);
+  });
+
+  it('cleans up an orphaned route once no subscriber tab remains alive', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', workerTtlMs: 5_000 });
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    expect(storage.entries().some(([key]) => key.includes(':route:'))).toBe(true);
+
+    // Worker A crashes. A peer that comes online after the TTL reconciles the
+    // registry: dead worker, dead subscriber, then the orphaned route go away.
+    now += 5_001;
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b', workerTtlMs: 5_000 });
+    b.runtime.start();
+    await Promise.resolve();
+    b.env.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(storage.entries().some(([key]) => key.includes(':route:'))).toBe(false);
+    expect(storage.entries().some(([key]) => key.includes(':subscriber:'))).toBe(false);
+    // Only the live peer's worker record remains.
+    const workerRecords = storage.entries().filter(([key]) => key.includes(':worker:'));
+    expect(workerRecords).toHaveLength(1);
+    expect(JSON.parse(workerRecords[0]![1]).workerId).toBe('worker-b');
+  });
+
+  it('short-circuits a handoff UNSUBSCRIBE on the old owner and ACKs ROUTE_RELEASED', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlA = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', onControl: controlA });
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b' });
+    const channelNames: string[] = [];
+    a.env.environment.createChannel = name => {
+      channelNames.push(name);
+      return hub.create(name);
+    };
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+    const topicKey = JSON.parse(storage.entries().find(([key]) => key.includes(':route:'))![1]).topicKey as string;
+    controlA.mockClear();
+
+    // Simulate a graceful handoff record: the route now belongs to worker-b
+    // and names worker-a as the previous owner that must release.
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({ ...route, workerId: 'worker-b', tabId: 'tab-b', generation: 2, handoffFromWorkerId: 'worker-a', updatedAt: now })
+    );
+
+    // The new owner asks the old owner to release via a point-to-point CONTROL.
+    hub.create(channelNames[0]!).postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-b',
+      targetWorkerId: 'worker-a',
+      action: 'UNSUBSCRIBE',
+      topic: 'topic-a',
+      topicKey
+    });
+
+    // The old owner releases locally exactly once (no generic double dispatch)
+    // and ACKs with ROUTE_RELEASED, which lets worker-b confirm ownership.
+    expect(controlA).toHaveBeenCalledTimes(1);
+    expect(controlA).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic-a', undefined);
+    await Promise.resolve();
+    expect(b.runtime.isAssigned('topic-a')).toBe(true);
+    expect(b.runtime.getSnapshot().routes[0]?.confirmedAt).toBe(now);
+  });
+
+  it('drops a locally assigned topic when the route no longer points at this worker', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlA = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', onControl: controlA });
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b' });
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+    expect(a.runtime.isAssigned('topic-a')).toBe(true);
+
+    // Simulate the route being taken over by another live worker in this
+    // tab's absence (e.g. a peer that won the race after a pause).
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({ ...route, workerId: 'worker-b', tabId: 'tab-b', generation: (route.generation as number) + 1, updatedAt: now })
+    );
+
+    a.env.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A releases its local subscription and stops claiming the topic.
+    expect(controlA).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic-a', undefined);
+    expect(a.runtime.isAssigned('topic-a')).toBe(false);
+  });
+});

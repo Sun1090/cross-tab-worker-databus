@@ -161,3 +161,24 @@ describe('BatchingStorageWriter', () => {
     expect(writer.pendingSize).toBe(0);
   });
 });
+
+  it('schedules a single retry timer for multiple failing keys in one flush', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    storage.setItem = () => {
+      throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+    };
+    const writer = new BatchingStorageWriter(storage);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    writer.setItem('doomed-a', '1');
+    writer.setItem('doomed-b', '2');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Both keys are eventually dropped, and the drop happens through one
+    // shared retry timer rather than one timer per key.
+    expect(writer.pendingSize).toBe(0);
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    warnSpy.mockRestore();
+    vi.useRealTimers();
+  });
