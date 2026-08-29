@@ -19,6 +19,17 @@ import {
   CentrifugeWorkerTransport,
   createCentrifugeDataBus
 } from 'cross-tab-worker-databus/centrifuge';
+
+import {
+  WebSocketTransport,
+  createWebSocketDataBus
+} from 'cross-tab-worker-databus';
+
+import {
+  useCrossTabDataBus,
+  useCrossTabStatus,
+  useCrossTabSubscription
+} from 'cross-tab-worker-databus/hooks';
 ```
 
 Business integration should prefer `CrossTabDataBus` or `createCentrifugeDataBus`. `WorkerClusterRuntime` is an advanced coordination API.
@@ -68,6 +79,7 @@ Registers a local subscription and returns a cleanup function.
 - The first handler in the current tab registers a cluster subscription.
 - The current tab only leaves the topic after the last handler is released.
 - Subscriptions are automatically queued when the transport is not yet ready.
+- Wildcard subscriptions: a topic ending in `.*` (`chat.*`) matches any remainder, and `*` matches everything. The pattern is routed, owned, and transport-subscribed as a literal channel; publications tagged with a matching concrete topic (or with the pattern itself) are delivered to wildcard handlers. See `topicMatchesPattern` below.
 
 ### `unsubscribe(topic, handler?)`
 
@@ -216,6 +228,66 @@ Available options:
 - `workerFactory`: custom Dedicated Worker loading method
 - `sharedWorkerFactory`: custom SharedWorker loading method
 
+## WebSocket Transport Backend
+
+A dependency-free transport over a plain WebSocket. Any server speaking the JSON frame protocol below can back the same cross-tab clustering stack (owner dedup, sticky routes, failover) as the Centrifuge backend.
+
+### `createWebSocketDataBus<TData>(options)`
+
+```ts
+createWebSocketDataBus<TData>(options): CrossTabDataBus<WebSocketDataBusConfig, TData>
+```
+
+Creates an auto-starting WebSocket DataBus. Defaults: `clusterKey = connection.url`.
+
+```ts
+const bus = createWebSocketDataBus({
+  connection: { url: 'wss://example.test/ws' },
+  trace: { enabled: true, sink: event => console.log(event) }
+});
+```
+
+### `WebSocketTransport<TData>`
+
+```ts
+new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
+```
+
+Implements `DataBusTransport`. Connection lifecycle maps to the DataBus status vocabulary: socket `open` → `connected`, `close` → `disconnected`, `error` → `error` (which triggers DataBus auto-recovery). Subscriptions are re-asserted when a socket reopens in place. Frames dropped while the socket is not open are reported via `handlers.onError`; reopening re-sends subscribe frames.
+
+`WebSocketDataBusConfig` fields:
+
+- `url` — WebSocket endpoint.
+- `protocols` — optional subprotocol(s) for the handshake.
+- `webSocketFactory` — optional factory `(url, protocols) => WebSocketLike` for tests and non-browser runtimes (defaults to the global `WebSocket`).
+
+### Wire protocol
+
+JSON text frames:
+
+- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
+- server → client: `{"topic":"...","data":...}` for publications. Frames without a string `topic` field are ignored; malformed JSON surfaces via `handlers.onError` without throwing.
+
+A pattern-aware server may deliver publications tagged with the concrete topic (recommended); publications tagged with the pattern itself are delivered through the exact-match path.
+
+## React Hooks (`cross-tab-worker-databus/hooks`)
+
+React (>= 18) is an optional peer dependency; this entry is separate so non-React consumers never load it.
+
+### `useCrossTabDataBus(create, deps?)`
+
+Creates a bus for the component's lifetime: created on mount, stopped on unmount. StrictMode-safe — the double-invoked effect exercises the same stop/recreate path as BFCache suspend/resume. Returns the active bus or `null` before the first effect (SSR / initial render).
+
+Pass a fresh bus per effect run (an inline factory); key recreation through `deps`.
+
+### `useCrossTabSubscription(bus, topic, handler)`
+
+Attaches a message handler with automatic cleanup. The handler is read through a ref on each delivery, so inline closures do not cause resubscription across re-renders. Queues while `bus` is `null` or the transport is not ready.
+
+### `useCrossTabStatus(bus)`
+
+Mirrors `bus.onStatus()` into React state and reads the current value synchronously whenever the bus identity changes. Returns `'connecting' | 'connected' | 'disconnected' | 'error'`.
+
 ## `WorkerClusterRuntime`
 
 Advanced API responsible for Worker registration, heartbeat, visibility, routing, BroadcastChannel protocol, and migration. Business modules should not operate on it directly.
@@ -257,5 +329,7 @@ Selects the actual backend based on `WorkerMode` and capability detection, retur
 - `selectLeastLoadedWorker`
 - `selectRebalanceTarget`
 - `hasActiveOwner`
+- `isWildcardTopic(pattern)`
+- `topicMatchesPattern(pattern, topic)` — wildcard matching used by subscriptions: `chat.*` matches `chat.room.1` (segment-boundary prefix), `*` matches everything
 
 These pure functions are primarily used for testing, diagnostics, and custom coordination strategies.

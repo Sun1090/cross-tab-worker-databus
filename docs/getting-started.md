@@ -14,6 +14,8 @@ The package provides the following entry points:
 - `cross-tab-worker-databus/centrifuge`: the built-in Centrifuge Worker transport
 - `cross-tab-worker-databus/centrifuge.worker`: the Dedicated Worker build artifact, loaded by default by the built-in factory; typically no need to reference it directly
 - `cross-tab-worker-databus/centrifuge.shared.worker`: the SharedWorker build artifact, loaded by default by the built-in factory; typically no need to reference it directly
+- `cross-tab-worker-databus/hooks`: optional React hooks adapter (`useCrossTabDataBus`, `useCrossTabSubscription`, `useCrossTabStatus`); React (>= 18) is an optional peer dependency
+- `cross-tab-worker-databus` also exports a zero-dependency native `WebSocketTransport` / `createWebSocketDataBus` for servers that speak plain WebSockets
 
 The `cross-tab-worker-databus/centrifuge` entry point relies on the optional peer dependency `centrifuge` (^5.5.3). Install it alongside this package when using the built-in Centrifuge transport: `pnpm add centrifuge`.
 
