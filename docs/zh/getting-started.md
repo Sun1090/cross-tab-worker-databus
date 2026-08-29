@@ -21,6 +21,8 @@ pnpm add cross-tab-worker-databus
 
 建议在应用基础设施层创建一个实例，其他模块直接导入。这样同一 Tab 内的业务模块会共享 Worker、连接和 Topic 引用。
 
+包同时发布 ESM 与 CommonJS 双格式：`import` 与 `require()`（`dist/cjs`）均可直接使用，CJS bundler 配置无需额外处理。
+
 ```ts
 import { createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
 
