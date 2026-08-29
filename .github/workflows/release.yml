@@ -28,11 +28,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify (typecheck + unit tests)
-        run: pnpm typecheck && pnpm test
-
-      - name: Build
-        run: pnpm build
+      # pnpm check = typecheck + build + test; build must precede test because
+      # tests/dual-format.test.ts imports the dist artifacts.
+      - name: Verify (typecheck + build + unit tests)
+        run: pnpm check
 
       - name: Extract changelog for this version
         run: |
