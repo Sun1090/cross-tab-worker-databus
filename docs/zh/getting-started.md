@@ -12,7 +12,10 @@ pnpm add cross-tab-worker-databus
 
 - `cross-tab-worker-databus`：核心 DataBus 和 transport 接口
 - `cross-tab-worker-databus/centrifuge`：内置 Centrifuge Worker transport
+- `cross-tab-worker-databus/centrifuge.worker`：Dedicated Worker 构建产物，默认由内置 factory 加载，通常无需直接引用
 - `cross-tab-worker-databus/centrifuge.shared.worker`：SharedWorker 构建产物，默认由内置 factory 加载，通常无需直接引用
+
+`cross-tab-worker-databus/centrifuge` 入口依赖可选 peer dependency `centrifuge`（^5.5.3）。使用内置 Centrifuge transport 时请一并安装：`pnpm add centrifuge`。
 
 ## 2. 创建实例
 

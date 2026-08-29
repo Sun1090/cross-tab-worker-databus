@@ -59,8 +59,9 @@ transport only owns the I/O path: connect, subscribe, publish, disconnect.
 
 Mirror the Centrifuge backend's `centrifuge-protocol.ts`: a discriminated union
 of messages the main thread sends to the Worker (`INIT` / `SUBSCRIBE` /
-`UNSUBSCRIBE` / `PUBLISH` / `STOP`) and a union the Worker posts back
-(`STATUS` / `MESSAGE` / `ERROR`). Keep it structured-cloneable (no functions,
+`UNSUBSCRIBE` / `PUBLISH` / `PUBLISH_BIN` / `PING` / `STOP`) and a union the
+Worker posts back (`STATUS` / `MESSAGE` / `MESSAGE_BIN` / `ERROR`). Keep it
+structured-cloneable (no functions,
 no class instances — `Error` must be serialised).
 
 ### 2. Implement the session

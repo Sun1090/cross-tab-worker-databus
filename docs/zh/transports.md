@@ -54,8 +54,9 @@ DataBus 层负责跨 Tab 协调（BroadcastChannel 控制面、localStorage 路�
 ### 1. 定义你的 Worker 协议
 
 参照 Centrifuge 后端的 `centrifuge-protocol.ts`：一个主线程发给 Worker 的
-判别联合（`INIT` / `SUBSCRIBE` / `UNSUBSCRIBE` / `PUBLISH` / `STOP`）和一个
-Worker 回传的联合（`STATUS` / `MESSAGE` / `ERROR`）。保持结构化克隆安全
+判别联合（`INIT` / `SUBSCRIBE` / `UNSUBSCRIBE` / `PUBLISH` / `PUBLISH_BIN` /
+`PING` / `STOP`）和一个 Worker 回传的联合（`STATUS` / `MESSAGE` / `MESSAGE_BIN` /
+`ERROR`）。保持结构化克隆安全
 （无函数、无类实例——`Error` 必须序列化）。
 
 ### 2. 实现 session

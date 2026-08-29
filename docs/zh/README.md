@@ -8,6 +8,7 @@
 |---|---|
 | [快速接入](./getting-started.md) | 安装、创建实例、订阅、发布和销毁 |
 | [配置说明](./configuration.md) | 核心配置、Centrifuge 配置、默认值和约束 |
+| [Transport 后端](./transports.md) | `DataBusTransport` 契约、Worker 协议与第三方后端接入指南 |
 | [API 参考](./api.md) | 公共入口、类型、方法、返回值和行为 |
 | [架构说明](./architecture.md) | Worker 集群、路由、存储、迁移和降级设计 |
 | [能力矩阵](./capabilities.md) | 已实现、未实现和计划待实现的能力矩阵 |
