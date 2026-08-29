@@ -1,5 +1,8 @@
 # cross-tab-worker-databus
 
+[![npm version](https://img.shields.io/npm/v/cross-tab-worker-databus)](https://www.npmjs.com/package/cross-tab-worker-databus)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 > 中文 | [English](./README.md)
 
 框架无关的浏览器跨 Tab 数据总线。
