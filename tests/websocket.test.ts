@@ -1,0 +1,228 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  WebSocketTransport,
+  createWebSocketDataBus
+} from '../src/websocket';
+import type { WebSocketLike } from '../src/websocket';
+
+/** Controllable WebSocket double: records sent frames, lets tests fire
+ * lifecycle events and inject server frames. */
+class FakeWebSocket implements WebSocketLike {
+  readyState = 0;
+  readonly sent: string[] = [];
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+
+  constructor(
+    readonly url: string,
+    readonly protocols?: string | string[]
+  ) {}
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+
+  serverFrame(payload: unknown): void {
+    this.onmessage?.({ data: typeof payload === 'string' ? payload : JSON.stringify(payload) });
+  }
+}
+
+function makeTransport(factory?: (url: string) => FakeWebSocket) {
+  const sockets: FakeWebSocket[] = [];
+  const transport = new WebSocketTransport({
+    url: 'wss://example.test/ws',
+    ...(factory
+      ? { webSocketFactory: (url: string) => {
+          const socket = factory(url);
+          sockets.push(socket);
+          return socket;
+        } }
+      : { webSocketFactory: (url: string) => {
+          const socket = new FakeWebSocket(url);
+          sockets.push(socket);
+          return socket;
+        } })
+  });
+  const onMessage = vi.fn();
+  const onStatus = vi.fn();
+  const onError = vi.fn();
+  transport.start(
+    { url: 'wss://example.test/ws' },
+    { onMessage, onStatus, onError }
+  );
+  return { sockets, transport, onMessage, onStatus, onError };
+}
+
+describe('WebSocketTransport', () => {
+  it('maps socket lifecycle to the DataBus status vocabulary', () => {
+    const { sockets, onStatus } = makeTransport();
+    const socket = sockets[0]!;
+    expect(onStatus).not.toHaveBeenCalledWith('connected');
+    socket.open();
+    expect(onStatus).toHaveBeenCalledWith('connected');
+    socket.onerror?.();
+    expect(onStatus).toHaveBeenCalledWith('error');
+    socket.close();
+    expect(onStatus).toHaveBeenCalledWith('disconnected');
+  });
+
+  it('sends JSON subscribe/unsubscribe/publish frames and tracks topics', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.subscribe('market.tick');
+    transport.unsubscribe('market.tick');
+    transport.subscribe('market.tick');
+    transport.publish('market.tick', { price: 1 });
+    expect(socket.sent).toEqual([
+      JSON.stringify({ op: 'subscribe', topic: 'market.tick' }),
+      JSON.stringify({ op: 'unsubscribe', topic: 'market.tick' }),
+      JSON.stringify({ op: 'subscribe', topic: 'market.tick' }),
+      JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 1 } })
+    ]);
+  });
+
+  it('re-asserts subscriptions when the socket (re)opens', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.subscribe('a');
+    transport.subscribe('b');
+    const afterFirstOpen = socket.sent.length;
+
+    // Simulate an in-place socket recovery: the same socket object drops and
+    // reconnects (e.g. transparent reconnect by the underlying runtime). The
+    // onopen handler must re-assert every tracked subscription.
+    socket.close();
+    socket.open();
+    expect(socket.sent.slice(afterFirstOpen)).toEqual([
+      JSON.stringify({ op: 'subscribe', topic: 'a' }),
+      JSON.stringify({ op: 'subscribe', topic: 'b' })
+    ]);
+  });
+
+  it('delivers server publications with a string topic and ignores other frames', () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.serverFrame({ topic: 'market.tick', data: { price: 7 } });
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'market.tick', data: { price: 7 } });
+
+    // Non-publication object shapes are ignored without touching onError.
+    socket.serverFrame({ op: 'ping' });
+    socket.serverFrame({ topic: 42 });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+
+    // Unparseable text frames surface through onError but never throw.
+    socket.serverFrame('not json');
+    socket.serverFrame('{broken');
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops frames with an onError report while the socket is not open', () => {
+    const { transport, onError } = makeTransport();
+    // Socket created but never opened (readyState 0).
+    transport.publish('t', 1);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('not open') }));
+  });
+
+  it('reports a throwing factory through onStatus(error) instead of throwing', () => {
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: () => {
+        throw new Error('no websocket here');
+      }
+    });
+    const onStatus = vi.fn();
+    const onError = vi.fn();
+    expect(() =>
+      transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus, onError }
+      )
+    ).not.toThrow();
+    expect(onStatus).toHaveBeenCalledWith('error');
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'no websocket here' }));
+  });
+
+  it('is safe to stop twice and clears subscription tracking', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.subscribe('a');
+    transport.stop();
+    expect(socket.readyState).toBe(3);
+    expect(() => transport.stop()).not.toThrow();
+    // After stop the transport is inert; start() may be called again.
+    expect(() =>
+      transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
+      )
+    ).not.toThrow();
+  });
+
+  it('passes protocols through to the socket factory', () => {
+    const seen: Array<string | string[] | undefined> = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      protocols: ['chat.v1'],
+      webSocketFactory: (url, protocols) => {
+        seen.push(protocols);
+        return new FakeWebSocket(url, protocols);
+      }
+    });
+    transport.start(
+      { url: 'wss://example.test/ws', protocols: ['chat.v1'] },
+      { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
+    );
+    expect(seen).toEqual([['chat.v1']]);
+  });
+});
+
+describe('createWebSocketDataBus', () => {
+  it('wires a WebSocket transport into an auto-starting CrossTabDataBus', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const bus = createWebSocketDataBus<{ hello: string }>({
+      connection: {
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => {
+          const socket = new FakeWebSocket(url);
+          sockets.push(socket);
+          return socket;
+        }
+      }
+    });
+    const received: Array<{ topic: string; data: { hello: string } }> = [];
+    bus.subscribe('demo.topic', message => received.push(message));
+    await bus.ready();
+
+    const socket = sockets[0]!;
+    socket.open();
+    socket.serverFrame({ topic: 'demo.topic', data: { hello: 'world' } });
+    expect(received).toEqual([{ topic: 'demo.topic', data: { hello: 'world' } }]);
+
+    // Publish goes out over the socket as a JSON frame.
+    bus.publish('demo.topic', { hello: 'from-tab' });
+    expect(socket.sent.at(-1)).toBe(
+      JSON.stringify({ op: 'publish', topic: 'demo.topic', data: { hello: 'from-tab' } })
+    );
+
+    await bus.stop();
+    expect(socket.readyState).toBe(3);
+  });
+});
