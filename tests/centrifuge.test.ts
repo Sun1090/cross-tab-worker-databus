@@ -600,12 +600,10 @@ describe('CentrifugeWorkerTransport local fallback session', () => {
       }
     );
 
-    // The local session received INIT — verify by emitting a connected status
-    // from the FakeCentrifuge instance. Find the instance via the state listener.
-    const client = (FakeCentrifuge as unknown as { new (...args: unknown[]): { on: (e: string, l: (c: unknown) => void) => void } });
-    // The FakeCentrifuge constructor was called during start(); we can't easily
-    // reach the instance, but we can verify INIT was processed by subscribing
-    // and confirming the transport doesn't throw.
+    // The local session received INIT — the FakeCentrifuge constructor was
+    // called during start(); we can't easily reach the instance, but we can
+    // verify INIT was processed by subscribing and confirming the transport
+    // doesn't throw.
     expect(() => transport.subscribe('market.tick')).not.toThrow();
     expect(() => transport.publish('market.tick', { hello: 1 })).not.toThrow();
 

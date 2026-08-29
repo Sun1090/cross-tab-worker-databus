@@ -41,18 +41,31 @@
       "types": "./dist/centrifuge.d.ts",
       "import": "./dist/centrifuge.js"
     },
-    "./centrifuge.worker": "./dist/centrifuge.worker.js",
-    "./centrifuge.shared.worker": "./dist/centrifuge.shared.worker.js",
+    "./centrifuge.worker": {
+      "types": "./dist/workers/centrifuge.worker.d.ts",
+      "default": "./dist/centrifuge.worker.js"
+    },
+    "./centrifuge.shared.worker": {
+      "types": "./dist/workers/centrifuge.shared.worker.d.ts",
+      "default": "./dist/centrifuge.shared.worker.js"
+    },
     "./package.json": "./package.json"
   },
+  "sideEffects": [
+    "./dist/centrifuge.worker.js",
+    "./dist/centrifuge.shared.worker.js"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "examples": "node scripts/serve-examples.mjs",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "pnpm build && playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm check"
   },
   "peerDependencies": {
     "centrifuge": "^5.5.3"
@@ -63,10 +76,15 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "esbuild": "^0.25.0",
+    "eslint": "^9.39.4",
+    "globals": "^17.11.0",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^3.2.0"
   },
   "engines": {

@@ -23,7 +23,7 @@ import type {
   CentrifugeWorkerOutput,
   SerializedWorkerError
 } from './centrifuge-protocol';
-import { DEFAULT_HEARTBEAT_INTERVAL_MS, DEFAULT_SESSION_TIMEOUT_MULTIPLIER } from './centrifuge-protocol';
+import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol';
 
 export type { CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
 export type { WorkerBackend, WorkerMode } from './worker-mode';
