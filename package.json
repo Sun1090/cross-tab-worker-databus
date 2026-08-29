@@ -7,7 +7,7 @@
   "author": "Sun1090",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Sun1090/cross-tab-worker-databus.git"
+    "url": "git+https://github.com/Sun1090/cross-tab-worker-databus.git"
   },
   "homepage": "https://github.com/Sun1090/cross-tab-worker-databus#readme",
   "bugs": {
