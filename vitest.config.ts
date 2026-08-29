@@ -8,6 +8,17 @@ import { defineConfig, configDefaults } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, 'e2e/**']
+    exclude: [...configDefaults.exclude, 'e2e/**'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.worker.ts', 'src/workers/centrifuge*.ts'],
+      thresholds: {
+        statements: 85,
+        branches: 80,
+        functions: 90,
+        lines: 85
+      }
+    }
   }
 });

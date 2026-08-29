@@ -43,15 +43,15 @@ function makeReaper() {
 describe('PortReaper', () => {
   it('reaps a silent port after its timeout, closing it before stopping the session', () => {
     vi.useFakeTimers();
-    const { reaper, register } = makeReaper();
+    const { register } = makeReaper();
     const { port, session } = register('tab-a');
 
-    // 10s probe: 10 s elapsed but timeout is 30 s — not reaped yet.
+    // 10s probe: 10 s elapsed but timeout is 30 s — not reaped yet.
     vi.advanceTimersByTime(10_000);
     expect(port.closed).toBe(false);
     expect(session.stopped).toBe(0);
 
-    // 40s probe: 40 s > 30 s timeout — reaped.
+    // 40s probe: 40 s > 30 s timeout — reaped.
     vi.advanceTimersByTime(31_000);
     expect(port.closed).toBe(true);
     expect(session.stopped).toBe(1);
@@ -83,15 +83,15 @@ describe('PortReaper', () => {
     const { register } = makeReaper();
     const { port, session } = register('tab-a', 5_000); // timeout 15s, cadence 5s
 
-    // 10s probe: 10 s elapsed but timeout is 15 s — still alive.
+    // 10s probe: 10 s elapsed but timeout is 15 s — still alive.
     vi.advanceTimersByTime(10_000);
     expect(port.closed).toBe(false);
 
-    // 15s probe: 15 s == timeout — not reaped yet (need > 15s).
+    // 15s probe: 15 s == timeout — not reaped yet (need > 15s).
     vi.advanceTimersByTime(5_000);
     expect(port.closed).toBe(false);
 
-    // 20s probe: 20 s > 15 s — reaped.
+    // 20s probe: 20 s > 15 s — reaped.
     vi.advanceTimersByTime(5_001);
     expect(port.closed).toBe(true);
     expect(session.stopped).toBe(1);
@@ -123,7 +123,7 @@ describe('PortReaper', () => {
     reaper.register(portA as unknown as MessagePort, reapTarget(portA, sessionA));
     expect(sets).toEqual([10_000]);
 
-    // 40s probe: 40 s > 30 s timeout — reaped.
+    // 40s probe: 40 s > 30 s timeout — reaped.
     vi.advanceTimersByTime(41_000);
     expect(portA.closed).toBe(true);
     // Reaping the last port clears the interval (one clear for the 40s probe).
@@ -135,7 +135,7 @@ describe('PortReaper', () => {
     reaper.register(portB as unknown as MessagePort, reapTarget(portB, sessionB));
     expect(sets).toEqual([10_000, 10_000]);
 
-    // 40s probe: 40 s > 30 s timeout — reaped.
+    // 40s probe: 40 s > 30 s timeout — reaped.
     vi.advanceTimersByTime(41_000);
     expect(portB.closed).toBe(true);
     expect(sessionB.stopped).toBe(1);
@@ -152,7 +152,7 @@ describe('PortReaper', () => {
     // Removed port is no longer tracked; touching it is a no-op.
     reaper.touch(portA as unknown as MessagePort);
 
-    // 40s probe: 40 s > 30 s timeout — portB (still tracked) is reaped.
+    // 40s probe: 40 s > 30 s timeout — portB (still tracked) is reaped.
     vi.advanceTimersByTime(41_000);
     expect(portA.closed).toBe(false);
     expect(sessionA.stopped).toBe(0);
