@@ -94,3 +94,22 @@ export function selectRebalanceTarget(
 export function hasActiveOwner(route: WorkerRoute | null, workers: readonly WorkerRecord[]): boolean {
   return Boolean(route && workers.some(worker => worker.workerId === route.workerId));
 }
+
+/** True when `pattern` is a wildcard topic: `*` (match everything) or a
+ * `prefix.*` suffix wildcard (match any remainder, including multiple
+ * segments). Any other string is an exact topic. */
+export function isWildcardTopic(pattern: string): boolean {
+  return pattern === '*' || pattern.endsWith('.*');
+}
+
+/** True when a publication on `topic` must be delivered to a subscription
+ * made with `pattern`. Exact patterns match only themselves; wildcards use
+ * prefix matching so `chat.*` matches `chat.room.1` and `*` matches anything.
+ * The empty pattern never matches. */
+export function topicMatchesPattern(pattern: string, topic: string): boolean {
+  if (!pattern || !topic) return false;
+  if (pattern === topic) return true;
+  if (pattern === '*') return true;
+  if (!pattern.endsWith('.*')) return false;
+  return topic.startsWith(pattern.slice(0, -1));
+}

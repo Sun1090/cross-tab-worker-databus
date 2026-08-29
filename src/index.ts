@@ -45,9 +45,11 @@ export type { WorkerBackend, WorkerMode } from './worker-mode';
 export {
   DEFAULT_MAX_ACTIVE_WORKERS,
   hasActiveOwner,
+  isWildcardTopic,
   selectActiveWorkers,
   selectLeastLoadedWorker,
-  selectRebalanceTarget
+  selectRebalanceTarget,
+  topicMatchesPattern
 } from './core/routing';
 export type {
   DataBusErrorHandler,

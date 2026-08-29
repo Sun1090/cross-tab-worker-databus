@@ -907,3 +907,117 @@ describe('CrossTabDataBus', () => {
     await Promise.all([busA.stop(), busB.stop()]);
   });
 });
+
+describe('CrossTabDataBus wildcard subscriptions', () => {
+  function makeBus(workerId: string, storage: MemoryStorage, hub: ChannelHub) {
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: workerId });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      autoStart: true,
+      clusterKey: 'wildcards',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    return { bus, transport };
+  }
+
+  it('delivers concrete-topic publications to wildcard subscribers on the owning tab', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const { bus, transport } = makeBus('owner', storage, hub);
+    const wildcardHandler = vi.fn();
+    bus.subscribe('chat.*', wildcardHandler);
+    await bus.ready();
+
+    // The pattern is subscribed at the transport as a literal channel.
+    expect(transport.subscribeCalls).toContain('chat.*');
+
+    // A pattern-aware server delivers a publication under the concrete topic.
+    transport.emit('chat.room.1', 7);
+    expect(wildcardHandler).toHaveBeenCalledWith(
+      expect.objectContaining({ topic: 'chat.room.1', data: 7 })
+    );
+
+    // Non-matching topics stay discarded.
+    transport.emit('other.topic', 8);
+    expect(wildcardHandler).toHaveBeenCalledTimes(1);
+
+    // The exact topic still flows to exact subscribers.
+    const exactHandler = vi.fn();
+    bus.subscribe('chat.room.1', exactHandler);
+    await Promise.resolve();
+    transport.emit('chat.room.1', 9);
+    expect(exactHandler).toHaveBeenCalledTimes(1);
+    expect(wildcardHandler).toHaveBeenCalledTimes(2);
+
+    await bus.stop();
+  });
+
+  it('delivers wildcard-matched publications to non-owner tabs via EVENT fan-out', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'wildcards',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'wildcards',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB
+    });
+    await busA.start({});
+    now += 1;
+    await busB.start({});
+
+    const receivedA: number[] = [];
+    const receivedB: number[] = [];
+    busA.subscribe('chat.*', message => receivedA.push(message.data));
+    busB.subscribe('chat.*', message => receivedB.push(message.data));
+    await Promise.resolve();
+
+    // A owns the pattern channel; B is a standby wildcard subscriber.
+    expect(transportA.subscribeCalls).toContain('chat.*');
+    expect(transportB.subscribeCalls).not.toContain('chat.*');
+
+    // A's transport receives a concrete-topic publication from a pattern-aware
+    // server; B must receive it through the EVENT fan-out + wildcard match.
+    transportA.emit('chat.room.2', 42);
+    await Promise.resolve();
+    expect(receivedA).toEqual([42]);
+    expect(receivedB).toEqual([42]);
+
+    await busA.stop();
+    await busB.stop();
+  });
+
+  it('stops delivering after the wildcard subscription is removed', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const { bus, transport } = makeBus('owner', storage, hub);
+    const handler = vi.fn();
+    const unsubscribe = bus.subscribe('chat.*', handler);
+    await bus.ready();
+
+    transport.emit('chat.room.1', 1);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    await Promise.resolve();
+    expect(transport.unsubscribeCalls).toContain('chat.*');
+    transport.emit('chat.room.1', 2);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    await bus.stop();
+  });
+});
