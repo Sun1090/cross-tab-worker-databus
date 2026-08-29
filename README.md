@@ -1,5 +1,8 @@
 # cross-tab-worker-databus
 
+[![npm version](https://img.shields.io/npm/v/cross-tab-worker-databus)](https://www.npmjs.com/package/cross-tab-worker-databus)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 > [中文](./README.zh.md) | English
 
 Framework-agnostic browser cross-tab data bus.
