@@ -20,6 +20,9 @@
 - localStorage 协调写入合并批量 flush；心跳和路由确认使用指数退避
 - 已有 Topic 的 owner 存活时保持稳定，前后台切换不迁移已有订阅
 - 新 Topic 分配给负载最低的候选 Worker
+- 通配符订阅：`chat.*` 与 `*` pattern 在分发侧匹配具体 Topic
+- 内置零依赖的原生 WebSocket 传输（`createWebSocketDataBus`），适配普通 WebSocket 服务器
+- 可选的 React hooks 适配层（`cross-tab-worker-databus/hooks`）：StrictMode 安全的 bus 生命周期与自动清理订阅
 - `pagehide` 自动释放资源；`pageshow` 自动重建 Worker 和连接
 - Transport 重连自动恢复当前 owner 的 Topic
 - Tab 异常退出后通过心跳 TTL 自动迁移

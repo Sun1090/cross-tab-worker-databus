@@ -114,7 +114,31 @@ shared worker）：
 }
 ```
 
+## 内置：原生 WebSocket 后端
+
+包内自带第二个真实后端 `WebSocketTransport`，以零依赖验证了上述契约。当你的
+服务器本身使用 WebSocket、且不需要 Centrifugo 特性时可以直接使用。
+
+```ts
+import { createWebSocketDataBus } from 'cross-tab-worker-databus';
+
+const bus = createWebSocketDataBus({
+  connection: { url: 'wss://example.test/ws' }
+});
+```
+
+线协议（JSON 文本帧）：
+
+- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
+- server → client：发布为 `{"topic":"...","data":...}`。没有字符串 `topic` 的帧
+  会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
+
+生命周期映射：`open` → `connected`，`close` → `disconnected`，`error` → `error`
+（触发 DataBus 自动恢复）。socket 原地重连时自动重发订阅帧。支持 pattern 的
+服务器可以以具体 topic 标注发布——见 [api.md](../api.md) 中的通配符订阅。
+
 ## 工厂入口
+
 
 提供一个 `create<Backend>DataBus(options)` 工厂，把 transport 接入
 `CrossTabDataBus`，与 `createCentrifugeDataBus` 对称。这是大多数消费者使用的

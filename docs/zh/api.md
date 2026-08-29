@@ -19,6 +19,17 @@ import {
   CentrifugeWorkerTransport,
   createCentrifugeDataBus
 } from 'cross-tab-worker-databus/centrifuge';
+
+import {
+  WebSocketTransport,
+  createWebSocketDataBus
+} from 'cross-tab-worker-databus';
+
+import {
+  useCrossTabDataBus,
+  useCrossTabStatus,
+  useCrossTabSubscription
+} from 'cross-tab-worker-databus/hooks';
 ```
 
 业务接入优先使用 `CrossTabDataBus` 或 `createCentrifugeDataBus`。`WorkerClusterRuntime` 属于高级协调 API。
@@ -68,6 +79,7 @@ subscribe(
 - 当前 Tab 第一个 handler 会登记集群订阅。
 - 最后一个 handler 释放后，当前 Tab 才退出该 Topic。
 - transport 尚未 ready 时订阅自动排队。
+- 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。
 
 ### `unsubscribe(topic, handler?)`
 
@@ -216,6 +228,66 @@ const transport = new CentrifugeWorkerTransport({
 - `workerFactory`：自定义 Dedicated Worker 加载方式
 - `sharedWorkerFactory`：自定义 SharedWorker 加载方式
 
+## WebSocket 传输后端
+
+基于原生 WebSocket 的零依赖传输。任何实现下列 JSON 帧协议的服务器都能驱动与 Centrifuge 后端相同的跨 Tab 集群栈（owner 去重、粘性路由、故障转移）。
+
+### `createWebSocketDataBus<TData>(options)`
+
+```ts
+createWebSocketDataBus<TData>(options): CrossTabDataBus<WebSocketDataBusConfig, TData>
+```
+
+创建自动启动的 WebSocket DataBus。默认值：`clusterKey = connection.url`。
+
+```ts
+const bus = createWebSocketDataBus({
+  connection: { url: 'wss://example.test/ws' },
+  trace: { enabled: true, sink: event => console.log(event) }
+});
+```
+
+### `WebSocketTransport<TData>`
+
+```ts
+new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
+```
+
+实现 `DataBusTransport`。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，重开后自动补发订阅帧。
+
+`WebSocketDataBusConfig` 字段：
+
+- `url` — WebSocket 端点。
+- `protocols` — 可选的握手子协议。
+- `webSocketFactory` — 可选工厂 `(url, protocols) => WebSocketLike`，用于测试与非浏览器运行时（默认使用全局 `WebSocket`）。
+
+### 线协议
+
+JSON 文本帧：
+
+- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
+- server → client：发布为 `{"topic":"...","data":...}`。没有字符串 `topic` 字段的帧被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
+
+支持 pattern 的服务器建议以具体 topic 标注发布；以 pattern 本身标注的发布走精确匹配路径投递。
+
+## React Hooks（`cross-tab-worker-databus/hooks`）
+
+React（>= 18）是可选 peer 依赖；独立入口保证非 React 消费者不会加载它。
+
+### `useCrossTabDataBus(create, deps?)`
+
+创建随组件生命周期存活的 bus：挂载时创建，卸载时停止。StrictMode 安全——effect 双调用走的是与 BFCache 挂起/恢复相同的停止/重建路径。返回当前 bus；首次 effect 之前（SSR / 初始渲染）为 `null`。
+
+每次 effect 返回一个全新 bus（内联工厂即可）；需要重建时通过 `deps` 控制。
+
+### `useCrossTabSubscription(bus, topic, handler)`
+
+登记消息 handler 并自动清理。handler 经由 ref 在每次投递时读取，因此内联闭包不会导致重渲染时的重订阅。`bus` 为 `null` 或 transport 未 ready 时自动排队。
+
+### `useCrossTabStatus(bus)`
+
+把 `bus.onStatus()` 镜像为 React 状态，bus 身份变化时同步读取当前值。返回 `'connecting' | 'connected' | 'disconnected' | 'error'`。
+
 ## `WorkerClusterRuntime`
 
 高级 API，负责 Worker 注册、心跳、可见性、路由、BroadcastChannel 协议和迁移。业务模块不应直接操作它。
@@ -257,5 +329,7 @@ const transport = new CentrifugeWorkerTransport({
 - `selectLeastLoadedWorker`
 - `selectRebalanceTarget`
 - `hasActiveOwner`
+- `isWildcardTopic(pattern)`
+- `topicMatchesPattern(pattern, topic)` — 订阅使用的通配匹配：`chat.*` 匹配 `chat.room.1`（按段前缀），`*` 匹配全部
 
 这些纯函数主要用于测试、诊断和自定义协调策略。

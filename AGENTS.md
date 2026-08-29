@@ -31,6 +31,8 @@ src/
   centrifuge.ts                 # CentrifugeWorkerTransport + createCentrifugeDataBus
   centrifuge-session.ts         # CentrifugeSession wrapper
   centrifuge-protocol.ts        # Worker ↔ main-thread message protocol
+  websocket.ts                  # WebSocketTransport + createWebSocketDataBus (zero-dep backend)
+  hooks.ts                      # React hooks adapter (separate entry; React optional peer)
   worker-mode.ts                # Worker backend selection (auto/dedicated/shared)
   workers/
     centrifuge.worker.ts         # Dedicated Worker entry
@@ -43,6 +45,11 @@ tests/
   storage-batch.test.ts         # BatchingStorageWriter write coalescing + backoff
   centrifuge.test.ts            # CentrifugeWorkerTransport backend selection + lifecycle
   centrifuge-session.test.ts    # CentrifugeSession subscribe/publish/stop protocol
+  websocket.test.ts             # WebSocketTransport lifecycle + frame protocol
+  environment.test.ts           # createBrowserEnvironment probes + getOrCreateTabId
+  trace.test.ts                 # DataBusTraceReporter caps, percentiles, sink isolation
+  dual-format.test.ts           # ESM + CJS dist artifacts expose the public API
+  hooks.test.tsx                # React hooks (jsdom + @testing-library/react)
   port-reaper.test.ts           # PortReaper adaptive cadence + session timeout
   worker-mode.test.ts           # selectWorkerBackend capability detection + degradation
   hash.test.ts                 # createOpaqueKey determinism + collision properties
@@ -83,6 +90,12 @@ cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
 - `knownTopics` never evicts a key the worker still owns (`assignedTopics` guard), because the storage-less fallback path needs it.
 - `isAssigned()` deliberately recomputes the hash via `createOpaqueKey` rather than calling `rememberTopic()` — it's a read-only query that must not populate the cache.
 - `clusterKey` defines the cluster boundary: different clusterKeys = fully isolated storage and BroadcastChannel namespaces.
+
+## Wildcard topic subscriptions
+
+- Patterns are topic strings: `*` (match everything) or a `prefix.*` suffix wildcard. `topicMatchesPattern(pattern, topic)` in `routing.ts` is the single source of matching truth (segment-boundary prefix, so `chat.*` does not match `chatter.1`).
+- A pattern subscription flows through routing/ownership/transport as a literal channel — zero special-casing in the cluster coordination plane.
+- Only the dispatch gates understand patterns: `cluster.isAssigned(topic)` (owner fan-out gate), `cluster.hasLocalSubscriber(topic)` (local gate), and `data-bus dispatch()` (handler iteration). Servers either deliver publications tagged with concrete topics (pattern-aware, recommended) or with the pattern itself (exact path).
 
 ## Testing guide
 

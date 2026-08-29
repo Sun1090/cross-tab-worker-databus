@@ -125,7 +125,34 @@ opt in:
 }
 ```
 
+## Built-in: native WebSocket backend
+
+The package ships a second real backend, `WebSocketTransport`, proving the
+contract above with zero dependencies. Use it when your server already speaks
+WebSockets and you do not need Centrifugo features.
+
+```ts
+import { createWebSocketDataBus } from 'cross-tab-worker-databus';
+
+const bus = createWebSocketDataBus({
+  connection: { url: 'wss://example.test/ws' }
+});
+```
+
+Wire protocol (JSON text frames):
+
+- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
+- server → client: publications are `{"topic":"...","data":...}`. Frames
+  without a string `topic` are ignored; malformed JSON is reported through
+  `handlers.onError` without throwing.
+
+Lifecycle mapping: `open` → `connected`, `close` → `disconnected`,
+`error` → `error` (DataBus auto-recovery). Subscribe frames are re-sent when
+the socket reopens in place. A pattern-aware server may tag publications with
+the concrete topic — see wildcard subscriptions in [api.md](./api.md).
+
 ## Factory entry point
+
 
 Provide a `create<Backend>DataBus(options)` factory that wires the transport
 into a `CrossTabDataBus`, mirroring `createCentrifugeDataBus`. This is the

@@ -14,6 +14,8 @@ pnpm add cross-tab-worker-databus
 - `cross-tab-worker-databus/centrifuge`：内置 Centrifuge Worker transport
 - `cross-tab-worker-databus/centrifuge.worker`：Dedicated Worker 构建产物，默认由内置 factory 加载，通常无需直接引用
 - `cross-tab-worker-databus/centrifuge.shared.worker`：SharedWorker 构建产物，默认由内置 factory 加载，通常无需直接引用
+- `cross-tab-worker-databus/hooks`：可选的 React hooks 适配层（`useCrossTabDataBus`、`useCrossTabSubscription`、`useCrossTabStatus`）；React（>= 18）为可选 peer 依赖
+- `cross-tab-worker-databus` 同时导出零依赖的原生 `WebSocketTransport` / `createWebSocketDataBus`，适用于本身使用 WebSocket 的服务器
 
 `cross-tab-worker-databus/centrifuge` 入口依赖可选 peer dependency `centrifuge`（^5.5.3）。使用内置 Centrifuge transport 时请一并安装：`pnpm add centrifuge`。
 
