@@ -12,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,7 +55,7 @@ jobs:
       - name: Publish to npm
         # Skipped when no token is configured (e.g. the release was published
         # manually) so tagging an already-published version still goes green.
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: ${{ env.HAS_NPM_TOKEN == 'true' }}
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
