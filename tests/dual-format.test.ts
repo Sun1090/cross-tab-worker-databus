@@ -30,7 +30,9 @@ describe('dual-format build artifacts', () => {
   });
 
   it('exposes the public API to ESM consumers via dist', async () => {
-    const lib = await import('../dist/index.js');
+    // Built as a non-literal specifier so tsc does not statically resolve it
+    // (dist/ may not exist during a pre-build typecheck).
+    const lib = await import(/* @vite-ignore */ `../dist/${'index.js'}`);
     for (const name of PUBLIC_FUNCTIONS) {
       expect(typeof (lib as Record<string, unknown>)[name], `dist missing export: ${name}`).toBe(
         'function'
