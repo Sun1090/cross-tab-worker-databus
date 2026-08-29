@@ -10,7 +10,8 @@ execFileSync('tsc', ['-p', 'tsconfig.build.json'], { stdio: 'inherit' });
 await build({
   entryPoints: {
     index: 'src/index.ts',
-    centrifuge: 'src/centrifuge.ts'
+    centrifuge: 'src/centrifuge.ts',
+    hooks: 'src/hooks.ts'
   },
   bundle: true,
   external: ['centrifuge'],
@@ -27,7 +28,8 @@ await build({
 await build({
   entryPoints: {
     index: 'src/index.ts',
-    centrifuge: 'src/centrifuge.ts'
+    centrifuge: 'src/centrifuge.ts',
+    hooks: 'src/hooks.ts'
   },
   bundle: true,
   external: ['centrifuge'],
