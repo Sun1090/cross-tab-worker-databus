@@ -51,6 +51,9 @@ jobs:
         run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
 
       - name: Publish to npm
+        # Skipped when no token is configured (e.g. the release was published
+        # manually) so tagging an already-published version still goes green.
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
