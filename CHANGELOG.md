@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-29
+
 ### Added
 
 - 发布自动化：tag 触发的 GitHub Actions release workflow（typecheck + 单测 + build 门禁 → 从 CHANGELOG 抽取版本说明创建 GitHub Release → `npm publish --provenance`）。
