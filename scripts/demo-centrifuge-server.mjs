@@ -13,11 +13,9 @@ export const demoWebSocketPath = '/centrifuge/demo/connection/websocket';
 export function installDemoWebSocketServer(httpServer, pathname = demoWebSocketPath) {
   const hub = new DemoCentrifugeHub();
   httpServer.on('upgrade', (request, socket, head) => {
-    if (request.url !== pathname) {
-      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
+    // Another upgrade listener (e.g. the WebSocket-bus demo server) may own
+    // this path — stay silent so it can claim the socket.
+    if (request.url !== pathname) return;
     const key = request.headers['sec-websocket-key'];
     if (typeof key !== 'string') {
       socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');

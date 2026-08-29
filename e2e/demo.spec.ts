@@ -186,3 +186,35 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     await expect.poll(() => receivedCount(owner)).toBe(1);
   });
 });
+
+test.describe('cross-tab databus demo — WebSocket backend', () => {
+  test('native WebSocket transport: cross-tab publish/receive through the cluster', async ({ context }) => {
+    const topic = `e2e.wsbrowser.${Date.now()}`;
+
+    const setupWsTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      await page.click('#modeSwitch [data-mode="websocket"]');
+      await page.fill('#topicInput', topic);
+      await page.click('#applyConnection');
+      await expect(page.locator('#statusBadge')).toHaveText('已连接');
+      return page;
+    };
+
+    const tabA = await setupWsTab();
+    // Let tabA take ownership before tabB joins — two simultaneous
+    // first-subscribers can race and both create their own route.
+    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    const tabB = await setupWsTab();
+
+    // Cluster coordination still applies: exactly one tab owns the topic.
+    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+
+    // The demo WebSocket server echoes publications to the sender as well,
+    // so each tab ends up with both messages after the two-way exchange.
+    await publishJson(tabA);
+    await expect.poll(() => receivedCount(tabB)).toBe(1);
+    await publishJson(tabB);
+    await expect.poll(() => receivedCount(tabA)).toBe(2);
+    await expect.poll(() => receivedCount(tabB)).toBe(2);
+  });
+});

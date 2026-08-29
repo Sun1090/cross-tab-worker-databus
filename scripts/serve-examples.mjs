@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDemoWebSocketServer } from './demo-centrifuge-server.mjs';
+import { installDemoWsBusServer } from './demo-ws-server.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.env.PORT || 4173);
@@ -48,9 +49,11 @@ const server = createServer(async (request, response) => {
 });
 
 installDemoWebSocketServer(server, demoWebSocketPath);
+installDemoWsBusServer(server, '/ws/demo');
 
 server.listen(port, () => {
   console.log(`Examples server: http://localhost:${port}/examples/demo/`);
   console.log(`Demo Centrifugo endpoint: ws://localhost:${port}${demoWebSocketPath}`);
+console.log(`Demo WebSocket-bus endpoint: ws://localhost:${port}/ws/demo`);
   console.log(`Open the URL in multiple browser tabs to observe cross-tab data flow.`);
 });

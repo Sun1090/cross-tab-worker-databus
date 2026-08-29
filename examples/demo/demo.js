@@ -1,4 +1,4 @@
-import { CrossTabDataBus, selectWorkerBackend } from '../../dist/index.js';
+import { CrossTabDataBus, createWebSocketDataBus, selectWorkerBackend } from '../../dist/index.js';
 import { createCentrifugeDataBus } from '../../dist/centrifuge.js';
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
@@ -186,6 +186,15 @@ function createBus(mode) {
       trace
     });
   }
+  if (mode === 'websocket') {
+    const url = wsDemoUrl;
+    state.backend = 'dedicated';
+    state.clusterKey = url;
+    return createWebSocketDataBus({
+      connection: { url },
+      trace
+    });
+  }
   state.backend = 'local';
   state.clusterKey = 'demo.local';
   return new CrossTabDataBus({
@@ -195,6 +204,8 @@ function createBus(mode) {
     trace
   });
 }
+
+const wsDemoUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/demo`;
 
 function currentEndpointPreset() {
   const value = elements.urlInput.value.trim();
@@ -437,7 +448,11 @@ function renderCluster(snapshot) {
   elements.nodeThisSub.textContent = shortId(snapshot.currentWorker.tabId);
   elements.nodeOthersSub.textContent = snapshot.workers.length > 1 ? `${snapshot.workers.length - 1} 个在线` : '无';
   elements.nodeServerSub.textContent =
-    state.activeTransport === 'centrifugo' ? hostOf(elements.urlInput.value) : '本地广播';
+    state.activeTransport === 'centrifugo'
+      ? hostOf(elements.urlInput.value)
+      : state.activeTransport === 'websocket'
+        ? '本地 WebSocket'
+        : '本地广播';
   elements.coordinationBadge.textContent = snapshot.coordinated ? '集群协同' : '本地模式';
   elements.coordinationBadge.className = `badge ${snapshot.coordinated ? 'connected' : 'disconnected'}`;
   elements.subscribedCount.textContent = String(snapshot.subscribedTopics.length);
@@ -475,12 +490,19 @@ function renderCluster(snapshot) {
 
 function renderConfig() {
   const transport = state.activeTransport;
-  const mode = transport === 'centrifugo' ? elements.workerMode.value : 'local';
+  const mode =
+    transport === 'centrifugo' ? elements.workerMode.value : transport === 'websocket' ? 'dedicated' : 'local';
   const backend = state.backend;
   const transferable = transport === 'centrifugo' ? elements.transferable.checked : false;
-  elements.configModeBadge.textContent = transport === 'centrifugo' ? 'Centrifugo' : '本地广播';
-  elements.configModeBadge.className = `badge ${transport === 'centrifugo' ? 'connected' : 'disconnected'}`;
-  elements.configTransport.textContent = transport === 'centrifugo' ? 'Centrifugo WebSocket' : 'BroadcastChannel';
+  elements.configModeBadge.textContent =
+    transport === 'centrifugo' ? 'Centrifugo' : transport === 'websocket' ? 'WebSocket' : '本地广播';
+  elements.configModeBadge.className = `badge ${transport === 'local' ? 'disconnected' : 'connected'}`;
+  elements.configTransport.textContent =
+    transport === 'centrifugo'
+      ? 'Centrifugo WebSocket'
+      : transport === 'websocket'
+        ? '原生 WebSocket'
+        : 'BroadcastChannel';
   elements.configWorkerMode.textContent = mode;
   elements.configBackend.textContent = backendLabel(backend);
   elements.configTransferable.textContent = transferable ? '启用' : '禁用';
@@ -601,7 +623,9 @@ elements.modeButtons.forEach(button => {
   button.addEventListener('click', () => {
     elements.modeButtons.forEach(item => item.classList.toggle('active', item === button));
     const mode = button.dataset.mode;
-    elements.urlField.hidden = mode !== 'centrifugo';
+    // The WebSocket mode connects to the bundled /ws/demo endpoint, so it
+    // needs no URL input either.
+    elements.urlField.hidden = mode === 'local' || mode === 'websocket';
     elements.workerModeField.hidden = mode !== 'centrifugo';
     elements.transferableField.hidden = mode !== 'centrifugo';
   });
