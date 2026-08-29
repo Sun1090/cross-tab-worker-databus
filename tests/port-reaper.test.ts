@@ -264,3 +264,28 @@ describe('PortReaper', () => {
     vi.useRealTimers();
   });
 });
+describe('PortReaper fault tolerance', () => {
+  it('reaps even when a target throws on close or stop', () => {
+    vi.useFakeTimers();
+    const { reaper, register } = makeReaper();
+    const { port } = register('tab-a', 5_000);
+    // Simulate a broken port/session pair whose cleanup throws.
+    reaper.register({} as MessagePort, {
+      close: () => {
+        throw new Error('close failed');
+      },
+      stop: () => {
+        throw new Error('stop failed');
+      }
+    });
+
+    // Probes run at cadence = timeout/3 = 5s; the 15s session timeout is
+    // exceeded at the 20s probe.
+    expect(() => vi.advanceTimersByTime(21_000)).not.toThrow();
+    expect(port.closed).toBe(true);
+
+    // stop() must also survive throwing targets.
+    expect(() => reaper.dispose()).not.toThrow();
+    vi.useRealTimers();
+  });
+});

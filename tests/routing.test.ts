@@ -142,3 +142,30 @@ describe('routing edge cases', () => {
     expect(hasActiveOwner(route, [makeWorker({ workerId: 'w1' })])).toBe(true);
   });
 });
+
+describe('routing selection edge branches', () => {
+  const makeWorker = (overrides: Partial<WorkerRecord> = {}): WorkerRecord => ({
+    workerId: 'w1',
+    tabId: 't1',
+    load: 0,
+    role: 'active',
+    status: 'connected',
+    visibilityState: 'visible',
+    heartbeatAt: 0,
+    registeredAt: 0,
+    ...overrides
+  });
+
+  it('selectLeastLoadedWorker keeps the lighter worker when a heavier one arrives later', () => {
+    const light = makeWorker({ workerId: 'worker-light', load: 1 });
+    const heavy = makeWorker({ workerId: 'worker-heavy', load: 9 });
+    // byLoad > 0 → the later, heavier worker must not displace the incumbent.
+    expect(selectLeastLoadedWorker([light, heavy])?.workerId).toBe('worker-light');
+  });
+
+  it('selectActiveWorkers sorts same-registration workers by workerId ascending', () => {
+    const z = makeWorker({ workerId: 'worker-z', registeredAt: 1 });
+    const a = makeWorker({ workerId: 'worker-a', registeredAt: 1 });
+    expect(selectActiveWorkers([z, a]).map(w => w.workerId)).toEqual(['worker-a', 'worker-z']);
+  });
+});

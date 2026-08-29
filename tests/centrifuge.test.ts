@@ -106,21 +106,28 @@ class PortDouble {
   private readonly messageListeners = new Set<
     (event: MessageEvent<CentrifugeWorkerOutput>) => void
   >();
+  private readonly decodeErrorListeners = new Set<(event: ErrorEvent) => void>();
 
   addEventListener(
     type: 'message' | 'messageerror',
-    listener: (event: MessageEvent<CentrifugeWorkerOutput>) => void
+    listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
     this.activeListeners.add(type);
-    if (type === 'message') this.messageListeners.add(listener);
+    if (type === 'message') this.messageListeners.add(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === 'messageerror') this.decodeErrorListeners.add(listener as (event: ErrorEvent) => void);
   }
 
   removeEventListener(
     type: 'message' | 'messageerror',
-    listener: (event: MessageEvent<CentrifugeWorkerOutput>) => void
+    listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
     this.activeListeners.delete(type);
-    if (type === 'message') this.messageListeners.delete(listener);
+    if (type === 'message') this.messageListeners.delete(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === 'messageerror') this.decodeErrorListeners.delete(listener as (event: ErrorEvent) => void);
+  }
+
+  failDecode(): void {
+    for (const listener of [...this.decodeErrorListeners]) listener({} as ErrorEvent);
   }
 
   start(): void {}
@@ -642,5 +649,99 @@ describe('CentrifugeWorkerTransport local fallback session', () => {
     transport.stop();
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe('CentrifugeWorkerTransport edge paths', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function makeDedicatedTransport() {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker
+    });
+    return { worker, transport };
+  }
+
+  it('posts UNSUBSCRIBE to the worker', () => {
+    const { worker, transport } = makeDedicatedTransport();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    transport.unsubscribe('market.tick');
+    expect(worker.messages.at(-1)).toMatchObject({ type: 'UNSUBSCRIBE', topic: 'market.tick' });
+    transport.stop();
+  });
+
+  it('throws when posting before start() or after stop()', () => {
+    const { transport } = makeDedicatedTransport();
+    expect(() => transport.subscribe('t')).toThrow(/must be called first/);
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    transport.stop();
+    expect(() => transport.subscribe('t')).toThrow(/must be called first/);
+  });
+
+  it('rebuilds a real Error from a serialised worker error, with stack and context', () => {
+    const { worker, transport } = makeDedicatedTransport();
+    const onError = vi.fn();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError }
+    );
+    worker.emit({
+      type: 'ERROR',
+      error: { name: 'TestError', message: 'boom', stack: 'stack-line-1', context: { code: 7 } }
+    });
+    expect(onError).toHaveBeenCalledTimes(1);
+    const error = onError.mock.calls[0]![0] as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('TestError');
+    expect(error.message).toBe('boom');
+    expect(error.stack).toBe('stack-line-1');
+    expect((error as Error & { context?: unknown }).context).toEqual({ code: 7 });
+    transport.stop();
+  });
+
+  it('rejects a non-cloneable INIT config with a TypeError before any worker I/O', () => {
+    const { worker, transport } = makeDedicatedTransport();
+    const start = () =>
+      transport.start(
+        { url: 'wss://example.test/connection/websocket', options: { onOpen: () => {} } as never },
+        { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+      );
+    // A function in the INIT config is not structured-cloneable.
+    expect(start).toThrow(TypeError);
+    expect(start).toThrow(/structured-cloneable/);
+    // The worker was created but never received an INIT message.
+    expect(worker.messages).toEqual([]);
+    transport.stop();
+  });
+
+  it('treats a SharedWorker port messageerror as a worker failure', () => {
+    // Stub SharedWorker so backend selection keeps 'shared' instead of
+    // degrading to the dedicated-worker path in Node.
+    vi.stubGlobal('SharedWorker', class {});
+    const shared = new SharedWorkerDouble();
+    const onError = vi.fn();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'shared',
+      sharedWorkerFactory: () => shared as unknown as SharedWorker
+    });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError }
+    );
+    shared.port.failDecode();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]![0]).toBeInstanceOf(Error);
+    transport.stop();
   });
 });
