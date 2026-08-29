@@ -21,6 +21,8 @@ The `cross-tab-worker-databus/centrifuge` entry point relies on the optional pee
 
 It is recommended to create an instance in the application's infrastructure layer and have other modules import it directly. This way, business modules within the same Tab share the Worker, connection, and Topic references.
 
+Both module formats are published: ESM (`import`) and CommonJS (`require` / `dist/cjs`), so CJS bundler configurations and `require()` callers work out of the box.
+
 ```ts
 import { createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
 

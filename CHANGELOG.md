@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- 双格式发布：新增 CJS 构建（`dist/cjs/*.cjs`），`exports` 增加 `require` 条件，CommonJS 消费者（`require()`、CJS bundler 配置）可直接使用；新增构建产物冒烟测试（`pnpm check` 先构建后测试）。
+
+### Changed
+
+- `main` 字段指向 CJS 入口（`./dist/cjs/index.cjs`），`module`/`exports.import` 仍为 ESM；worker 入口保持 ESM module worker 不变。
+
 ## [0.2.1] - 2026-08-29
 
 ### Added
