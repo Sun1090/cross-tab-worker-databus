@@ -97,7 +97,25 @@ pnpm examples
 - [能力矩阵](./docs/zh/capabilities.md)
 - [变更日志](./CHANGELOG.md)
 
+## 常见问题（FAQ）
+
+**为什么我的订阅收不到其他 Tab 的消息？**
+每个 Topic 的传输层订阅只有一个 owner，owner 收到消息后通过 BroadcastChannel `EVENT` 广播扇出给所有 Tab。如果接收方的浏览器禁用了 BroadcastChannel 或存储，会降级为仅本地模式。检查 `bus.getStatus()` 和 `getClusterSnapshot().coordinated`。
+
+**每个 Tab 都会开一条 WebSocket 吗？**
+默认 `dedicated` 模式：是，每个 Tab 通过自己的 Worker 持有一条连接。`shared`（或 `auto` 在支持 SharedWorker 的浏览器下）模式：同源 Tab 复用一个 SharedWorker 进程，但每个 Tab 的 port 仍是独立会话。无论哪种模式，Topic ownership 都会跨 Tab 去重，热门 Topic 在整个集群内只订阅一次。
+
+**owner 所在 Tab 崩溃了怎么办？**
+Ownership 会迁移。优雅退出（pagehide）走严格交接；非受控崩溃（Tab 被杀、浏览器崩溃）通过心跳 TTL 兜底恢复——最坏情况 `heartbeatIntervalMs + workerTtlMs`（默认约 13 秒）。
+
+**需要安装 `centrifuge` 吗？**
+只有使用内置 Centrifuge 后端（`cross-tab-worker-databus/centrifuge`）时才需要。它是可选 peer 依赖，核心包零运行时依赖。
+
+**如何从 0.1.x 迁移到 0.2.x？**
+`centrifuge` 从 `dependencies` 移为可选 `peerDependency`。如果使用 Centrifuge 后端，请把 `centrifuge@^5.5.3` 加入你自己的依赖（`pnpm add centrifuge@^5.5.3`）；无需修改代码。详见 [0.2.0 changelog](./CHANGELOG.md)。
+
 ## 开发
+
 
 ```bash
 pnpm install

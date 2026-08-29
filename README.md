@@ -185,7 +185,25 @@ const snapshot = bus.getClusterSnapshot();
 console.log(snapshot.workers, snapshot.routes, snapshot.assignedTopics);
 ```
 
+## FAQ
+
+**Why is my subscription not receiving messages from the other tab?**
+Cross-tab delivery for a topic only has one transport subscription (the owner). The owner fans out received publications to all tabs via BroadcastChannel `EVENT` messages, so if the receiving tab's browser disables BroadcastChannel or storage, it degrades to local-only mode. Check `bus.getStatus()` and `getClusterSnapshot().coordinated`.
+
+**Does every tab open its own WebSocket?**
+With the default `dedicated` mode, yes — each tab owns a connection through its own Worker. With `shared` (or `auto` in shared-capable browsers), same-origin tabs reuse one SharedWorker process while each tab's port keeps an independent session. Topic ownership is deduplicated across tabs either way, so popular topics are only subscribed once per cluster.
+
+**What happens when the owning tab crashes?**
+Ownership migrates. A graceful exit (pagehide) performs a strict handoff; an uncontrolled crash (killed tab, browser kill) is recovered via the heartbeat TTL — worst case `heartbeatIntervalMs + workerTtlMs` (≈13s with defaults).
+
+**Do I need `centrifuge` installed?**
+Only if you use the built-in Centrifuge backend (`cross-tab-worker-databus/centrifuge`). It is an optional peer dependency; the core package has zero runtime dependencies.
+
+**How do I migrate from 0.1.x to 0.2.x?**
+`centrifuge` moved from `dependencies` to an optional `peerDependency`. If you use the Centrifuge backend, add it to your own dependencies (`pnpm add centrifuge@^5.5.3`); no code changes are required. See the [0.2.0 changelog](./CHANGELOG.md).
+
 ## Development
+
 
 ```bash
 pnpm install

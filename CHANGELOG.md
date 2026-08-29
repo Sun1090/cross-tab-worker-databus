@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- 发布自动化：tag 触发的 GitHub Actions release workflow（typecheck + 单测 + build 门禁 → 从 CHANGELOG 抽取版本说明创建 GitHub Release → `npm publish --provenance`）。
+- 测试基建：ESLint（typescript-eslint flat config，含 `lint` 脚本）、Vitest 覆盖率（`pnpm test:coverage`，阈值 statements 85 / branches 80 / functions 90 / lines 85）、`.editorconfig`。
+- 51 个新单元测试（137 → 188）：`CentrifugeSession` 协议分支（UNSUBSCRIBE、server-side publication、错误序列化）、浏览器环境适配层（`createBrowserEnvironment`/`getOrCreateTabId`/`canUseStorage`）、trace 上限截断与 sink 异常隔离、cluster 健壮性（损坏 JSON、存储写失败、TTL 清理、handoff UNSUBSCRIBE 短路、路由抢占 reconcile）、routing/storage-batch/port-reaper 边界分支、`CentrifugeWorkerTransport` 边界路径。
+- 1 个新 E2E：BFCache 往返（pagehide 交接 + pageshow 恢复后双向收发）。
+- React 18 使用示例（`examples/react`，StrictMode 安全的 bus 生命周期）；示例服务器支持 `.jsx`。
+- README（中英）FAQ 与 0.1 → 0.2 迁移说明。
+
+### Changed
+
+- 包导出加固：`./centrifuge.worker` / `./centrifuge.shared.worker` 补 `types` 条件（指向 `dist/workers/*.d.ts`）；新增 `sideEffects` 白名单保护 worker 产物不被 tree-shake；`prepublishOnly` 门禁（`pnpm check`）。
+- tsconfig 追加严格开关：`noFallthroughCasesInSwitch`、`noImplicitOverride`、`allowUnreachableCode: false`（零代码改动通过）。
+- 测试总覆盖率：语句 89.9% → 96.6%，分支 86.3% → 90.9%（environment 32.9% → 100%，centrifuge-session 77.8% → 100%）。
+
+### Fixed
+
+- 清理 18 处 ESLint 违规：未使用变量/导入、注释中的 U+202F 不规则空白。
+- `scripts/serve-examples.mjs` 之前不识别 `.jsx` MIME 导致模块脚本被拒（随新示例修复）。
+
 ## [0.2.0] - 2026-08-27
 
 ### Changed
