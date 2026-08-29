@@ -31,6 +31,15 @@ export type {
 export { createBrowserEnvironment, getOrCreateTabId } from './core/environment';
 export type { ClusterChannel, ClusterEnvironment, StorageLike } from './core/environment';
 export { createOpaqueKey } from './core/hash';
+export {
+  WebSocketTransport,
+  createWebSocketDataBus
+} from './websocket';
+export type {
+  CreateWebSocketDataBusOptions,
+  WebSocketDataBusConfig,
+  WebSocketLike
+} from './websocket';
 export { selectWorkerBackend } from './worker-mode';
 export type { WorkerBackend, WorkerMode } from './worker-mode';
 export {
