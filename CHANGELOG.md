@@ -9,6 +9,8 @@
 - 双格式发布：新增 CJS 构建（`dist/cjs/*.cjs`），`exports` 增加 `require` 条件，CommonJS 消费者（`require()`、CJS bundler 配置）可直接使用；新增构建产物冒烟测试（`pnpm check` 先构建后测试）。
 - 原生 WebSocket 传输后端：`WebSocketTransport` + `createWebSocketDataBus`（零依赖，极简 JSON 帧协议），验证 `DataBusTransport` 多后端抽象；含 9 个单元测试。
 - Topic 通配符订阅：`chat.*` 后缀通配与 `*` 全匹配。pattern 以字面量参与路由/归属/传输订阅（服务器需支持 channel pattern 并以具体 topic 标注发布，或直接以 pattern 标注）；dispatch 侧新增通配匹配——owner 门（`isAssigned`）、本地订阅门（`hasLocalSubscriber`）与 handler 分发均按 pattern 匹配具体 topic。新增纯函数 `isWildcardTopic` / `topicMatchesPattern` 与 10 个相关测试。
+- React hooks 适配层：独立入口 `cross-tab-worker-databus/hooks`，导出 `useCrossTabDataBus`（StrictMode 安全的 bus 生命周期）、`useCrossTabSubscription`（handler 经 ref 读取，内联闭包不重订阅）、`useCrossTabStatus`；React（>=18）为可选 peer 依赖；jsdom 渲染测试 3 个。
+- 示例与演示服务器：demo 页新增「WebSocket」后端模式（连接内置 `/ws/demo` 演示服务器，支持 pattern 订阅与发布回显）；新增 `scripts/demo-ws-server.mjs` 与 12 个契约测试；新增 WebSocket 后端跨 Tab 收发 e2e（全套 6 个）。
 
 ### Changed
 
