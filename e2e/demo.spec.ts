@@ -153,3 +153,36 @@ test.describe('cross-tab databus demo', () => {
     await expect(tabB.locator('#backendBadge')).toHaveText('SharedWorker');
   });
 });
+
+test.describe('cross-tab databus demo — BFCache round trip', () => {
+  test('pagehide hands ownership off and pageshow restores a standby receiver', async ({ context }) => {
+    const topic = `e2e.bfcache.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+
+    // Wait until exactly one tab owns the topic, and make sure it is tabA:
+    // if B won the race, reload A's ownership picture by reassigning roles.
+    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+    const ownerIsA = (await assignedCount(tabA)) === 1;
+    const owner = ownerIsA ? tabA : tabB;
+    const standby = ownerIsA ? tabB : tabA;
+
+    // Simulate entering the page cache: pagehide fires the graceful handoff
+    // while the page object stays alive (unlike tab.close()).
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+
+    // The survivor takes over ownership and keeps receiving.
+    await expect.poll(() => assignedCount(standby), { timeout: 30_000 }).toBe(1);
+
+    // Returning from the page cache: pageshow re-subscribes the returning tab.
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+
+    // Both tabs exchange publications again across the restored cluster.
+    await publishJson(owner);
+    await expect.poll(() => receivedCount(standby)).toBe(1);
+    await publishJson(standby);
+    await expect.poll(() => receivedCount(owner)).toBe(1);
+  });
+});
