@@ -6,6 +6,7 @@
 |---|---|
 | [Getting Started](./getting-started.md) | Installation, creating instances, subscribing, publishing, and destroying |
 | [Configuration](./configuration.md) | Core configuration, Centrifuge configuration, defaults, and constraints |
+| [Transports](./transports.md) | The `DataBusTransport` contract, worker protocol, and third-party backend guide |
 | [API Reference](./api.md) | Public API, types, methods, return values, and behavior |
 | [Architecture](./architecture.md) | Worker cluster, routing, storage, migration, and degradation design |
 | [Capabilities Matrix](./capabilities.md) | Implemented, not implemented, and planned capabilities matrix |
