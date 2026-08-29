@@ -21,6 +21,7 @@ class FakeSubscription {
   }
 
   subscribe(): void {}
+  unsubscribe(): void {}
 }
 
 const { FakeCentrifuge } = vi.hoisted(() => {
@@ -217,5 +218,147 @@ describe('CentrifugeSession additional coverage', () => {
     expect(() => session.handle({ type: 'UNKNOWN' as never })).not.toThrow();
     // No additional sink calls beyond the normal INIT flow.
     expect(sink).not.toHaveBeenCalled();
+  });
+});
+
+describe('CentrifugeSession protocol coverage', () => {
+  function makeSession() {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    return { sink, session };
+  }
+
+  function init() {
+    return {
+      type: 'INIT' as const,
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    };
+  }
+
+  it('unsubscribes and removes listeners before detaching', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const subscription = client.getSubscription('market.tick')!;
+    expect(subscription.listeners.has('publication')).toBe(true);
+
+    session.handle({ type: 'UNSUBSCRIBE', topic: 'market.tick' });
+    expect(subscription.listeners.size).toBe(0);
+    expect(sink).not.toHaveBeenCalled();
+
+    // Unsubscribing an unknown topic is a no-op.
+    expect(() => session.handle({ type: 'UNSUBSCRIBE', topic: 'ghost' })).not.toThrow();
+  });
+
+  it('posts an ERROR for SUBSCRIBE/PUBLISH before INIT', () => {
+    const { sink, session } = makeSession();
+    session.handle({ type: 'SUBSCRIBE', topic: 't' });
+    expect(sink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'ERROR',
+        error: expect.objectContaining({ name: 'Error', message: 'Centrifuge client is not initialized.' })
+      })
+    );
+    session.handle({ type: 'PUBLISH', topic: 't', data: 1 });
+    expect(sink).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a duplicate INIT', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    session.handle(init());
+    expect(FakeCentrifuge.instances).toHaveLength(1);
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('maps Centrifuge state changes through normalizeStatus', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.emit('state', { newState: 'connecting' });
+    client.emit('state', { newState: 'connected' });
+    client.emit('state', { newState: 'disconnected' });
+    expect(sink).toHaveBeenNthCalledWith(1, { type: 'STATUS', status: 'connecting' });
+    expect(sink).toHaveBeenNthCalledWith(2, { type: 'STATUS', status: 'connected' });
+    expect(sink).toHaveBeenNthCalledWith(3, { type: 'STATUS', status: 'disconnected' });
+  });
+
+  it('delivers server-side client publications not backed by a local subscription', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+
+    // Explicit channel on the context.
+    client.emit('publication', { channel: 'server.push', data: { n: 1 } });
+    expect(sink).toHaveBeenCalledWith({ type: 'MESSAGE', topic: 'server.push', data: { n: 1 } });
+
+    // Topic nested inside push.channel (server-side push shape).
+    client.emit('publication', { data: { push: { channel: 'nested.topic' }, n: 2 } });
+    expect(sink).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'MESSAGE', topic: 'nested.topic' })
+    );
+
+    // No topic derivable — silently dropped.
+    client.emit('publication', { data: { n: 3 } });
+    expect(sink).toHaveBeenCalledTimes(2);
+
+    // Local subscription exists for the topic — skipped to avoid double delivery.
+    session.handle({ type: 'SUBSCRIBE', topic: 'local.topic' });
+    client.emit('publication', { channel: 'local.topic', data: { n: 4 } });
+    expect(sink).toHaveBeenCalledTimes(2);
+  });
+
+  it('serialises non-Error failures with the right shape', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.publish = vi.fn().mockRejectedValue('boom-string');
+    session.handle({ type: 'PUBLISH', topic: 't', data: 1 });
+    return vi.waitFor(() => {
+      expect(sink).toHaveBeenCalledWith({
+        type: 'ERROR',
+        error: { name: 'CentrifugeError', message: 'boom-string', context: 'boom-string' }
+      });
+    });
+  });
+
+  it('serialises object failures with a context field', async () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.publish = vi.fn().mockRejectedValue({ code: 42 });
+    session.handle({ type: 'PUBLISH', topic: 't', data: 1 });
+    await vi.waitFor(() => expect(sink).toHaveBeenCalled());
+    expect(sink).toHaveBeenCalledWith({
+      type: 'ERROR',
+      error: { name: 'CentrifugeError', message: 'Centrifuge worker operation failed.', context: { code: 42 } }
+    });
+  });
+
+  it('reports subscription errors through the sink', async () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const subscription = client.getSubscription('market.tick')!;
+    for (const listener of subscription.listeners.get('error') ?? []) {
+      (listener as (context: unknown) => void)({ type: 'subscribe:error', error: new Error('sub failed') });
+    }
+    await vi.waitFor(() => expect(sink).toHaveBeenCalled());
+    // The session serialises the SubscriptionErrorContext itself, wrapping it
+    // as a non-Error failure with the original context attached.
+    expect(sink).toHaveBeenCalledWith({
+      type: 'ERROR',
+      error: expect.objectContaining({
+        name: 'CentrifugeError',
+        message: 'Centrifuge worker operation failed.',
+        context: expect.objectContaining({ type: 'subscribe:error' })
+      })
+    });
   });
 });
