@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+### Added
+
+- 消息重放（有界本地历史）：`replay: { maxPerTopic }` 选项 + `subscribe(topic, handler, { replay: true | n })`，晚加入的 handler 立即收到缓冲历史（`message.replayed: true` 标记）；仅缓冲已分发消息，内存环形队列，最后一位 handler 退订即清空；通配订阅跨匹配 topic 回放。
+- 性能基准套件：`pnpm bench`（routing 纯函数 / cluster 协调 / 通配匹配共 8 项基线）。
+- e2e：二进制发布按钮 × WebSocket 后端跨 Tab 往返。
+
 ## [0.3.0] - 2026-08-29
 
 ### Added

@@ -134,6 +134,9 @@ export type WorkerClusterMessage<TEvent = unknown> =
 export interface DataBusMessage<TData = unknown> {
   topic: string;
   data: TData;
+  /** True when this delivery is a historical replay (see the `replay`
+   * subscription option) rather than a live publication. */
+  replayed?: boolean;
 }
 
 /** Callbacks the transport calls to notify the DataBus of events.
