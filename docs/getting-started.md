@@ -25,6 +25,8 @@ It is recommended to create an instance in the application's infrastructure laye
 
 Both module formats are published: ESM (`import`) and CommonJS (`require` / `dist/cjs`), so CJS bundler configurations and `require()` callers work out of the box.
 
+When consuming the Centrifuge entry as CommonJS in a browser, provide an explicit `workerFactory` (or `sharedWorkerFactory`) if your bundler does not preserve `import.meta.url`; the default module-relative Worker URL is only available in ESM output.
+
 ```ts
 import { createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
 

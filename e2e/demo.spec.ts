@@ -178,6 +178,11 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
 
     // Returning from the page cache: pageshow re-subscribes the returning tab.
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    // Wait for the restored tab's transport to finish reopening before
+    // publishing; pageshow dispatches lifecycle work synchronously but
+    // transport recovery completes asynchronously. Ownership may remain with
+    // the survivor, so status is the correct readiness signal here.
+    await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
 
     // Both tabs exchange publications again across the restored cluster.
     await publishJson(owner);

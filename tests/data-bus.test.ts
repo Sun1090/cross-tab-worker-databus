@@ -1121,4 +1121,11 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(rejoin).not.toHaveBeenCalled();
     await bus.stop();
   });
+
+  it('rejects invalid replay buffer limits', () => {
+    for (const maxPerTopic of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => makeReplayBus({ maxPerTopic })).toThrow(TypeError);
+    }
+    expect(() => makeReplayBus({ maxPerTopic: 1 })).not.toThrow();
+  });
 });

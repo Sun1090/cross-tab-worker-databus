@@ -10,7 +10,7 @@
  */
 
 export { CrossTabDataBus } from './core/data-bus';
-export type { CrossTabDataBusOptions } from './core/data-bus';
+export type { CrossTabDataBusOptions, DataBusReplayOptions } from './core/data-bus';
 export type {
   DataBusCoordinationTraceEvent,
   DataBusErrorTraceEvent,

@@ -106,6 +106,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   constructor(options: CrossTabDataBusOptions<TConfig, TData>) {
     const replay = options.replay;
+    if (replay) {
+      const maxPerTopic = replay.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
+      if (!Number.isSafeInteger(maxPerTopic) || maxPerTopic <= 0) {
+        throw new TypeError(
+          `replay.maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`
+        );
+      }
+    }
     this.replayMaxPerTopic = replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
     this.replayBuffers = replay ? new Map() : null;
     const { autoStart, initialConfig, trace, transport, ...clusterOptions } = options;

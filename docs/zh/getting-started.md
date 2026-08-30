@@ -25,6 +25,8 @@ pnpm add cross-tab-worker-databus
 
 包同时发布 ESM 与 CommonJS 双格式：`import` 与 `require()`（`dist/cjs`）均可直接使用，CJS bundler 配置无需额外处理。
 
+在浏览器中以 CommonJS 使用 Centrifuge 入口时，如果 bundler 不保留 `import.meta.url`，请显式提供 `workerFactory`（或 `sharedWorkerFactory`）；默认的模块相对 Worker URL 仅在 ESM 产物中可用。
+
 ```ts
 import { createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
 
