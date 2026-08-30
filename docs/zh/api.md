@@ -80,6 +80,7 @@ subscribe(
 - 最后一个 handler 释放后，当前 Tab 才退出该 Topic。
 - transport 尚未 ready 时订阅自动排队。
 - 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。
+- 重放（可选）：构造 bus 时传 `replay: { maxPerTopic }` 开启缓冲，`subscribe()` 第三个参数传 `{ replay: true | n }` 后，新 handler 会立即收到缓冲历史（最多 `n` 条，受 `maxPerTopic` 上限约束，默认 100），消息带 `message.replayed: true` 标记——晚加入的 handler 不会错过更早的发布。只有被分发过的消息才入缓冲（无本地订阅者的 topic 会被 owner 丢弃）；缓冲仅存内存，该 topic 最后一个 handler 退订时清空。通配订阅会对所有匹配 pattern 的已缓冲 topic 做回放。
 
 ### `unsubscribe(topic, handler?)`
 

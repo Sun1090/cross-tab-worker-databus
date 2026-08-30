@@ -1021,3 +1021,104 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
     await bus.stop();
   });
 });
+
+describe('CrossTabDataBus replay (bounded local history)', () => {
+  function makeReplayBus(replay?: { maxPerTopic?: number }) {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
+    const transport = new FakeTransport<unknown>();
+    const bus = new CrossTabDataBus({
+      autoStart: true,
+      clusterKey: 'replay',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      ...(replay ? { replay } : {})
+    });
+    return { bus, transport };
+  }
+
+  it('delivers buffered history to a late-joining handler, marked replayed', async () => {
+    const { bus, transport } = makeReplayBus({});
+    const early: unknown[] = [];
+    bus.subscribe('t', message => early.push(message.data));
+    await bus.ready();
+    transport.emit('t', 1);
+    transport.emit('t', 2);
+
+    const late: Array<{ data: unknown; replayed?: boolean | undefined }> = [];
+    bus.subscribe('t', message => late.push({ data: message.data, replayed: message.replayed }), {
+      replay: true
+    });
+    // Live dispatches still reach both handlers.
+    transport.emit('t', 3);
+
+    expect(early).toEqual([1, 2, 3]);
+    expect(late).toEqual([
+      { data: 1, replayed: true },
+      { data: 2, replayed: true },
+      { data: 3, replayed: undefined }
+    ]);
+    await bus.stop();
+  });
+
+  it('honours a per-subscription limit and the bus-level ring cap', async () => {
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 4 });
+    await bus.ready();
+    // Only dispatched publications are buffered: keep a sink subscriber on
+    // the topic so the messages are not dropped as unowned.
+    bus.subscribe('t', () => {});
+    for (let index = 0; index < 10; index += 1) transport.emit('t', index);
+
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data), { replay: true });
+    // Ring holds the last 4 publications; the request cannot exceed it.
+    expect(seen).toEqual([6, 7, 8, 9]);
+
+    const limited: unknown[] = [];
+    bus.subscribe('t', message => limited.push(message.data), { replay: 2 });
+    expect(limited).toEqual([8, 9]);
+    await bus.stop();
+  });
+
+  it('replays wildcard subscriptions across all matching buffered topics', async () => {
+    const { bus, transport } = makeReplayBus({});
+    await bus.ready();
+    bus.subscribe('chat.room.1', () => {});
+    transport.emit('chat.room.1', 'a');
+    transport.emit('other.topic', 'b');
+    transport.emit('chat.room.2', 'c');
+
+    const seen: Array<{ topic: string; data: string | number }> = [];
+    bus.subscribe(
+      'chat.*',
+      message => seen.push({ topic: message.topic, data: message.data as string }),
+      { replay: true }
+    );
+    // Only dispatched publications are buffered: chat.room.2 had no local
+    // subscriber, so it was dropped as unowned and never entered the ring.
+    expect(seen).toEqual([{ topic: 'chat.room.1', data: 'a' }]);
+    await bus.stop();
+  });
+
+  it('buffers nothing when replay is not enabled, and clears on unsubscribe', async () => {
+    const noReplay = makeReplayBus();
+    await noReplay.bus.ready();
+    noReplay.transport.emit('t', 1);
+    const late = vi.fn();
+    noReplay.bus.subscribe('t', late, { replay: true });
+    expect(late).not.toHaveBeenCalled();
+    await noReplay.bus.stop();
+
+    const { bus, transport } = makeReplayBus({});
+    await bus.ready();
+    const handler = vi.fn();
+    const unsubscribe = bus.subscribe('t', handler, { replay: true });
+    transport.emit('t', 1);
+    unsubscribe();
+    const rejoin = vi.fn();
+    bus.subscribe('t', rejoin, { replay: true });
+    expect(rejoin).not.toHaveBeenCalled();
+    await bus.stop();
+  });
+});

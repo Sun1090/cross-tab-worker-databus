@@ -218,3 +218,29 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     await expect.poll(() => receivedCount(tabB)).toBe(2);
   });
 });
+
+test.describe('cross-tab databus demo — binary publish', () => {
+  test('binary publish button round-trips across tabs over the WebSocket backend', async ({ context }) => {
+    const topic = `e2e.bin.${Date.now()}`;
+    const setupWsTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      await page.click('#modeSwitch [data-mode="websocket"]');
+      await page.fill('#topicInput', topic);
+      await page.click('#applyConnection');
+      await expect(page.locator('#statusBadge')).toHaveText('已连接');
+      return page;
+    };
+
+    const tabA = await setupWsTab();
+    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    const tabB = await setupWsTab();
+    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+
+    await tabA.click('#publishBinary');
+    // The demo wraps binary payloads as base64 JSON ({__bin}) — the event
+    // feed must show the ArrayBuffer sizing on the receiving tab.
+    await expect
+      .poll(() => tabB.locator('#eventBody').textContent())
+      .toContain('ArrayBuffer(48)');
+  });
+});

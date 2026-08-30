@@ -7,7 +7,7 @@
  */
 import { WorkerClusterRuntime } from './cluster';
 import type { WorkerClusterOptions } from './cluster';
-import { topicMatchesPattern } from './routing';
+import { isWildcardTopic, topicMatchesPattern } from './routing';
 import type {
   DataBusErrorHandler,
   DataBusMessage,
@@ -28,16 +28,30 @@ import type { DataBusTraceOptions } from './trace';
  * The cluster's `onEvent` handler filters on this to distinguish databus
  * publications from other control-plane events. */
 const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
+/** Default ring size per topic when replay is enabled without a limit. */
+const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
 
 /** Constructor options for {@link CrossTabDataBus}. Extends WorkerClusterOptions
  * (cluster coordination config) with the transport, initial connection config,
  * and trace options. */
+/** Replay (bounded local history) configuration. When present, the DataBus
+ * keeps an in-memory ring buffer of the most recent dispatched publications
+ * per topic, and `subscribe()` can deliver that history to late-joining
+ * handlers. Buffers live in memory only — nothing is persisted. */
+export interface DataBusReplayOptions {
+  /** Maximum buffered publications per topic. Oldest entries are evicted
+   * first. Default 100. */
+  maxPerTopic?: number;
+}
+
 export interface CrossTabDataBusOptions<TConfig, TData>
   extends Omit<WorkerClusterOptions, 'handlers'> {
   transport: DataBusTransport<TConfig, TData>;
   initialConfig?: TConfig;
   autoStart?: boolean;
   trace?: DataBusTraceOptions;
+  /** Opt-in bounded per-topic history. Absent → no buffering, zero overhead. */
+  replay?: DataBusReplayOptions;
 }
 
 /**
@@ -58,6 +72,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly transportSubscribedTopics = new Set<string>();
   private readonly statusHandlers = new Set<DataBusStatusHandler>();
   private readonly errorHandlers = new Set<DataBusErrorHandler>();
+  // Bounded per-topic ring of recent dispatched publications. Null unless
+  // replay is enabled — buffering is opt-in and must cost nothing otherwise.
+  private readonly replayBuffers: Map<string, DataBusMessage<TData>[]> | null;
+  private readonly replayMaxPerTopic: number;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
@@ -87,6 +105,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private static readonly RECOVERY_COOLDOWN_MS = 1000;
 
   constructor(options: CrossTabDataBusOptions<TConfig, TData>) {
+    const replay = options.replay;
+    this.replayMaxPerTopic = replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
+    this.replayBuffers = replay ? new Map() : null;
     const { autoStart, initialConfig, trace, transport, ...clusterOptions } = options;
     this.transport = transport;
     this.initialConfig = initialConfig;
@@ -289,7 +310,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * delivered to this tab, regardless of which tab published it. Returns an
    * unsubscribe function for convenience.
    */
-  subscribe(topic: string, handler: DataBusMessageHandler<TData>): () => void {
+  subscribe(
+    topic: string,
+    handler: DataBusMessageHandler<TData>,
+    options?: { replay?: boolean | number }
+  ): () => void {
     this.ensureStarted();
     const handlers = this.topicHandlers.get(topic) ?? new Set<DataBusMessageHandler<TData>>();
     const wasUnused = handlers.size === 0;
@@ -301,6 +326,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // wasUnused is the only gate, and cluster.subscribe() is idempotent by
     // construction. The matching n→0 gate is in the unsubscribe path below.
     if (wasUnused) this.cluster.subscribe(topic);
+    if (options?.replay) {
+      const limit = Math.min(
+        typeof options.replay === 'number' ? Math.floor(options.replay) : this.replayMaxPerTopic,
+        this.replayMaxPerTopic
+      );
+      this.deliverReplay(topic, limit, handler);
+    }
     return () => this.unsubscribe(topic, handler);
   }
 
@@ -315,6 +347,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     else handlers.clear();
     if (handlers.size > 0) return;
     this.topicHandlers.delete(topic);
+    this.replayBuffers?.delete(topic);
     this.cluster.unsubscribe(topic);
   }
 
@@ -367,6 +400,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.trace.event({ type: 'lifecycle', action: 'stop' });
     this.trace.stop();
     this.topicHandlers.clear();
+    this.replayBuffers?.clear();
     this.cluster.stop();
     try {
       await this.startPromise?.catch(() => undefined);
@@ -420,6 +454,46 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.invokeHandlers(handlers, handler => handler(message));
       }
     }
+    this.recordReplay(message);
+  }
+
+  /** Append a dispatched publication to the topic's replay ring buffer.
+   * No-op when replay is disabled. */
+  private recordReplay(message: DataBusMessage<TData>): void {
+    if (!this.replayBuffers) return;
+    let buffer = this.replayBuffers.get(message.topic);
+    if (!buffer) {
+      buffer = [];
+      this.replayBuffers.set(message.topic, buffer);
+    }
+    buffer.push(message);
+    if (buffer.length > this.replayMaxPerTopic) buffer.shift();
+  }
+
+  /** Deliver buffered history to a newly-registered handler. For an exact
+   * topic this is that topic's ring; for a wildcard subscription every
+   * buffered topic matching the pattern contributes (in buffer insertion
+   * order). Replay deliveries are marked `replayed: true` and are not
+   * counted into trace metrics. */
+  private deliverReplay(
+    topic: string,
+    limit: number,
+    handler: DataBusMessageHandler<TData>
+  ): void {
+    if (!this.replayBuffers || limit <= 0) return;
+    const deliver = (buffer: DataBusMessage<TData>[]) => {
+      for (const message of buffer.slice(-limit)) {
+        this.invokeHandlers([handler], h => h({ ...message, replayed: true }));
+      }
+    };
+    if (isWildcardTopic(topic)) {
+      for (const [bufferedTopic, buffer] of this.replayBuffers) {
+        if (topicMatchesPattern(topic, bufferedTopic)) deliver(buffer);
+      }
+      return;
+    }
+    const buffer = this.replayBuffers.get(topic);
+    if (buffer) deliver(buffer);
   }
 
   /**
