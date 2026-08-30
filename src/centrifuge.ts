@@ -370,7 +370,15 @@ function createDefaultWorker(): Worker {
   if (typeof Worker === 'undefined') {
     throw new Error('CentrifugeWorkerTransport requires a browser Worker implementation.');
   }
-  return new Worker(new URL('./centrifuge.worker.js', import.meta.url), {
+  let workerUrl: URL;
+  try {
+    workerUrl = new URL('./centrifuge.worker.js', import.meta.url);
+  } catch {
+    throw new Error(
+      'The default Centrifuge Worker URL is unavailable in this module format; provide workerFactory explicitly.'
+    );
+  }
+  return new Worker(workerUrl, {
     name: 'cross-tab-worker-databus',
     type: 'module'
   });
@@ -383,7 +391,15 @@ function createDefaultSharedWorker(): SharedWorker {
   if (typeof SharedWorker === 'undefined') {
     throw new Error('CentrifugeWorkerTransport requires a browser SharedWorker implementation.');
   }
-  return new SharedWorker(new URL('./centrifuge.shared.worker.js', import.meta.url), {
+  let workerUrl: URL;
+  try {
+    workerUrl = new URL('./centrifuge.shared.worker.js', import.meta.url);
+  } catch {
+    throw new Error(
+      'The default Centrifuge SharedWorker URL is unavailable in this module format; provide sharedWorkerFactory explicitly.'
+    );
+  }
+  return new SharedWorker(workerUrl, {
     name: 'cross-tab-worker-databus-shared',
     type: 'module'
   });
