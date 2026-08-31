@@ -15,6 +15,14 @@
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
 
+declare global {
+  interface Window {
+    __replayBus?: { stop: () => Promise<void> };
+    __replayEmit?: (data: unknown) => void;
+    __replayAssigned?: () => boolean;
+  }
+}
+
 const DEMO_URL = 'http://localhost:4173/examples/demo/';
 const LOCAL_WS_URL = 'ws://localhost:4173/centrifuge/demo/connection/websocket';
 
@@ -258,10 +266,11 @@ test.describe('cross-tab databus replay persistence', () => {
     const topic = `e2e.replay.topic.${Date.now()}`;
 
     await page.evaluate(async ({ dbName: name, topic: replayTopic }) => {
-      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import('/dist/index.js');
+      const moduleUrl = '/dist/index.js';
+      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import(moduleUrl);
       class Transport {
-        handlers;
-        async start(_config, handlers) {
+        handlers!: { onStatus: (status: 'connected') => void; onMessage: (message: { topic: string; data: unknown }) => void };
+        async start(_config: unknown, handlers: Transport['handlers']) {
           this.handlers = handlers;
           handlers.onStatus('connected');
         }
@@ -281,12 +290,12 @@ test.describe('cross-tab databus replay persistence', () => {
       await bus.ready();
       bus.subscribe(replayTopic, () => {});
       window.__replayBus = bus;
-      window.__replayEmit = data => transport.handlers.onMessage({ topic: replayTopic, data });
+      window.__replayEmit = (data: unknown) => transport.handlers.onMessage({ topic: replayTopic, data });
       window.__replayAssigned = () => bus.getClusterSnapshot().assignedTopics.includes(replayTopic);
     }, { dbName, topic });
 
     await page.waitForFunction(() => window.__replayAssigned?.(), undefined, { timeout: 30_000 });
-    await page.evaluate(() => window.__replayEmit('persisted-value'));
+    await page.evaluate(() => window.__replayEmit?.('persisted-value'));
     await page.waitForTimeout(500);
     const stored = await page.evaluate(async name => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -301,13 +310,14 @@ test.describe('cross-tab databus replay persistence', () => {
       });
     }, dbName);
     expect(stored).toEqual([{ topic, messages: [{ topic, data: 'persisted-value' }] }]);
-    await page.evaluate(async () => window.__replayBus.stop());
+    await page.evaluate(async () => window.__replayBus?.stop());
     await page.reload();
 
     const replayed = await page.evaluate(async ({ dbName: name, topic: replayTopic }) => {
-      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import('/dist/index.js');
+      const moduleUrl = '/dist/index.js';
+      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import(moduleUrl);
       class Transport {
-        async start(_config, handlers) { handlers.onStatus('connected'); }
+        async start(_config: unknown, handlers: { onStatus: (status: 'connected') => void }) { handlers.onStatus('connected'); }
         subscribe() {}
         unsubscribe() {}
         publish() {}
@@ -320,11 +330,11 @@ test.describe('cross-tab databus replay persistence', () => {
         transport: new Transport(),
         replay: { maxPerTopic: 8, persistence: createIndexedDbReplayPersistence({ dbName: name, maxPerTopic: 8 }) }
       });
-      const errors = [];
-      bus.onError(error => errors.push(String(error)));
+      const errors: string[] = [];
+      bus.onError((error: unknown) => errors.push(String(error)));
       await bus.ready();
-      const seen = [];
-      bus.subscribe(replayTopic, message => seen.push({ data: message.data, replayed: message.replayed }), { replay: true });
+      const seen: Array<{ data: unknown; replayed?: boolean | undefined }> = [];
+      bus.subscribe(replayTopic, (message: { data: unknown; replayed?: boolean }) => seen.push({ data: message.data, replayed: message.replayed }), { replay: true });
       await new Promise(resolve => setTimeout(resolve, 100));
       await bus.stop();
       return { seen, errors };
