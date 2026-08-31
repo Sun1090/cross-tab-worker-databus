@@ -56,6 +56,11 @@
       "import": "./dist/hooks.js",
       "require": "./dist/cjs/hooks.cjs"
     },
+    "./vue": {
+      "types": "./dist/vue.d.ts",
+      "import": "./dist/vue.js",
+      "require": "./dist/cjs/vue.cjs"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": [
@@ -78,13 +83,17 @@
   },
   "peerDependencies": {
     "centrifuge": "^5.5.3",
-    "react": ">=18"
+    "react": ">=18",
+    "vue": ">=3.3"
   },
   "peerDependenciesMeta": {
     "centrifuge": {
       "optional": true
     },
     "react": {
+      "optional": true
+    },
+    "vue": {
       "optional": true
     }
   },
@@ -103,7 +112,8 @@
     "react-dom": "^18.3.1",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.68.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "vue": "^3.5.42"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -11,10 +11,11 @@ await build({
   entryPoints: {
     index: 'src/index.ts',
     centrifuge: 'src/centrifuge.ts',
-    hooks: 'src/hooks.ts'
+    hooks: 'src/hooks.ts',
+    vue: 'src/vue.ts'
   },
   bundle: true,
-  external: ['centrifuge'],
+  external: ['centrifuge', 'react', 'vue'],
   format: 'esm',
   outdir: 'dist',
   platform: 'browser',
@@ -29,10 +30,11 @@ await build({
   entryPoints: {
     index: 'src/index.ts',
     centrifuge: 'src/centrifuge.ts',
-    hooks: 'src/hooks.ts'
+    hooks: 'src/hooks.ts',
+    vue: 'src/vue.ts'
   },
   bundle: true,
-  external: ['centrifuge'],
+  external: ['centrifuge', 'react', 'vue'],
   format: 'cjs',
   outExtension: { '.js': '.cjs' },
   outdir: 'dist/cjs',
