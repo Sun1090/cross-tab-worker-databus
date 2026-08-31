@@ -121,6 +121,8 @@ clearReplay(): Promise<void>
 
 清空内存 replay 缓冲，并调用持久化适配器可选的 `clear()`。适合留存策略、退出登录或租户切换；普通 `stop()` 仍会保留 durable history。
 
+`clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。
+
 ### `onStatus(handler)`
 
 ```ts
