@@ -8,7 +8,6 @@ export interface DataBusReplayPersistence<TData = unknown> {
 
 export interface IndexedDbReplayPersistenceOptions {
   dbName?: string;
-  storeName?: string;
   maxPerTopic: number;
 }
 
@@ -19,7 +18,7 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
   const indexedDb = globalThis.indexedDB;
   if (!indexedDb) throw new Error('IndexedDB is unavailable in this environment.');
   const dbName = options.dbName ?? 'cross-tab-worker-databus';
-  const storeName = options.storeName ?? 'replay';
+  const storeName = 'replay';
   const maxPerTopic = options.maxPerTopic;
   if (!Number.isSafeInteger(maxPerTopic) || maxPerTopic <= 0) {
     throw new TypeError(`maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`);
