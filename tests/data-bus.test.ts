@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown }>>; append: (message: { topic: string; data: unknown }) => Promise<void> } }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1127,5 +1127,27 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       expect(() => makeReplayBus({ maxPerTopic })).toThrow(TypeError);
     }
     expect(() => makeReplayBus({ maxPerTopic: 1 })).not.toThrow();
+  });
+
+  it('hydrates and persists replay history through an optional backend', async () => {
+    const appended: Array<{ topic: string; data: unknown }> = [];
+    const persistence = {
+      load: vi.fn(async () => [{ topic: 't', data: 'old' }]),
+      append: vi.fn(async (message: { topic: string; data: unknown }) => {
+        appended.push(message);
+      })
+    };
+    const { bus, transport } = makeReplayBus({ persistence });
+    await bus.ready();
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data), { replay: true });
+    await Promise.resolve();
+    expect(seen).toEqual(['old']);
+    bus.subscribe('t', () => {});
+    transport.emit('t', 'new');
+    await Promise.resolve();
+    expect(persistence.load).toHaveBeenCalledOnce();
+    expect(appended).toEqual([{ topic: 't', data: 'new' }]);
+    await bus.stop();
   });
 });
