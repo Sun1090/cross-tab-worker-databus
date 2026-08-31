@@ -1169,6 +1169,15 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(persistence.clear).not.toHaveBeenCalled();
   });
 
+  it('exposes explicit replay retention cleanup', async () => {
+    const persistence = { load: vi.fn(async () => []), append: vi.fn(async () => undefined), clear: vi.fn(async () => undefined) };
+    const { bus } = makeReplayBus({ persistence });
+    await bus.ready();
+    await bus.clearReplay();
+    expect(persistence.clear).toHaveBeenCalledOnce();
+    await bus.stop();
+  });
+
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
     const { bus, transport } = makeReplayBus(undefined, { maxEntries: 2 });
     const seen: unknown[] = [];
@@ -1178,6 +1187,15 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     transport.emit('t', { value: 2 }, 'dup');
     transport.emit('t', { value: 3 }, 'other');
     expect(seen).toEqual([{ value: 1 }, { value: 3 }]);
+    await bus.stop();
+  });
+
+  it('routes a caller-supplied publish message ID to the transport', async () => {
+    const { bus, transport } = makeReplayBus();
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    bus.publish('t', { value: 1 }, { messageId: 'out-1' });
+    expect(transport.publishCalls).toEqual([{ topic: 't', data: { value: 1 }, options: { messageId: 'out-1' } }]);
     await bus.stop();
   });
 });

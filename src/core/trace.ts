@@ -58,17 +58,7 @@ export interface DataBusErrorTraceEvent {
 /** Bounded reliability diagnostics for recovery, acknowledgments, and migrations. */
 export interface DataBusReliabilityTraceEvent {
   type: 'reliability';
-  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup';
-  topic?: string;
-  attempt?: number;
-  durationMs?: number;
-  timestamp: number;
-}
-
-/** Emitted for bounded reliability diagnostics such as recovery attempts and route handoff. */
-export interface DataBusReliabilityTraceEvent {
-  type: 'reliability';
-  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup';
+  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup' | 'dedup_suppressed';
   topic?: string;
   attempt?: number;
   durationMs?: number;
@@ -100,7 +90,6 @@ export type DataBusTraceEvent =
   | DataBusSubscriptionTraceEvent
   | DataBusCoordinationTraceEvent
   | DataBusErrorTraceEvent
-  | DataBusReliabilityTraceEvent
   | DataBusReliabilityTraceEvent
   | DataBusMetricsTraceEvent;
 

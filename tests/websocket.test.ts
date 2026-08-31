@@ -94,6 +94,16 @@ describe('WebSocketTransport', () => {
     ]);
   });
 
+  it('propagates optional publication message IDs in JSON frames', () => {
+    const { sockets, transport, onMessage } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publish('market.tick', { price: 1 }, { messageId: 'm-1' });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 1 }, messageId: 'm-1' }));
+    socket.onmessage?.({ data: JSON.stringify({ topic: 'market.tick', data: { price: 2 }, messageId: 'm-2' }) });
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'market.tick', data: { price: 2 }, messageId: 'm-2' });
+  });
+
   it('sends and receives ArrayBuffer publications as binary frames', () => {
     const { sockets, transport, onMessage } = makeTransport();
     const socket = sockets[0]!;

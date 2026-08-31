@@ -23,6 +23,7 @@ import type {
   CentrifugeWorkerOutput,
   SerializedWorkerError
 } from './centrifuge-protocol';
+import type { DataBusPublishOptions } from './core/types';
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol';
 
 export type { CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
@@ -145,12 +146,12 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * Publish data to `topic`. Binary data (ArrayBuffer) is sent via Transferable
    * when `transferable` is enabled, avoiding a structured-clone cycle.
    */
-  publish(topic: string, data: unknown): void {
+  publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     if (this.transferable && data instanceof ArrayBuffer) {
-      this.post({ type: 'PUBLISH_BIN', topic, data }, [data]);
+      this.post({ type: 'PUBLISH_BIN', topic, data, ...(options?.messageId ? { messageId: options.messageId } : {}) }, [data]);
       return;
     }
-    this.post({ type: 'PUBLISH', topic, data });
+    this.post({ type: 'PUBLISH', topic, data, ...(options?.messageId ? { messageId: options.messageId } : {}) });
   }
 
   /**
@@ -230,8 +231,8 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * and the local-session sink — all three feed into this single dispatcher. */
   private handleOutput(message: CentrifugeWorkerOutput<TData>): void {
     if (message.type === 'STATUS') this.handlers?.onStatus(message.status);
-    if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data });
-    if (message.type === 'MESSAGE_BIN') this.handlers?.onMessage({ topic: message.topic, data: message.data as TData });
+    if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data, ...(message.messageId ? { messageId: message.messageId } : {}) });
+    if (message.type === 'MESSAGE_BIN') this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...(message.messageId ? { messageId: message.messageId } : {}) });
     if (message.type === 'ERROR') this.handlers?.onError(deserializeWorkerError(message.error));
   }
 

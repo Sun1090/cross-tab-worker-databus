@@ -99,10 +99,10 @@ unsubscribe(topic: string, handler?: DataBusMessageHandler<TData>): void
 
 优先使用 `subscribe` 返回的释放函数，避免误删其他模块的回调。
 
-### `publish(topic, data)`
+### `publish(topic, data, options?)`
 
 ```ts
-publish(topic: string, data: unknown): void
+publish(topic: string, data: unknown, options?: { messageId?: string }): void
 ```
 
 将发布操作路由到当前 Topic owner；没有有效路由时使用当前 Worker。
@@ -110,6 +110,16 @@ publish(topic: string, data: unknown): void
 发布数据必须满足底层 transport 的序列化约束。SDK 不会在页面暂停期间持久化或延迟重放发布命令。
 
 当 owner 是远端 Tab、且发布控制消息无法投递时（例如 BroadcastChannel 无法克隆 payload），`publish()` 会通过 `onError` 上报失败，而不是静默丢弃。
+
+传入 `options.messageId` 后，ID 会经过跨 Tab 路由并由支持的 transport 透传。它只是元数据；服务端需要回显或保留该 ID，入站 dedup 才能生效。
+
+### `clearReplay()`
+
+```ts
+clearReplay(): Promise<void>
+```
+
+清空内存 replay 缓冲，并调用持久化适配器可选的 `clear()`。适合留存策略、退出登录或租户切换；普通 `stop()` 仍会保留 durable history。
 
 ### `onStatus(handler)`
 
