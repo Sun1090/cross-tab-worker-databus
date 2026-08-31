@@ -25,7 +25,7 @@ import type {
 export interface WebSocketLike {
   /** Current connection state; 1 (OPEN) means frames may be sent. */
   readonly readyState?: number;
-  send(data: string): void;
+  send(data: string | ArrayBuffer): void;
   close(code?: number, reason?: string): void;
   onopen: (() => void) | null;
   onclose: (() => void) | null;
@@ -118,6 +118,10 @@ export class WebSocketTransport<TData = unknown>
 
   /** Publish `data` to `topic` as a JSON frame. Requires an open socket. */
   publish(topic: string, data: unknown): MaybePromise<void> {
+    if (data instanceof ArrayBuffer) {
+      this.sendBinaryFrame(topic, data);
+      return;
+    }
     this.sendFrame({ op: 'publish', topic, data });
   }
 
@@ -141,11 +145,39 @@ export class WebSocketTransport<TData = unknown>
     this.socket.send(JSON.stringify(payload));
   }
 
+  private sendBinaryFrame(topic: string, data: ArrayBuffer): void {
+    if (this.socket?.readyState !== WS_OPEN) {
+      this.handlers?.onError(new Error('WebSocket is not open; dropped "publish" frame.'));
+      return;
+    }
+    const topicBytes = new TextEncoder().encode(topic);
+    if (topicBytes.length > 0xffff) {
+      this.handlers?.onError(new Error('WebSocket topic is too long for a binary frame.'));
+      return;
+    }
+    const frame = new Uint8Array(3 + topicBytes.length + data.byteLength);
+    frame[0] = 0xc7;
+    new DataView(frame.buffer).setUint16(1, topicBytes.length);
+    frame.set(topicBytes, 3);
+    frame.set(new Uint8Array(data), 3 + topicBytes.length);
+    this.socket.send(frame.buffer);
+  }
+
   /** Parse a server frame. Only objects carrying a string `topic` are
    * publications; malformed JSON and unknown shapes are ignored so a chatty
    * server cannot crash the message path. */
   private handleMessage(raw: unknown): void {
     let parsed: unknown;
+    if (raw instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(raw);
+      if (bytes[0] !== 0xc7 || bytes.length < 3) return;
+      const topicLength = new DataView(raw).getUint16(1);
+      if (bytes.length < 3 + topicLength) return;
+      const topic = new TextDecoder().decode(bytes.subarray(3, 3 + topicLength));
+      const data = bytes.slice(3 + topicLength).buffer;
+      this.handlers?.onMessage({ topic, data: data as TData });
+      return;
+    }
     if (typeof raw !== 'string') return;
     try {
       parsed = JSON.parse(raw);

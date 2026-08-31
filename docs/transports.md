@@ -146,6 +146,10 @@ Wire protocol (JSON text frames):
   without a string `topic` are ignored; malformed JSON is reported through
   `handlers.onError` without throwing.
 
+When `data` is an `ArrayBuffer`, publish uses a binary frame with a small
+header (`0xc7`, UTF-8 topic length, topic, payload). Servers may echo the same
+frame unchanged; JSON remains the compatibility path for all other payloads.
+
 Lifecycle mapping: `open` → `connected`, `close` → `disconnected`,
 `error` → `error` (DataBus auto-recovery). Subscribe frames are re-sent when
 the socket reopens in place. A pattern-aware server may tag publications with

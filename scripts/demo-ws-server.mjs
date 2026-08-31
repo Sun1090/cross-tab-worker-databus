@@ -64,7 +64,17 @@ export class DemoWsBusHub {
     this.clients.add(connection);
     this.subscriptions.set(connection, new Set());
     connection.onMessage(text => this.handleFrame(connection, text));
+    connection.onBinary(payload => this.handleBinaryFrame(connection, payload));
     connection.onClose(() => this.detach(connection));
+  }
+
+  handleBinaryFrame(connection, payload) {
+    if (!Buffer.isBuffer(payload) || payload.length < 3 || payload[0] !== 0xc7) return false;
+    const topicLength = payload.readUInt16BE(1);
+    if (payload.length < 3 + topicLength) return false;
+    const topic = payload.subarray(3, 3 + topicLength).toString('utf8');
+    this.publish(topic, payload.subarray(3 + topicLength), true);
+    return true;
   }
 
   detach(connection) {
@@ -99,14 +109,19 @@ export class DemoWsBusHub {
   }
 
   /** Fan a publication out to every subscriber whose subscriptions match. */
-  publish(topic, data) {
-    const frame = JSON.stringify({ topic, data });
+  publish(topic, data, binary = false) {
+    const frame = binary ? null : JSON.stringify({ topic, data });
+    const topicBytes = Buffer.from(topic, 'utf8');
+    const binaryFrame = binary
+      ? Buffer.concat([Buffer.from([0xc7, topicBytes.length >> 8, topicBytes.length & 0xff]), topicBytes, Buffer.from(data)])
+      : null;
     for (const client of [...this.clients]) {
       const topics = this.subscriptions.get(client);
       if (!topics) continue;
       for (const pattern of topics) {
         if (matchesDemoTopic(pattern, topic)) {
-          client.sendText(frame);
+          if (binaryFrame) client.sendBinary(binaryFrame);
+          else client.sendText(frame);
           break;
         }
       }

@@ -133,6 +133,10 @@ const bus = createWebSocketDataBus({
 - server → client：发布为 `{"topic":"...","data":...}`。没有字符串 `topic` 的帧
   会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
 
+当 `data` 是 `ArrayBuffer` 时，publish 使用二进制帧：帧头为 `0xc7`，随后是
+UTF-8 topic 长度、topic 和 payload。服务器可以原样回显该帧；其他 payload 仍走
+JSON 兼容路径。
+
 生命周期映射：`open` → `connected`，`close` → `disconnected`，`error` → `error`
 （触发 DataBus 自动恢复）。socket 原地重连时自动重发订阅帧。支持 pattern 的
 服务器可以以具体 topic 标注发布——见 [api.md](../api.md) 中的通配符订阅。
