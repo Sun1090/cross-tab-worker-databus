@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown }>>; append: (message: { topic: string; data: unknown }) => Promise<void> } }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown }>>; append: (message: { topic: string; data: unknown }) => Promise<void>; clearTopic?: () => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1033,6 +1033,7 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       environment: environment.environment,
       initialConfig: {},
       transport,
+      ...(dedup ? { dedup } : {}),
       ...(replay ? { replay } : {})
     });
     return { bus, transport };
@@ -1148,6 +1149,35 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await Promise.resolve();
     expect(persistence.load).toHaveBeenCalledOnce();
     expect(appended).toEqual([{ topic: 't', data: 'new' }]);
+    await bus.stop();
+  });
+
+  it('clears persisted topic history when the last handler unsubscribes and clears all on stop', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearTopic: vi.fn(async () => undefined),
+      clear: vi.fn(async () => undefined)
+    };
+    const { bus } = makeReplayBus({ persistence });
+    await bus.ready();
+    const unsubscribe = bus.subscribe('t', () => {});
+    unsubscribe();
+    await Promise.resolve();
+    expect(persistence.clearTopic).toHaveBeenCalledWith('t');
+    await bus.stop();
+    expect(persistence.clear).not.toHaveBeenCalled();
+  });
+
+  it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
+    const { bus, transport } = makeReplayBus(undefined, { maxEntries: 2 });
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data));
+    await bus.ready();
+    transport.emit('t', { value: 1 }, 'dup');
+    transport.emit('t', { value: 2 }, 'dup');
+    transport.emit('t', { value: 3 }, 'other');
+    expect(seen).toEqual([{ value: 1 }, { value: 3 }]);
     await bus.stop();
   });
 });

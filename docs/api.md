@@ -87,6 +87,7 @@ Registers a local subscription and returns a cleanup function.
 - Subscriptions are automatically queued when the transport is not yet ready.
 - Wildcard subscriptions: a topic ending in `.*` (`chat.*`) matches any remainder, and `*` matches everything. The pattern is routed, owned, and transport-subscribed as a literal channel; publications tagged with a matching concrete topic (or with the pattern itself) are delivered to wildcard handlers. See `topicMatchesPattern` below.
 - Replay (opt-in): construct the bus with `replay: { maxPerTopic }` and pass `{ replay: true | n }` as the third `subscribe()` argument. `maxPerTopic` must be a positive safe integer. The new handler immediately receives the buffered history (up to `n`, capped by `maxPerTopic`, default 100) with `message.replayed: true`, so late joiners do not miss earlier publications. Only dispatched publications are buffered (a topic with no local subscriber drops them as unowned); buffers are in-memory and cleared when the last handler for the topic unsubscribes. Wildcard subscriptions replay across every buffered topic matching the pattern. For reload/BFCache persistence, pass an optional `persistence` created by `createIndexedDbReplayPersistence({ maxPerTopic })`; persistence is asynchronous and failures are reported through `onError` without breaking live delivery.
+- Persistent replay stores may also implement `clearTopic(topic)`; the bus calls it on final topic unsubscribe. A store may expose `clear()` for application-controlled retention cleanup; `stop()` deliberately preserves durable history for reload/BFCache recovery.
 
 ### `unsubscribe(topic, handler?)`
 
@@ -109,6 +110,8 @@ Routes the publish operation to the current topic owner; uses the current Worker
 Published data must satisfy the serialization constraints of the underlying transport. The SDK does not persist or defer replay of publish commands during page suspension.
 
 When the owning Worker is a remote Tab and the publish control message cannot be posted (for example the BroadcastChannel fails to clone the payload), `publish()` reports the failure through `onError` instead of silently dropping it.
+
+Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee.
 
 ### `onStatus(handler)`
 

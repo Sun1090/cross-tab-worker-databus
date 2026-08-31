@@ -55,6 +55,26 @@ export interface DataBusErrorTraceEvent {
   timestamp: number;
 }
 
+/** Bounded reliability diagnostics for recovery, acknowledgments, and migrations. */
+export interface DataBusReliabilityTraceEvent {
+  type: 'reliability';
+  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup';
+  topic?: string;
+  attempt?: number;
+  durationMs?: number;
+  timestamp: number;
+}
+
+/** Emitted for bounded reliability diagnostics such as recovery attempts and route handoff. */
+export interface DataBusReliabilityTraceEvent {
+  type: 'reliability';
+  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup';
+  topic?: string;
+  attempt?: number;
+  durationMs?: number;
+  timestamp: number;
+}
+
 /**
  * Periodic metrics snapshot: message throughput, dispatch latency percentiles,
  * and active topic count. Aggregated over the interval and emitted every
@@ -80,6 +100,8 @@ export type DataBusTraceEvent =
   | DataBusSubscriptionTraceEvent
   | DataBusCoordinationTraceEvent
   | DataBusErrorTraceEvent
+  | DataBusReliabilityTraceEvent
+  | DataBusReliabilityTraceEvent
   | DataBusMetricsTraceEvent;
 
 /** Distributive-conditional type: given a trace event union, derive the same shape minus `timestamp`. */

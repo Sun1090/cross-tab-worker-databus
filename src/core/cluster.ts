@@ -36,6 +36,8 @@ export interface WorkerClusterHandlers {
   onSuspend?: () => void;
   /** The cluster resumed (tab visible / pageshow). */
   onResume?: () => void;
+  /** Bounded diagnostics for route confirmation and graceful migration. */
+  onDiagnostic?: (event: { operation: 'route_ack' | 'route_migration'; topic: string }) => void;
 }
 
 export interface WorkerClusterOptions {
@@ -394,6 +396,7 @@ export class WorkerClusterRuntime {
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
       const generation = (previous?.generation ?? 0) + 1;
       this.writeRoute(topicKey, owner, previous?.workerId, generation);
+      this.handlers.onDiagnostic?.({ operation: 'route_migration', topic });
       // Make the new route visible before the target confirms it. This also
       // leaves a durable unconfirmed assignment when unload drops CONTROL.
       this.flushStorage();
@@ -879,6 +882,8 @@ export class WorkerClusterRuntime {
       ...route,
       confirmedAt: this.environment.now()
     } satisfies WorkerRoute);
+    const topic = this.knownTopics.get(topicKey);
+    if (topic) this.handlers.onDiagnostic?.({ operation: 'route_ack', topic });
   }
 
   /** Remove routes whose topic has no subscribers and whose TTL has expired. */

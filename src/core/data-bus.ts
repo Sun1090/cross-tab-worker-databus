@@ -48,6 +48,12 @@ export interface DataBusReplayOptions<TData = unknown> {
   persistence?: DataBusReplayPersistence<TData>;
 }
 
+/** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
+export interface DataBusDedupOptions {
+  maxEntries?: number;
+  ttlMs?: number;
+}
+
 export interface CrossTabDataBusOptions<TConfig, TData>
   extends Omit<WorkerClusterOptions, 'handlers'> {
   transport: DataBusTransport<TConfig, TData>;
@@ -56,6 +62,8 @@ export interface CrossTabDataBusOptions<TConfig, TData>
   trace?: DataBusTraceOptions;
   /** Opt-in bounded per-topic history. Absent → no buffering, zero overhead. */
   replay?: DataBusReplayOptions<TData>;
+  /** Optional duplicate suppression; absent means every publication is delivered. */
+  dedup?: DataBusDedupOptions;
 }
 
 /**
@@ -85,6 +93,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
+  private readonly dedupMaxEntries: number;
+  private readonly dedupTtlMs: number;
+  private readonly dedupEnabled: boolean;
+  private readonly seenMessageIds = new Map<string, number>();
   private activeConfig: TConfig | undefined;
   private status: WorkerStatus = 'disconnected';
   private started = false;
@@ -124,11 +136,20 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers = replay ? new Map() : null;
     this.replayPersistence = (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null;
     this.replayHydration = this.hydrateReplay();
-    const { autoStart, initialConfig, trace, transport, ...clusterOptions } = options;
+    const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
     this.transport = transport;
     this.initialConfig = initialConfig;
     this.hasInitialConfig = 'initialConfig' in options;
     this.trace = new DataBusTraceReporter(trace);
+    this.dedupMaxEntries = dedup?.maxEntries ?? 1_000;
+    this.dedupTtlMs = dedup?.ttlMs ?? 60_000;
+    this.dedupEnabled = dedup !== undefined;
+    if (!Number.isSafeInteger(this.dedupMaxEntries) || this.dedupMaxEntries <= 0) {
+      throw new TypeError('dedup.maxEntries must be a positive safe integer.');
+    }
+    if (!Number.isFinite(this.dedupTtlMs) || this.dedupTtlMs <= 0) {
+      throw new TypeError('dedup.ttlMs must be a positive finite number.');
+    }
     this.cluster = new WorkerClusterRuntime({
       ...clusterOptions,
       handlers: {
@@ -170,6 +191,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.trace.event({ type: 'lifecycle', action: 'resume' });
           this.trace.start();
           this.resumeTransport();
+        },
+        onDiagnostic: event => {
+          this.trace.event({ type: 'reliability', ...event });
         }
       }
     });
@@ -370,6 +394,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (handlers.size > 0) return;
     this.topicHandlers.delete(topic);
     this.replayBuffers?.delete(topic);
+    if (this.replayPersistence?.clearTopic) {
+      void this.replayPersistence.clearTopic(topic).catch(error => this.reportError(error));
+    }
     this.cluster.unsubscribe(topic);
   }
 
@@ -433,6 +460,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       else await this.transport.stop();
     } finally {
       this.transportSubscribedTopics.clear();
+      this.seenMessageIds.clear();
       this.started = false;
       this.stopping = false;
       this.suspended = false;
@@ -451,6 +479,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * and dispatches locally.
    */
   private handleTransportMessage(message: DataBusMessage<TData>): void {
+    if (this.isDuplicate(message)) return;
     this.trace.recordReceived(message.topic);
     // Drop messages for topics we do not own — the owning Worker fans out.
     if (!this.cluster.isAssigned(message.topic)) {
@@ -463,6 +492,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       return;
     }
     this.trace.recordDiscarded(message.topic);
+  }
+
+  private isDuplicate(message: DataBusMessage<TData>): boolean {
+    if (!this.dedupEnabled || !message.messageId) return false;
+    const now = Date.now();
+    for (const [id, timestamp] of this.seenMessageIds) {
+      if (now - timestamp > this.dedupTtlMs) this.seenMessageIds.delete(id);
+    }
+    if (this.seenMessageIds.has(message.messageId)) return true;
+    this.seenMessageIds.set(message.messageId, now);
+    while (this.seenMessageIds.size > this.dedupMaxEntries) {
+      const oldest = this.seenMessageIds.keys().next().value;
+      if (oldest === undefined) break;
+      this.seenMessageIds.delete(oldest);
+    }
+    return false;
   }
 
   /** Deliver a message to every local handler registered for its topic,
@@ -564,6 +609,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       const now = Date.now();
       if (now - this.lastRecoveryAt >= CrossTabDataBus.RECOVERY_COOLDOWN_MS) {
         this.lastRecoveryAt = now;
+        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1 });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;
           // An explicit resume or subscribe already recovered the transport

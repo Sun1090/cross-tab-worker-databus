@@ -232,8 +232,8 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     if (this.stopGate) return this.stopGate;
   }
 
-  emit(topic: string, data: TData): void {
-    this.handlers?.onMessage({ topic, data });
+  emit(topic: string, data: TData, messageId?: string): void {
+    this.handlers?.onMessage({ topic, data, ...(messageId ? { messageId } : {}) });
   }
 
   setStatus(status: 'connecting' | 'connected' | 'disconnected' | 'error'): void {

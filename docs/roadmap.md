@@ -1,14 +1,14 @@
 # Roadmap
 
-0.5.0 is released. The next work is organized as 0.6.0 candidates, with publish-path improvements landing first because they are measurable without changing the public transport contract.
+0.6.0 is released. The next work is organized as 0.7.0 candidates, with reliability and diagnostics landing first so the new behavior is observable before expanding the protocol surface.
 
-## 0.6.0 candidates
+## 0.7.0 candidates
 
-1. **Publish-path profiling and optimization** — continue isolating routing, storage, and transport overhead; the first 0.6.0 slice adds a synchronous owner fast path for local publishes.
-2. **Vue composables** — provide a Vue 3 adapter mirroring the React hooks lifecycle and subscription semantics without making Vue a core dependency. (Adapter implemented; contract coverage and examples remain.)
-3. **End-to-end binary demo** — exercise real `ArrayBuffer` frames through the WebSocket demo path; keep the existing base64 JSON fallback for servers that only support JSON.
-4. **Push CI browser gate** — run the existing Playwright suite on pushes with an installed Chromium fallback; keep local/manual execution as the fallback for contributors. (Workflow implemented.)
-5. **Operational polish** — document IndexedDB replay retention/cleanup and add diagnostics around persistence quota failures.
+1. **Replay lifecycle and retention** — add explicit persistence cleanup (`clear`, `clearTopic`), make unsubscribe/replacement remove stale history, and surface persistence failures through trace and error handlers.
+2. **Reliability diagnostics** — emit structured recovery/retry, owner-acknowledgment, and route-migration events with bounded metadata while keeping tracing opt-in.
+3. **Publication deduplication** — design and implement an opt-in, bounded message-ID window that works across local dispatch, BroadcastChannel fan-out, WebSocket, and replay without changing the default behavior.
+4. **Adapter and protocol parity** — align React/Vue lifecycle and type contracts, document binary framing and recovery semantics, and add compatibility fixtures for custom transports.
+5. **Operational validation** — extend browser and package-consumption tests, add regression benchmarks for dedup/recovery/replay cleanup, and keep push CI as a release gate.
 
 ## Release checklist
 
