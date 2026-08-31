@@ -71,6 +71,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",
+    "bench:browser": "pnpm build && node scripts/bench-browser.mjs",
     "test:e2e": "pnpm build && playwright test",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm check"

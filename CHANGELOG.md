@@ -19,6 +19,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- 真实浏览器发布基准入口：`pnpm bench:browser`，在本地 Centrifuge 演示服务上用两个真实标签页分别测 dedicated/shared Worker 的跨 Tab 发布耗时。
+
+### Notes
+
+- 当前基准包含页面点击、JSON 序列化、Worker/Storage/BroadcastChannel、服务端回显和接收端渲染，结果用于端到端回归趋势，不等同于核心 `publish()` 微基准。
+- 2026-08-31 本机 Chrome 100 条消息采样：dedicated 约 34.03 ms/条，shared 约 33.89 ms/条；两者接近，暂不据此改动 publish 路径，避免在缺少核心 profile 时引入陈旧路由缓存。
+
 ## [0.3.0] - 2026-08-29
 
 ### Added
