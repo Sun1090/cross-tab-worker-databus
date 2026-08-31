@@ -18,6 +18,7 @@ import type {
 } from './types';
 import { DataBusTraceReporter } from './trace';
 import type { DataBusTraceOptions } from './trace';
+import type { DataBusReplayPersistence } from './replay-persistence';
 
 /**
  * Event type used to broadcast topic publications across tabs via the cluster.
@@ -35,13 +36,16 @@ const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
  * (cluster coordination config) with the transport, initial connection config,
  * and trace options. */
 /** Replay (bounded local history) configuration. When present, the DataBus
- * keeps an in-memory ring buffer of the most recent dispatched publications
- * per topic, and `subscribe()` can deliver that history to late-joining
- * handlers. Buffers live in memory only — nothing is persisted. */
-export interface DataBusReplayOptions {
+ * keeps a bounded ring buffer of the most recent dispatched publications per
+ * topic, and `subscribe()` can deliver that history to late-joining handlers.
+ * Buffers live in memory by default; an optional persistence backend can make
+ * them durable. */
+export interface DataBusReplayOptions<TData = unknown> {
   /** Maximum buffered publications per topic. Oldest entries are evicted
    * first. Default 100. */
   maxPerTopic?: number;
+  /** Optional durable history backend. Defaults to in-memory only. */
+  persistence?: DataBusReplayPersistence<TData>;
 }
 
 export interface CrossTabDataBusOptions<TConfig, TData>
@@ -51,7 +55,7 @@ export interface CrossTabDataBusOptions<TConfig, TData>
   autoStart?: boolean;
   trace?: DataBusTraceOptions;
   /** Opt-in bounded per-topic history. Absent → no buffering, zero overhead. */
-  replay?: DataBusReplayOptions;
+  replay?: DataBusReplayOptions<TData>;
 }
 
 /**
@@ -76,6 +80,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // replay is enabled — buffering is opt-in and must cost nothing otherwise.
   private readonly replayBuffers: Map<string, DataBusMessage<TData>[]> | null;
   private readonly replayMaxPerTopic: number;
+  private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
+  private readonly replayHydration: Promise<void>;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
@@ -116,6 +122,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     this.replayMaxPerTopic = replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
     this.replayBuffers = replay ? new Map() : null;
+    this.replayPersistence = (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null;
+    this.replayHydration = this.hydrateReplay();
     const { autoStart, initialConfig, trace, transport, ...clusterOptions } = options;
     this.transport = transport;
     this.initialConfig = initialConfig;
@@ -339,7 +347,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         typeof options.replay === 'number' ? Math.floor(options.replay) : this.replayMaxPerTopic,
         this.replayMaxPerTopic
       );
-      this.deliverReplay(topic, limit, handler);
+      if (this.replayPersistence) {
+        void this.replayHydration.then(() => {
+          if (this.topicHandlers.get(topic)?.has(handler)) this.deliverReplay(topic, limit, handler);
+        });
+      } else {
+        this.deliverReplay(topic, limit, handler);
+      }
     }
     return () => this.unsubscribe(topic, handler);
   }
@@ -476,6 +490,28 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     buffer.push(message);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
+    if (this.replayPersistence) {
+      void this.replayPersistence.append(message).catch(error => this.reportError(error));
+    }
+  }
+
+  private async hydrateReplay(): Promise<void> {
+    if (!this.replayBuffers || !this.replayPersistence) {
+      return;
+    }
+    try {
+      for (const message of await this.replayPersistence.load()) {
+        let buffer = this.replayBuffers.get(message.topic);
+        if (!buffer) {
+          buffer = [];
+          this.replayBuffers.set(message.topic, buffer);
+        }
+        buffer.push(message);
+        if (buffer.length > this.replayMaxPerTopic) buffer.shift();
+      }
+    } catch (error) {
+      this.reportError(error);
+    }
   }
 
   /** Deliver buffered history to a newly-registered handler. For an exact
