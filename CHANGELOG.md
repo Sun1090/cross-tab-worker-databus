@@ -19,6 +19,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
 ### Added
 
 - 真实浏览器发布基准入口：`pnpm bench:browser`，在本地 Centrifuge 演示服务上用两个真实标签页分别测 dedicated/shared Worker 的跨 Tab 发布耗时。
