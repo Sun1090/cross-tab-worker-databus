@@ -9,7 +9,7 @@ import type { WebSocketLike } from '../src/websocket';
  * lifecycle events and inject server frames. */
 class FakeWebSocket implements WebSocketLike {
   readyState = 0;
-  readonly sent: string[] = [];
+  readonly sent: Array<string | ArrayBuffer> = [];
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -20,7 +20,7 @@ class FakeWebSocket implements WebSocketLike {
     readonly protocols?: string | string[]
   ) {}
 
-  send(data: string): void {
+  send(data: string | ArrayBuffer): void {
     this.sent.push(data);
   }
 
@@ -92,6 +92,20 @@ describe('WebSocketTransport', () => {
       JSON.stringify({ op: 'subscribe', topic: 'market.tick' }),
       JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 1 } })
     ]);
+  });
+
+  it('sends and receives ArrayBuffer publications as binary frames', () => {
+    const { sockets, transport, onMessage } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publish('bin.topic', new Uint8Array([1, 2, 3]).buffer);
+    const frame = socket.sent.at(-1);
+    expect(frame).toBeInstanceOf(ArrayBuffer);
+
+    const bytes = new Uint8Array([0xc7, 0, 9, ...new TextEncoder().encode('bin.topic'), 4, 5]);
+    socket.onmessage?.({ data: bytes.buffer });
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'bin.topic', data: expect.any(ArrayBuffer) });
+    expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([4, 5]);
   });
 
   it('re-asserts subscriptions when the socket (re)opens', () => {

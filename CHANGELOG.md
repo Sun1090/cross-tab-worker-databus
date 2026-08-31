@@ -23,6 +23,7 @@
 
 - `publish()` 在当前 Worker 已同步持有 topic owner assignment 时走本地快路径，避免每条消息重复扫描 worker/route storage；跨 Tab 路由仍保留原有存储校验。
 - 新增独立 `./vue` 入口，提供 `useCrossTabDataBus`、`useCrossTabSubscription` 和 `useCrossTabStatus`；Vue 3 作为可选 peer dependency，不影响核心入口。
+- WebSocketTransport 与内置 demo 支持 `ArrayBuffer` 二进制帧往返；JSON payload 协议保持兼容。
 
 ## [0.5.0] - 2026-08-31
 

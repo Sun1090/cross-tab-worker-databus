@@ -172,6 +172,7 @@ export class DemoWebSocketConnection {
     this.channels = new Set();
     this.textBuffer = '';
     this.messageHandlers = [];
+    this.binaryHandlers = [];
     this.closeHandlers = [];
     socket.setNoDelay(true);
     socket.on('data', chunk => this.handleData(chunk));
@@ -181,6 +182,10 @@ export class DemoWebSocketConnection {
 
   onMessage(handler) {
     this.messageHandlers.push(handler);
+  }
+
+  onBinary(handler) {
+    this.binaryHandlers.push(handler);
   }
 
   onClose(handler) {
@@ -205,6 +210,10 @@ export class DemoWebSocketConnection {
 
   sendText(text) {
     this.writeFrame(0x1, Buffer.from(text, 'utf8'));
+  }
+
+  sendBinary(buffer) {
+    this.writeFrame(0x2, Buffer.from(buffer));
   }
 
   close(code, reason) {
@@ -297,6 +306,10 @@ export class DemoWebSocketConnection {
       }
       return;
     }
+    if (opcode === 0x2) {
+      for (const handler of this.binaryHandlers) handler(payload);
+      return;
+    }
     if (opcode === 0x8) {
       this.socket.end();
       return;
@@ -309,6 +322,7 @@ export class DemoWebSocketConnection {
   notifyClose() {
     for (const handler of this.closeHandlers) handler();
     this.messageHandlers = [];
+    this.binaryHandlers = [];
     this.closeHandlers = [];
   }
 }
