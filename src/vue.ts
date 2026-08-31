@@ -16,7 +16,7 @@ export function useCrossTabDataBus<TConfig, TData>(
   onMounted(start);
   onBeforeUnmount(() => { void stop(); });
   if (deps.length > 0) watch(deps, start);
-  return bus;
+  return bus as Ref<CrossTabDataBus<TConfig, TData> | null>;
 }
 
 export function useCrossTabSubscription<TConfig, TData>(
@@ -55,4 +55,3 @@ export function useCrossTabStatus<TConfig, TData>(
   onBeforeUnmount(() => cleanup?.());
   return status;
 }
-

@@ -23,6 +23,7 @@
 - 通配符订阅：`chat.*` 与 `*` pattern 在分发侧匹配具体 Topic
 - 内置零依赖的原生 WebSocket 传输（`createWebSocketDataBus`），适配普通 WebSocket 服务器
 - 可选的 React hooks 适配层（`cross-tab-worker-databus/hooks`）：StrictMode 安全的 bus 生命周期与自动清理订阅
+- 可选的 Vue 3 composables 适配层（`cross-tab-worker-databus/vue`）：安全管理 bus 生命周期、订阅和状态
 - `pagehide` 自动释放资源；`pageshow` 自动重建 Worker 和连接
 - Transport 重连自动恢复当前 owner 的 Topic
 - Tab 异常退出后通过心跳 TTL 自动迁移

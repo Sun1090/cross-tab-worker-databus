@@ -23,6 +23,7 @@ By default each tab holds its own Dedicated Worker; when configured with `worker
 - Wildcard subscriptions: `chat.*` and `*` patterns match concrete topics at dispatch
 - Built-in zero-dependency native WebSocket transport (`createWebSocketDataBus`) for plain-WebSocket servers
 - Optional React hooks adapter (`cross-tab-worker-databus/hooks`): StrictMode-safe bus lifecycle, auto-cleanup subscriptions
+- Optional Vue 3 composables adapter (`cross-tab-worker-databus/vue`): lifecycle-safe bus, subscription, and status composables
 - `pagehide` releases resources automatically; `pageshow` rebuilds the Worker and connection automatically
 - Transport reconnect automatically restores the current owner's Topics
 - After a tab exits abnormally, automatic migration happens via heartbeat TTL
