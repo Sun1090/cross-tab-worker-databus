@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, defineComponent, h, nextTick, ref } from 'vue';
+import { createApp, defineComponent, h, nextTick, ref, type Ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import { useCrossTabDataBus, useCrossTabStatus, useCrossTabSubscription } from '../src/vue';
 import type { CrossTabDataBus } from '../src/core/data-bus';
@@ -23,7 +23,7 @@ describe('Vue composables adapter', () => {
     const received: unknown[] = [];
     const host = document.createElement('div');
     const app = createApp(defineComponent({ setup() {
-      const active = useCrossTabDataBus(() => bus);
+      const active = useCrossTabDataBus(() => bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
       const status = useCrossTabStatus(active);
       useCrossTabSubscription(active, 'topic', message => received.push(message.data));
       return () => h('span', status.value);
@@ -42,7 +42,7 @@ describe('Vue composables adapter', () => {
   it('rebinds when the bus ref changes', async () => {
     const first = fakeBus();
     const second = fakeBus();
-    const active = ref<CrossTabDataBus<unknown, unknown> | null>(first);
+    const active = ref<CrossTabDataBus<unknown, unknown> | null>(first) as Ref<CrossTabDataBus<unknown, unknown> | null>;
     const received: unknown[] = [];
     const host = document.createElement('div');
     const app = createApp(defineComponent({ setup() {
@@ -59,4 +59,3 @@ describe('Vue composables adapter', () => {
     app.unmount();
   });
 });
-

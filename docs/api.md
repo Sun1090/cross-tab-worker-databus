@@ -30,6 +30,12 @@ import {
   useCrossTabStatus,
   useCrossTabSubscription
 } from 'cross-tab-worker-databus/hooks';
+
+import {
+  useCrossTabDataBus as useVueCrossTabDataBus,
+  useCrossTabStatus as useVueCrossTabStatus,
+  useCrossTabSubscription as useVueCrossTabSubscription
+} from 'cross-tab-worker-databus/vue';
 ```
 
 Business integration should prefer `CrossTabDataBus` or `createCentrifugeDataBus`. `WorkerClusterRuntime` is an advanced coordination API.
@@ -288,6 +294,18 @@ Attaches a message handler with automatic cleanup. The handler is read through a
 ### `useCrossTabStatus(bus)`
 
 Mirrors `bus.onStatus()` into React state and reads the current value synchronously whenever the bus identity changes. Returns `'connecting' | 'connected' | 'disconnected' | 'error'`.
+
+## Vue Composables (`cross-tab-worker-databus/vue`)
+
+Vue 3.3+ is an optional peer dependency; this entry is separate from the core package.
+
+```ts
+const bus = useVueCrossTabDataBus(() => createWebSocketDataBus({ connection: { url } }));
+const status = useVueCrossTabStatus(bus);
+useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
+```
+
+`useCrossTabDataBus` returns a Vue `Ref` that is populated on mount and stopped on unmount. `useCrossTabSubscription` accepts a string or `Ref<string>` topic and rebinds when the bus or topic changes. `useCrossTabStatus` returns a `Ref<WorkerStatus>` synchronized with `bus.onStatus()`.
 
 ## `WorkerClusterRuntime`
 

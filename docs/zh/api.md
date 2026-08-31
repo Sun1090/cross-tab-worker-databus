@@ -30,6 +30,12 @@ import {
   useCrossTabStatus,
   useCrossTabSubscription
 } from 'cross-tab-worker-databus/hooks';
+
+import {
+  useCrossTabDataBus as useVueCrossTabDataBus,
+  useCrossTabStatus as useVueCrossTabStatus,
+  useCrossTabSubscription as useVueCrossTabSubscription
+} from 'cross-tab-worker-databus/vue';
 ```
 
 业务接入优先使用 `CrossTabDataBus` 或 `createCentrifugeDataBus`。`WorkerClusterRuntime` 属于高级协调 API。
@@ -288,6 +294,18 @@ React（>= 18）是可选 peer 依赖；独立入口保证非 React 消费者不
 ### `useCrossTabStatus(bus)`
 
 把 `bus.onStatus()` 镜像为 React 状态，bus 身份变化时同步读取当前值。返回 `'connecting' | 'connected' | 'disconnected' | 'error'`。
+
+## Vue Composables（`cross-tab-worker-databus/vue`）
+
+Vue 3.3+ 是可选 peer 依赖；独立入口不会影响核心包。
+
+```ts
+const bus = useVueCrossTabDataBus(() => createWebSocketDataBus({ connection: { url } }));
+const status = useVueCrossTabStatus(bus);
+useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
+```
+
+`useCrossTabDataBus` 返回 Vue `Ref`，在组件挂载时创建 bus、卸载时停止。`useCrossTabSubscription` 接受字符串或 `Ref<string>` topic，在 bus/topic 变化时自动重绑。`useCrossTabStatus` 返回与 `bus.onStatus()` 同步的 `Ref<WorkerStatus>`。
 
 ## `WorkerClusterRuntime`
 
