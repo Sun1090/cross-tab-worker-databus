@@ -23,6 +23,7 @@
 
 - 真实浏览器发布基准入口：`pnpm bench:browser`，在本地 Centrifuge 演示服务上用两个真实标签页分别测 dedicated/shared Worker 的跨 Tab 发布耗时。
 - 可选 replay 持久化契约与 IndexedDB 实现：`createIndexedDbReplayPersistence({ maxPerTopic })`；默认仍为纯内存，持久化失败通过错误处理器报告。
+- E2E：新增真实 Chrome reload 场景，验证 IndexedDB replay 历史在页面重建后恢复（总计 8 项 E2E）。
 
 ### Notes
 
