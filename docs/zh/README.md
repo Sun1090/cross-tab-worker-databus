@@ -12,6 +12,7 @@
 | [API 参考](./api.md) | 公共入口、类型、方法、返回值和行为 |
 | [架构说明](./architecture.md) | Worker 集群、路由、存储、迁移和降级设计 |
 | [能力矩阵](./capabilities.md) | 已实现、未实现和计划待实现的能力矩阵 |
+| [路线图](./roadmap.md) | 面向版本的优先级与验证清单 |
 | [../..//examples/demo](../../examples/demo) | 可运行的多标签浏览器演示 |
 | [../../CHANGELOG.md](../../CHANGELOG.md) | 版本变更记录 |
 

@@ -10,6 +10,7 @@
 | [API Reference](./api.md) | Public API, types, methods, return values, and behavior |
 | [Architecture](./architecture.md) | Worker cluster, routing, storage, migration, and degradation design |
 | [Capabilities Matrix](./capabilities.md) | Implemented, not implemented, and planned capabilities matrix |
+| [Roadmap](./roadmap.md) | Release-oriented priorities and verification checklist |
 | [../examples/demo](../examples/demo) | Runnable multi-tab browser demo |
 | [../CHANGELOG.md](../CHANGELOG.md) | Version changelog |
 
