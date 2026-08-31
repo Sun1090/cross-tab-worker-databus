@@ -19,6 +19,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-31
+
 ### Changed
 
 - `publish()` 在当前 Worker 已同步持有 topic owner assignment 时走本地快路径，避免每条消息重复扫描 worker/route storage；跨 Tab 路由仍保留原有存储校验。
