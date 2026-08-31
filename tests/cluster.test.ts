@@ -46,6 +46,29 @@ describe('WorkerClusterRuntime', () => {
     expect(runtimeB.getSnapshot().workers.map(worker => worker.workerId)).toEqual(['worker-b']);
   });
 
+  it('publishes through the synchronous local assignment without rereading storage', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'fast-publish' });
+    const control = vi.fn();
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'publish-fast-path',
+      environment: env.environment,
+      tabId: 'tab-fast-publish',
+      workerId: 'worker-fast-publish',
+      handlers: { onControl: control, onEvent: vi.fn() }
+    });
+
+    runtime.start();
+    runtime.subscribe('hot-topic');
+    await Promise.resolve();
+    const getItem = vi.spyOn(storage, 'getItem');
+
+    expect(runtime.publish('hot-topic', { value: 1 })).toBe(true);
+    expect(control).toHaveBeenLastCalledWith('PUBLISH', 'hot-topic', { value: 1 });
+    expect(getItem).not.toHaveBeenCalled();
+  });
+
   it('keeps existing topic owners and balances only newly introduced topics', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

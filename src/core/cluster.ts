@@ -412,6 +412,18 @@ export class WorkerClusterRuntime {
    */
   publish(topic: string, data: unknown): boolean {
     const topicKey = this.rememberTopic(topic);
+    // The owning Worker already has a synchronous assignment map. Reuse it
+    // for the hot local-publish path instead of scanning worker and route
+    // records on every message. Wildcard assignments also own matching
+    // concrete topics, so they can use the same fast path.
+    if (this.assignedTopics.has(topicKey)) {
+      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data);
+    }
+    for (const pattern of this.assignedTopics.values()) {
+      if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
+        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data);
+      }
+    }
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
     const target = this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;

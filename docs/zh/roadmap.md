@@ -1,14 +1,14 @@
 # 路线图
 
-0.4.0 已发布。下一阶段统一按 0.5.0 候选推进，让性能、持久化和兼容性说明一起落地。
+0.5.0 已发布。下一阶段按 0.6.0 候选推进，先处理可用基准直接验证的 publish 路径优化，不改变公开 transport 契约。
 
-## 0.5.0 候选
+## 0.6.0 候选
 
-1. **publish 路径 profile 与优化**：结合 `pnpm bench` 和 `pnpm bench:browser`，先拆分 storage batching、路由和页面/服务端开销，再决定是否优化；
-2. **重放持久化**：增加 IndexedDB 历史适配器，支持 reload 与 BFCache 会话间恢复；保留纯内存重放作为零依赖默认；
-3. **Vue composable**：复制 React hooks 的生命周期与订阅语义，Vue 仍保持可选依赖；
-4. **二进制 demo 真链路**：让 WebSocket demo 端到端覆盖真实 `ArrayBuffer` 帧，同时保留仅支持 JSON 服务端的 base64 fallback；
-5. **Push CI 浏览器门禁**：环境提供 Chrome 时在 push 上运行 Playwright，贡献者本地仍可手动执行。
+1. **publish 路径 profile 与优化**：继续拆分路由、存储和 transport 开销；0.6.0 首批加入 owner 本地 publish 的同步快路径；
+2. **Vue composable**：复制 React hooks 的生命周期与订阅语义，Vue 仍保持可选依赖；
+3. **二进制 demo 真链路**：让 WebSocket demo 端到端覆盖真实 `ArrayBuffer` 帧，同时保留仅支持 JSON 服务端的 base64 fallback；
+4. **Push CI 浏览器门禁**：环境提供 Chrome 时在 push 上运行 Playwright，贡献者本地仍可手动执行；
+5. **运维完善**：补充 IndexedDB replay 留存/清理说明，并为持久化配额失败增加诊断。
 
 ## 发版检查清单
 
