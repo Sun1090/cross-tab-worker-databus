@@ -4,6 +4,10 @@ import type { DataBusMessage } from './types';
 export interface DataBusReplayPersistence<TData = unknown> {
   load(): Promise<ReadonlyArray<DataBusMessage<TData>>>;
   append(message: DataBusMessage<TData>): Promise<void>;
+  /** Remove all persisted replay history. */
+  clear?(): Promise<void>;
+  /** Remove persisted replay history for one exact topic. */
+  clearTopic?(topic: string): Promise<void>;
 }
 
 export interface IndexedDbReplayPersistenceOptions {
@@ -56,6 +60,24 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to persist replay history.'));
+      });
+    },
+    async clear() {
+      const db = await open();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        transaction.objectStore(storeName).clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear replay history.'));
+      });
+    },
+    async clearTopic(topic) {
+      const db = await open();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        transaction.objectStore(storeName).delete(topic);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear topic replay history.'));
       });
     }
   };

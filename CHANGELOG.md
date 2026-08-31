@@ -19,6 +19,21 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
+### Added
+
+- Replay persistence lifecycle cleanup (`clear` / `clearTopic`) with stale-history removal on unsubscribe.
+- Opt-in reliability diagnostics for recovery retries, owner acknowledgments, and route migrations.
+- Bounded, opt-in publication deduplication with caller-supplied message IDs.
+- React/Vue and custom-transport compatibility fixtures plus browser/package regression coverage.
+
+### Implemented in the current 0.7.0 worktree
+
+- Replay persistence now supports optional `clear()` and `clearTopic()` lifecycle hooks; `CrossTabDataBus` invokes them on stop and final topic unsubscribe.
+- Trace exports bounded `reliability` events for transport recovery attempts, route acknowledgments, and graceful route migrations.
+- `DataBusMessage.messageId` plus opt-in `dedup: { maxEntries, ttlMs }` suppresses duplicate inbound publications with bounded memory.
+
 ## [0.6.0] - 2026-08-31
 
 ### Changed
