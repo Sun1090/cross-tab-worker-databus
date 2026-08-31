@@ -12,6 +12,7 @@ import type {
   DataBusErrorHandler,
   DataBusMessage,
   DataBusMessageHandler,
+  DataBusPublishOptions,
   DataBusStatusHandler,
   DataBusTransport,
   WorkerStatus
@@ -155,7 +156,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       handlers: {
         // The cluster calls `onControl` when it receives a SUBSCRIBE/UNSUBSCRIBE/PUBLISH
         // control message — meaning the owning Worker has delegated the action to us.
-        onControl: (action, topic, data) => {
+        onControl: (action, topic, data, messageId) => {
           switch (action) {
             case 'SUBSCRIBE':
               if (this.subscribeTransport(topic)) this.traceSubscription('subscribe', topic);
@@ -164,7 +165,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
               if (this.unsubscribeTransport(topic)) this.traceSubscription('unsubscribe', topic);
               break;
             case 'PUBLISH':
-              this.runTransport(() => this.transport.publish(topic, data));
+              this.runTransport(() => this.transport.publish(topic, data, messageId ? { messageId } : undefined));
               break;
             default:
               break;
@@ -400,10 +401,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.cluster.unsubscribe(topic);
   }
 
+  /** Clear all in-memory replay buffers and, when supported, durable history. */
+  async clearReplay(): Promise<void> {
+    this.replayBuffers?.clear();
+    if (this.replayPersistence?.clear) {
+      try {
+        await this.replayPersistence.clear();
+      } catch (error) {
+        this.reportError(error);
+        throw error;
+      }
+    }
+  }
+
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
-  publish(topic: string, data: unknown): void {
+  publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     this.ensureStarted();
-    if (!this.cluster.publish(topic, data)) {
+    if (!this.cluster.publish(topic, data, options?.messageId)) {
       this.reportError(
         new Error('Failed to send the publish control message to the owning worker.')
       );
@@ -500,7 +514,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     for (const [id, timestamp] of this.seenMessageIds) {
       if (now - timestamp > this.dedupTtlMs) this.seenMessageIds.delete(id);
     }
-    if (this.seenMessageIds.has(message.messageId)) return true;
+    if (this.seenMessageIds.has(message.messageId)) {
+      this.trace.event({ type: 'reliability', operation: 'dedup_suppressed', topic: message.topic });
+      return true;
+    }
     this.seenMessageIds.set(message.messageId, now);
     while (this.seenMessageIds.size > this.dedupMaxEntries) {
       const oldest = this.seenMessageIds.keys().next().value;

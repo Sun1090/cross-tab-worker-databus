@@ -53,7 +53,7 @@ export class CentrifugeSession<TData = unknown> {
       case 'PUBLISH_BIN':
         // Binary and JSON publish share the same Centrifuge client call; the
         // transport layer decides whether to transfer the ArrayBuffer.
-        this.publish(message.topic, message.data);
+        this.publish(message.topic, message.data, message.messageId);
         return;
       case 'STOP':
         this.stop();
@@ -132,9 +132,13 @@ export class CentrifugeSession<TData = unknown> {
   }
 
   /** Publish a message to the Centrifuge channel. */
-  private publish(topic: string, data: unknown): void {
+  private publish(topic: string, data: unknown, messageId?: string): void {
     if (!this.client) return this.postError(new Error('Centrifuge client is not initialized.'));
-    void this.client.publish(topic, data).catch(error => this.postError(error));
+    // Centrifuge's payload is application-defined. Preserve legacy payloads;
+    // when an ID is requested, send a small metadata envelope that compatible
+    // servers can echo back for end-to-end deduplication.
+    const payload = messageId ? { data, messageId } : data;
+    void this.client.publish(topic, payload).catch(error => this.postError(error));
   }
 
   /** Forward a publication to the transport. Binary payloads take the
@@ -147,7 +151,13 @@ export class CentrifugeSession<TData = unknown> {
       this.post({ type: 'MESSAGE_BIN', topic, data }, [data]);
       return;
     }
-    this.post({ type: 'MESSAGE', topic, data: data as TData });
+    const messageId = data && typeof data === 'object' && typeof (data as Record<string, unknown>).messageId === 'string'
+      ? (data as Record<string, unknown>).messageId as string
+      : undefined;
+    const payload = messageId && Object.prototype.hasOwnProperty.call(data, 'data')
+      ? (data as Record<string, unknown>).data
+      : data;
+    this.post({ type: 'MESSAGE', topic, data: payload as TData, ...(messageId ? { messageId } : {}) });
   }
 
   /** Disconnect the client and clear all subscriptions. */

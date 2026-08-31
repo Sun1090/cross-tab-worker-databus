@@ -99,10 +99,10 @@ When a handler is provided, only that callback is released; when omitted, all ha
 
 Prefer using the cleanup function returned by `subscribe` to avoid accidentally removing callbacks from other modules.
 
-### `publish(topic, data)`
+### `publish(topic, data, options?)`
 
 ```ts
-publish(topic: string, data: unknown): void
+publish(topic: string, data: unknown, options?: { messageId?: string }): void
 ```
 
 Routes the publish operation to the current topic owner; uses the current Worker when no valid route exists.
@@ -112,6 +112,16 @@ Published data must satisfy the serialization constraints of the underlying tran
 When the owning Worker is a remote Tab and the publish control message cannot be posted (for example the BroadcastChannel fails to clone the payload), `publish()` reports the failure through `onError` instead of silently dropping it.
 
 Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee.
+
+When supplied, `options.messageId` is propagated through cross-tab routing and supported transports. It is metadata only; the server must echo or otherwise preserve it for inbound deduplication.
+
+### `clearReplay()`
+
+```ts
+clearReplay(): Promise<void>
+```
+
+Clears in-memory replay buffers and invokes the persistence adapter's optional `clear()` hook. Useful for retention policies, logout, or tenant switching. Durable history is otherwise preserved across `stop()`.
 
 ### `onStatus(handler)`
 

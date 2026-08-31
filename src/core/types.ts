@@ -24,6 +24,12 @@ export type WorkerStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
  * These are the three operations a subscriber asks the owning worker to perform. */
 export type WorkerControlAction = 'SUBSCRIBE' | 'UNSUBSCRIBE' | 'PUBLISH';
 
+/** Optional metadata attached to an outbound publication. */
+export interface DataBusPublishOptions {
+  /** Stable caller/server identifier propagated through the cluster and wire protocol. */
+  messageId?: string;
+}
+
 /** Whether the tab is currently visible to the user. Only influences placement
  * of NEW topic routes; existing routes are sticky and never migrated on hide. */
 export type TabVisibilityState = 'visible' | 'hidden';
@@ -103,6 +109,8 @@ export type WorkerClusterMessage<TEvent = unknown> =
       topicKey: string;
       /** Present only for PUBLISH actions; the publication payload. */
       data?: unknown;
+      /** Optional stable identifier for the publication. */
+      messageId?: string;
     }
   /** The owning worker fans out a publication to every tab. `eventType`
    * distinguishes databus publications from future event types. */
@@ -171,7 +179,7 @@ export interface DataBusTransport<TConfig = unknown, TData = unknown> {
   /** Unsubscribe from a topic. Idempotent: unsubscribing a non-subscribed topic is a no-op. */
   unsubscribe(topic: string): MaybePromise<void>;
   /** Publish `data` to `topic` via the server. */
-  publish(topic: string, data: unknown): MaybePromise<void>;
+  publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
   /** Close the connection and release all resources. Safe to call multiple times. */
   stop(): MaybePromise<void>;
 }

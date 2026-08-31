@@ -29,7 +29,7 @@ import { BatchingStorageWriter } from './storage-batch';
 /** Callbacks the cluster invokes to drive the transport and lifecycle. */
 export interface WorkerClusterHandlers {
   /** A SUBSCRIBE/UNSUBSCRIBE/PUBLISH control action was received for this worker. */
-  onControl: (action: WorkerControlAction, topic: string, data?: unknown) => void;
+  onControl: (action: WorkerControlAction, topic: string, data?: unknown, messageId?: string) => void;
   /** A fan-out publication event was received from another Worker. */
   onEvent: (eventType: string, payload: unknown, sourceWorkerId: string) => void;
   /** The cluster suspended (tab hidden / pagehide). */
@@ -413,24 +413,24 @@ export class WorkerClusterRuntime {
    * posted to a remote owner, so the caller can surface the failure instead of
    * silently dropping the publication.
    */
-  publish(topic: string, data: unknown): boolean {
+  publish(topic: string, data: unknown, messageId?: string): boolean {
     const topicKey = this.rememberTopic(topic);
     // The owning Worker already has a synchronous assignment map. Reuse it
     // for the hot local-publish path instead of scanning worker and route
     // records on every message. Wildcard assignments also own matching
     // concrete topics, so they can use the same fast path.
     if (this.assignedTopics.has(topicKey)) {
-      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data);
+      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, messageId);
     }
     for (const pattern of this.assignedTopics.values()) {
       if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
-        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data);
+        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, messageId);
       }
     }
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
     const target = this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
-    return this.sendControl(target, 'PUBLISH', topic, topicKey, data);
+    return this.sendControl(target, 'PUBLISH', topic, topicKey, data, messageId);
   }
 
   /** True when `route` exists and its owner worker is among `workers`.
@@ -584,7 +584,11 @@ export class WorkerClusterRuntime {
       default:
         break;
     }
-    this.handlers.onControl(message.action, message.topic, message.data);
+    if (message.messageId === undefined) {
+      this.handlers.onControl(message.action, message.topic, message.data);
+    } else {
+      this.handlers.onControl(message.action, message.topic, message.data, message.messageId);
+    }
     if (message.action !== 'PUBLISH') this.updateLoad();
   }
 
@@ -740,7 +744,8 @@ export class WorkerClusterRuntime {
     action: WorkerControlAction,
     topic: string,
     topicKey: string,
-    data?: unknown
+    data?: unknown,
+    messageId?: string
   ): boolean {
     if (targetWorkerId === this.workerId) {
       switch (action) {
@@ -755,7 +760,8 @@ export class WorkerClusterRuntime {
         default:
           break;
       }
-      this.handlers.onControl(action, topic, data);
+      if (messageId === undefined) this.handlers.onControl(action, topic, data);
+      else this.handlers.onControl(action, topic, data, messageId);
       if (action !== 'PUBLISH') this.updateLoad();
       return true;
     }
@@ -767,6 +773,7 @@ export class WorkerClusterRuntime {
       topic,
       topicKey,
       ...(data === undefined ? {} : { data })
+      ,...(messageId === undefined ? {} : { messageId })
     });
   }
 

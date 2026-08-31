@@ -17,7 +17,13 @@
 
 - BFCache e2e 在 `pageshow` 后等待 transport 恢复完成，避免把合法的异步恢复窗口误判为重复投递。
 
-## [Unreleased]
+## [0.8.0] - 2026-08-31
+
+### Added
+
+- 0.8.0 development: optional `publish(topic, data, { messageId })` metadata now propagates through cluster routing and supported transports.
+- Explicit `bus.clearReplay()` retention cleanup for in-memory and durable replay stores.
+- Dedup suppression is observable through reliability trace events (`dedup_suppressed`).
 
 ## [0.7.0] - 2026-08-31
 
