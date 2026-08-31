@@ -249,3 +249,87 @@ test.describe('cross-tab databus demo — binary publish', () => {
       .toContain('ArrayBuffer(48)');
   });
 });
+
+test.describe('cross-tab databus replay persistence', () => {
+  test('hydrates IndexedDB replay history after a reload', async ({ context }) => {
+    const page = await context.newPage();
+    await page.goto(DEMO_URL);
+    const dbName = `e2e.replay.${Date.now()}`;
+    const topic = `e2e.replay.topic.${Date.now()}`;
+
+    await page.evaluate(async ({ dbName: name, topic: replayTopic }) => {
+      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import('/dist/index.js');
+      class Transport {
+        handlers;
+        async start(_config, handlers) {
+          this.handlers = handlers;
+          handlers.onStatus('connected');
+        }
+        subscribe() {}
+        unsubscribe() {}
+        publish() {}
+        stop() {}
+      }
+      const transport = new Transport();
+      const bus = new CrossTabDataBus({
+        autoStart: true,
+        clusterKey: `replay-${name}`,
+        initialConfig: {},
+        transport,
+        replay: { maxPerTopic: 8, persistence: createIndexedDbReplayPersistence({ dbName: name, maxPerTopic: 8 }) }
+      });
+      await bus.ready();
+      bus.subscribe(replayTopic, () => {});
+      window.__replayBus = bus;
+      window.__replayEmit = data => transport.handlers.onMessage({ topic: replayTopic, data });
+      window.__replayAssigned = () => bus.getClusterSnapshot().assignedTopics.includes(replayTopic);
+    }, { dbName, topic });
+
+    await page.waitForFunction(() => window.__replayAssigned?.(), undefined, { timeout: 30_000 });
+    await page.evaluate(() => window.__replayEmit('persisted-value'));
+    await page.waitForTimeout(500);
+    const stored = await page.evaluate(async name => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return await new Promise<unknown>((resolve, reject) => {
+        const request = db.transaction('replay', 'readonly').objectStore('replay').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }, dbName);
+    expect(stored).toEqual([{ topic, messages: [{ topic, data: 'persisted-value' }] }]);
+    await page.evaluate(async () => window.__replayBus.stop());
+    await page.reload();
+
+    const replayed = await page.evaluate(async ({ dbName: name, topic: replayTopic }) => {
+      const { CrossTabDataBus, createIndexedDbReplayPersistence } = await import('/dist/index.js');
+      class Transport {
+        async start(_config, handlers) { handlers.onStatus('connected'); }
+        subscribe() {}
+        unsubscribe() {}
+        publish() {}
+        stop() {}
+      }
+      const bus = new CrossTabDataBus({
+        autoStart: true,
+        clusterKey: `replay-${name}-restored`,
+        initialConfig: {},
+        transport: new Transport(),
+        replay: { maxPerTopic: 8, persistence: createIndexedDbReplayPersistence({ dbName: name, maxPerTopic: 8 }) }
+      });
+      const errors = [];
+      bus.onError(error => errors.push(String(error)));
+      await bus.ready();
+      const seen = [];
+      bus.subscribe(replayTopic, message => seen.push({ data: message.data, replayed: message.replayed }), { replay: true });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await bus.stop();
+      return { seen, errors };
+    }, { dbName, topic });
+
+    expect(replayed).toEqual({ seen: [{ data: 'persisted-value', replayed: true }], errors: [] });
+  });
+});
