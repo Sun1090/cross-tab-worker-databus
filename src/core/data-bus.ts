@@ -55,6 +55,13 @@ export interface DataBusDedupOptions {
   ttlMs?: number;
 }
 
+export interface DataBusDedupStats {
+  enabled: boolean;
+  tracked: number;
+  suppressed: number;
+  accepted: number;
+}
+
 export interface CrossTabDataBusOptions<TConfig, TData>
   extends Omit<WorkerClusterOptions, 'handlers'> {
   transport: DataBusTransport<TConfig, TData>;
@@ -98,6 +105,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly dedupTtlMs: number;
   private readonly dedupEnabled: boolean;
   private readonly seenMessageIds = new Map<string, number>();
+  private dedupSuppressed = 0;
+  private dedupAccepted = 0;
   private activeConfig: TConfig | undefined;
   private status: WorkerStatus = 'disconnected';
   private started = false;
@@ -414,6 +423,36 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
   }
 
+  /** Clear replay history for one exact topic, including durable storage. */
+  async clearReplayTopic(topic: string): Promise<void> {
+    this.replayBuffers?.delete(topic);
+    if (this.replayPersistence?.clearTopic) {
+      try {
+        await this.replayPersistence.clearTopic(topic);
+      } catch (error) {
+        this.reportError(error);
+        throw error;
+      }
+    }
+  }
+
+  /** Return bounded deduplication counters for diagnostics and health checks. */
+  getDedupStats(): DataBusDedupStats {
+    return {
+      enabled: this.dedupEnabled,
+      tracked: this.seenMessageIds.size,
+      suppressed: this.dedupSuppressed,
+      accepted: this.dedupAccepted
+    };
+  }
+
+  /** Drop all remembered IDs and reset dedup counters. */
+  resetDedup(): void {
+    this.seenMessageIds.clear();
+    this.dedupSuppressed = 0;
+    this.dedupAccepted = 0;
+  }
+
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     this.ensureStarted();
@@ -516,9 +555,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     if (this.seenMessageIds.has(message.messageId)) {
       this.trace.event({ type: 'reliability', operation: 'dedup_suppressed', topic: message.topic });
+      this.dedupSuppressed += 1;
       return true;
     }
     this.seenMessageIds.set(message.messageId, now);
+    this.dedupAccepted += 1;
     while (this.seenMessageIds.size > this.dedupMaxEntries) {
       const oldest = this.seenMessageIds.keys().next().value;
       if (oldest === undefined) break;

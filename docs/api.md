@@ -123,6 +123,8 @@ clearReplay(): Promise<void>
 
 Clears in-memory replay buffers and invokes the persistence adapter's optional `clear()` hook. Useful for retention policies, logout, or tenant switching. Durable history is otherwise preserved across `stop()`.
 
+`clearReplayTopic(topic)` applies the same cleanup to one exact topic. `getDedupStats()` returns bounded counters (`enabled`, `tracked`, `accepted`, `suppressed`), and `resetDedup()` clears remembered IDs and counters without changing configuration.
+
 ### `onStatus(handler)`
 
 ```ts
