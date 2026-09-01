@@ -139,6 +139,8 @@ clearReplay(): Promise<void>
 
 `clearReplayBefore(timestamp)` 按毫秒时间戳清理带显式 producer timestamp 且早于 cutoff 的记录；实现可选 `clearBefore()` 的持久化适配器会同步执行该清理。没有 producer timestamp 的 legacy 消息会为兼容性保留。transport 未提供时间戳时，系统仍会补充 bus timestamp，但该时间戳不会被当作 producer metadata 用于 retention 清理。
 
+启用自动 retention 时，如果持久化清理正在进行，后续清理请求会合并，完成后再应用最新 cutoff。
+
 ### `onStatus(handler)`
 
 ```ts

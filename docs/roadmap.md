@@ -1,6 +1,12 @@
 # Roadmap
 
-0.15.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.16.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.16.0 delivered scope
+
+- Retention cleanup is coalesced during publication bursts and executes serialized mutations using the newest requested cutoff.
+- WebSocket binary protocol boundaries now have regression coverage for truncated and invalid frames.
+- Existing legacy replay, JSON metadata, and manual cleanup compatibility guarantees remain documented.
 
 ## 0.15.0 delivered scope
 

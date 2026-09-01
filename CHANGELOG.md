@@ -2,6 +2,18 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.16.0] - 2026-09-01
+
+### Added
+
+- Replay retention cleanup is coalesced during publication bursts; the newest cutoff wins while cleanup mutations remain serialized.
+- WebSocket binary-frame compatibility coverage now verifies truncated, invalid-magic, and incomplete-header frames are ignored safely.
+
+### Compatibility
+
+- Retention cleanup remains opt-in through `replay.retentionMs`; manual `clearReplayBefore()` behavior is unchanged.
+- Existing JSON, nested publication-envelope, and legacy binary payload formats remain supported.
+
 ## [0.15.0] - 2026-09-01
 
 ### Fixed

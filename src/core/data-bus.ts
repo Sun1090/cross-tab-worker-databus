@@ -103,6 +103,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
   private readonly replayRetentionMs: number | undefined;
   private readonly replayHydration: Promise<void>;
+  // Retention cleanup is coalesced so a burst of publications does not issue
+  // one IndexedDB read/write transaction per message. The newest cutoff wins.
+  private replayRetentionCleanup: Promise<void> | null = null;
+  private replayRetentionCutoff: number | null = null;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
@@ -641,8 +645,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.replayPersistence) {
       void this.replayPersistence.append(storedMessage).catch(error => this.reportPersistenceError(error));
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        void this.replayPersistence.clearBefore(this.now() - this.replayRetentionMs)
-          .catch(error => this.reportPersistenceError(error));
+        this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs);
       }
     }
   }
@@ -667,6 +670,30 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     } catch (error) {
       this.reportPersistenceError(error);
     }
+  }
+
+  private scheduleReplayRetentionCleanup(cutoff: number): void {
+    if (!this.replayPersistence?.clearBefore) return;
+    if (this.replayRetentionCutoff === null || cutoff > this.replayRetentionCutoff) {
+      this.replayRetentionCutoff = cutoff;
+    }
+    if (this.replayRetentionCleanup) return;
+    this.replayRetentionCleanup = (async () => {
+      while (this.replayRetentionCutoff !== null) {
+        const nextCutoff = this.replayRetentionCutoff;
+        this.replayRetentionCutoff = null;
+        try {
+          await this.replayPersistence!.clearBefore!(nextCutoff);
+        } catch (error) {
+          this.reportPersistenceError(error);
+        }
+      }
+    })().finally(() => {
+      this.replayRetentionCleanup = null;
+      if (this.replayRetentionCutoff !== null) {
+        this.scheduleReplayRetentionCleanup(this.replayRetentionCutoff);
+      }
+    });
   }
 
   /** Deliver buffered history to a newly-registered handler. For an exact

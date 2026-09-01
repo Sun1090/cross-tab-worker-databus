@@ -141,6 +141,8 @@ Clears in-memory replay buffers and invokes the persistence adapter's optional `
 
 `clearReplayBefore(timestamp)` removes entries with an explicit producer timestamp older than an epoch-millisecond cutoff from memory and from adapters that implement optional `clearBefore(timestamp)`. Legacy messages without a producer timestamp are preserved for compatibility. Incoming messages receive a bus timestamp when the transport does not provide one; that bus timestamp is not treated as producer metadata for retention cleanup.
 
+When automatic retention is enabled, repeated cleanup requests are coalesced while a persistence cleanup is in flight; the newest cutoff is applied next.
+
 ### `onStatus(handler)`
 
 ```ts
