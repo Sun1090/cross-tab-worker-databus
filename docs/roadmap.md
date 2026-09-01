@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.1 delivered scope
+
+- WebSocket binary publication handling accepts browser `Blob` frames in addition to `ArrayBuffer` frames.
+- Blob conversion failures remain isolated through the transport error callback.
+
 ## 0.19.0 delivered scope
 
 - Persistence retries emit bounded, opt-in `persistence_retry` reliability events with the operation and attempt number.

@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.19.1 已完成范围
+
+- WebSocket 二进制 publication 除 `ArrayBuffer` 外，也支持浏览器常见的 `Blob` 帧。
+- Blob 转换失败会通过 transport error callback 隔离报告，不会打崩消息回调。
+
 ## 0.19.0 已完成范围
 
 - persistence retry 会发出有界、可选开启的 `persistence_retry` reliability 事件，包含操作名和尝试次数。

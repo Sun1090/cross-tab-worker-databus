@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.1] - 2026-09-01
+
+### Fixed
+
+- WebSocket transport now accepts browser `Blob` binary frames and decodes them through the existing ArrayBuffer protocol path.
+- Blob conversion failures are isolated through the transport error handler without crashing the message callback.
+
 ## [0.19.0] - 2026-09-01
 
 ### Added

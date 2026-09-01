@@ -102,7 +102,7 @@ export class WebSocketTransport<TData = unknown>
     };
     socket.onclose = () => handlers.onStatus('disconnected');
     socket.onerror = () => handlers.onStatus('error');
-    socket.onmessage = event => this.handleMessage(event.data);
+    socket.onmessage = event => { void this.handleMessage(event.data); };
     this.socket = socket;
   }
 
@@ -187,7 +187,18 @@ export class WebSocketTransport<TData = unknown>
   /** Parse a server frame. Only objects carrying a string `topic` are
    * publications; malformed JSON and unknown shapes are ignored so a chatty
    * server cannot crash the message path. */
-  private handleMessage(raw: unknown): void {
+  private async handleMessage(raw: unknown): Promise<void> {
+    // Browser WebSockets may deliver binary frames as Blob unless
+    // `binaryType = 'arraybuffer'` is explicitly configured by the host.
+    // Normalize Blob asynchronously and reuse the exact ArrayBuffer parser.
+    if (typeof Blob !== 'undefined' && raw instanceof Blob) {
+      try {
+        await this.handleMessage(await raw.arrayBuffer());
+      } catch (error) {
+        this.handlers?.onError(error);
+      }
+      return;
+    }
     let parsed: unknown;
     if (raw instanceof ArrayBuffer) {
       const bytes = new Uint8Array(raw);

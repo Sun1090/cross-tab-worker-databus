@@ -88,6 +88,8 @@ subscribe(
 - 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。
 - 重放（可选）：构造 bus 时传 `replay: { maxPerTopic }` 开启缓冲，`maxPerTopic` 必须是正安全整数；`subscribe()` 第三个参数传 `{ replay: true | n }` 后，新 handler 会立即收到缓冲历史（最多 `n` 条，受 `maxPerTopic` 上限约束，默认 100），消息带 `message.replayed: true` 标记——晚加入的 handler 不会错过更早的发布。只有被分发过的消息才入缓冲（无本地订阅者的 topic 会被 owner 丢弃）；缓冲仅存内存，该 topic 最后一个 handler 退订时清空。通配订阅会对所有匹配 pattern 的已缓冲 topic 做回放。需要跨 reload/BFCache 持久化时，可传入 `createIndexedDbReplayPersistence({ maxPerTopic })` 创建的 `persistence`；持久化为异步操作，失败会通过 `onError` 报告，不影响实时投递。设置 `retentionMs` 后，如果 adapter 支持 `clearBefore`，会在 hydrate 和追加后自动清理过期历史。设置 `persistenceRetry: { maxAttempts, backoffMs }` 可重试瞬时持久化失败；默认仍保持单次尝试。
   启用 trace 后，重试会发出 `reliability` 事件，包含 `operation: 'persistence_retry'`、有界的 `persistenceOperation` 和 `attempt`。
+
+WebSocket transport 支持以 `ArrayBuffer` 或浏览器 `Blob` 帧接收二进制 publication。
 - 持久化 replay store 还可实现 `clearTopic(topic)`；bus 会在最后一个 handler 退订时调用。应用可自行保留 `clear()` 做全量留存清理；`stop()` 会保留 durable history，以支持 reload/BFCache 恢复。
 
 ### `unsubscribe(topic, handler?)`
