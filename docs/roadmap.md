@@ -1,6 +1,12 @@
 # Roadmap
 
-0.16.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.17.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.17.0 delivered scope
+
+- Optional periodic replay retention sweeps run without requiring a new publication.
+- Sweep timers follow start/resume and pagehide/stop lifecycle boundaries.
+- Fake-timer coverage protects cleanup scheduling, teardown, and invalid configuration behavior.
 
 ## 0.16.0 delivered scope
 

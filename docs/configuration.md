@@ -50,6 +50,8 @@ const bus = new CrossTabDataBus({
 
 When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced during bursts: an in-flight cleanup is reused and the newest cutoff is applied after it settles. This bounds IndexedDB cleanup work without changing the retention boundary.
 
+`replay.retentionSweepMs` optionally schedules the same cleanup on a periodic interval. It is useful for quiet topics whose old durable records should still expire; it requires `retentionMs` and a persistence adapter with `clearBefore()`. The timer follows visibility and lifecycle transitions and is disabled by default.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

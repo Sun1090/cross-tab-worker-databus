@@ -143,6 +143,8 @@ Clears in-memory replay buffers and invokes the persistence adapter's optional `
 
 When automatic retention is enabled, repeated cleanup requests are coalesced while a persistence cleanup is in flight; the newest cutoff is applied next.
 
+Set `replay.retentionSweepMs` to periodically apply the retention cutoff even when no new publications arrive. The sweep is active only while the bus is started and visible; it pauses during pagehide and stops permanently on `stop()`.
+
 ### `onStatus(handler)`
 
 ```ts
