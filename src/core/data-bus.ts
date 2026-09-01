@@ -47,6 +47,8 @@ export interface DataBusReplayOptions<TData = unknown> {
   maxPerTopic?: number;
   /** Optional durable history backend. Defaults to in-memory only. */
   persistence?: DataBusReplayPersistence<TData>;
+  /** Optional producer-timestamp retention window in milliseconds. */
+  retentionMs?: number;
 }
 
 /** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
@@ -97,6 +99,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayBuffers: Map<string, DataBusMessage<TData>[]> | null;
   private readonly replayMaxPerTopic: number;
   private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
+  private readonly replayRetentionMs: number | undefined;
   private readonly replayHydration: Promise<void>;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
@@ -145,6 +148,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayMaxPerTopic = replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
     this.replayBuffers = replay ? new Map() : null;
     this.replayPersistence = (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null;
+    this.replayRetentionMs = replay?.retentionMs;
+    if (this.replayRetentionMs !== undefined && (!Number.isFinite(this.replayRetentionMs) || this.replayRetentionMs <= 0)) {
+      throw new TypeError('replay.retentionMs must be a positive finite number.');
+    }
     this.replayHydration = this.hydrateReplay();
     const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
     this.transport = transport;
@@ -578,10 +585,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.seenMessageIds.has(message.messageId)) {
       this.trace.event({ type: 'reliability', operation: 'dedup_suppressed', topic: message.topic });
       this.dedupSuppressed += 1;
+      this.trace.recordDedupSuppressed();
       return true;
     }
     this.seenMessageIds.set(message.messageId, now);
     this.dedupAccepted += 1;
+    this.trace.recordDedupAccepted();
     while (this.seenMessageIds.size > this.dedupMaxEntries) {
       const oldest = this.seenMessageIds.keys().next().value;
       if (oldest === undefined) break;
@@ -620,6 +629,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
       void this.replayPersistence.append(storedMessage).catch(error => this.reportError(error));
+      if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
+        void this.replayPersistence.clearBefore(Date.now() - this.replayRetentionMs)
+          .catch(error => this.reportError(error));
+      }
     }
   }
 
@@ -628,6 +641,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       return;
     }
     try {
+      if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
+        await this.replayPersistence.clearBefore(Date.now() - this.replayRetentionMs);
+      }
       for (const message of await this.replayPersistence.load()) {
         let buffer = this.replayBuffers.get(message.topic);
         if (!buffer) {

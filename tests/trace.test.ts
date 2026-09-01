@@ -93,6 +93,18 @@ describe('DataBusTraceReporter', () => {
     reporter.stop();
   });
 
+  it('includes dedup outcomes in metrics windows', () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, mode: 'metrics', sink: collect(events), metricsIntervalMs: 1_000 });
+    reporter.recordDedupAccepted();
+    reporter.recordDedupSuppressed();
+    reporter.recordDedupSuppressed();
+    reporter.flush();
+    expect(events[0]).toMatchObject({ type: 'message_metrics', dedupAccepted: 1, dedupSuppressed: 2 });
+    reporter.flush();
+    expect(events).toHaveLength(1);
+  });
+
   it('does not pair latency for dispatches without a local receive', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events), metricsIntervalMs: 1_000 });

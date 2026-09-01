@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown }>>; append: (message: { topic: string; data: unknown }) => Promise<void>; clearTopic?: () => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1206,6 +1206,28 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.clearReplayBefore(Date.now() + 1);
     expect(persistence.clearBefore).toHaveBeenCalledOnce();
     await bus.stop();
+  });
+
+  it('automatically prunes durable replay history when retention is configured', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(async (_timestamp: number) => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ retentionMs: 60_000, persistence });
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1, undefined, 1_700_000_000_000);
+    await Promise.resolve();
+    expect(persistence.clearBefore).toHaveBeenCalled();
+    expect(persistence.clearBefore.mock.calls.at(-1)?.[0]).toBeGreaterThan(0);
+    await bus.stop();
+  });
+
+  it('rejects invalid replay retention windows', () => {
+    for (const retentionMs of [0, -1, NaN, Infinity]) {
+      expect(() => makeReplayBus({ retentionMs })).toThrow(TypeError);
+    }
   });
 
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {

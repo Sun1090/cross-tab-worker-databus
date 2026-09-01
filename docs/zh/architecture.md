@@ -414,6 +414,10 @@ BroadcastChannel 不会把消息回传给发送者，因此 owner 收不到自�
 
 publication 不写入 localStorage。消息数据与 publication 元数据只存在于 BroadcastChannel 内存事件和 transport 内；批量写入只覆盖协调元数据。
 
+### Service Worker 边界
+
+SDK 当前刻意不在 Service Worker 中承载实时 transport。Service Worker 可能在事件之间被浏览器终止，不能提供持久的前台连接生命周期，而且各浏览器对长连接 WebSocket 的限制并不一致。未来若实现 adapter，必须先定义明确的连接 owner、客户端唤醒协议、重连策略和持久化交接语义；在这些条件标准化并有真实浏览器测试前，Dedicated/Shared Worker 仍是受支持的运行模型。
+
 ### 分发流程：三道关卡
 
 每条来自 transport 的 publication 在到达应用 handler 之前经过三道关卡：

@@ -411,6 +411,10 @@ BroadcastChannel does not echo to its sender, so the owner receives no `EVENT` b
 
 Publications are not written to localStorage. Message data and publication metadata only exist in the BroadcastChannel in-memory event and within the transport; batch writes only cover coordination metadata.
 
+### Service Worker boundary
+
+The SDK intentionally does not host a real-time transport in a Service Worker. Service Workers can be terminated between events, do not provide a durable foreground connection lifetime, and impose browser-specific restrictions around long-lived WebSockets. A future adapter would need an explicit connection owner, client wake-up protocol, reconnection policy, and durable handoff semantics; until those are standardized and covered by browser tests, Dedicated/Shared Worker transports remain the supported runtime models.
+
 ### Dispatch flow: three gates
 
 Every publication from the transport goes through three checks before reaching the application handler:

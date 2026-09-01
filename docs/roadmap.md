@@ -1,6 +1,20 @@
 # Roadmap
 
-0.6.0 is released. The next work is organized as 0.7.0 candidates, with reliability and diagnostics landing first so the new behavior is observable before expanding the protocol surface.
+0.11.0 is the current development line. The next work is organized as 1.0.0 candidates, with protocol stability and operational guarantees taking priority over adding another browser runtime.
+
+## 0.11.0 delivered scope
+
+- Automatic durable replay retention through `replay.retentionMs` when the persistence adapter supports `clearBefore`.
+- Deduplication accepted/suppressed counters in periodic trace metrics.
+- Publication metadata compatibility coverage across WebSocket, Centrifuge, Worker boundaries, and browser E2E.
+- Service Worker transport decision: remain deliberately unimplemented until a stable connection-lifetime contract exists across target browsers.
+
+## 1.0.0 candidates
+
+1. Freeze the public export surface and transport-neutral publication envelope.
+2. Document at-least-once delivery and deduplication guarantees precisely.
+3. Add long-running browser soak coverage for replay retention, reconnect, BFCache, and owner migration.
+4. Publish a migration guide and deprecation policy for any pre-1.0 protocol aliases.
 
 ## 0.7.0 candidates
 

@@ -2,6 +2,19 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.11.0] - 2026-09-01
+
+### Added
+
+- Automatic durable replay retention via `replay.retentionMs` when a persistence adapter supports `clearBefore`.
+- Deduplication accepted/suppressed counters in periodic `message_metrics` trace snapshots.
+- Service Worker runtime boundary documented as intentionally deferred pending stable browser lifetime semantics.
+
+### Compatibility
+
+- Existing replay adapters remain valid; `retentionMs` is ignored when an adapter does not implement `clearBefore`.
+- Existing trace consumers can continue reading the original metrics fields; dedup counters are additive.
+
 ## [0.10.0] - 2026-09-01
 
 ### Added
