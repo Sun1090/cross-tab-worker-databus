@@ -553,7 +553,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       else await this.transport.stop();
     } finally {
       this.transportSubscribedTopics.clear();
-      this.seenMessageIds.clear();
+      this.resetDedup();
       this.started = false;
       this.stopping = false;
       this.suspended = false;
