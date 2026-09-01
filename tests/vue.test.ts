@@ -58,4 +58,23 @@ describe('Vue composables adapter', () => {
     expect(received).toEqual(['new']);
     app.unmount();
   });
+
+  it('rebinds when a reactive topic changes on the same bus', async () => {
+    const bus = fakeBus();
+    const topic = ref('first');
+    const received: unknown[] = [];
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      useCrossTabSubscription(ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>, topic, message => received.push(message.data));
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    topic.value = 'second';
+    await nextTick();
+    bus.emit('first', 'old');
+    bus.emit('second', 'new');
+    expect(received).toEqual(['new']);
+    app.unmount();
+  });
 });

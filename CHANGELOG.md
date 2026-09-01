@@ -2,6 +2,17 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.14.0] - 2026-09-01
+
+### Fixed
+
+- Vue `useCrossTabSubscription` now rebinds when a reactive topic changes on the same bus instance.
+
+### Added
+
+- Vue topic-switch lifecycle regression coverage.
+- Release scope documents cross-page replay mutation ordering and adapter parity guarantees.
+
 ## [0.13.0] - 2026-09-01
 
 ### Added
