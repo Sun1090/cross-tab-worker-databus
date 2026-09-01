@@ -148,6 +148,17 @@ describe('WebSocketTransport', () => {
     expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([4, 5]);
   });
 
+  it('accepts Blob binary publications when the browser uses Blob binaryType', async () => {
+    const { sockets, onMessage } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    const bytes = new Uint8Array([0xc7, 0, 9, ...new TextEncoder().encode('bin.topic'), 6, 7]);
+    socket.onmessage?.({ data: new Blob([bytes]) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'bin.topic', data: expect.any(ArrayBuffer) });
+    expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([6, 7]);
+  });
+
   it('ignores truncated or invalid binary frames without crashing the transport', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;

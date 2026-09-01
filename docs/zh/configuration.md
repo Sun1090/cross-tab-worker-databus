@@ -56,6 +56,8 @@ const bus = new CrossTabDataBus({
 
 启用 trace 后，每次在最终尝试之前发生的重试都会发出有界 `reliability` 事件：`operation: persistence_retry`，并包含 `persistenceOperation`（`load`、`append`、`clear`、`clearTopic` 或 `clearBefore`）和失败的尝试次数。不包含 payload、URL、凭证或错误正文。
 
+WebSocket 二进制帧可能以 `ArrayBuffer` 或浏览器 `Blob` 到达；两者使用相同的紧凑二进制 publication 格式。Blob 转换是异步的，转换失败会通过 transport error handler 报告。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束
