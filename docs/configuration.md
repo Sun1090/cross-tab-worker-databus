@@ -54,6 +54,8 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 
 `replay.persistenceRetry` optionally controls transient persistence recovery. `maxAttempts` is the total number of attempts (default `1`), and `backoffMs` is the initial delay before retry (default `50`). Delays grow exponentially and are capped; final failures retain the existing `onError` and reliability behavior.
 
+When tracing is enabled, each retry before the final attempt emits a bounded `reliability` event with `operation: persistence_retry`, `persistenceOperation` (`load`, `append`, `clear`, `clearTopic`, or `clearBefore`), and the failed attempt number. No payload, URL, credential, or error body is included.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

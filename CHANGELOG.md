@@ -2,6 +2,17 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.0] - 2026-09-01
+
+### Added
+
+- Persistence retry now emits opt-in `reliability` trace events with the bounded operation name and retry attempt.
+- Retry diagnostics cover `load`, `append`, `clear`, `clearTopic`, and `clearBefore` without exposing payloads or error bodies.
+
+### Compatibility
+
+- Tracing remains disabled by default; retry timing, adapter contracts, and final error behavior are unchanged.
+
 ## [0.18.0] - 2026-09-01
 
 ### Added

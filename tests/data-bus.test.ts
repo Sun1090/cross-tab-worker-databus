@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }, trace?: (event: Parameters<NonNullable<ConstructorParameters<typeof CrossTabDataBus>[0]['trace']>['sink']>[0]) => void) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1033,6 +1033,7 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       environment: environment.environment,
       initialConfig: {},
       transport,
+      ...(trace ? { trace: { enabled: true, sink: trace } } : {}),
       ...(dedup ? { dedup } : {}),
       ...(replay ? { replay } : {})
     });
@@ -1369,13 +1370,18 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
         if (attempts === 1) throw new Error('transient append');
       })
     };
-    const { bus, transport } = makeReplayBus({ persistence, persistenceRetry: { maxAttempts: 2, backoffMs: 0 } });
+    const events: Array<{ type: string; operation?: string; persistenceOperation?: string; attempt?: number }> = [];
+    const { bus, transport } = makeReplayBus({ persistence, persistenceRetry: { maxAttempts: 2, backoffMs: 0 } }, undefined, event => events.push(event));
     await bus.ready();
     bus.subscribe('t', () => {});
     transport.emit('t', 1);
     await Promise.resolve();
     await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(persistence.append).toHaveBeenCalledTimes(2);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'reliability', operation: 'persistence_retry', persistenceOperation: 'append', attempt: 1
+    }));
     await bus.stop();
   });
 
