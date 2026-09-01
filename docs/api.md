@@ -115,7 +115,7 @@ Published data must satisfy the serialization constraints of the underlying tran
 
 When the owning Worker is a remote Tab and the publish control message cannot be posted (for example the BroadcastChannel fails to clone the payload), `publish()` reports the failure through `onError` instead of silently dropping it.
 
-Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee.
+Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee. Tests and hosts with a custom time source may provide `dedup.now`.
 
 When supplied, `options.messageId` and `options.timestamp` are propagated through cross-tab routing, Worker boundaries, and supported transports. The server must echo or otherwise preserve them for inbound deduplication and replay retention.
 

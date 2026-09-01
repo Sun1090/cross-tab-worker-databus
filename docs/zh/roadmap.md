@@ -1,8 +1,17 @@
 # 路线图
 
-0.6.0 已发布。下一阶段按 0.7.0 候选推进，先做可靠性与诊断，让新行为在扩展协议前可观测。
+0.12.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
-## 0.7.0 候选
+## 0.12.0 已完成范围
+
+- dedup TTL 支持可注入时钟，生命周期与过期测试不再依赖墙上时间。
+- replay 持久化 append、hydration、退订和 retention 清理失败均有结构化诊断。
+- publication metadata 做兼容性归一化：只接受非空 ID 与有限 timestamp。
+- 补充 legacy、嵌套、fallback topic 和坏 metadata 协议夹具测试。
+
+## 0.13.0 候选
+
+## 更长期候选
 
 1. **Replay 生命周期与留存**：增加持久化 `clear`/`clearTopic`，退订/替换时清理旧历史，并通过 trace 与 error handler 暴露持久化失败；
 2. **可靠性诊断**：增加恢复/重试、owner ack、路由迁移结构化事件，元数据有界且默认关闭 trace；

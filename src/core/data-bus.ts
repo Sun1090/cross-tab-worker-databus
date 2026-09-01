@@ -55,6 +55,8 @@ export interface DataBusReplayOptions<TData = unknown> {
 export interface DataBusDedupOptions {
   maxEntries?: number;
   ttlMs?: number;
+  /** Injectable epoch clock for deterministic tests and non-wall-clock hosts. */
+  now?: () => number;
 }
 
 export interface DataBusDedupStats {
@@ -107,6 +109,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly dedupMaxEntries: number;
   private readonly dedupTtlMs: number;
   private readonly dedupEnabled: boolean;
+  private readonly now: () => number;
   private readonly seenMessageIds = new Map<string, number>();
   private dedupSuppressed = 0;
   private dedupAccepted = 0;
@@ -152,8 +155,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.replayRetentionMs !== undefined && (!Number.isFinite(this.replayRetentionMs) || this.replayRetentionMs <= 0)) {
       throw new TypeError('replay.retentionMs must be a positive finite number.');
     }
-    this.replayHydration = this.hydrateReplay();
     const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
+    this.now = dedup?.now ?? Date.now;
+    this.replayHydration = this.hydrateReplay();
     this.transport = transport;
     this.initialConfig = initialConfig;
     this.hasInitialConfig = 'initialConfig' in options;
@@ -421,7 +425,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.topicHandlers.delete(topic);
     this.replayBuffers?.delete(topic);
     if (this.replayPersistence?.clearTopic) {
-      void this.replayPersistence.clearTopic(topic).catch(error => this.reportError(error));
+      void this.replayPersistence.clearTopic(topic).catch(error => this.reportPersistenceError(error));
     }
     this.cluster.unsubscribe(topic);
   }
@@ -433,7 +437,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       try {
         await this.replayPersistence.clear();
       } catch (error) {
-        this.reportError(error);
+        this.reportPersistenceError(error);
         throw error;
       }
     }
@@ -446,7 +450,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       try {
         await this.replayPersistence.clearTopic(topic);
       } catch (error) {
-        this.reportError(error);
+        this.reportPersistenceError(error);
         throw error;
       }
     }
@@ -462,7 +466,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         else this.replayBuffers.delete(topic);
       }
     }
-    if (this.replayPersistence?.clearBefore) await this.replayPersistence.clearBefore(timestamp);
+    if (this.replayPersistence?.clearBefore) {
+      try {
+        await this.replayPersistence.clearBefore(timestamp);
+      } catch (error) {
+        this.reportPersistenceError(error);
+        throw error;
+      }
+    }
   }
 
   /** Return bounded deduplication counters for diagnostics and health checks. */
@@ -578,7 +589,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   private isDuplicate(message: DataBusMessage<TData>): boolean {
     if (!this.dedupEnabled || !message.messageId) return false;
-    const now = Date.now();
+    const now = this.now();
     for (const [id, timestamp] of this.seenMessageIds) {
       if (now - timestamp > this.dedupTtlMs) this.seenMessageIds.delete(id);
     }
@@ -628,10 +639,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     buffer.push(storedMessage);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
-      void this.replayPersistence.append(storedMessage).catch(error => this.reportError(error));
+      void this.replayPersistence.append(storedMessage).catch(error => this.reportPersistenceError(error));
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        void this.replayPersistence.clearBefore(Date.now() - this.replayRetentionMs)
-          .catch(error => this.reportError(error));
+        void this.replayPersistence.clearBefore(this.now() - this.replayRetentionMs)
+          .catch(error => this.reportPersistenceError(error));
       }
     }
   }
@@ -642,7 +653,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     try {
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        await this.replayPersistence.clearBefore(Date.now() - this.replayRetentionMs);
+        await this.replayPersistence.clearBefore(this.now() - this.replayRetentionMs);
       }
       for (const message of await this.replayPersistence.load()) {
         let buffer = this.replayBuffers.get(message.topic);
@@ -654,7 +665,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (buffer.length > this.replayMaxPerTopic) buffer.shift();
       }
     } catch (error) {
-      this.reportError(error);
+      this.reportPersistenceError(error);
     }
   }
 
@@ -705,7 +716,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // Uses setTimeout so the recovery does not run re-entrantly inside the
     // callback that produced this status (e.g. openTransport's catch).
     if (status === 'error' && this.started && !this.stopping) {
-      const now = Date.now();
+      const now = this.now();
       if (now - this.lastRecoveryAt >= CrossTabDataBus.RECOVERY_COOLDOWN_MS) {
         this.lastRecoveryAt = now;
         this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1 });
@@ -724,6 +735,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private reportError(error: unknown): void {
     this.trace.event({ type: 'error', source: 'transport' });
     this.invokeHandlers(this.errorHandlers, handler => handler(error), 'error handler');
+  }
+
+  private reportPersistenceError(error: unknown): void {
+    this.trace.event({ type: 'reliability', operation: 'persistence_cleanup' });
+    this.reportError(error);
   }
 
   private traceSubscription(action: 'subscribe' | 'unsubscribe', topic: string): void {

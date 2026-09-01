@@ -2,6 +2,20 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.12.0] - 2026-09-01
+
+### Added
+
+- Deduplication TTL now accepts an injectable `dedup.now` clock for deterministic tests and host runtimes without a wall-clock dependency.
+- Persistence failures in replay append/cleanup paths emit bounded `persistence_cleanup` reliability diagnostics before reaching error handlers.
+- Publication parsing now accepts only non-empty message IDs and finite timestamps, while preserving legacy payload compatibility.
+- Added protocol compatibility tests for legacy, nested, fallback-topic, and malformed metadata frames.
+
+### Compatibility
+
+- `dedup.now` is optional and existing configurations keep wall-clock behavior.
+- Invalid metadata is ignored instead of poisoning a publication; the topic and payload remain deliverable.
+
 ## [0.11.0] - 2026-09-01
 
 ### Added
