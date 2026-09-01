@@ -165,7 +165,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       handlers: {
         // The cluster calls `onControl` when it receives a SUBSCRIBE/UNSUBSCRIBE/PUBLISH
         // control message — meaning the owning Worker has delegated the action to us.
-        onControl: (action, topic, data, messageId) => {
+        onControl: (action, topic, data, messageId, timestamp) => {
           switch (action) {
             case 'SUBSCRIBE':
               if (this.subscribeTransport(topic)) this.traceSubscription('subscribe', topic);
@@ -174,7 +174,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
               if (this.unsubscribeTransport(topic)) this.traceSubscription('unsubscribe', topic);
               break;
             case 'PUBLISH':
-              this.runTransport(() => this.transport.publish(topic, data, messageId ? { messageId } : undefined));
+              this.runTransport(() => this.transport.publish(
+                topic,
+                data,
+                messageId === undefined && timestamp === undefined
+                  ? undefined
+                  : {
+                      ...(messageId === undefined ? {} : { messageId }),
+                      ...(timestamp === undefined ? {} : { timestamp })
+                    }
+              ));
               break;
             default:
               break;
@@ -469,7 +478,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     this.ensureStarted();
-    if (!this.cluster.publish(topic, data, options?.messageId)) {
+    if (!this.cluster.publish(topic, data, options)) {
       this.reportError(
         new Error('Failed to send the publish control message to the owning worker.')
       );

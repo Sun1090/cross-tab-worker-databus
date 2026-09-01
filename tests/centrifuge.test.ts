@@ -253,6 +253,50 @@ describe('createCentrifugeDataBus', () => {
     expect(worker.transfers).toEqual([]);
   });
 
+  it('preserves publication metadata across the Worker protocol boundary', async () => {
+    const shared = new SharedWorkerDouble();
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'publication-metadata'
+    });
+    const received: unknown[] = [];
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      sharedWorkerFactory: () => shared as unknown as SharedWorker,
+      workerMode: 'shared'
+    });
+
+    bus.subscribe('market.tick', message => received.push(message));
+    await bus.ready();
+    bus.publish('market.tick', { price: 100 }, { messageId: 'm-1', timestamp: 42 });
+
+    expect(shared.port.messages.find(message => message.type === 'PUBLISH')).toEqual({
+      type: 'PUBLISH',
+      topic: 'market.tick',
+      data: { price: 100 },
+      messageId: 'm-1',
+      timestamp: 42
+    });
+
+    shared.port.emit({
+      type: 'MESSAGE',
+      topic: 'market.tick',
+      data: { price: 100 },
+      messageId: 'm-1',
+      timestamp: 42
+    });
+    expect(received).toEqual([
+      {
+        topic: 'market.tick',
+        data: { price: 100 },
+        messageId: 'm-1',
+        timestamp: 42
+      }
+    ]);
+  });
+
   it('delivers MESSAGE_BIN publications through the object message API', async () => {
     const shared = new SharedWorkerDouble();
     const environment = createFakeEnvironment({

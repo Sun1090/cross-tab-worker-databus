@@ -230,6 +230,38 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     await expect.poll(() => receivedCount(tabA)).toBe(2);
     await expect.poll(() => receivedCount(tabB)).toBe(2);
   });
+
+  test('publication metadata round-trips through the real demo WebSocket server', async ({ page }) => {
+    await page.goto(DEMO_URL);
+    const topic = `e2e.metadata.${Date.now()}`;
+    const result = await page.evaluate(async replayTopic => {
+      const moduleUrl = '/dist/index.js';
+      const { WebSocketTransport } = await import(/* @vite-ignore */ moduleUrl);
+      const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/demo`;
+      const transport = new WebSocketTransport({ url });
+      let resolveConnected!: () => void;
+      const connected = new Promise<void>(resolve => { resolveConnected = resolve; });
+      let resolveMessage!: (message: unknown) => void;
+      const received = new Promise<unknown>(resolve => { resolveMessage = resolve; });
+      transport.start({ url }, {
+        onMessage: (message: unknown) => resolveMessage(message),
+        onStatus: (status: string) => { if (status === 'connected') resolveConnected(); },
+        onError: (error: unknown) => { throw error; }
+      });
+      await connected;
+      transport.subscribe(replayTopic);
+      transport.publish(replayTopic, { value: 1 }, { messageId: 'e2e-message', timestamp: 42 });
+      const message = await received;
+      transport.stop();
+      return message;
+    }, topic);
+    expect(result).toEqual({
+      topic,
+      data: { value: 1 },
+      messageId: 'e2e-message',
+      timestamp: 42
+    });
+  });
 });
 
 test.describe('cross-tab databus demo — binary publish', () => {

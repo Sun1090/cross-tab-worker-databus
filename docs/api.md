@@ -102,7 +102,11 @@ Prefer using the cleanup function returned by `subscribe` to avoid accidentally 
 ### `publish(topic, data, options?)`
 
 ```ts
-publish(topic: string, data: unknown, options?: { messageId?: string }): void
+publish(
+  topic: string,
+  data: unknown,
+  options?: { messageId?: string; timestamp?: number }
+): void
 ```
 
 Routes the publish operation to the current topic owner; uses the current Worker when no valid route exists.
@@ -113,7 +117,17 @@ When the owning Worker is a remote Tab and the publish control message cannot be
 
 Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee.
 
-When supplied, `options.messageId` is propagated through cross-tab routing and supported transports. It is metadata only; the server must echo or otherwise preserve it for inbound deduplication.
+When supplied, `options.messageId` and `options.timestamp` are propagated through cross-tab routing, Worker boundaries, and supported transports. The server must echo or otherwise preserve them for inbound deduplication and replay retention.
+
+`DataBusMessage` and `DataBusPublication` expose the same optional metadata.
+`DataBusPublicationEnvelope<TData>` is the canonical JSON envelope type:
+
+```ts
+{
+  op: 'publication',
+  publication: { topic, data, messageId?, timestamp? }
+}
+```
 
 ### `clearReplay()`
 
@@ -289,8 +303,11 @@ Implements `DataBusTransport`. Connection lifecycle maps to the DataBus status v
 
 JSON text frames:
 
-- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
-- server → client: `{"topic":"...","data":...}` for publications. Frames without a string `topic` field are ignored; malformed JSON surfaces via `handlers.onError` without throwing.
+- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:...,"timestamp"?:...}`
+- server → client (canonical): `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:...,"timestamp"?:...}}`
+- server → client (legacy, still accepted): `{"topic":"...","data":...}`
+
+Frames without a string publication `topic` are ignored; malformed JSON surfaces via `handlers.onError` without throwing.
 
 A pattern-aware server may deliver publications tagged with the concrete topic (recommended); publications tagged with the pattern itself are delivered through the exact-match path.
 

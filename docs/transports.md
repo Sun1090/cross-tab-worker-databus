@@ -141,14 +141,18 @@ const bus = createWebSocketDataBus({
 
 Wire protocol (JSON text frames):
 
-- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
-- server → client: publications are `{"topic":"...","data":...}`. Frames
-  without a string `topic` are ignored; malformed JSON is reported through
-  `handlers.onError` without throwing.
+- client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
+- server → client: the canonical publication is `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`. The legacy flat `{"topic":"...","data":...}` frame remains accepted. Frames without a string topic are ignored; malformed JSON is reported through `handlers.onError` without throwing.
 
 When `data` is an `ArrayBuffer`, publish uses a binary frame with a small
 header (`0xc7`, UTF-8 topic length, topic, payload). Servers may echo the same
-frame unchanged; JSON remains the compatibility path for all other payloads.
+frame unchanged. A binary publication carrying metadata uses the JSON-compatible
+byte-array envelope so `messageId` and `timestamp` are not lost.
+
+The Centrifuge session applies the same transport-neutral contract. Payloads
+without metadata keep their original shape. Metadata-bearing publishes use
+`{ data, messageId?, timestamp? }`, while inbound publications additionally
+accept the canonical nested `DataBusPublicationEnvelope`.
 
 Lifecycle mapping: `open` → `connected`, `close` → `disconnected`,
 `error` → `error` (DataBus auto-recovery). Subscribe frames are re-sent when

@@ -57,6 +57,9 @@ export {
 export type {
   DataBusErrorHandler,
   DataBusMessage,
+  DataBusPublication,
+  DataBusPublicationEnvelope,
+  DataBusPublicationMetadata,
   DataBusPublishOptions,
   DataBusMessageHandler,
   DataBusStatusHandler,

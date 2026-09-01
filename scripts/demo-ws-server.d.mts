@@ -11,11 +11,18 @@ export declare function installDemoWsBusServer(
 ): DemoWsBusHub;
 
 export declare class DemoWsBusHub {
+  constructor(options?: { now?: () => number });
+  now: () => number;
   clients: Set<DemoWebSocketConnection>;
   subscriptions: Map<DemoWebSocketConnection, Set<string>>;
 
   attach(connection: DemoWebSocketConnection): void;
   detach(connection: DemoWebSocketConnection): void;
   handleFrame(connection: DemoWebSocketConnection, text: string): boolean;
-  publish(topic: string, data: unknown): void;
+  publish(
+    topic: string,
+    data: unknown,
+    binary?: boolean,
+    metadata?: { messageId?: string; timestamp?: number }
+  ): void;
 }

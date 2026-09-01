@@ -21,6 +21,7 @@
 - 已有 Topic 的 owner 存活时保持稳定，前后台切换不迁移已有订阅
 - 新 Topic 分配给负载最低的候选 Worker
 - 通配符订阅：`chat.*` 与 `*` pattern 在分发侧匹配具体 Topic
+- 传输无关的 publication 元数据（`messageId`、`timestamp`），支持标准 WebSocket/Centrifuge envelope，并兼容旧帧格式
 - 内置零依赖的原生 WebSocket 传输（`createWebSocketDataBus`），适配普通 WebSocket 服务器
 - 可选的 React hooks 适配层（`cross-tab-worker-databus/hooks`）：StrictMode 安全的 bus 生命周期与自动清理订阅
 - 可选的 Vue 3 composables 适配层（`cross-tab-worker-databus/vue`）：安全管理 bus 生命周期、订阅和状态

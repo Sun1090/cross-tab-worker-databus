@@ -2,6 +2,19 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.10.0] - 2026-09-01
+
+### Added
+
+- Formal transport-neutral publication metadata types (`DataBusPublication`, `DataBusPublicationMetadata`, and `DataBusPublicationEnvelope`).
+- Publication metadata (`messageId` and `timestamp`) now traverses cluster controls, Centrifuge Worker boundaries, and WebSocket publish frames.
+- Demo WebSocket server emits the canonical nested publication envelope and preserves caller metadata; real-browser contract coverage added.
+
+### Compatibility
+
+- Flat WebSocket publication frames remain accepted.
+- Existing payloads without metadata retain their legacy shape.
+
 ## [0.9.0] - 2026-09-01
 
 ### Added

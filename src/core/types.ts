@@ -24,10 +24,27 @@ export type WorkerStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
  * These are the three operations a subscriber asks the owning worker to perform. */
 export type WorkerControlAction = 'SUBSCRIBE' | 'UNSUBSCRIBE' | 'PUBLISH';
 
-/** Optional metadata attached to an outbound publication. */
-export interface DataBusPublishOptions {
+/** Transport-neutral metadata attached to a publication. */
+export interface DataBusPublicationMetadata {
   /** Stable caller/server identifier propagated through the cluster and wire protocol. */
   messageId?: string;
+  /** Producer-assigned Unix timestamp in milliseconds, used by retention policies. */
+  timestamp?: number;
+}
+
+/** Optional metadata attached to an outbound publication. */
+export type DataBusPublishOptions = DataBusPublicationMetadata;
+
+/** Canonical transport-neutral publication shape. */
+export interface DataBusPublication<TData = unknown> extends DataBusPublicationMetadata {
+  topic: string;
+  data: TData;
+}
+
+/** Forward-compatible JSON envelope accepted from WebSocket-style servers. */
+export interface DataBusPublicationEnvelope<TData = unknown> {
+  op: 'publication';
+  publication: DataBusPublication<TData>;
 }
 
 /** Whether the tab is currently visible to the user. Only influences placement
@@ -111,6 +128,8 @@ export type WorkerClusterMessage<TEvent = unknown> =
       data?: unknown;
       /** Optional stable identifier for the publication. */
       messageId?: string;
+      /** Optional producer timestamp propagated with PUBLISH actions. */
+      timestamp?: number;
     }
   /** The owning worker fans out a publication to every tab. `eventType`
    * distinguishes databus publications from future event types. */
@@ -139,13 +158,7 @@ export type WorkerClusterMessage<TEvent = unknown> =
 
 /** A publication delivered to a topic handler: the topic name and the
  * structured-clone-safe payload. */
-export interface DataBusMessage<TData = unknown> {
-  topic: string;
-  data: TData;
-  /** Optional caller/server supplied stable identifier used by opt-in dedup. */
-  messageId?: string;
-  /** Millisecond timestamp assigned by the producer/bus for retention policies. */
-  timestamp?: number;
+export interface DataBusMessage<TData = unknown> extends DataBusPublication<TData> {
   /** True when this delivery is a historical replay (see the `replay`
    * subscription option) rather than a live publication. */
   replayed?: boolean;

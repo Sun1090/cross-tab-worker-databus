@@ -58,9 +58,9 @@ export type CentrifugeWorkerInput =
   /** Unsubscribe from a channel. Idempotent. */
   | { type: 'UNSUBSCRIBE'; topic: string }
   /** Publish a structured-cloneable payload to a channel. */
-  | { type: 'PUBLISH'; topic: string; data: unknown; messageId?: string }
+  | { type: 'PUBLISH'; topic: string; data: unknown; messageId?: string; timestamp?: number }
   /** Publish an ArrayBuffer via Transferable (zero-copy when `transferable` is on). */
-  | { type: 'PUBLISH_BIN'; topic: string; data: ArrayBuffer; messageId?: string }
+  | { type: 'PUBLISH_BIN'; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
   /** Heartbeat from the main thread; the SharedWorker reaps silent ports. */
   | { type: 'PING' }
   /** Disconnect the client and clear all subscriptions. */
@@ -72,9 +72,9 @@ export type CentrifugeWorkerOutput<TData = unknown> =
   /** Connection status changed. Maps Centrifuge states to the DataBus vocabulary. */
   | { type: 'STATUS'; status: WorkerStatus }
   /** A JSON publication arrived. Routed to onMessage via handleOutput. */
-  | { type: 'MESSAGE'; topic: string; data: TData; messageId?: string }
+  | { type: 'MESSAGE'; topic: string; data: TData; messageId?: string; timestamp?: number }
   /** A binary publication arrived (Transferable). Routed to onMessage with the ArrayBuffer. */
-  | { type: 'MESSAGE_BIN'; topic: string; data: ArrayBuffer; messageId?: string }
+  | { type: 'MESSAGE_BIN'; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
   /** A non-fatal error occurred. Does not imply disconnection (the client retries internally). */
   | { type: 'ERROR'; error: SerializedWorkerError };
 

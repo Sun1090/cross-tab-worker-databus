@@ -104,6 +104,28 @@ describe('WebSocketTransport', () => {
     expect(onMessage).toHaveBeenCalledWith({ topic: 'market.tick', data: { price: 2 }, messageId: 'm-2' });
   });
 
+  it('propagates complete publication metadata in JSON and metadata-bearing binary frames', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publish('market.tick', { price: 1 }, { messageId: 'm-1', timestamp: 42 });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.tick',
+      data: { price: 1 },
+      messageId: 'm-1',
+      timestamp: 42
+    }));
+
+    transport.publish('market.bin', new Uint8Array([1, 2]).buffer, { timestamp: 43 });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.bin',
+      data: [1, 2],
+      timestamp: 43
+    }));
+  });
+
   it('accepts nested publication envelopes for forward-compatible servers', () => {
     const { sockets, onMessage } = makeTransport();
     const socket = sockets[0]!;

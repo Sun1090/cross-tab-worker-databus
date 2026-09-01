@@ -6,6 +6,7 @@
  * a SharedWorker port, or directly on the main thread as a local fallback.
  */
 import { Centrifuge } from 'centrifuge';
+import { parseDataBusPublication } from './core/publication';
 import type {
   PublicationContext,
   StateContext,
@@ -53,7 +54,7 @@ export class CentrifugeSession<TData = unknown> {
       case 'PUBLISH_BIN':
         // Binary and JSON publish share the same Centrifuge client call; the
         // transport layer decides whether to transfer the ArrayBuffer.
-        this.publish(message.topic, message.data, message.messageId);
+        this.publish(message.topic, message.data, message.messageId, message.timestamp);
         return;
       case 'STOP':
         this.stop();
@@ -132,12 +133,19 @@ export class CentrifugeSession<TData = unknown> {
   }
 
   /** Publish a message to the Centrifuge channel. */
-  private publish(topic: string, data: unknown, messageId?: string): void {
+  private publish(topic: string, data: unknown, messageId?: string, timestamp?: number): void {
     if (!this.client) return this.postError(new Error('Centrifuge client is not initialized.'));
     // Centrifuge's payload is application-defined. Preserve legacy payloads;
     // when an ID is requested, send a small metadata envelope that compatible
     // servers can echo back for end-to-end deduplication.
-    const payload = messageId ? { data, messageId } : data;
+    const hasMetadata = messageId !== undefined || timestamp !== undefined;
+    const payload = hasMetadata
+      ? {
+          data,
+          ...(messageId === undefined ? {} : { messageId }),
+          ...(timestamp === undefined ? {} : { timestamp })
+        }
+      : data;
     void this.client.publish(topic, payload).catch(error => this.postError(error));
   }
 
@@ -151,13 +159,15 @@ export class CentrifugeSession<TData = unknown> {
       this.post({ type: 'MESSAGE_BIN', topic, data }, [data]);
       return;
     }
-    const messageId = data && typeof data === 'object' && typeof (data as Record<string, unknown>).messageId === 'string'
-      ? (data as Record<string, unknown>).messageId as string
-      : undefined;
-    const payload = messageId && Object.prototype.hasOwnProperty.call(data, 'data')
-      ? (data as Record<string, unknown>).data
-      : data;
-    this.post({ type: 'MESSAGE', topic, data: payload as TData, ...(messageId ? { messageId } : {}) });
+    const publication = parseDataBusPublication<TData>(data, topic);
+    if (!publication) return;
+    this.post({
+      type: 'MESSAGE',
+      topic: publication.topic,
+      data: publication.data,
+      ...(publication.messageId === undefined ? {} : { messageId: publication.messageId }),
+      ...(publication.timestamp === undefined ? {} : { timestamp: publication.timestamp })
+    });
   }
 
   /** Disconnect the client and clear all subscriptions. */

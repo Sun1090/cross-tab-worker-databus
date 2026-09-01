@@ -102,7 +102,11 @@ unsubscribe(topic: string, handler?: DataBusMessageHandler<TData>): void
 ### `publish(topic, data, options?)`
 
 ```ts
-publish(topic: string, data: unknown, options?: { messageId?: string }): void
+publish(
+  topic: string,
+  data: unknown,
+  options?: { messageId?: string; timestamp?: number }
+): void
 ```
 
 将发布操作路由到当前 Topic owner；没有有效路由时使用当前 Worker。
@@ -111,7 +115,17 @@ publish(topic: string, data: unknown, options?: { messageId?: string }): void
 
 当 owner 是远端 Tab、且发布控制消息无法投递时（例如 BroadcastChannel 无法克隆 payload），`publish()` 会通过 `onError` 上报失败，而不是静默丢弃。
 
-传入 `options.messageId` 后，ID 会经过跨 Tab 路由并由支持的 transport 透传。它只是元数据；服务端需要回显或保留该 ID，入站 dedup 才能生效。
+传入 `options.messageId` 和 `options.timestamp` 后，元数据会穿过跨 Tab 路由、Worker 边界和支持的 transport。服务端必须回显或以其他方式保留它们，入站去重和 replay retention 才能使用。
+
+`DataBusMessage` 与 `DataBusPublication` 暴露相同的可选元数据。
+`DataBusPublicationEnvelope<TData>` 是标准 JSON envelope 类型：
+
+```ts
+{
+  op: 'publication',
+  publication: { topic, data, messageId?, timestamp? }
+}
+```
 
 ### `clearReplay()`
 
@@ -287,8 +301,11 @@ new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 
 JSON 文本帧：
 
-- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
-- server → client：发布为 `{"topic":"...","data":...}`。没有字符串 `topic` 字段的帧被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
+- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:...,"timestamp"?:...}`
+- server → client（标准）：`{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:...,"timestamp"?:...}}`
+- server → client（旧格式，继续兼容）：`{"topic":"...","data":...}`
+
+没有字符串 publication `topic` 的帧会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
 
 支持 pattern 的服务器建议以具体 topic 标注发布；以 pattern 本身标注的发布走精确匹配路径投递。
 
