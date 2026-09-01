@@ -8,7 +8,7 @@ export const demoWsBusPath = '/ws/demo';
  * by `src/websocket.ts` (WebSocketTransport):
  *
  * - client → server: {"op":"subscribe"|"unsubscribe"|"publish","topic":...,"data":...}
- * - server → client: {"topic":...,"data":...} for publications
+ * - server → client: {"op":"publication","publication":{"topic":...,"data":...,"timestamp":...}}
  *
  * Publications fan out to every connection whose subscriptions (exact topics
  * or wildcards) match the published topic, including the sender, mirroring
@@ -53,7 +53,8 @@ export function matchesDemoTopic(pattern, topic) {
 }
 
 export class DemoWsBusHub {
-  constructor() {
+  constructor({ now = Date.now } = {}) {
+    this.now = now;
     /** @type {Set<DemoWebSocketConnection>} */
     this.clients = new Set();
     /** @type {Map<DemoWebSocketConnection, Set<string>>} subscription patterns per client */
@@ -101,7 +102,10 @@ export class DemoWsBusHub {
         topics.delete(frame.topic);
         return true;
       case 'publish':
-        this.publish(frame.topic, frame.data);
+        this.publish(frame.topic, frame.data, false, {
+          ...(typeof frame.messageId === 'string' ? { messageId: frame.messageId } : {}),
+          timestamp: typeof frame.timestamp === 'number' ? frame.timestamp : this.now()
+        });
         return true;
       default:
         return false;
@@ -109,8 +113,16 @@ export class DemoWsBusHub {
   }
 
   /** Fan a publication out to every subscriber whose subscriptions match. */
-  publish(topic, data, binary = false) {
-    const frame = binary ? null : JSON.stringify({ topic, data });
+  publish(topic, data, binary = false, metadata = {}) {
+    const frame = binary ? null : JSON.stringify({
+      op: 'publication',
+      publication: {
+        topic,
+        data,
+        ...(typeof metadata.messageId === 'string' ? { messageId: metadata.messageId } : {}),
+        timestamp: typeof metadata.timestamp === 'number' ? metadata.timestamp : this.now()
+      }
+    });
     const topicBytes = Buffer.from(topic, 'utf8');
     const binaryFrame = binary
       ? Buffer.concat([Buffer.from([0xc7, topicBytes.length >> 8, topicBytes.length & 0xff]), topicBytes, Buffer.from(data)])

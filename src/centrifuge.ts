@@ -148,10 +148,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
    */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     if (this.transferable && data instanceof ArrayBuffer) {
-      this.post({ type: 'PUBLISH_BIN', topic, data, ...(options?.messageId ? { messageId: options.messageId } : {}) }, [data]);
+      this.post({ type: 'PUBLISH_BIN', topic, data, ...publicationMetadata(options) }, [data]);
       return;
     }
-    this.post({ type: 'PUBLISH', topic, data, ...(options?.messageId ? { messageId: options.messageId } : {}) });
+    this.post({ type: 'PUBLISH', topic, data, ...publicationMetadata(options) });
   }
 
   /**
@@ -231,8 +231,8 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * and the local-session sink — all three feed into this single dispatcher. */
   private handleOutput(message: CentrifugeWorkerOutput<TData>): void {
     if (message.type === 'STATUS') this.handlers?.onStatus(message.status);
-    if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data, ...(message.messageId ? { messageId: message.messageId } : {}) });
-    if (message.type === 'MESSAGE_BIN') this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...(message.messageId ? { messageId: message.messageId } : {}) });
+    if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data, ...publicationMetadata(message) });
+    if (message.type === 'MESSAGE_BIN') this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...publicationMetadata(message) });
     if (message.type === 'ERROR') this.handlers?.onError(deserializeWorkerError(message.error));
   }
 
@@ -462,4 +462,14 @@ function deserializeWorkerError(error: SerializedWorkerError): Error {
   if (error.stack) result.stack = error.stack;
   if (error.context !== undefined) Object.assign(result, { context: error.context });
   return result;
+}
+
+/** Copy defined publication metadata without adding empty enumerable fields. */
+function publicationMetadata(
+  metadata?: { messageId?: string; timestamp?: number }
+): { messageId?: string; timestamp?: number } {
+  return {
+    ...(metadata?.messageId === undefined ? {} : { messageId: metadata.messageId }),
+    ...(metadata?.timestamp === undefined ? {} : { timestamp: metadata.timestamp })
+  };
 }

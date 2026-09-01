@@ -90,7 +90,7 @@ function decodeTextFrame(frame: Buffer): string {
 
 describe('DemoWsBusHub protocol', () => {
   it('fans publications out to exact and wildcard subscribers, including the sender', () => {
-    const hub = new DemoWsBusHub();
+    const hub = new DemoWsBusHub({ now: () => 42 });
     const sender = new FakeConnection();
     const exact = new FakeConnection();
     const wildcard = new FakeConnection();
@@ -106,14 +106,17 @@ describe('DemoWsBusHub protocol', () => {
 
     // The sender echoes (like the Centrifuge demo) and the exact subscriber
     // receives; the unrelated subscriber gets nothing.
-    const expected = JSON.stringify({ topic: 'chat.room.1', data: { n: 1 } });
+    const expected = JSON.stringify({
+      op: 'publication',
+      publication: { topic: 'chat.room.1', data: { n: 1 }, timestamp: 42 }
+    });
     expect(sender.messages).toEqual([expected]);
     expect(exact.messages).toEqual([expected]);
     expect(wildcard.messages).toEqual([]);
   });
 
   it('unsubscribe stops delivery and the matcher respects segment boundaries', () => {
-    const hub = new DemoWsBusHub();
+    const hub = new DemoWsBusHub({ now: () => 42 });
     const client = new FakeConnection();
     hub.attach(client);
     client.sendFrame({ op: 'subscribe', topic: 'chat.*' });
@@ -121,11 +124,14 @@ describe('DemoWsBusHub protocol', () => {
     client.sendFrame({ op: 'unsubscribe', topic: 'chat.*' });
     client.sendFrame({ op: 'publish', topic: 'chat.room.2', data: 2 });
 
-    expect(client.messages).toEqual([JSON.stringify({ topic: 'chat.room.1', data: 1 })]);
+    expect(client.messages).toEqual([JSON.stringify({
+      op: 'publication',
+      publication: { topic: 'chat.room.1', data: 1, timestamp: 42 }
+    })]);
   });
 
   it('ignores malformed and unknown frames without disconnecting', () => {
-    const hub = new DemoWsBusHub();
+    const hub = new DemoWsBusHub({ now: () => 42 });
     const client = new FakeConnection();
     hub.attach(client);
 
@@ -136,7 +142,22 @@ describe('DemoWsBusHub protocol', () => {
     // The connection still works afterwards.
     client.sendFrame({ op: 'subscribe', topic: 't' });
     client.sendFrame({ op: 'publish', topic: 't', data: 'ok' });
-    expect(client.messages).toEqual([JSON.stringify({ topic: 't', data: 'ok' })]);
+    expect(client.messages).toEqual([JSON.stringify({
+      op: 'publication',
+      publication: { topic: 't', data: 'ok', timestamp: 42 }
+    })]);
+  });
+
+  it('echoes caller metadata through the canonical publication envelope', () => {
+    const hub = new DemoWsBusHub({ now: () => 99 });
+    const client = new FakeConnection();
+    hub.attach(client);
+    client.sendFrame({ op: 'subscribe', topic: 't' });
+    client.sendFrame({ op: 'publish', topic: 't', data: 1, messageId: 'm-1', timestamp: 42 });
+    expect(client.messages).toEqual([JSON.stringify({
+      op: 'publication',
+      publication: { topic: 't', data: 1, messageId: 'm-1', timestamp: 42 }
+    })]);
   });
 
   it('drops detached clients from the fan-out set', () => {

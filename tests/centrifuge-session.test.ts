@@ -111,6 +111,61 @@ describe('CentrifugeSession', () => {
     await Promise.resolve();
     expect(sink).not.toHaveBeenCalled();
   });
+
+  it('wraps outbound metadata and unwraps echoed publication metadata', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+    const client = FakeCentrifuge.instances[0]!;
+    client.publish = vi.fn().mockResolvedValue({});
+    session.handle({
+      type: 'PUBLISH',
+      topic: 'market.tick',
+      data: { price: 1 },
+      messageId: 'm-1',
+      timestamp: 42
+    });
+    await vi.waitFor(() => expect(client.publish).toHaveBeenCalledWith(
+      'market.tick',
+      { data: { price: 1 }, messageId: 'm-1', timestamp: 42 }
+    ));
+
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const subscription = client.subscriptions.get('market.tick')!;
+    for (const listener of subscription.listeners.get('publication') ?? []) {
+      listener({ data: { data: { price: 2 }, messageId: 'm-2', timestamp: 43 } });
+    }
+    expect(sink).toHaveBeenCalledWith({
+      type: 'MESSAGE',
+      topic: 'market.tick',
+      data: { price: 2 },
+      messageId: 'm-2',
+      timestamp: 43
+    });
+
+    for (const listener of subscription.listeners.get('publication') ?? []) {
+      listener({
+        data: {
+          op: 'publication',
+          publication: { topic: 'market.tick', data: { price: 3 }, messageId: 'm-3', timestamp: 44 }
+        }
+      });
+    }
+    expect(sink).toHaveBeenCalledWith({
+      type: 'MESSAGE',
+      topic: 'market.tick',
+      data: { price: 3 },
+      messageId: 'm-3',
+      timestamp: 44
+    });
+  });
 });
 
 describe('CentrifugeSession additional coverage', () => {

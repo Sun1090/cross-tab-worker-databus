@@ -384,6 +384,8 @@ A publication travels publisher → current Topic owner → transport/server →
 4. The owner broadcasts `EVENT/DATABUS_PUBLICATION` over the BroadcastChannel and, if its own Tab also has a local subscription, dispatches once directly. BroadcastChannel never echoes to the sender, so there is no duplicate dispatch.
 5. Every other Tab receives the `EVENT` but invokes its local handlers only when it holds a `subscriber:{topicKey}:{tabId}` record for that topic; Tabs without a local subscription drop the message.
 
+Optional publication metadata (`messageId` and `timestamp`) follows the same path as the payload: `CONTROL/PUBLISH` → transport/server → `DataBusMessage` → `EVENT` fan-out. It is never written to coordination storage. Transports normalize legacy payloads and the canonical `DataBusPublicationEnvelope` before the three dispatch gates.
+
 At the transport layer, a Centrifuge client can emit a publication both on the `client` object and on the matching `Subscription` object. To avoid dispatching the same server publication twice, the Centrifuge session only handles the client-level `publication` for topics that have **no active client-side subscription** (server-side subscriptions); topics with an active subscription are delivered solely through the subscription-level listener.
 
 ```mermaid
@@ -407,7 +409,7 @@ sequenceDiagram
 
 BroadcastChannel does not echo to its sender, so the owner receives no `EVENT` back for its own broadcast — its local dispatch is the only local delivery.
 
-Publications are not written to localStorage. Message data only exists in the BroadcastChannel in-memory event and within the transport; batch writes only cover coordination metadata.
+Publications are not written to localStorage. Message data and publication metadata only exist in the BroadcastChannel in-memory event and within the transport; batch writes only cover coordination metadata.
 
 ### Dispatch flow: three gates
 

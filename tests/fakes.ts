@@ -180,7 +180,7 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   readonly subscribed = new Set<string>();
   readonly subscribeCalls: string[] = [];
   readonly unsubscribeCalls: string[] = [];
-  readonly publishCalls: Array<{ topic: string; data: unknown; options?: { messageId?: string } }> = [];
+  readonly publishCalls: Array<{ topic: string; data: unknown; options?: { messageId?: string; timestamp?: number } }> = [];
   startCalls = 0;
   stopCalls = 0;
   /** When true, start() calls onStatus('error') instead of 'connected'. */
@@ -221,7 +221,7 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     this.subscribed.delete(topic);
   }
 
-  publish(topic: string, data: unknown, options?: { messageId?: string }): void {
+  publish(topic: string, data: unknown, options?: { messageId?: string; timestamp?: number }): void {
     this.publishCalls.push({ topic, data, ...(options ? { options } : {}) });
   }
 

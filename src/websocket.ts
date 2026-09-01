@@ -12,6 +12,7 @@
  *   without a string `topic` field is ignored (forward-compatible).
  */
 import { CrossTabDataBus } from './core/data-bus';
+import { parseDataBusPublication } from './core/publication';
 import type { CrossTabDataBusOptions } from './core/data-bus';
 import type {
   DataBusTransport,
@@ -121,10 +122,16 @@ export class WebSocketTransport<TData = unknown>
   /** Publish `data` to `topic` as a JSON frame. Requires an open socket. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void> {
     if (data instanceof ArrayBuffer) {
-      this.sendBinaryFrame(topic, data, options?.messageId);
+      this.sendBinaryFrame(topic, data, options?.messageId, options?.timestamp);
       return;
     }
-    this.sendFrame({ op: 'publish', topic, data, ...(options?.messageId ? { messageId: options.messageId } : {}) });
+    this.sendFrame({
+      op: 'publish',
+      topic,
+      data,
+      ...(options?.messageId === undefined ? {} : { messageId: options.messageId }),
+      ...(options?.timestamp === undefined ? {} : { timestamp: options.timestamp })
+    });
   }
 
   /** Close the socket and drop all state. Safe to call multiple times. */
@@ -139,7 +146,7 @@ export class WebSocketTransport<TData = unknown>
   /** Send one JSON frame. Frames are dropped with an `onError` report when
    * the socket is not open — subscribe frames are re-sent on open, so the
    * only real loss is a publish during a disconnect window. */
-  private sendFrame(payload: { op: string; topic: string; data?: unknown; messageId?: string }): void {
+  private sendFrame(payload: { op: string; topic: string; data?: unknown; messageId?: string; timestamp?: number }): void {
     if (this.socket?.readyState !== WS_OPEN) {
       this.handlers?.onError(new Error(`WebSocket is not open; dropped "${payload.op}" frame.`));
       return;
@@ -147,11 +154,17 @@ export class WebSocketTransport<TData = unknown>
     this.socket.send(JSON.stringify(payload));
   }
 
-  private sendBinaryFrame(topic: string, data: ArrayBuffer, messageId?: string): void {
-    if (messageId) {
+  private sendBinaryFrame(topic: string, data: ArrayBuffer, messageId?: string, timestamp?: number): void {
+    if (messageId !== undefined || timestamp !== undefined) {
       // Binary frames retain their compact legacy shape; metadata is sent as a
       // JSON envelope so IDs are never silently lost.
-      this.sendFrame({ op: 'publish', topic, data: Array.from(new Uint8Array(data)), messageId });
+      this.sendFrame({
+        op: 'publish',
+        topic,
+        data: Array.from(new Uint8Array(data)),
+        ...(messageId === undefined ? {} : { messageId }),
+        ...(timestamp === undefined ? {} : { timestamp })
+      });
       return;
     }
     if (this.socket?.readyState !== WS_OPEN) {
@@ -194,18 +207,8 @@ export class WebSocketTransport<TData = unknown>
       return;
     }
     if (!parsed || typeof parsed !== 'object') return;
-    const frame = parsed as Record<string, unknown>;
-    const envelope = frame.publication && typeof frame.publication === 'object'
-      ? frame.publication as Record<string, unknown>
-      : frame;
-    if (typeof envelope.topic !== 'string') return;
-    const message: DataBusMessage<TData> = {
-      topic: envelope.topic,
-      data: envelope.data as TData,
-      ...(typeof envelope.messageId === 'string' ? { messageId: envelope.messageId } : {}),
-      ...(typeof envelope.timestamp === 'number' ? { timestamp: envelope.timestamp } : {})
-    };
-    this.handlers?.onMessage(message);
+    const publication = parseDataBusPublication<TData>(parsed);
+    if (publication) this.handlers?.onMessage(publication as DataBusMessage<TData>);
   }
 }
 

@@ -21,6 +21,7 @@ By default each tab holds its own Dedicated Worker; when configured with `worker
 - Existing Topic owners remain stable while alive; visibility changes do not move established subscriptions
 - New Topics are assigned to the least-loaded eligible Worker
 - Wildcard subscriptions: `chat.*` and `*` patterns match concrete topics at dispatch
+- Transport-neutral publication metadata (`messageId`, `timestamp`) with canonical WebSocket/Centrifuge envelopes and legacy frame compatibility
 - Built-in zero-dependency native WebSocket transport (`createWebSocketDataBus`) for plain-WebSocket servers
 - Optional React hooks adapter (`cross-tab-worker-databus/hooks`): StrictMode-safe bus lifecycle, auto-cleanup subscriptions
 - Optional Vue 3 composables adapter (`cross-tab-worker-databus/vue`): lifecycle-safe bus, subscription, and status composables

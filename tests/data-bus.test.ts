@@ -1228,4 +1228,17 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(transport.publishCalls).toEqual([{ topic: 't', data: { value: 1 }, options: { messageId: 'out-1' } }]);
     await bus.stop();
   });
+
+  it('routes publication metadata through the cluster to the transport', async () => {
+    const { bus, transport } = makeReplayBus();
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    bus.publish('t', { value: 1 }, { messageId: 'out-2', timestamp: 1_725_160_000_000 });
+    expect(transport.publishCalls).toEqual([{
+      topic: 't',
+      data: { value: 1 },
+      options: { messageId: 'out-2', timestamp: 1_725_160_000_000 }
+    }]);
+    await bus.stop();
+  });
 });

@@ -69,6 +69,46 @@ describe('WorkerClusterRuntime', () => {
     expect(getItem).not.toHaveBeenCalled();
   });
 
+  it('preserves publication metadata across a remote owner control message', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'metadata-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'metadata-b' });
+    const controlA = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'metadata-routing',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'metadata-routing',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('market.tick');
+    await Promise.resolve();
+    now += 1;
+    runtimeB.start();
+
+    expect(runtimeB.publish('market.tick', { price: 1 }, {
+      messageId: 'm-1',
+      timestamp: 42
+    })).toBe(true);
+    expect(controlA).toHaveBeenLastCalledWith(
+      'PUBLISH',
+      'market.tick',
+      { price: 1 },
+      'm-1',
+      42
+    );
+  });
+
   it('keeps existing topic owners and balances only newly introduced topics', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

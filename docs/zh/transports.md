@@ -129,13 +129,17 @@ const bus = createWebSocketDataBus({
 
 线协议（JSON 文本帧）：
 
-- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...}`
-- server → client：发布为 `{"topic":"...","data":...}`。没有字符串 `topic` 的帧
-  会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
+- client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
+- server → client：标准 publication 为 `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`；旧的扁平 `{"topic":"...","data":...}` 帧仍然兼容。没有字符串 topic 的帧会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
 
 当 `data` 是 `ArrayBuffer` 时，publish 使用二进制帧：帧头为 `0xc7`，随后是
 UTF-8 topic 长度、topic 和 payload。服务器可以原样回显该帧；其他 payload 仍走
-JSON 兼容路径。
+JSON 兼容路径。带 metadata 的二进制 publication 使用 JSON 兼容的字节数组
+envelope，避免丢失 `messageId` 与 `timestamp`。
+
+Centrifuge session 遵循同一个传输无关契约：不带 metadata 的 payload 保持原始
+形状；带 metadata 的 publish 使用 `{ data, messageId?, timestamp? }`，入站还接受
+标准嵌套 `DataBusPublicationEnvelope`。
 
 生命周期映射：`open` → `connected`，`close` → `disconnected`，`error` → `error`
 （触发 DataBus 自动恢复）。socket 原地重连时自动重发订阅帧。支持 pattern 的
