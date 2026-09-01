@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1239,6 +1239,20 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     transport.emit('t', { value: 2 }, 'dup');
     transport.emit('t', { value: 3 }, 'other');
     expect(seen).toEqual([{ value: 1 }, { value: 3 }]);
+    await bus.stop();
+  });
+
+  it('uses the injected dedup clock for TTL expiry', async () => {
+    let now = 1_000;
+    const { bus, transport } = makeReplayBus(undefined, { ttlMs: 100, now: () => now });
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data));
+    await bus.ready();
+    transport.emit('t', 1, 'same');
+    now += 101;
+    transport.emit('t', 2, 'same');
+    expect(seen).toEqual([1, 2]);
+    expect(bus.getDedupStats()).toMatchObject({ accepted: 2, suppressed: 0 });
     await bus.stop();
   });
 

@@ -1,6 +1,13 @@
 # Roadmap
 
-0.11.0 is the current development line. The next work is organized as 1.0.0 candidates, with protocol stability and operational guarantees taking priority over adding another browser runtime.
+0.12.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.12.0 delivered scope
+
+- Injectable deduplication TTL clock for deterministic lifecycle and expiry tests.
+- Structured persistence cleanup diagnostics for append, hydration, unsubscribe, and retention failures.
+- Strict-but-compatible publication metadata normalization (non-empty IDs and finite timestamps only).
+- Protocol compatibility fixtures and expanded package-consumption coverage.
 
 ## 0.11.0 delivered scope
 
@@ -9,14 +16,14 @@
 - Publication metadata compatibility coverage across WebSocket, Centrifuge, Worker boundaries, and browser E2E.
 - Service Worker transport decision: remain deliberately unimplemented until a stable connection-lifetime contract exists across target browsers.
 
-## 1.0.0 candidates
+## 0.13.0 candidates
 
 1. Freeze the public export surface and transport-neutral publication envelope.
 2. Document at-least-once delivery and deduplication guarantees precisely.
 3. Add long-running browser soak coverage for replay retention, reconnect, BFCache, and owner migration.
 4. Publish a migration guide and deprecation policy for any pre-1.0 protocol aliases.
 
-## 0.7.0 candidates
+## Longer-term candidates
 
 1. **Replay lifecycle and retention** — add explicit persistence cleanup (`clear`, `clearTopic`), make unsubscribe/replacement remove stale history, and surface persistence failures through trace and error handlers.
 2. **Reliability diagnostics** — emit structured recovery/retry, owner-acknowledgment, and route-migration events with bounded metadata while keeping tracing opt-in.

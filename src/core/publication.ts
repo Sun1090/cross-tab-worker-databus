@@ -30,10 +30,16 @@ export function parseDataBusPublication<TData = unknown>(
   const data = nested || fallbackTopic === undefined || hasMetadataEnvelope
     ? publication.data
     : value;
+  const messageId = typeof publication.messageId === 'string' && publication.messageId.length > 0
+    ? publication.messageId
+    : undefined;
+  const timestamp = typeof publication.timestamp === 'number' && Number.isFinite(publication.timestamp)
+    ? publication.timestamp
+    : undefined;
   return {
     topic,
     data: data as TData,
-    ...(typeof publication.messageId === 'string' ? { messageId: publication.messageId } : {}),
-    ...(typeof publication.timestamp === 'number' ? { timestamp: publication.timestamp } : {})
+    ...(messageId === undefined ? {} : { messageId }),
+    ...(timestamp === undefined ? {} : { timestamp })
   };
 }

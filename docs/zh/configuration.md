@@ -46,7 +46,7 @@ const bus = new CrossTabDataBus({
 | `metricsIntervalMs` | `number` | `5000` | 聚合窗口，必须是大于 0 的有限数值 |
 | `sink` | `(event) => void` | 必填 | 由接入方决定 console、监控 SDK 或其他出口 |
 
-`message_metrics` 包含窗口时长、接收数、分发数、活跃 Topic 数量，以及接收 → 分发延迟的样本数、平均值、P50、P95 和最大值，并包含同一窗口的 `dedupAccepted` 与 `dedupSuppressed` 计数。延迟按 50ms 桶聚合，不包含单条消息 payload。订阅事件会带 Topic，便于接入方关联 owner 变化；仅 owner transport 的订阅集合实际变化时才输出，幂等 `CONTROL` 重试不会产生重复订阅事件。将 trace 写入 console 或外部监控前，应按业务 Topic 约定进行脱敏。Trace 不包含 URL、凭证、payload 或错误正文。sink 抛错会被隔离，不会中断消息分发，但会向 `console.warn` 输出错误，方便接入方发现诊断配置问题。
+`message_metrics` 包含窗口时长、接收数、分发数、活跃 Topic 数量，以及接收 → 分发延迟的样本数、平均值、P50、P95 和最大值，并包含同一窗口的 `dedupAccepted` 与 `dedupSuppressed` 计数。延迟按 50ms 桶聚合，不包含单条消息 payload。持久化失败会先输出带 `operation: persistence_cleanup` 的有界 `reliability` 事件，再交给 error handler；`dedup.now` 可注入以便确定性测试。订阅事件会带 Topic，便于接入方关联 owner 变化；仅 owner transport 的订阅集合实际变化时才输出，幂等 `CONTROL` 重试不会产生重复订阅事件。将 trace 写入 console 或外部监控前，应按业务 Topic 约定进行脱敏。Trace 不包含 URL、凭证、payload 或错误正文。sink 抛错会被隔离，不会中断消息分发，但会向 `console.warn` 输出错误，方便接入方发现诊断配置问题。
 
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
