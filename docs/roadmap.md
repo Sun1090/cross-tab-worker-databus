@@ -1,6 +1,11 @@
 # Roadmap
 
-0.13.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.14.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.14.0 delivered scope
+
+- Vue subscription parity for reactive topic changes on a stable bus.
+- Cross-page replay mutation ordering and lifecycle guarantees are documented and regression-tested.
 
 ## 0.13.0 delivered scope
 

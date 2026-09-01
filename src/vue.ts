@@ -24,16 +24,18 @@ export function useCrossTabSubscription<TConfig, TData>(
   handler: (message: DataBusMessage<TData>) => void
 ): void {
   let currentBus: CrossTabDataBus<TConfig, TData> | null = null;
+  let currentTopic: string | null = null;
   let cleanup: (() => void) | undefined;
   let latestHandler = handler;
-  const stop = () => { cleanup?.(); cleanup = undefined; currentBus = null; };
+  const stop = () => { cleanup?.(); cleanup = undefined; currentBus = null; currentTopic = null; };
   const sync = () => {
     const nextBus = bus.value;
     const nextTopic = typeof topic === 'string' ? topic : topic.value;
-    if (nextBus === currentBus && cleanup) return;
+    if (nextBus === currentBus && currentTopic === nextTopic && cleanup) return;
     stop();
     if (!nextBus) return;
     currentBus = nextBus;
+    currentTopic = nextTopic;
     cleanup = nextBus.subscribe(nextTopic, message => latestHandler(message));
   };
   watch(bus, sync, { immediate: true });
