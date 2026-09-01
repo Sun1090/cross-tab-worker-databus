@@ -81,6 +81,8 @@ export interface DataBusMetricsTraceEvent {
   dispatchP50Ms: number;
   dispatchP95Ms: number;
   dispatchMaxMs: number;
+  dedupAccepted: number;
+  dedupSuppressed: number;
   timestamp: number;
 }
 
@@ -146,6 +148,8 @@ export class DataBusTraceReporter {
   // Bucketed histogram: bucket index = floor(delayMs / 50), capped at 19.
   private readonly latencyBuckets = new Array<number>(LATENCY_BUCKET_COUNT).fill(0);
   private latencySumMs = 0;
+  private dedupAccepted = 0;
+  private dedupSuppressed = 0;
 
   constructor(options?: DataBusTraceOptions, now: () => number = Date.now) {
     this.enabled = options?.enabled ?? false;
@@ -235,6 +239,15 @@ export class DataBusTraceReporter {
     this.latencySumMs += delayMs;
   }
 
+  /** Record deduplication outcomes for the next metrics window. */
+  recordDedupAccepted(): void {
+    if (this.metricsActive) this.dedupAccepted += 1;
+  }
+
+  recordDedupSuppressed(): void {
+    if (this.metricsActive) this.dedupSuppressed += 1;
+  }
+
   /** True when metrics recording is active: enabled and mode includes metrics.
    * Extracted so the four record / flush methods share one guard expression
    * instead of repeating `!this.enabled || this.mode === 'events'` at each. */
@@ -253,7 +266,7 @@ export class DataBusTraceReporter {
     // Only emit when there was activity in this window — an all-zero metrics
     // snapshot adds noise without information. The interval still advances
     // intervalStartedAt so the next window's duration is measured correctly.
-    if (this.received > 0 || this.dispatched > 0) {
+    if (this.received > 0 || this.dispatched > 0 || this.dedupAccepted > 0 || this.dedupSuppressed > 0) {
       const samples = this.latencySamples;
       this.emit({
         type: 'message_metrics',
@@ -267,6 +280,8 @@ export class DataBusTraceReporter {
         dispatchP50Ms: roundMs(percentileMs(this.latencyBuckets, samples, 0.5)),
         dispatchP95Ms: roundMs(percentileMs(this.latencyBuckets, samples, 0.95)),
         dispatchMaxMs: roundMs(percentileMs(this.latencyBuckets, samples, 1)),
+        dedupAccepted: this.dedupAccepted,
+        dedupSuppressed: this.dedupSuppressed,
         timestamp
       });
       this.resetMetrics();
@@ -282,6 +297,8 @@ export class DataBusTraceReporter {
     this.receivedAt.clear();
     this.latencyBuckets.fill(0);
     this.latencySumMs = 0;
+    this.dedupAccepted = 0;
+    this.dedupSuppressed = 0;
   }
 
   private emit(event: DataBusTraceEvent): void {

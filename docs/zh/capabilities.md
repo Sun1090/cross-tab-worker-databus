@@ -22,7 +22,7 @@
 | 降级 | localStorage 或 BroadcastChannel 不可用时本地运行 | ✅ 已实现 | 保留当前 Tab 的连接和订阅能力 |
 | Centrifuge | 内置 Dedicated / Shared Worker transport | ✅ 已实现 | 支持 subscribe、unsubscribe、publish、连接状态和错误上报；`auto` 从 SharedWorker → Dedicated Worker → 主线程 WebSocket 降级 |
 | 安全边界 | localStorage 使用连接和 Topic 派生不透明 key；BroadcastChannel 协调消息以明文传输 Topic 名称 | ✅ 已实现 | 不持久化 URL、原始 Topic 名称、凭证或 publication payload。BroadcastChannel 协调消息仅存在于内存中，以明文传输 Topic 名称——不会被持久化。 |
-| 诊断 | 聚合生命周期、吞吐量、分发延迟、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调 |
+| 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调 |
 | 性能 | 协调元数据批量写入 + 退避重试 | ✅ 已实现 | 心跳、路由和 subscriber 写入合并后在微任务中 flush；失败时指数退避；`pagehide` / `stop()` 同步 flush |
 | 性能 | 可选 ArrayBuffer Transferable 传输 | ✅ 已实现 | 开启 `transferable: true` 后，二进制 publish/receive 跳过 structured clone 复制；对象消息 API 不变 |
 | 消息语义 | exactly-once 投递 | 未实现 | 正常交接会避免重叠，但异常恢复和 transport/服务端行为仍不提供 exactly-once 保证 |
@@ -31,7 +31,7 @@
 | 负载策略 | 按消息速率、字节数或 CPU 自适应加权 | 规划中 | 当前负载仅按 owner Topic 数量计算 |
 | 可观测性 | owner 确认、迁移和恢复尝试的指标/事件 | ✅ 已实现 | `DataBusReliabilityTraceEvent` 记录有界的 route ack/migration 与 transport recovery；服务端最终确认仍由 transport 决定 |
 | 运行时模型 | SharedWorker / Dedicated Worker transport | ✅ 已实现 | `workerMode` 支持 `dedicated`、`shared` 和 `auto`，默认 `dedicated` |
-| 运行时模型 | Service Worker transport | 未实现 | 当前不提供使用 Service Worker 承载实时连接 |
+| 运行时模型 | Service Worker transport | 未实现 | 刻意延后；生命周期与长连接约束见 `docs/zh/architecture.md` |
 | 持久消息 | 跨页面关闭持久化 publication 或发布命令 | 未实现 | SDK 不持久化业务 payload，也不在恢复后重放发布命令 |
 
 ## 验收标准

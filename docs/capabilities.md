@@ -22,7 +22,7 @@ Status Legend: `✅ Implemented` means the current version has code and test cov
 | Degradation | Runs locally when localStorage or BroadcastChannel is unavailable | ✅ Implemented | Preserves the current Tab's connection and subscription capabilities |
 | Centrifuge | Built-in Dedicated / Shared Worker transport | ✅ Implemented | Supports subscribe, unsubscribe, publish, connection status, and error reporting; `auto` degrades from SharedWorker → Dedicated Worker → main-thread WebSocket |
 | Security Boundary | localStorage uses opaque keys derived from connection and Topic; BroadcastChannel coordination messages carry plaintext topic names | ✅ Implemented | Does not persist URLs, raw Topic names, credentials, or publication payloads. BroadcastChannel coordination messages are in-memory only and carry plaintext topic names — they are not persisted. |
-| Diagnostics | Aggregates lifecycle events, throughput, delivery latency, recovery retries, route acknowledgments, and migrations | ✅ Implemented | Disabled by default; metrics are emitted every 5 seconds by default, with bounded reliability events for recovery and route coordination |
+| Diagnostics | Aggregates lifecycle events, throughput, delivery latency, dedup outcomes, recovery retries, route acknowledgments, and migrations | ✅ Implemented | Disabled by default; metrics are emitted every 5 seconds by default, with bounded reliability events for recovery and route coordination |
 | Performance | Batched writes of coordination metadata with backoff retry | ✅ Implemented | Heartbeat, route, and subscriber writes are merged and flushed in a microtask; failures use exponential backoff; `pagehide` / `stop()` flush synchronously |
 | Performance | Optional ArrayBuffer Transferable transport | ✅ Implemented | With `transferable: true`, binary publish / receive bypasses structured clone copying; the object message API is unchanged |
 | Message Semantics | exactly-once delivery | Not Implemented | Graceful handoff avoids overlap, but crash recovery and transport/server behavior still do not provide an exactly-once guarantee |
@@ -31,7 +31,7 @@ Status Legend: `✅ Implemented` means the current version has code and test cov
 | Load Policy | Adaptive weighting by message rate, byte count, or CPU | Planned | Load is currently computed only from the number of owner Topics |
 | Observability | Metrics/events for owner acknowledgments, migrations, and recovery attempts | ✅ Implemented | `DataBusReliabilityTraceEvent` reports bounded route ack/migration and transport recovery events; exact server-side ack remains transport-specific |
 | Runtime Model | SharedWorker / Dedicated Worker transport | ✅ Implemented | `workerMode` supports `dedicated`, `shared`, and `auto`, defaulting to `dedicated` |
-| Runtime Model | Service Worker transport | Not Implemented | Service Worker hosting of real-time connections is not currently provided |
+| Runtime Model | Service Worker transport | Not Implemented | Deliberately deferred; lifetime and long-lived connection constraints are documented in `docs/architecture.md` |
 | Durable Messages | Persisting publications or publish commands across page close | Not Implemented | The SDK does not persist business payloads, nor does it replay publish commands after restoration |
 
 ## Acceptance Criteria
