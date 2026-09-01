@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.13.0] - 2026-09-01
+
+### Added
+
+- IndexedDB replay mutations are serialized per adapter instance, preventing concurrent append read-modify-write races from losing history.
+- Dedup memory is reset as part of a full stop lifecycle, so a restarted bus begins with a clean delivery window.
+- Added persistence-failure diagnostics and lifecycle regression coverage.
+
 ## [0.12.0] - 2026-09-01
 
 ### Added

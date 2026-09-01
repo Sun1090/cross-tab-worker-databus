@@ -1,6 +1,12 @@
 # Roadmap
 
-0.12.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.13.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.13.0 delivered scope
+
+- IndexedDB replay mutation serialization prevents concurrent append loss.
+- Dedup state is reset on full stop/restart boundaries.
+- Persistence failure and lifecycle regression coverage is included.
 
 ## 0.12.0 delivered scope
 

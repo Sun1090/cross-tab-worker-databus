@@ -30,6 +30,15 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     throw new TypeError(`maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`);
   }
   let dbPromise: Promise<IDBDatabase> | null = null;
+  // IndexedDB transactions are atomic, but a read-modify-write append can
+  // still lose updates when callers start several appends concurrently.
+  // Serialize all mutations per adapter instance while keeping reads free.
+  let mutationQueue: Promise<void> = Promise.resolve();
+  const serializeMutation = (mutation: () => Promise<void>): Promise<void> => {
+    const next = mutationQueue.then(mutation, mutation);
+    mutationQueue = next.catch(() => undefined);
+    return next;
+  };
   const open = (): Promise<IDBDatabase> => {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
@@ -49,9 +58,10 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         request.onerror = () => reject(request.error ?? new Error('Failed to load replay history.'));
       });
     },
-    async append(message) {
-      const db = await open();
-      await new Promise<void>((resolve, reject) => {
+    append(message) {
+      return serializeMutation(async () => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.get(message.topic);
@@ -62,29 +72,35 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to persist replay history.'));
+        });
       });
     },
-    async clear() {
-      const db = await open();
-      await new Promise<void>((resolve, reject) => {
+    clear() {
+      return serializeMutation(async () => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         transaction.objectStore(storeName).clear();
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear replay history.'));
+        });
       });
     },
-    async clearTopic(topic) {
-      const db = await open();
-      await new Promise<void>((resolve, reject) => {
+    clearTopic(topic) {
+      return serializeMutation(async () => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         transaction.objectStore(storeName).delete(topic);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear topic replay history.'));
+        });
       });
     },
-    async clearBefore(timestamp) {
-      const db = await open();
-      await new Promise<void>((resolve, reject) => {
+    clearBefore(timestamp) {
+      return serializeMutation(async () => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
         const transaction = db.transaction(storeName, 'readwrite');
         const store = transaction.objectStore(storeName);
         const request = store.getAll();
@@ -98,6 +114,7 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to prune replay history.'));
+        });
       });
     }
   };

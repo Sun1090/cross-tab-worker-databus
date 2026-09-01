@@ -106,7 +106,7 @@ describe('CrossTabDataBus', () => {
     const receivedB: number[] = [];
     busA.subscribe('market.tick', message => receivedA.push(message.data));
     busB.subscribe('market.tick', message => receivedB.push(message.data));
-    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(transportA.subscribeCalls).toEqual(['market.tick']);
     expect(transportB.subscribeCalls).toEqual([]);
@@ -1254,6 +1254,49 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(seen).toEqual([1, 2]);
     expect(bus.getDedupStats()).toMatchObject({ accepted: 2, suppressed: 0 });
     await bus.stop();
+  });
+
+  it('resets dedup state across a full stop and restart lifecycle', async () => {
+    const { bus, transport } = makeReplayBus(undefined, { maxEntries: 4 });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    transport.emit('t', 1, 'session-id');
+    expect(bus.getDedupStats()).toMatchObject({ tracked: 1, accepted: 1 });
+    await bus.stop();
+    expect(bus.getDedupStats()).toMatchObject({ tracked: 0, accepted: 0, suppressed: 0 });
+    await bus.start({});
+    bus.subscribe('t', () => {});
+    transport.emit('t', 2, 'session-id');
+    expect(bus.getDedupStats()).toMatchObject({ tracked: 1, accepted: 1, suppressed: 0 });
+    await bus.stop();
+  });
+
+  it('reports persistence failures through reliability diagnostics and onError', async () => {
+    const failure = new Error('persist-failed');
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => { throw failure; })
+    };
+    const errors: unknown[] = [];
+    const events: unknown[] = [];
+    const transport = new FakeTransport<unknown>();
+    const traced = new CrossTabDataBus({
+      autoStart: true,
+      clusterKey: 'trace-persistence',
+      environment: createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'trace' }).environment,
+      initialConfig: {},
+      transport,
+      replay: { persistence },
+      trace: { enabled: true, sink: event => events.push(event) }
+    });
+    traced.onError(error => errors.push(error));
+    traced.subscribe('t', () => {});
+    await traced.ready();
+    transport.emit('t', 1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(errors).toContain(failure);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'persistence_cleanup' }));
+    await traced.stop();
   });
 
   it('routes a caller-supplied publish message ID to the transport', async () => {
