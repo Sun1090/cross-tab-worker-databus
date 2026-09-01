@@ -111,6 +111,8 @@ export interface DataBusTraceOptions {
   mode?: DataBusTraceMode;
   /** Aggregation window for `message_metrics` events. Default 5 s. */
   metricsIntervalMs?: number;
+  /** Injectable epoch clock for deterministic metrics and lifecycle tests. */
+  now?: () => number;
   /** Callback invoked for each emitted trace event. */
   sink: (event: DataBusTraceEvent) => void;
 }
@@ -151,7 +153,7 @@ export class DataBusTraceReporter {
   private dedupAccepted = 0;
   private dedupSuppressed = 0;
 
-  constructor(options?: DataBusTraceOptions, now: () => number = Date.now) {
+  constructor(options?: DataBusTraceOptions, now: () => number = options?.now ?? Date.now) {
     this.enabled = options?.enabled ?? false;
     this.mode = options?.mode ?? 'all';
     this.metricsIntervalMs = normalizeInterval(options?.metricsIntervalMs);

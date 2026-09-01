@@ -461,7 +461,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (!Number.isFinite(timestamp)) throw new TypeError('timestamp must be finite.');
     if (this.replayBuffers) {
       for (const [topic, messages] of this.replayBuffers) {
-        const kept = messages.filter(message => (message.timestamp ?? 0) >= timestamp);
+        const kept = messages.filter(message => message.timestamp === undefined || message.timestamp >= timestamp);
         if (kept.length) this.replayBuffers.set(topic, kept);
         else this.replayBuffers.delete(topic);
       }

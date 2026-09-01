@@ -1,6 +1,12 @@
 # Roadmap
 
-0.14.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.15.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.15.0 delivered scope
+
+- Replay retention preserves legacy timestamp-less messages while pruning only explicitly timestamped records older than the cutoff.
+- Trace timestamps accept an injectable `trace.now` clock, aligned with the existing dedup clock injection.
+- Compatibility and lifecycle regression coverage protects replay cleanup, diagnostics, and adapter behavior.
 
 ## 0.14.0 delivered scope
 

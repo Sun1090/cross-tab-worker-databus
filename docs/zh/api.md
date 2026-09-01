@@ -137,7 +137,7 @@ clearReplay(): Promise<void>
 
 `clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。为测试或非墙上时钟宿主，可额外提供 `dedup.now`。完整 `stop()` 会清空已记忆的 ID 窗口，之后 `start()` 会开启新的 dedup 会话。
 
-`clearReplayBefore(timestamp)` 按毫秒时间戳清理旧记录；实现可选 `clearBefore()` 的持久化适配器会同步执行该清理。
+`clearReplayBefore(timestamp)` 按毫秒时间戳清理带显式 producer timestamp 且早于 cutoff 的记录；实现可选 `clearBefore()` 的持久化适配器会同步执行该清理。没有 producer timestamp 的 legacy 消息会为兼容性保留。transport 未提供时间戳时，系统仍会补充 bus timestamp，但该时间戳不会被当作 producer metadata 用于 retention 清理。
 
 ### `onStatus(handler)`
 

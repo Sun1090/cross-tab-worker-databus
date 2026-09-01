@@ -105,6 +105,13 @@ describe('DataBusTraceReporter', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('uses an injected clock for event timestamps', () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, now: () => 1234, sink: collect(events) });
+    reporter.event({ type: 'lifecycle', action: 'start' });
+    expect(events[0]).toMatchObject({ type: 'lifecycle', timestamp: 1234 });
+  });
+
   it('does not pair latency for dispatches without a local receive', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events), metricsIntervalMs: 1_000 });

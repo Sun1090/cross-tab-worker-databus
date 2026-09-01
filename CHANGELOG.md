@@ -2,6 +2,21 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.15.0] - 2026-09-01
+
+### Fixed
+
+- Replay retention now preserves legacy messages that do not carry an explicit producer timestamp; only timestamped messages older than the cutoff are removed.
+
+### Added
+
+- Trace event timestamps accept an injectable `trace.now` clock for deterministic lifecycle and metrics tests.
+- Added compatibility coverage for timestamp-less replay cleanup and injected trace clocks.
+
+### Compatibility
+
+- Existing `DataBusTraceOptions` and replay persistence adapters remain source-compatible; wall-clock behavior remains the default.
+
 ## [0.14.0] - 2026-09-01
 
 ### Fixed

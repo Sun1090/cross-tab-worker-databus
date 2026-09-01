@@ -1208,6 +1208,20 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('preserves legacy replay messages without producer timestamps during cleanup', async () => {
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 4 });
+    const early: unknown[] = [];
+    bus.subscribe('t', message => early.push(message.data));
+    await bus.ready();
+    transport.emit('t', 'legacy');
+    transport.emit('t', 'dated', undefined, 1_700_000_000_000);
+    await bus.clearReplayBefore(1_700_000_000_001);
+    const replayed: unknown[] = [];
+    bus.subscribe('t', message => replayed.push(message.data), { replay: true });
+    expect(replayed).toEqual(['legacy']);
+    await bus.stop();
+  });
+
   it('automatically prunes durable replay history when retention is configured', async () => {
     const persistence = {
       load: vi.fn(async () => []),
