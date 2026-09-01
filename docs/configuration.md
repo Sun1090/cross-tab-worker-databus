@@ -52,6 +52,8 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 
 `replay.retentionSweepMs` optionally schedules the same cleanup on a periodic interval. It is useful for quiet topics whose old durable records should still expire; it requires `retentionMs` and a persistence adapter with `clearBefore()`. The timer follows visibility and lifecycle transitions and is disabled by default.
 
+`replay.persistenceRetry` optionally controls transient persistence recovery. `maxAttempts` is the total number of attempts (default `1`), and `backoffMs` is the initial delay before retry (default `50`). Delays grow exponentially and are capped; final failures retain the existing `onError` and reliability behavior.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

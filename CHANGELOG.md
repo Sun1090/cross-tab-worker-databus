@@ -2,6 +2,19 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.18.0] - 2026-09-01
+
+### Added
+
+- Added opt-in `replay.persistenceRetry` with bounded attempts and exponential backoff for transient persistence failures.
+- Replay append, hydrate, clear, topic cleanup, and retention cleanup now share the same retry policy.
+- Exported `DataBusPersistenceRetryOptions` for typed configuration.
+
+### Compatibility
+
+- The default retry policy is one attempt, preserving existing persistence behavior and error timing.
+- Persistence adapters remain unchanged; retry orchestration stays in `CrossTabDataBus`.
+
 ## [0.17.0] - 2026-09-01
 
 ### Added
