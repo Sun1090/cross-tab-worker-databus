@@ -604,9 +604,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       buffer = [];
       this.replayBuffers.set(message.topic, buffer);
     }
-    const storedMessage = message.timestamp === undefined && this.replayPersistence?.clearBefore
-      ? { ...message, timestamp: Date.now() }
-      : message;
+    // Preserve the public message shape for legacy adapters. Retention pruning
+    // applies to messages that carry an explicit producer timestamp.
+    const storedMessage = message;
     buffer.push(storedMessage);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
