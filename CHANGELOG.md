@@ -2,6 +2,14 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.9.0] - 2026-09-01
+
+### Added
+
+- Dedup runtime statistics (`getDedupStats`) and reset API (`resetDedup`).
+- Replay retention APIs: `clearReplayTopic` and `clearReplayBefore`; IndexedDB supports optional time-based pruning.
+- Forward-compatible WebSocket publication envelope parsing with timestamp and message ID metadata.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added

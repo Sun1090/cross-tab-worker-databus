@@ -123,6 +123,8 @@ clearReplay(): Promise<void>
 
 `clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。
 
+`clearReplayBefore(timestamp)` 按毫秒时间戳清理旧记录；实现可选 `clearBefore()` 的持久化适配器会同步执行该清理。
+
 ### `onStatus(handler)`
 
 ```ts

@@ -8,6 +8,8 @@ export interface DataBusReplayPersistence<TData = unknown> {
   clear?(): Promise<void>;
   /** Remove persisted replay history for one exact topic. */
   clearTopic?(topic: string): Promise<void>;
+  /** Remove persisted messages older than the given epoch-millisecond cutoff. */
+  clearBefore?(timestamp: number): Promise<void>;
 }
 
 export interface IndexedDbReplayPersistenceOptions {
@@ -78,6 +80,24 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         transaction.objectStore(storeName).delete(topic);
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear topic replay history.'));
+      });
+    },
+    async clearBefore(timestamp) {
+      const db = await open();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(storeName, 'readwrite');
+        const store = transaction.objectStore(storeName);
+        const request = store.getAll();
+        request.onsuccess = () => {
+          for (const record of request.result as Array<{ topic: string; messages: DataBusMessage<TData>[] }>) {
+            const messages = record.messages.filter(message => (message.timestamp ?? 0) >= timestamp);
+            if (messages.length === 0) store.delete(record.topic);
+            else if (messages.length !== record.messages.length) store.put({ topic: record.topic, messages });
+          }
+        };
+        request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to prune replay history.'));
       });
     }
   };

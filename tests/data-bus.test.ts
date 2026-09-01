@@ -1193,6 +1193,21 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('supports time-based replay cleanup when the persistence adapter opts in', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(async (_timestamp: number) => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ persistence });
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1);
+    await bus.clearReplayBefore(Date.now() + 1);
+    expect(persistence.clearBefore).toHaveBeenCalledOnce();
+    await bus.stop();
+  });
+
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
     const { bus, transport } = makeReplayBus(undefined, { maxEntries: 2 });
     const seen: unknown[] = [];
