@@ -1238,6 +1238,25 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('coalesces retention cleanup during a publication burst', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(async (_timestamp: number) => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ retentionMs: 60_000, persistence });
+    await bus.ready();
+    persistence.clearBefore.mockClear();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1, undefined, 1_700_000_000_000);
+    transport.emit('t', 2, undefined, 1_700_000_000_001);
+    transport.emit('t', 3, undefined, 1_700_000_000_002);
+    // All three synchronous dispatches share the first in-flight cleanup.
+    expect(persistence.clearBefore).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    await bus.stop();
+  });
+
   it('rejects invalid replay retention windows', () => {
     for (const retentionMs of [0, -1, NaN, Infinity]) {
       expect(() => makeReplayBus({ retentionMs })).toThrow(TypeError);

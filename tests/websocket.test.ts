@@ -148,6 +148,17 @@ describe('WebSocketTransport', () => {
     expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([4, 5]);
   });
 
+  it('ignores truncated or invalid binary frames without crashing the transport', () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.onmessage?.({ data: new Uint8Array([0xc7]).buffer });
+    socket.onmessage?.({ data: new Uint8Array([0xc7, 0, 8, 1, 2]).buffer });
+    socket.onmessage?.({ data: new Uint8Array([0x00, 0, 0]).buffer });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('re-asserts subscriptions when the socket (re)opens', () => {
     const { sockets, transport } = makeTransport();
     const socket = sockets[0]!;

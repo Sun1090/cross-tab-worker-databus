@@ -48,6 +48,8 @@ const bus = new CrossTabDataBus({
 
 `message_metrics` 包含窗口时长、接收数、分发数、活跃 Topic 数量，以及接收 → 分发延迟的样本数、平均值、P50、P95 和最大值，并包含同一窗口的 `dedupAccepted` 与 `dedupSuppressed` 计数。延迟按 50ms 桶聚合，不包含单条消息 payload。持久化失败会先输出带 `operation: persistence_cleanup` 的有界 `reliability` 事件，再交给 error handler；`dedup.now` 与 `trace.now` 均可注入，以便确定性测试 TTL、事件时间戳和 metrics 窗口。订阅事件会带 Topic，便于接入方关联 owner 变化；仅 owner transport 的订阅集合实际变化时才输出，幂等 `CONTROL` 重试不会产生重复订阅事件。将 trace 写入 console 或外部监控前，应按业务 Topic 约定进行脱敏。Trace 不包含 URL、凭证、payload 或错误正文。sink 抛错会被隔离，不会中断消息分发，但会向 `console.warn` 输出错误，方便接入方发现诊断配置问题。
 
+启用 `replay.retentionMs` 时，自动 durable cleanup 会在 publication burst 期间合并：复用进行中的清理，并在其完成后应用最新 cutoff。在不改变 retention 边界的前提下，这会限制 IndexedDB 清理事务数量。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束
