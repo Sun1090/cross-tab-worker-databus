@@ -51,6 +51,15 @@ export interface DataBusReplayOptions<TData = unknown> {
   retentionMs?: number;
   /** Optional periodic sweep interval for durable retention cleanup. */
   retentionSweepMs?: number;
+  /** Optional bounded retry policy for transient persistence failures. */
+  persistenceRetry?: DataBusPersistenceRetryOptions;
+}
+
+export interface DataBusPersistenceRetryOptions {
+  /** Total attempts including the initial operation. Default 1. */
+  maxAttempts?: number;
+  /** Initial delay between attempts. Default 50ms. */
+  backoffMs?: number;
 }
 
 /** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
@@ -105,6 +114,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
   private readonly replayRetentionMs: number | undefined;
   private readonly replayRetentionSweepMs: number | undefined;
+  private readonly persistenceRetryMaxAttempts: number;
+  private readonly persistenceRetryBackoffMs: number;
   private readonly replayHydration: Promise<void>;
   // Retention cleanup is coalesced so a burst of publications does not issue
   // one IndexedDB read/write transaction per message. The newest cutoff wins.
@@ -166,6 +177,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayRetentionSweepMs = replay?.retentionSweepMs;
     if (this.replayRetentionSweepMs !== undefined && (!Number.isFinite(this.replayRetentionSweepMs) || this.replayRetentionSweepMs <= 0)) {
       throw new TypeError('replay.retentionSweepMs must be a positive finite number.');
+    }
+    this.persistenceRetryMaxAttempts = replay?.persistenceRetry?.maxAttempts ?? 1;
+    this.persistenceRetryBackoffMs = replay?.persistenceRetry?.backoffMs ?? 50;
+    if (!Number.isSafeInteger(this.persistenceRetryMaxAttempts) || this.persistenceRetryMaxAttempts <= 0) {
+      throw new TypeError('replay.persistenceRetry.maxAttempts must be a positive safe integer.');
+    }
+    if (!Number.isFinite(this.persistenceRetryBackoffMs) || this.persistenceRetryBackoffMs < 0) {
+      throw new TypeError('replay.persistenceRetry.backoffMs must be a non-negative finite number.');
     }
     const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
     this.now = dedup?.now ?? Date.now;
@@ -440,7 +459,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.topicHandlers.delete(topic);
     this.replayBuffers?.delete(topic);
     if (this.replayPersistence?.clearTopic) {
-      void this.replayPersistence.clearTopic(topic).catch(error => this.reportPersistenceError(error));
+      void this.withPersistenceRetry(() => this.replayPersistence!.clearTopic!(topic))
+        .catch(error => this.reportPersistenceError(error));
     }
     this.cluster.unsubscribe(topic);
   }
@@ -450,7 +470,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers?.clear();
     if (this.replayPersistence?.clear) {
       try {
-        await this.replayPersistence.clear();
+        await this.withPersistenceRetry(() => this.replayPersistence!.clear!());
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -463,7 +483,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers?.delete(topic);
     if (this.replayPersistence?.clearTopic) {
       try {
-        await this.replayPersistence.clearTopic(topic);
+        await this.withPersistenceRetry(() => this.replayPersistence!.clearTopic!(topic));
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -483,7 +503,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     if (this.replayPersistence?.clearBefore) {
       try {
-        await this.replayPersistence.clearBefore(timestamp);
+        await this.withPersistenceRetry(() => this.replayPersistence!.clearBefore!(timestamp));
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -655,7 +675,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     buffer.push(storedMessage);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
-      void this.replayPersistence.append(storedMessage).catch(error => this.reportPersistenceError(error));
+      void this.withPersistenceRetry(() => this.replayPersistence!.append(storedMessage))
+        .catch(error => this.reportPersistenceError(error));
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
         this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs);
       }
@@ -668,9 +689,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     try {
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        await this.replayPersistence.clearBefore(this.now() - this.replayRetentionMs);
+        await this.withPersistenceRetry(() => this.replayPersistence!.clearBefore!(this.now() - this.replayRetentionMs!));
       }
-      for (const message of await this.replayPersistence.load()) {
+      for (const message of await this.withPersistenceRetry(() => this.replayPersistence!.load())) {
         let buffer = this.replayBuffers.get(message.topic);
         if (!buffer) {
           buffer = [];
@@ -718,6 +739,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private stopReplayRetentionSweep(): void {
     if (this.replayRetentionTimer) clearInterval(this.replayRetentionTimer);
     this.replayRetentionTimer = null;
+  }
+
+  private async withPersistenceRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let attempt = 0;
+    let delay = this.persistenceRetryBackoffMs;
+    while (true) {
+      attempt += 1;
+      try {
+        return await operation();
+      } catch (error) {
+        if (attempt >= this.persistenceRetryMaxAttempts) throw error;
+        if (delay > 0) await new Promise<void>(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 1_600);
+      }
+    }
   }
 
   /** Deliver buffered history to a newly-registered handler. For an exact

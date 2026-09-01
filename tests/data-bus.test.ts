@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1358,6 +1358,31 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(errors).toContain(failure);
     expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'persistence_cleanup' }));
     await traced.stop();
+  });
+
+  it('retries transient persistence append failures when configured', async () => {
+    let attempts = 0;
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('transient append');
+      })
+    };
+    const { bus, transport } = makeReplayBus({ persistence, persistenceRetry: { maxAttempts: 2, backoffMs: 0 } });
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(persistence.append).toHaveBeenCalledTimes(2);
+    await bus.stop();
+  });
+
+  it('rejects invalid persistence retry settings', () => {
+    expect(() => makeReplayBus({ persistenceRetry: { maxAttempts: 0 } })).toThrow(TypeError);
+    expect(() => makeReplayBus({ persistenceRetry: { maxAttempts: 1.5 } })).toThrow(TypeError);
+    expect(() => makeReplayBus({ persistenceRetry: { backoffMs: -1 } })).toThrow(TypeError);
   });
 
   it('routes a caller-supplied publish message ID to the transport', async () => {

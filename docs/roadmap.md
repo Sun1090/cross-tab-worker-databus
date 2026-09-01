@@ -1,6 +1,12 @@
 # Roadmap
 
-0.17.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.18.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.18.0 delivered scope
+
+- Opt-in replay persistence retry policy with bounded attempts and exponential backoff.
+- Append, hydration, manual cleanup, topic cleanup, and retention cleanup share one recovery path.
+- Public retry option type is exported while persistence adapter contracts remain source-compatible.
 
 ## 0.17.0 delivered scope
 
