@@ -125,6 +125,8 @@ Clears in-memory replay buffers and invokes the persistence adapter's optional `
 
 `clearReplayTopic(topic)` applies the same cleanup to one exact topic. `getDedupStats()` returns bounded counters (`enabled`, `tracked`, `accepted`, `suppressed`), and `resetDedup()` clears remembered IDs and counters without changing configuration.
 
+`clearReplayBefore(timestamp)` removes entries older than an epoch-millisecond cutoff from memory and from adapters that implement optional `clearBefore(timestamp)`. Incoming messages receive a bus timestamp when the transport does not provide one.
+
 ### `onStatus(handler)`
 
 ```ts

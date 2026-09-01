@@ -195,11 +195,15 @@ export class WebSocketTransport<TData = unknown>
     }
     if (!parsed || typeof parsed !== 'object') return;
     const frame = parsed as Record<string, unknown>;
-    if (typeof frame.topic !== 'string') return;
+    const envelope = frame.publication && typeof frame.publication === 'object'
+      ? frame.publication as Record<string, unknown>
+      : frame;
+    if (typeof envelope.topic !== 'string') return;
     const message: DataBusMessage<TData> = {
-      topic: frame.topic,
-      data: frame.data as TData,
-      ...(typeof frame.messageId === 'string' ? { messageId: frame.messageId } : {})
+      topic: envelope.topic,
+      data: envelope.data as TData,
+      ...(typeof envelope.messageId === 'string' ? { messageId: envelope.messageId } : {}),
+      ...(typeof envelope.timestamp === 'number' ? { timestamp: envelope.timestamp } : {})
     };
     this.handlers?.onMessage(message);
   }

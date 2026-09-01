@@ -144,6 +144,8 @@ export interface DataBusMessage<TData = unknown> {
   data: TData;
   /** Optional caller/server supplied stable identifier used by opt-in dedup. */
   messageId?: string;
+  /** Millisecond timestamp assigned by the producer/bus for retention policies. */
+  timestamp?: number;
   /** True when this delivery is a historical replay (see the `replay`
    * subscription option) rather than a live publication. */
   replayed?: boolean;

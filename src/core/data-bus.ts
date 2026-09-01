@@ -436,6 +436,19 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
   }
 
+  /** Remove replay entries older than an epoch-millisecond cutoff. */
+  async clearReplayBefore(timestamp: number): Promise<void> {
+    if (!Number.isFinite(timestamp)) throw new TypeError('timestamp must be finite.');
+    if (this.replayBuffers) {
+      for (const [topic, messages] of this.replayBuffers) {
+        const kept = messages.filter(message => (message.timestamp ?? 0) >= timestamp);
+        if (kept.length) this.replayBuffers.set(topic, kept);
+        else this.replayBuffers.delete(topic);
+      }
+    }
+    if (this.replayPersistence?.clearBefore) await this.replayPersistence.clearBefore(timestamp);
+  }
+
   /** Return bounded deduplication counters for diagnostics and health checks. */
   getDedupStats(): DataBusDedupStats {
     return {
@@ -591,10 +604,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       buffer = [];
       this.replayBuffers.set(message.topic, buffer);
     }
-    buffer.push(message);
+    const storedMessage = message.timestamp === undefined && this.replayPersistence?.clearBefore
+      ? { ...message, timestamp: Date.now() }
+      : message;
+    buffer.push(storedMessage);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
-      void this.replayPersistence.append(message).catch(error => this.reportError(error));
+      void this.replayPersistence.append(storedMessage).catch(error => this.reportError(error));
     }
   }
 
