@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1238,6 +1238,28 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('runs periodic retention sweeps without requiring a publication', async () => {
+    vi.useFakeTimers();
+    try {
+      const persistence = {
+        load: vi.fn(async () => []),
+        append: vi.fn(async () => undefined),
+        clearBefore: vi.fn(async (_timestamp: number) => undefined)
+      };
+      const { bus } = makeReplayBus({ retentionMs: 60_000, retentionSweepMs: 1_000, persistence });
+      await bus.ready();
+      persistence.clearBefore.mockClear();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(persistence.clearBefore).toHaveBeenCalledOnce();
+      await bus.stop();
+      persistence.clearBefore.mockClear();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(persistence.clearBefore).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('coalesces retention cleanup during a publication burst', async () => {
     const persistence = {
       load: vi.fn(async () => []),
@@ -1260,6 +1282,12 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
   it('rejects invalid replay retention windows', () => {
     for (const retentionMs of [0, -1, NaN, Infinity]) {
       expect(() => makeReplayBus({ retentionMs })).toThrow(TypeError);
+    }
+  });
+
+  it('rejects invalid retention sweep intervals', () => {
+    for (const retentionSweepMs of [0, -1, NaN, Infinity]) {
+      expect(() => makeReplayBus({ retentionMs: 60_000, retentionSweepMs })).toThrow(TypeError);
     }
   });
 

@@ -2,6 +2,19 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.17.0] - 2026-09-01
+
+### Added
+
+- Added optional `replay.retentionSweepMs` for periodic durable replay retention cleanup when no new publications arrive.
+- Retention sweeps follow the DataBus lifecycle: start/resume enables the timer, while pagehide/stop disables it.
+- Added fake-clock lifecycle coverage for timer cleanup and invalid sweep intervals.
+
+### Compatibility
+
+- `retentionSweepMs` is opt-in and has no effect without both `retentionMs` and a persistence adapter implementing `clearBefore()`.
+- Existing publication-triggered cleanup, manual cleanup, and replay persistence contracts remain unchanged.
+
 ## [0.16.0] - 2026-09-01
 
 ### Added

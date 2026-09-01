@@ -49,6 +49,8 @@ export interface DataBusReplayOptions<TData = unknown> {
   persistence?: DataBusReplayPersistence<TData>;
   /** Optional producer-timestamp retention window in milliseconds. */
   retentionMs?: number;
+  /** Optional periodic sweep interval for durable retention cleanup. */
+  retentionSweepMs?: number;
 }
 
 /** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
@@ -102,11 +104,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayMaxPerTopic: number;
   private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
   private readonly replayRetentionMs: number | undefined;
+  private readonly replayRetentionSweepMs: number | undefined;
   private readonly replayHydration: Promise<void>;
   // Retention cleanup is coalesced so a burst of publications does not issue
   // one IndexedDB read/write transaction per message. The newest cutoff wins.
   private replayRetentionCleanup: Promise<void> | null = null;
   private replayRetentionCutoff: number | null = null;
+  private replayRetentionTimer: ReturnType<typeof setInterval> | null = null;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
@@ -158,6 +162,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayRetentionMs = replay?.retentionMs;
     if (this.replayRetentionMs !== undefined && (!Number.isFinite(this.replayRetentionMs) || this.replayRetentionMs <= 0)) {
       throw new TypeError('replay.retentionMs must be a positive finite number.');
+    }
+    this.replayRetentionSweepMs = replay?.retentionSweepMs;
+    if (this.replayRetentionSweepMs !== undefined && (!Number.isFinite(this.replayRetentionSweepMs) || this.replayRetentionSweepMs <= 0)) {
+      throw new TypeError('replay.retentionSweepMs must be a positive finite number.');
     }
     const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
     this.now = dedup?.now ?? Date.now;
@@ -219,11 +227,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           // the trace log ends on 'stop' rather than 'suspend'→'stop'.
           if (!this.stopping) this.trace.event({ type: 'lifecycle', action: 'suspend' });
           this.trace.pause();
+          this.stopReplayRetentionSweep();
           this.suspendTransport();
         },
         onResume: () => {
           this.trace.event({ type: 'lifecycle', action: 'resume' });
           this.trace.start();
+          this.startReplayRetentionSweep();
           this.resumeTransport();
         },
         onDiagnostic: event => {
@@ -253,6 +263,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.lastError = null;
     this.trace.event({ type: 'lifecycle', action: 'start' });
     this.trace.start();
+    this.startReplayRetentionSweep();
     this.updateStatus('connecting');
     this.cluster.start();
     // Establish the opening before replaying topicHandlers: cluster.subscribe()
@@ -545,6 +556,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.stopping = true;
     this.trace.event({ type: 'lifecycle', action: 'stop' });
     this.trace.stop();
+    this.stopReplayRetentionSweep();
     this.topicHandlers.clear();
     this.replayBuffers?.clear();
     this.cluster.stop();
@@ -694,6 +706,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.scheduleReplayRetentionCleanup(this.replayRetentionCutoff);
       }
     });
+  }
+
+  private startReplayRetentionSweep(): void {
+    if (this.replayRetentionTimer || !this.replayRetentionMs || !this.replayRetentionSweepMs || !this.replayPersistence?.clearBefore) return;
+    this.replayRetentionTimer = setInterval(() => {
+      this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs!);
+    }, this.replayRetentionSweepMs);
+  }
+
+  private stopReplayRetentionSweep(): void {
+    if (this.replayRetentionTimer) clearInterval(this.replayRetentionTimer);
+    this.replayRetentionTimer = null;
   }
 
   /** Deliver buffered history to a newly-registered handler. For an exact

@@ -50,6 +50,8 @@ const bus = new CrossTabDataBus({
 
 启用 `replay.retentionMs` 时，自动 durable cleanup 会在 publication burst 期间合并：复用进行中的清理，并在其完成后应用最新 cutoff。在不改变 retention 边界的前提下，这会限制 IndexedDB 清理事务数量。
 
+`replay.retentionSweepMs` 可选地按周期触发同一清理逻辑。它适合安静 topic 的 durable 旧记录也需要过期的场景；需要同时配置 `retentionMs` 和实现 `clearBefore()` 的持久化适配器。定时器遵循页面可见性和生命周期切换，默认关闭。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

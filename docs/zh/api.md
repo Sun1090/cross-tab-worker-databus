@@ -141,6 +141,8 @@ clearReplay(): Promise<void>
 
 启用自动 retention 时，如果持久化清理正在进行，后续清理请求会合并，完成后再应用最新 cutoff。
 
+设置 `replay.retentionSweepMs` 后，即使没有新 publication 也会周期性应用 retention cutoff。sweep 只在 bus started 且页面可见时运行；pagehide 时暂停，`stop()` 后永久停止。
+
 ### `onStatus(handler)`
 
 ```ts
