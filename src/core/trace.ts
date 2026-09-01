@@ -58,8 +58,9 @@ export interface DataBusErrorTraceEvent {
 /** Bounded reliability diagnostics for recovery, acknowledgments, and migrations. */
 export interface DataBusReliabilityTraceEvent {
   type: 'reliability';
-  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup' | 'dedup_suppressed';
+  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup' | 'persistence_retry' | 'dedup_suppressed';
   topic?: string;
+  persistenceOperation?: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore';
   attempt?: number;
   durationMs?: number;
   timestamp: number;

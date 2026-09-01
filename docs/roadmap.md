@@ -1,6 +1,12 @@
 # Roadmap
 
-0.18.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.19.0 delivered scope
+
+- Persistence retries emit bounded, opt-in `persistence_retry` reliability events with the operation and attempt number.
+- Diagnostics cover hydration, append, full/topic cleanup, and retention cleanup without exposing payloads or error bodies.
+- Existing retry timing, default single-attempt behavior, adapter contracts, and final error handling remain compatible.
 
 ## 0.18.0 delivered scope
 

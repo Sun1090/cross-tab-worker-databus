@@ -459,7 +459,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.topicHandlers.delete(topic);
     this.replayBuffers?.delete(topic);
     if (this.replayPersistence?.clearTopic) {
-      void this.withPersistenceRetry(() => this.replayPersistence!.clearTopic!(topic))
+      void this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic))
         .catch(error => this.reportPersistenceError(error));
     }
     this.cluster.unsubscribe(topic);
@@ -470,7 +470,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers?.clear();
     if (this.replayPersistence?.clear) {
       try {
-        await this.withPersistenceRetry(() => this.replayPersistence!.clear!());
+        await this.withPersistenceRetry('clear', () => this.replayPersistence!.clear!());
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -483,7 +483,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers?.delete(topic);
     if (this.replayPersistence?.clearTopic) {
       try {
-        await this.withPersistenceRetry(() => this.replayPersistence!.clearTopic!(topic));
+        await this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic));
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -503,7 +503,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     if (this.replayPersistence?.clearBefore) {
       try {
-        await this.withPersistenceRetry(() => this.replayPersistence!.clearBefore!(timestamp));
+        await this.withPersistenceRetry('clearBefore', () => this.replayPersistence!.clearBefore!(timestamp));
       } catch (error) {
         this.reportPersistenceError(error);
         throw error;
@@ -675,7 +675,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     buffer.push(storedMessage);
     if (buffer.length > this.replayMaxPerTopic) buffer.shift();
     if (this.replayPersistence) {
-      void this.withPersistenceRetry(() => this.replayPersistence!.append(storedMessage))
+      void this.withPersistenceRetry('append', () => this.replayPersistence!.append(storedMessage))
         .catch(error => this.reportPersistenceError(error));
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
         this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs);
@@ -689,9 +689,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     try {
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        await this.withPersistenceRetry(() => this.replayPersistence!.clearBefore!(this.now() - this.replayRetentionMs!));
+        await this.withPersistenceRetry('clearBefore', () => this.replayPersistence!.clearBefore!(this.now() - this.replayRetentionMs!));
       }
-      for (const message of await this.withPersistenceRetry(() => this.replayPersistence!.load())) {
+      for (const message of await this.withPersistenceRetry('load', () => this.replayPersistence!.load())) {
         let buffer = this.replayBuffers.get(message.topic);
         if (!buffer) {
           buffer = [];
@@ -741,7 +741,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayRetentionTimer = null;
   }
 
-  private async withPersistenceRetry<T>(operation: () => Promise<T>): Promise<T> {
+  private async withPersistenceRetry<T>(
+    persistenceOperation: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore',
+    operation: () => Promise<T>
+  ): Promise<T> {
     let attempt = 0;
     let delay = this.persistenceRetryBackoffMs;
     while (true) {
@@ -750,6 +753,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         return await operation();
       } catch (error) {
         if (attempt >= this.persistenceRetryMaxAttempts) throw error;
+        this.trace.event({
+          type: 'reliability',
+          operation: 'persistence_retry',
+          persistenceOperation,
+          attempt,
+        });
         if (delay > 0) await new Promise<void>(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 1_600);
       }
