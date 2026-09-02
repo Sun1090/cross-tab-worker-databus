@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.20.3 delivered scope
+
+- Added React lifecycle coverage for dynamic topic changes.
+- Topic replacement verifies old subscriptions are removed before the new topic is delivered through WebSocket hook wiring.
+
 ## 0.20.2 delivered scope
 
 - Added protocol recovery coverage proving valid WebSocket publications continue after malformed binary and text frames.

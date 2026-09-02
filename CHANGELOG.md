@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.3] - 2026-09-02
+
+### Added
+
+- Added React lifecycle coverage for dynamic topic changes.
+- Topic replacement now verifies old subscriptions are removed before the new topic is delivered, including end-to-end WebSocket hook wiring.
+
 ## [0.20.2] - 2026-09-02
 
 ### Added
