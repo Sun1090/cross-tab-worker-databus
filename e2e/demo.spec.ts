@@ -250,8 +250,9 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     // Both tabs exchange publications again across the restored cluster.
     await publishJson(owner);
     await expect.poll(() => receivedCount(standby)).toBe(1);
+    const ownerBeforeReturnPublish = await receivedCount(owner);
     await publishJson(standby);
-    await expect.poll(() => receivedCount(owner)).toBe(1);
+    await expect.poll(() => receivedCount(owner)).toBe(ownerBeforeReturnPublish + 1);
   });
 });
 

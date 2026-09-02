@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.5 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.6 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.6 delivered scope
+
+- Added bilingual release checklists covering local validation, packed consumers, tagging, manual npm publication, and post-release verification.
+- Documented immutable npm history and the requirement to rebuild missing historical versions from their exact git tags.
 
 ## 0.20.5 delivered scope
 
