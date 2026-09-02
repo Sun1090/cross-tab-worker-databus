@@ -16,6 +16,11 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Browser scheduling is noisier on shared GitHub runners than on a local
+  // desktop. Keep local runs fast while allowing a transient browser/network
+  // hiccup to retry without masking persistent failures.
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 2 : undefined,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: [['list']],
