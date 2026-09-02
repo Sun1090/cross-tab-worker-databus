@@ -173,4 +173,28 @@ describe('React hooks adapter', () => {
     expect(buses[0]!.stop).toHaveBeenCalled();
     view.unmount();
   });
+
+  it('rebinds the subscription when the React topic changes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const received: unknown[] = [];
+    function Demo({ topic }: { topic: string }) {
+      const bus = useCrossTabDataBus(() => createWebSocketDataBus({
+        connection: { url: 'wss://example.test/ws', webSocketFactory: () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket; } }
+      }));
+      useCrossTabSubscription(bus, topic, message => received.push(message.data));
+      return null;
+    }
+    const view = render(<Demo topic="first" />);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    const socket = sockets[0]!;
+    socket.open();
+    await waitFor(() => expect(socket.sent).toContain(JSON.stringify({ op: 'subscribe', topic: 'first' })));
+    view.rerender(<Demo topic="second" />);
+    await waitFor(() => expect(socket.sent).toContain(JSON.stringify({ op: 'unsubscribe', topic: 'first' })));
+    await waitFor(() => expect(socket.sent).toContain(JSON.stringify({ op: 'subscribe', topic: 'second' })));
+    socket.serverFrame({ topic: 'first', data: 'old' });
+    socket.serverFrame({ topic: 'second', data: 'new' });
+    await waitFor(() => expect(received).toEqual(['new']));
+    view.unmount();
+  });
 });

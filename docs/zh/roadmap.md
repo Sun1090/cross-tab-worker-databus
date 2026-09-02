@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.20.3 已完成范围
+
+- 新增 React 动态 topic 生命周期覆盖。
+- 验证 topic 替换会移除旧订阅后再接收新 topic，且通过 WebSocket hook 链路生效。
+
 ## 0.20.2 已完成范围
 
 - 新增协议恢复回归：malformed binary/text frame 之后，合法 WebSocket publication 仍可继续投递。
