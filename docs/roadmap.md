@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.20.1 delivered scope
+
+- Added persistence mutation-sequence soak coverage spanning hydration, retry recovery, topic cleanup, subsequent append, and full cleanup.
+- Serialized persistence operations remain usable after transient failures.
+
 ## 0.20.0 delivered scope
 
 - Publication envelope compatibility is covered for legacy, nested, fallback-topic, primitive payload, metadata, and unknown-field frames.

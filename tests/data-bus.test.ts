@@ -1433,6 +1433,37 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('recovers across a persistence mutation sequence after a transient failure', async () => {
+    let appendAttempts = 0;
+    const calls: string[] = [];
+    const persistence = {
+      load: vi.fn(async () => { calls.push('load'); return []; }),
+      append: vi.fn(async () => {
+        calls.push('append');
+        appendAttempts += 1;
+        if (appendAttempts === 1) throw new Error('transient append');
+      }),
+      clearTopic: vi.fn(async () => { calls.push('clearTopic'); }),
+      clear: vi.fn(async () => { calls.push('clear'); })
+    };
+    const { bus, transport } = makeReplayBus({
+      persistence,
+      persistenceRetry: { maxAttempts: 2, backoffMs: 0 }
+    });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    transport.emit('t', 1);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await bus.clearReplayTopic('t');
+    transport.emit('t', 2);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await bus.clearReplay();
+
+    expect(calls).toEqual(['load', 'append', 'append', 'clearTopic', 'append', 'clear']);
+    expect(persistence.append).toHaveBeenCalledTimes(3);
+    await bus.stop();
+  });
+
   it('cancels a pending persistence retry when the bus stops', async () => {
     const errors: unknown[] = [];
     const persistence = {

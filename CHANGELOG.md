@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.1] - 2026-09-02
+
+### Added
+
+- Added persistence mutation-sequence soak coverage spanning hydration, retry recovery, topic cleanup, subsequent append, and full cleanup.
+- Recovery tests now verify that serialized persistence operations remain usable after transient failures.
+
 ## [0.20.0] - 2026-09-02
 
 ### Added
