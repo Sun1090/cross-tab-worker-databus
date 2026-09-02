@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.7] - 2026-09-02
+
+### Fixed
+
+- IndexedDB replay persistence no longer permanently caches a rejected `open()` promise after transient initialization failures.
+- Subsequent persistence operations can reopen the database and recover without recreating the adapter.
+
 ## [0.19.6] - 2026-09-02
 
 ### Fixed

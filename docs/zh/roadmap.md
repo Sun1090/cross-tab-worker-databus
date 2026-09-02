@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.19.7 已完成范围
+
+- IndexedDB replay adapter 在 open 失败后会丢弃 rejected promise，下一次操作可重新打开并恢复。
+- 与既有跨 tab `versionchange` 连接重置行为保持兼容。
+
 ## 0.19.6 已完成范围
 
 - IndexedDB replay adapter 遇到跨 tab `versionchange` 时会关闭旧连接，并在下一次操作时重新打开。
