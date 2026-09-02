@@ -30,6 +30,16 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     throw new TypeError(`maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`);
   }
   let dbPromise: Promise<IDBDatabase> | null = null;
+  const invalidate = (db: IDBDatabase): void => {
+    if (dbPromise) {
+      void dbPromise.then(current => {
+        if (current === db) {
+          current.close();
+          dbPromise = null;
+        }
+      }, () => undefined);
+    }
+  };
   // IndexedDB transactions are atomic, but a read-modify-write append can
   // still lose updates when callers start several appends concurrently.
   // Serialize all mutations per adapter instance while keeping reads free.
@@ -70,25 +80,37 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     async load() {
       const db = await open();
       return new Promise((resolve, reject) => {
-        const request = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
-        request.onsuccess = () => resolve(request.result.flatMap(record => record.messages as DataBusMessage<TData>[]));
-        request.onerror = () => reject(request.error ?? new Error('Failed to load replay history.'));
+        let request: IDBRequest;
+        try {
+          request = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+        } catch (error) {
+          invalidate(db);
+          reject(error);
+          return;
+        }
+        request.onsuccess = () => resolve((request.result as Array<{ messages: DataBusMessage<TData>[] }>).flatMap(record => record.messages));
+        request.onerror = () => {
+          invalidate(db);
+          reject(request.error ?? new Error('Failed to load replay history.'));
+        };
       });
     },
     append(message) {
       return serializeMutation(async () => {
         const db = await open();
         await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
+        let transaction: IDBTransaction;
+        try { transaction = db.transaction(storeName, 'readwrite'); }
+        catch (error) { invalidate(db); reject(error); return; }
         const store = transaction.objectStore(storeName);
         const request = store.get(message.topic);
         request.onsuccess = () => {
           const messages = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(message).slice(-maxPerTopic);
           store.put({ topic: message.topic, messages });
         };
-        request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
+        request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
         transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to persist replay history.'));
+        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to persist replay history.')); };
         });
       });
     },
@@ -96,10 +118,12 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       return serializeMutation(async () => {
         const db = await open();
         await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
+        let transaction: IDBTransaction;
+        try { transaction = db.transaction(storeName, 'readwrite'); }
+        catch (error) { invalidate(db); reject(error); return; }
         transaction.objectStore(storeName).clear();
         transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear replay history.'));
+        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear replay history.')); };
         });
       });
     },
@@ -107,10 +131,12 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       return serializeMutation(async () => {
         const db = await open();
         await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
+        let transaction: IDBTransaction;
+        try { transaction = db.transaction(storeName, 'readwrite'); }
+        catch (error) { invalidate(db); reject(error); return; }
         transaction.objectStore(storeName).delete(topic);
         transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to clear topic replay history.'));
+        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear topic replay history.')); };
         });
       });
     },
@@ -118,7 +144,9 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       return serializeMutation(async () => {
         const db = await open();
         await new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(storeName, 'readwrite');
+        let transaction: IDBTransaction;
+        try { transaction = db.transaction(storeName, 'readwrite'); }
+        catch (error) { invalidate(db); reject(error); return; }
         const store = transaction.objectStore(storeName);
         const request = store.getAll();
         request.onsuccess = () => {
@@ -128,9 +156,9 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
             else if (messages.length !== record.messages.length) store.put({ topic: record.topic, messages });
           }
         };
-        request.onerror = () => reject(request.error ?? new Error('Failed to read replay history.'));
+        request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
         transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error ?? new Error('Failed to prune replay history.'));
+        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to prune replay history.')); };
         });
       });
     }

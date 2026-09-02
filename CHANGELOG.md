@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.8] - 2026-09-02
+
+### Fixed
+
+- IndexedDB replay persistence now invalidates cached connections after transaction creation or request failures.
+- Closed or otherwise unusable connections can recover through the existing persistence retry path without recreating the adapter.
+
 ## [0.19.7] - 2026-09-02
 
 ### Fixed
