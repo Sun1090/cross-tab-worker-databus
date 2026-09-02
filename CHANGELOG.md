@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.2] - 2026-09-02
+
+### Added
+
+- Added protocol recovery coverage proving valid WebSocket publications continue after malformed binary and text frames.
+- Binary truncation, JSON parse failures, nested envelopes, and error isolation are now exercised as one compatibility sequence.
+
 ## [0.20.1] - 2026-09-02
 
 ### Added

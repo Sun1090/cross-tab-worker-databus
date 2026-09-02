@@ -170,6 +170,17 @@ describe('WebSocketTransport', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('continues delivering valid publications after malformed binary frames', () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.onmessage?.({ data: new Uint8Array([0xc7, 0, 20, 1]).buffer });
+    socket.onmessage?.({ data: '{broken' });
+    socket.onmessage?.({ data: JSON.stringify({ op: 'publication', publication: { topic: 'ok', data: 9 } }) });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'ok', data: 9 });
+  });
+
   it('re-asserts subscriptions when the socket (re)opens', () => {
     const { sockets, transport } = makeTransport();
     const socket = sockets[0]!;
