@@ -66,6 +66,8 @@ Vue 适配层会串行化 bus 替换，并在 reactive 依赖快速变化时忽�
 
 React 适配层同样在 StrictMode 和依赖驱动的重建过程中使用 generation 保护，过期 effect 清理不会清除更新后的 bus。
 
+IndexedDB replay persistence 收到 `versionchange` 时会关闭连接，并在下一次操作时惰性重新打开，从而支持多 tab schema 升级后的恢复。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

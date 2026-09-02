@@ -66,6 +66,8 @@ The Vue adapter serializes bus replacement and ignores stale stop completions wh
 
 The React adapter applies the same generation guard across StrictMode and dependency-driven recreation, so stale effect cleanup cannot clear a newer bus.
 
+IndexedDB replay persistence closes connections receiving `versionchange` and lazily reopens them for the next operation, which keeps multi-tab schema upgrades recoverable.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints
