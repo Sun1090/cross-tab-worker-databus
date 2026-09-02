@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to verify/release, for example v0.20.6"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,6 +22,8 @@ jobs:
       HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: pnpm/action-setup@v4
 
@@ -35,7 +43,8 @@ jobs:
 
       - name: Extract changelog for this version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ inputs.tag || github.ref_name }}"
+          VERSION="${VERSION#v}"
           awk -v ver="$VERSION" '
             /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) found = 1; next }
             found { print }
