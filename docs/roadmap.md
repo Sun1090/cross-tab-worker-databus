@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.8 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.9 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.9 delivered scope
+
+- Published-package verification accepts both semver and `v`-prefixed tag inputs, keeping release-triggered checks aligned with local commands.
 
 ## 0.20.8 delivered scope
 

@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.9] - 2026-09-02
+
+### Fixed
+
+- Published-consumer verification now accepts both npm versions (`0.20.9`) and Git tags (`v0.20.9`) as input.
+
 ## [0.20.8] - 2026-09-02
 
 ### Added
