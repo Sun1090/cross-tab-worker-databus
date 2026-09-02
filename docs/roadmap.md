@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.4 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.5 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.5 delivered scope
+
+- Public-consumer freeze coverage now exercises root, hooks, Vue, and Centrifuge subpaths in both ESM and CommonJS builds.
+- Shipped declaration files are checked for existence and key replay, deduplication, and publication metadata types.
 
 ## 0.20.4 delivered scope
 
