@@ -64,6 +64,8 @@ Retry waits are lifecycle-aware: `stop()` and pagehide suspension cancel pending
 
 The Vue adapter serializes bus replacement and ignores stale stop completions when reactive dependencies change rapidly, preserving the newest component lifecycle.
 
+The React adapter applies the same generation guard across StrictMode and dependency-driven recreation, so stale effect cleanup cannot clear a newer bus.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

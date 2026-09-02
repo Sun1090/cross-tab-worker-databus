@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWebSocketDataBus } from '../src/websocket';
 import type { WebSocketLike } from '../src/websocket';
 import {
@@ -152,5 +152,25 @@ describe('React hooks adapter', () => {
     socket.serverFrame({ topic: 't', data: 1 });
     await waitFor(() => expect(received).toEqual(['v2']));
     expect(socket.sent.filter(frame => frame.includes('"subscribe"'))).toEqual(subscribeFrames);
+  });
+
+  it('does not let a superseded effect clear the newest bus during rapid dependency changes', async () => {
+    const buses = [
+      { ready: vi.fn(async () => {}), stop: vi.fn(async () => {}), getStatus: () => 'connecting', onStatus: () => () => {} },
+      { ready: vi.fn(async () => {}), stop: vi.fn(async () => {}), getStatus: () => 'connecting', onStatus: () => () => {} }
+    ] as unknown as Array<ReturnType<typeof createWebSocketDataBus>>;
+    let index = 0;
+    let tick = 0;
+    function Demo() {
+      useCrossTabDataBus(() => buses[index++]!, [tick]);
+      return null;
+    }
+    const view = render(<Demo />);
+    await waitFor(() => expect(index).toBe(1));
+    tick = 1;
+    act(() => view.rerender(<Demo />));
+    await waitFor(() => expect(index).toBe(2));
+    expect(buses[0]!.stop).toHaveBeenCalled();
+    view.unmount();
   });
 });

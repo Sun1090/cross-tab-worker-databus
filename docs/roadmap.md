@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.5 delivered scope
+
+- React bus effects are generation-guarded across StrictMode and rapid dependency changes.
+- Superseded asynchronous cleanup cannot overwrite the newest active bus.
+
 ## 0.19.4 delivered scope
 
 - Vue bus recreation is generation-guarded across rapid reactive dependency changes.
