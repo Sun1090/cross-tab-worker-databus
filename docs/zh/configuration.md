@@ -58,6 +58,8 @@ const bus = new CrossTabDataBus({
 
 WebSocket 二进制帧可能以 `ArrayBuffer` 或浏览器 `Blob` 到达；两者使用相同的紧凑二进制 publication 格式。Blob 转换是异步的，转换失败会通过 transport error handler 报告。
 
+Retry 等待遵循生命周期：`stop()` 和 pagehide 挂起会取消待执行的 retry；之后的 `start()`/pageshow 会在新的生命周期代际中开始新工作。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

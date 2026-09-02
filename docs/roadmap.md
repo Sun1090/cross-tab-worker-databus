@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.2 delivered scope
+
+- Persistence retries are cancelled across `stop()` and pagehide suspension transitions.
+- Cancelled retry waits do not trigger another adapter call or surface as persistence failures.
+
 ## 0.19.1 delivered scope
 
 - WebSocket binary publication handling accepts browser `Blob` frames in addition to `ArrayBuffer` frames.
