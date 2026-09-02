@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.6 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.7 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.7 delivered scope
+
+- Added `pnpm verify:published` to download the npm package and verify root, hooks, Vue, and Centrifuge ESM/CJS consumers in a clean temporary directory.
+- Published verification accepts `PUBLISHED_VERSION` for release-specific checks and otherwise follows npm's current version.
 
 ## 0.20.6 delivered scope
 

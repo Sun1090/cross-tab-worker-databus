@@ -36,7 +36,11 @@ describe('createBrowserEnvironment (bare Node / SSR)', () => {
 
   it('exposes Date.now and global interval handles', () => {
     const env = createBrowserEnvironment();
-    expect(env.now()).toBe(Date.now());
+    const before = Date.now();
+    const observed = env.now();
+    const after = Date.now();
+    expect(observed).toBeGreaterThanOrEqual(before);
+    expect(observed).toBeLessThanOrEqual(after);
     const callback = vi.fn();
     const handle = env.setInterval(callback, 10);
     expect(handle).toBeTruthy();

@@ -18,3 +18,5 @@
 1. 用 `npm view cross-tab-worker-databus versions --json` 确认版本已出现。
 2. 在干净消费者中安装已发布版本或 tarball，并导入主入口及所有公开子路径。
 3. 将结果记录到发布说明。在公开 API 和协议弃用策略明确冻结前，不进入 `1.0.0`。
+
+npm 发布后运行 `PUBLISHED_VERSION=0.20.7 pnpm verify:published`。

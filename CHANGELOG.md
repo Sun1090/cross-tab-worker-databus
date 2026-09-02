@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.7] - 2026-09-02
+
+### Added
+
+- Added published-package consumer verification that downloads the npm version, then imports every public ESM and CommonJS entry point from a clean temporary consumer.
+- The verification can target `PUBLISHED_VERSION` explicitly, making release validation independent from the local checkout version.
+
 ## [0.20.6] - 2026-09-02
 
 ### Added
