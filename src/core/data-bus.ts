@@ -72,6 +72,8 @@ export interface DataBusPersistenceRetryOptions {
 export interface DataBusDedupOptions {
   maxEntries?: number;
   ttlMs?: number;
+  /** Optional periodic sweep interval for quiet-topic expiry. */
+  sweepMs?: number;
   /** Injectable epoch clock for deterministic tests and non-wall-clock hosts. */
   now?: () => number;
 }
@@ -134,6 +136,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly trace: DataBusTraceReporter;
   private readonly dedupMaxEntries: number;
   private readonly dedupTtlMs: number;
+  private readonly dedupSweepMs: number | undefined;
+  private dedupSweepTimer: ReturnType<typeof setInterval> | null = null;
   private readonly dedupEnabled: boolean;
   private readonly now: () => number;
   private readonly seenMessageIds = new Map<string, number>();
@@ -202,12 +206,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.trace = new DataBusTraceReporter(trace);
     this.dedupMaxEntries = dedup?.maxEntries ?? 1_000;
     this.dedupTtlMs = dedup?.ttlMs ?? 60_000;
+    this.dedupSweepMs = dedup?.sweepMs;
     this.dedupEnabled = dedup !== undefined;
     if (!Number.isSafeInteger(this.dedupMaxEntries) || this.dedupMaxEntries <= 0) {
       throw new TypeError('dedup.maxEntries must be a positive safe integer.');
     }
     if (!Number.isFinite(this.dedupTtlMs) || this.dedupTtlMs <= 0) {
       throw new TypeError('dedup.ttlMs must be a positive finite number.');
+    }
+    if (this.dedupSweepMs !== undefined && (!Number.isFinite(this.dedupSweepMs) || this.dedupSweepMs <= 0)) {
+      throw new TypeError('dedup.sweepMs must be a positive finite number.');
     }
     this.cluster = new WorkerClusterRuntime({
       ...clusterOptions,
@@ -254,12 +262,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           if (!this.stopping) this.trace.event({ type: 'lifecycle', action: 'suspend' });
           this.trace.pause();
           this.persistenceRetryGeneration += 1;
+          this.stopDedupSweep();
           this.stopReplayRetentionSweep();
           this.suspendTransport();
         },
         onResume: () => {
           this.trace.event({ type: 'lifecycle', action: 'resume' });
           this.trace.start();
+          this.startDedupSweep();
           this.startReplayRetentionSweep();
           this.resumeTransport();
         },
@@ -290,6 +300,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.lastError = null;
     this.trace.event({ type: 'lifecycle', action: 'start' });
     this.trace.start();
+    this.startDedupSweep();
     this.startReplayRetentionSweep();
     this.updateStatus('connecting');
     this.cluster.start();
@@ -585,6 +596,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.persistenceRetryGeneration += 1;
     this.trace.event({ type: 'lifecycle', action: 'stop' });
     this.trace.stop();
+    this.stopDedupSweep();
     this.stopReplayRetentionSweep();
     this.topicHandlers.clear();
     this.replayBuffers?.clear();
@@ -653,6 +665,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.seenMessageIds.delete(oldest);
     }
     return false;
+  }
+
+  private startDedupSweep(): void {
+    if (this.dedupSweepTimer || !this.dedupEnabled || !this.dedupSweepMs) return;
+    this.dedupSweepTimer = setInterval(() => this.pruneExpiredDedup(), this.dedupSweepMs);
+  }
+
+  private stopDedupSweep(): void {
+    if (this.dedupSweepTimer) clearInterval(this.dedupSweepTimer);
+    this.dedupSweepTimer = null;
+  }
+
+  private pruneExpiredDedup(): void {
+    const cutoff = this.now() - this.dedupTtlMs;
+    for (const [id, timestamp] of this.seenMessageIds) {
+      if (timestamp < cutoff) this.seenMessageIds.delete(id);
+    }
   }
 
   /** Deliver a message to every local handler registered for its topic,
