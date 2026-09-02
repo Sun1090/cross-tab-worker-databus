@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.3] - 2026-09-02
+
+### Added
+
+- Added optional `dedup.sweepMs` for periodic expiry cleanup during quiet periods.
+- Dedup sweep timers follow start/resume and pagehide/stop lifecycle boundaries.
+
 ## [0.19.2] - 2026-09-02
 
 ### Fixed

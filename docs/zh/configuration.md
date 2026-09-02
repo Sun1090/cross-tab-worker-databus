@@ -60,6 +60,8 @@ WebSocket 二进制帧可能以 `ArrayBuffer` 或浏览器 `Blob` 到达；两�
 
 Retry 等待遵循生命周期：`stop()` 和 pagehide 挂起会取消待执行的 retry；之后的 `start()`/pageshow 会在新的生命周期代际中开始新工作。
 
+`dedup.sweepMs` 可选地在 bus started 且可见时执行 TTL 清理，默认关闭；无论是否开启，消息到达时清理和 `maxEntries` 上限仍然生效。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

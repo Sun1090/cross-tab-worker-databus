@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.3 delivered scope
+
+- Added optional `dedup.sweepMs` to remove expired message IDs during quiet periods.
+- Sweep timers follow DataBus lifecycle and remain disabled by default.
+
 ## 0.19.2 delivered scope
 
 - Persistence retries are cancelled across `stop()` and pagehide suspension transitions.

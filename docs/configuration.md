@@ -60,6 +60,8 @@ WebSocket binary frames may arrive as either `ArrayBuffer` or browser `Blob`; bo
 
 Retry waits are lifecycle-aware: `stop()` and pagehide suspension cancel pending retry attempts. A later `start()`/pageshow begins new work under a fresh lifecycle generation.
 
+`dedup.sweepMs` optionally runs TTL cleanup while the bus is started and visible. It is disabled by default; on-message cleanup and `maxEntries` bounds remain in effect regardless.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

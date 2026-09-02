@@ -1023,7 +1023,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; now?: () => number }, trace?: (event: Parameters<NonNullable<ConstructorParameters<typeof CrossTabDataBus>[0]['trace']>['sink']>[0]) => void) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; sweepMs?: number; now?: () => number }, trace?: (event: Parameters<NonNullable<ConstructorParameters<typeof CrossTabDataBus>[0]['trace']>['sink']>[0]) => void) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1316,6 +1316,21 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(seen).toEqual([1, 2]);
     expect(bus.getDedupStats()).toMatchObject({ accepted: 2, suppressed: 0 });
     await bus.stop();
+  });
+
+  it('sweeps expired dedup IDs during quiet periods and validates sweep interval', async () => {
+    let now = 1_000;
+    const { bus, transport } = makeReplayBus(undefined, { ttlMs: 100, sweepMs: 25, now: () => now });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    transport.emit('t', 1, 'quiet-id');
+    now += 101;
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(bus.getDedupStats()).toMatchObject({ tracked: 0 });
+    await bus.stop();
+    for (const sweepMs of [0, -1, NaN, Infinity]) {
+      expect(() => makeReplayBus(undefined, { sweepMs })).toThrow(TypeError);
+    }
   });
 
   it('resets dedup state across a full stop and restart lifecycle', async () => {
