@@ -20,7 +20,7 @@ export default defineConfig({
   // desktop. Keep local runs fast while allowing a transient browser/network
   // hiccup to retry without masking persistent failures.
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  ...(process.env.CI ? { workers: 2 } : {}),
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: [['list']],
