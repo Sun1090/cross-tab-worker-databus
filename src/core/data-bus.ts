@@ -32,6 +32,12 @@ import type { DataBusReplayPersistence } from './replay-persistence';
 const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
+class PersistenceRetryCancelledError extends Error {
+  constructor() {
+    super('Persistence retry cancelled by lifecycle transition.');
+    this.name = 'PersistenceRetryCancelledError';
+  }
+}
 
 /** Constructor options for {@link CrossTabDataBus}. Extends WorkerClusterOptions
  * (cluster coordination config) with the transport, initial connection config,
@@ -116,6 +122,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayRetentionSweepMs: number | undefined;
   private readonly persistenceRetryMaxAttempts: number;
   private readonly persistenceRetryBackoffMs: number;
+  private persistenceRetryGeneration = 0;
   private readonly replayHydration: Promise<void>;
   // Retention cleanup is coalesced so a burst of publications does not issue
   // one IndexedDB read/write transaction per message. The newest cutoff wins.
@@ -246,6 +253,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           // the trace log ends on 'stop' rather than 'suspend'→'stop'.
           if (!this.stopping) this.trace.event({ type: 'lifecycle', action: 'suspend' });
           this.trace.pause();
+          this.persistenceRetryGeneration += 1;
           this.stopReplayRetentionSweep();
           this.suspendTransport();
         },
@@ -574,6 +582,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.stopping = true;
+    this.persistenceRetryGeneration += 1;
     this.trace.event({ type: 'lifecycle', action: 'stop' });
     this.trace.stop();
     this.stopReplayRetentionSweep();
@@ -745,13 +754,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     persistenceOperation: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore',
     operation: () => Promise<T>
   ): Promise<T> {
+    const generation = this.persistenceRetryGeneration;
     let attempt = 0;
     let delay = this.persistenceRetryBackoffMs;
     while (true) {
       attempt += 1;
       try {
+        if (generation !== this.persistenceRetryGeneration) throw new PersistenceRetryCancelledError();
         return await operation();
       } catch (error) {
+        if (error instanceof PersistenceRetryCancelledError || generation !== this.persistenceRetryGeneration) {
+          throw new PersistenceRetryCancelledError();
+        }
         if (attempt >= this.persistenceRetryMaxAttempts) throw error;
         this.trace.event({
           type: 'reliability',
@@ -760,6 +774,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           attempt,
         });
         if (delay > 0) await new Promise<void>(resolve => setTimeout(resolve, delay));
+        if (generation !== this.persistenceRetryGeneration) throw new PersistenceRetryCancelledError();
         delay = Math.min(delay * 2, 1_600);
       }
     }
@@ -834,6 +849,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   private reportPersistenceError(error: unknown): void {
+    if (error instanceof PersistenceRetryCancelledError) return;
     this.trace.event({ type: 'reliability', operation: 'persistence_cleanup' });
     this.reportError(error);
   }

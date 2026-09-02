@@ -58,6 +58,8 @@ When tracing is enabled, each retry before the final attempt emits a bounded `re
 
 WebSocket binary frames may arrive as either `ArrayBuffer` or browser `Blob`; both use the same compact binary publication format. Blob conversion is asynchronous and conversion failures are reported through the transport error handler.
 
+Retry waits are lifecycle-aware: `stop()` and pagehide suspension cancel pending retry attempts. A later `start()`/pageshow begins new work under a fresh lifecycle generation.
+
 On `pagehide`, the aggregation timer stops and discards the incomplete window; on `pageshow`, it resumes with a new window. A permanent `stop()` clears the timer. Only diagnostics output is throttled; actual message reception and distribution are never rate-limited.
 
 ### Timing Parameter Constraints

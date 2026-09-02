@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.2] - 2026-09-02
+
+### Fixed
+
+- Pending persistence retries are cancelled across `stop()` and pagehide suspension boundaries.
+- Lifecycle-cancelled retries no longer emit persistence errors or start another adapter attempt.
+
 ## [0.19.1] - 2026-09-01
 
 ### Fixed

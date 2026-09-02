@@ -1385,6 +1385,24 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('cancels a pending persistence retry when the bus stops', async () => {
+    const errors: unknown[] = [];
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => { throw new Error('temporary'); })
+    };
+    const { bus, transport } = makeReplayBus({ persistence, persistenceRetry: { maxAttempts: 3, backoffMs: 25 } });
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1);
+    await Promise.resolve();
+    await bus.stop();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(persistence.append).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([]);
+  });
+
   it('rejects invalid persistence retry settings', () => {
     expect(() => makeReplayBus({ persistenceRetry: { maxAttempts: 0 } })).toThrow(TypeError);
     expect(() => makeReplayBus({ persistenceRetry: { maxAttempts: 1.5 } })).toThrow(TypeError);
