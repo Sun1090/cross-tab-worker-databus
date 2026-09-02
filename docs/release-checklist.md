@@ -19,4 +19,4 @@ Run `npm publish --access public` from the tagged checkout. A version already pr
 2. Install the published tarball or version in a clean consumer and import the root plus every public subpath.
 3. Record the result in the release notes. Do not advance to `1.0.0` until the public API and protocol deprecation policy are explicitly frozen.
 
-Run `PUBLISHED_VERSION=0.20.7 pnpm verify:published` after npm publication.
+Run `PUBLISHED_VERSION=0.20.8 pnpm verify:published` after npm publication. The verifier retries while the registry propagates the tarball; tune `PUBLISHED_VERIFY_ATTEMPTS` and `PUBLISHED_VERIFY_DELAY_MS` only for unusually slow mirrors.

@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.7 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.8 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.8 delivered scope
+
+- Release verification retries npm tarball resolution during registry propagation and validates the exact tagged version after publish or skip.
+- GitHub Release now runs the same ESM/CJS published-consumer check used locally, including manually published releases.
 
 ## 0.20.7 delivered scope
 

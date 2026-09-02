@@ -19,4 +19,4 @@
 2. 在干净消费者中安装已发布版本或 tarball，并导入主入口及所有公开子路径。
 3. 将结果记录到发布说明。在公开 API 和协议弃用策略明确冻结前，不进入 `1.0.0`。
 
-npm 发布后运行 `PUBLISHED_VERSION=0.20.7 pnpm verify:published`。
+npm 发布后运行 `PUBLISHED_VERSION=0.20.8 pnpm verify:published`。验证器会在 registry 传播 tarball 时自动重试；只有遇到异常慢的镜像才需要调整 `PUBLISHED_VERIFY_ATTEMPTS` 和 `PUBLISHED_VERIFY_DELAY_MS`。

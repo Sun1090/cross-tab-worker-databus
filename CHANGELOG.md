@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.8] - 2026-09-02
+
+### Added
+
+- Release verification now retries npm tarball resolution to tolerate registry propagation after publication.
+- The release workflow always verifies the exact tagged package's ESM and CommonJS consumers after the publish-or-skip step.
+
 ## [0.20.7] - 2026-09-02
 
 ### Added

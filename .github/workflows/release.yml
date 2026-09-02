@@ -77,3 +77,10 @@ jobs:
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify published npm consumers
+        env:
+          PUBLISHED_VERSION: ${{ inputs.tag || github.ref_name }}
+          PUBLISHED_VERIFY_ATTEMPTS: 12
+          PUBLISHED_VERIFY_DELAY_MS: 5000
+        run: pnpm verify:published
