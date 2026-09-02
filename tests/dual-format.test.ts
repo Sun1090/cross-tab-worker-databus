@@ -21,6 +21,12 @@ const PUBLIC_FUNCTIONS = [
   'selectWorkerBackend'
 ] as const;
 
+const SUBPATH_EXPORTS = {
+  './hooks': ['useCrossTabDataBus', 'useCrossTabSubscription', 'useCrossTabStatus'],
+  './vue': ['useCrossTabDataBus', 'useCrossTabSubscription', 'useCrossTabStatus'],
+  './centrifuge': ['CentrifugeWorkerTransport', 'createCentrifugeDataBus']
+} as const;
+
 describe('dual-format build artifacts', () => {
   it('exposes the public API to CommonJS consumers via dist/cjs', () => {
     const lib: Record<string, unknown> = require('../dist/cjs/index.cjs');
@@ -38,6 +44,29 @@ describe('dual-format build artifacts', () => {
         'function'
       );
     }
+  });
+
+  it('keeps every public subpath consumable in both module formats', async () => {
+    for (const [subpath, names] of Object.entries(SUBPATH_EXPORTS)) {
+      const entry = subpath.slice(2);
+      const esm = (await import(/* @vite-ignore */ `../dist/${entry}.js`)) as Record<string, unknown>;
+      const cjs = require(`../dist/cjs/${entry}.cjs`) as Record<string, unknown>;
+      for (const name of names) {
+        expect(typeof esm[name], `dist/${entry}.js missing export: ${name}`).toBe('function');
+        expect(typeof cjs[name], `dist/cjs/${entry}.cjs missing export: ${name}`).toBe('function');
+      }
+    }
+  });
+
+  it('publishes declarations for every public subpath and key option type', () => {
+    const declarations = ['index.d.ts', 'hooks.d.ts', 'vue.d.ts', 'centrifuge.d.ts'];
+    for (const file of declarations) {
+      expect(existsSync(`dist/${file}`), `declaration missing: dist/${file}`).toBe(true);
+    }
+    const indexTypes = require('node:fs').readFileSync('dist/index.d.ts', 'utf8') as string;
+    expect(indexTypes).toContain('DataBusPublicationMetadata');
+    expect(indexTypes).toContain('DataBusReplayPersistence');
+    expect(indexTypes).toContain('DataBusDedupOptions');
   });
 
   it('materialises every path declared in package.json exports', () => {

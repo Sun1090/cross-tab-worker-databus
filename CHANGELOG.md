@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.5] - 2026-09-02
+
+### Added
+
+- Added public-consumer freeze coverage for root, hooks, Vue, and Centrifuge subpaths across ESM and CommonJS artifacts.
+- Declaration checks now verify the shipped `.d.ts` files and key replay, deduplication, and publication metadata types.
+
 ## [0.20.4] - 2026-09-02
 
 ### Added
