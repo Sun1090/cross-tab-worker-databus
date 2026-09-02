@@ -1,6 +1,11 @@
 # Roadmap
 
-0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.4 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.4 delivered scope
+
+- Added a real Chromium multi-tab soak scenario covering repeated fan-out, owner migration, BFCache round trips, reload recovery, and duplicate-free delivery.
+- Browser lifecycle transitions are now exercised as one continuous session, catching timer and route cleanup regressions that isolated checks can miss.
 
 ## 0.20.3 delivered scope
 

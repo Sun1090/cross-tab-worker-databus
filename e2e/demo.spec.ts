@@ -160,6 +160,61 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(tabB)).toBe(1);
     await expect(tabB.locator('#backendBadge')).toHaveText('SharedWorker');
   });
+
+  test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
+    const topic = `e2e.soak.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+    const tabC = await openDemoTab(context);
+    await connectDemo(tabC, 'dedicated', topic);
+
+    const tabs = [tabA, tabB, tabC];
+    await expect.poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length).toBe(1);
+
+    // Exercise steady-state fan-out repeatedly before any lifecycle transition.
+    for (let index = 0; index < 3; index += 1) {
+      const sender = tabs[index % tabs.length]!;
+      const receivers = tabs.filter(tab => tab !== sender);
+      const before = await Promise.all(receivers.map(receivedCount));
+      await publishJson(sender);
+      await Promise.all(
+        receivers.map((receiver, receiverIndex) =>
+          expect.poll(() => receivedCount(receiver)).toBe(before[receiverIndex]! + 1)
+        )
+      );
+    }
+
+    // Put the current owner through a graceful page-cache transition, then
+    // verify a survivor takes over without duplicate delivery.
+    const ownerIndex = (await Promise.all(tabs.map(assignedCount))).indexOf(1);
+    expect(ownerIndex).toBeGreaterThan(-1);
+    const owner = tabs[ownerIndex]!;
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    const survivors = tabs.filter(tab => tab !== owner);
+    await expect
+      .poll(async () => (await Promise.all(survivors.map(assignedCount))).filter(count => count === 1).length, {
+        timeout: 30_000
+      })
+      .toBe(1);
+    const survivor = survivors[(await Promise.all(survivors.map(assignedCount))).indexOf(1)]!;
+
+    const receiver = survivors.find(tab => tab !== survivor)!;
+    const beforeMigration = await receivedCount(receiver);
+    await publishJson(survivor);
+    await expect.poll(() => receivedCount(receiver)).toBe(beforeMigration + 1);
+
+    // Restore the cached page, reload it, and ensure one final publication is
+    // delivered exactly once after both lifecycle paths have completed.
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
+    await owner.reload();
+    await connectDemo(owner, 'dedicated', topic);
+    const beforeReload = await receivedCount(owner);
+    await publishJson(survivor);
+    await expect.poll(() => receivedCount(owner)).toBe(beforeReload + 1);
+  });
 });
 
 test.describe('cross-tab databus demo — BFCache round trip', () => {

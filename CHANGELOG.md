@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.4] - 2026-09-02
+
+### Added
+
+- Added a real Chromium multi-tab soak scenario covering repeated fan-out, owner migration, BFCache round trips, reload recovery, and duplicate-free delivery.
+- Browser regression coverage now exercises lifecycle transitions as one continuous session instead of isolated one-shot checks.
+
 ## [0.20.3] - 2026-09-02
 
 ### Added
