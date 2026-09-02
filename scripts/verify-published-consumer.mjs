@@ -3,12 +3,31 @@ import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 const workspace = process.cwd();
 const packageJson = JSON.parse(execFileSync('node', ['-p', 'JSON.stringify(require("./package.json"))'], { cwd: workspace, encoding: 'utf8' }));
 const packageName = packageJson.name;
 const version = process.env.PUBLISHED_VERSION || execFileSync('npm', ['view', packageName, 'version', '--registry', 'https://registry.npmjs.org'], { encoding: 'utf8' }).trim();
+const attempts = Number(process.env.PUBLISHED_VERIFY_ATTEMPTS ?? 6);
+const delayMs = Number(process.env.PUBLISHED_VERIFY_DELAY_MS ?? 5_000);
+if (!Number.isSafeInteger(attempts) || attempts <= 0) throw new TypeError('PUBLISHED_VERIFY_ATTEMPTS must be a positive safe integer.');
+if (!Number.isFinite(delayMs) || delayMs < 0) throw new TypeError('PUBLISHED_VERIFY_DELAY_MS must be a non-negative finite number.');
 const tempRoot = mkdtempSync(join(tmpdir(), 'cross-tab-databus-published-'));
-const packJson = execFileSync('npm', ['pack', `${packageName}@${version}`, '--json', '--ignore-scripts', '--pack-destination', tempRoot, '--registry', 'https://registry.npmjs.org'], { encoding: 'utf8' });
+let packJson;
+let lastError;
+for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  try {
+    packJson = execFileSync('npm', ['pack', `${packageName}@${version}`, '--json', '--ignore-scripts', '--pack-destination', tempRoot, '--registry', 'https://registry.npmjs.org'], { encoding: 'utf8' });
+    break;
+  } catch (error) {
+    lastError = error;
+    if (attempt === attempts) throw error;
+    console.warn(`[npm] ${packageName}@${version} not available yet (attempt ${attempt}/${attempts}); retrying in ${delayMs}ms`);
+    await sleep(delayMs);
+  }
+}
+if (!packJson) throw lastError ?? new Error(`Unable to download ${packageName}@${version}`);
 const [{ filename }] = JSON.parse(packJson);
 const packageDir = join(tempRoot, 'package');
 execFileSync('tar', ['-xzf', join(tempRoot, filename), '-C', tempRoot]);
