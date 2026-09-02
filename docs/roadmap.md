@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.4 delivered scope
+
+- Vue bus recreation is generation-guarded across rapid reactive dependency changes.
+- Stale asynchronous lifecycle completions cannot resurrect an obsolete bus instance.
+
 ## 0.19.3 delivered scope
 
 - Added optional `dedup.sweepMs` to remove expired message IDs during quiet periods.

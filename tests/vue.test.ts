@@ -77,4 +77,25 @@ describe('Vue composables adapter', () => {
     expect(received).toEqual(['new']);
     app.unmount();
   });
+
+  it('does not resurrect a stale bus after rapid dependency changes', async () => {
+    const first = fakeBus();
+    const second = fakeBus();
+    const third = fakeBus();
+    const source = ref(0);
+    let created = 0;
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      useCrossTabDataBus(() => [first, second, third][created++]! as never, [source]);
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    source.value = 1;
+    source.value = 2;
+    await nextTick();
+    await Promise.resolve();
+    expect(created).toBeLessThanOrEqual(2);
+    app.unmount();
+  });
 });

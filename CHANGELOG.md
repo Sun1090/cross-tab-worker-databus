@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.4] - 2026-09-02
+
+### Fixed
+
+- Vue `useCrossTabDataBus` now guards against stale asynchronous stop/start completions during rapid reactive dependency changes.
+- A superseded lifecycle no longer resurrects an obsolete bus instance after a newer dependency update.
+
 ## [0.19.3] - 2026-09-02
 
 ### Added

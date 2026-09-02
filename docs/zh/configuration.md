@@ -62,6 +62,8 @@ Retry 等待遵循生命周期：`stop()` 和 pagehide 挂起会取消待执行�
 
 `dedup.sweepMs` 可选地在 bus started 且可见时执行 TTL 清理，默认关闭；无论是否开启，消息到达时清理和 `maxEntries` 上限仍然生效。
 
+Vue 适配层会串行化 bus 替换，并在 reactive 依赖快速变化时忽略过期的 stop 完成，确保组件始终绑定最新生命周期。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

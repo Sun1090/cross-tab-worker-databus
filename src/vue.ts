@@ -11,8 +11,18 @@ export function useCrossTabDataBus<TConfig, TData>(
 ): Ref<CrossTabDataBus<TConfig, TData> | null> {
   const bus = shallowRef<CrossTabDataBus<TConfig, TData> | null>(null);
   let instance: CrossTabDataBus<TConfig, TData> | null = null;
+  let lifecycleGeneration = 0;
   const stop = async () => { const current = instance; instance = null; bus.value = null; if (current) await current.stop(); };
-  const start = () => { void stop().then(() => { const next = create(); instance = next; bus.value = next; void next.ready().catch(() => {}); }); };
+  const start = () => {
+    const generation = ++lifecycleGeneration;
+    void stop().then(() => {
+      if (generation !== lifecycleGeneration) return;
+      const next = create();
+      instance = next;
+      bus.value = next;
+      void next.ready().catch(() => {});
+    });
+  };
   onMounted(start);
   onBeforeUnmount(() => { void stop(); });
   if (deps.length > 0) watch(deps, start);
