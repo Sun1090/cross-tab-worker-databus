@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.9 delivered scope
+
+- Added combined deduplication and replay/persistence regression coverage.
+- Dedup-suppressed publications cannot pollute replay history, while TTL expiry permits the same message ID to be accepted again.
+
 ## 0.19.8 delivered scope
 
 - IndexedDB replay adapters invalidate cached connections after transaction or request failures.

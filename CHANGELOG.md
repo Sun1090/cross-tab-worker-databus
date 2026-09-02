@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.9] - 2026-09-02
+
+### Added
+
+- Added regression coverage for deduplication and replay/persistence composition.
+- Duplicate publications are verified not to pollute replay history, while IDs can re-enter history after TTL expiry.
+
 ## [0.19.8] - 2026-09-02
 
 ### Fixed
