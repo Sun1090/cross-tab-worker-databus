@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.8 delivered scope
+
+- IndexedDB replay adapters invalidate cached connections after transaction or request failures.
+- Closed connections can recover through the existing persistence retry path without recreating the adapter.
+
 ## 0.19.7 delivered scope
 
 - IndexedDB replay adapters discard rejected open promises so transient open failures can recover on the next operation.
