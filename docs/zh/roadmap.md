@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.20.0 已完成范围
+
+- publication envelope 兼容性已覆盖 legacy、嵌套、fallback topic、原始 payload、metadata 和未知字段帧。
+- 缺失或空 topic 会统一拒绝，同时继续支持 transport 提供的 fallback channel。
+
 ## 0.19.9 已完成范围
 
 - 新增 dedup 与 replay/persistence 组合回归覆盖。

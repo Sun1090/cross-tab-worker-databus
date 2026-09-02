@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.0] - 2026-09-02
+
+### Added
+
+- Formalized publication-envelope compatibility coverage across legacy, nested, fallback-topic, primitive payload, metadata, and unknown-field frames.
+- Empty or missing topics are rejected consistently while transport-supplied fallback channels remain supported.
+
 ## [0.19.9] - 2026-09-02
 
 ### Added

@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.20.0 delivered scope
+
+- Publication envelope compatibility is covered for legacy, nested, fallback-topic, primitive payload, metadata, and unknown-field frames.
+- Empty or missing topics are rejected consistently while transport-supplied fallback channels remain supported.
+
 ## 0.19.9 delivered scope
 
 - Added combined deduplication and replay/persistence regression coverage.
