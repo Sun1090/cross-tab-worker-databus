@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.5] - 2026-09-02
+
+### Fixed
+
+- React `useCrossTabDataBus` now ignores stale effect generations during rapid dependency changes.
+- Superseded asynchronous cleanup can no longer clear or overwrite the newest bus lifecycle.
+
 ## [0.19.4] - 2026-09-02
 
 ### Fixed

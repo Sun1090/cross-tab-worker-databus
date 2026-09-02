@@ -64,6 +64,8 @@ Retry 等待遵循生命周期：`stop()` 和 pagehide 挂起会取消待执行�
 
 Vue 适配层会串行化 bus 替换，并在 reactive 依赖快速变化时忽略过期的 stop 完成，确保组件始终绑定最新生命周期。
 
+React 适配层同样在 StrictMode 和依赖驱动的重建过程中使用 generation 保护，过期 effect 清理不会清除更新后的 bus。
+
 `pagehide` 时聚合定时器会停止并丢弃未完成窗口，`pageshow` 后以新窗口恢复；永久 `stop()` 会清理定时器。这里节流的只是诊断输出，真实消息接收与分发不会被限速。
 
 ### 时间参数约束

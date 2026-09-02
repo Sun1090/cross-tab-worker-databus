@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.19.5 已完成范围
+
+- React bus effect 在 StrictMode 和快速依赖切换下使用 generation 保护。
+- 过期的异步清理不会覆盖最新的 active bus。
+
 ## 0.19.4 已完成范围
 
 - Vue bus 在快速 reactive 依赖切换时使用 generation 保护重建流程。

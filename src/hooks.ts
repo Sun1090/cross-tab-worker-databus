@@ -35,12 +35,15 @@ export function useCrossTabDataBus<TConfig, TData>(
   deps: DependencyList = []
 ): CrossTabDataBus<TConfig, TData> | null {
   const [bus, setBus] = useState<CrossTabDataBus<TConfig, TData> | null>(null);
+  const lifecycleGeneration = useRef(0);
   useEffect(() => {
+    const generation = ++lifecycleGeneration.current;
     const instance = create();
+    if (generation !== lifecycleGeneration.current) return;
     setBus(instance);
     void instance.ready().catch(() => {});
     return () => {
-      setBus(null);
+      if (generation === lifecycleGeneration.current) setBus(null);
       void instance.stop();
     };
     // The factory is intentionally not a dependency: callers pass an inline
