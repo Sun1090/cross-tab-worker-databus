@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.6] - 2026-09-02
+
+### Added
+
+- Added a release checklist covering local gates, packed-consumer verification, tag creation, and manual npm publication.
+- Added migration guidance for pre-0.20 consumers and clarified that historical npm versions are immutable and are not republished from the current tree.
+
 ## [0.20.5] - 2026-09-02
 
 ### Added

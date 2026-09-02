@@ -1,6 +1,6 @@
 {
   "name": "cross-tab-worker-databus",
-  "version": "0.20.5",
+  "version": "0.20.6",
   "description": "Framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering and Centrifuge support.",
   "type": "module",
   "license": "MIT",
@@ -77,6 +77,7 @@
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",
     "bench:browser": "pnpm build && node scripts/bench-browser.mjs",
+    "verify:pack": "node scripts/verify-packed-consumer.mjs",
     "test:e2e": "pnpm build && playwright test",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm check"
