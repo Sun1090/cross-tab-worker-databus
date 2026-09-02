@@ -41,7 +41,7 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
   };
   const open = (): Promise<IDBDatabase> => {
     if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
+    const pending = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDb.open(dbName, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(storeName, { keyPath: 'topic' });
       request.onsuccess = () => {
@@ -57,7 +57,14 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       };
       request.onerror = () => reject(request.error ?? new Error('Failed to open replay database.'));
     });
-    return dbPromise;
+    dbPromise = pending;
+    // Do not permanently cache a rejected open promise. IndexedDB can fail
+    // transiently (quota, private-mode initialization, a closing connection,
+    // or a browser shutdown); the next operation must be able to retry.
+    void pending.catch(() => {
+      if (dbPromise === pending) dbPromise = null;
+    });
+    return pending;
   };
   return {
     async load() {

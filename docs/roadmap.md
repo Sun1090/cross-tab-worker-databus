@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.7 delivered scope
+
+- IndexedDB replay adapters discard rejected open promises so transient open failures can recover on the next operation.
+- Recovery remains compatible with the existing cross-tab `versionchange` connection reset behavior.
+
 ## 0.19.6 delivered scope
 
 - IndexedDB replay adapters recover from cross-tab `versionchange` events by reopening on the next operation.
