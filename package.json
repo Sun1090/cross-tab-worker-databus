@@ -1,6 +1,6 @@
 {
   "name": "cross-tab-worker-databus",
-  "version": "0.19.5",
+  "version": "0.19.6",
   "description": "Framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering and Centrifuge support.",
   "type": "module",
   "license": "MIT",

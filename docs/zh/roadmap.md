@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.19.6 已完成范围
+
+- IndexedDB replay adapter 遇到跨 tab `versionchange` 时会关闭旧连接，并在下一次操作时重新打开。
+- schema 变化后不会继续复用失效数据库连接。
+
 ## 0.19.5 已完成范围
 
 - React bus effect 在 StrictMode 和快速依赖切换下使用 generation 保护。

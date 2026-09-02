@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.19.6] - 2026-09-02
+
+### Fixed
+
+- IndexedDB replay persistence now handles cross-tab `versionchange` events by closing stale connections and reopening on the next operation.
+- Multi-tab schema changes no longer leave the adapter permanently bound to an invalid connection.
+
 ## [0.19.5] - 2026-09-02
 
 ### Fixed

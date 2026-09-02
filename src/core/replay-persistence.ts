@@ -44,7 +44,17 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     dbPromise = new Promise((resolve, reject) => {
       const request = indexedDb.open(dbName, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(storeName, { keyPath: 'topic' });
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        // A schema upgrade in another tab invalidates this connection. Close
+        // it and clear the cached promise so the next operation reopens a
+        // usable connection instead of repeatedly targeting a dead database.
+        db.onversionchange = () => {
+          db.close();
+          if (dbPromise) dbPromise = null;
+        };
+        resolve(db);
+      };
       request.onerror = () => reject(request.error ?? new Error('Failed to open replay database.'));
     });
     return dbPromise;

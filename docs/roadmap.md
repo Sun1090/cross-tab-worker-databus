@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.19.6 delivered scope
+
+- IndexedDB replay adapters recover from cross-tab `versionchange` events by reopening on the next operation.
+- Stale database connections are closed instead of being reused after schema changes.
+
 ## 0.19.5 delivered scope
 
 - React bus effects are generation-guarded across StrictMode and rapid dependency changes.
