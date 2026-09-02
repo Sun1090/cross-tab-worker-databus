@@ -58,6 +58,13 @@ jobs:
         # Skipped when no token is configured (e.g. the release was published
         # manually) so tagging an already-published version still goes green.
         if: ${{ env.HAS_NPM_TOKEN == 'true' }}
-        run: npm publish --provenance
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "${PACKAGE_NAME}@${VERSION} is already published; skipping npm publish."
+          else
+            npm publish --provenance --registry https://registry.npmjs.org
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
