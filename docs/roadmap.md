@@ -2,6 +2,11 @@
 
 0.19.0 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
+## 0.20.2 delivered scope
+
+- Added protocol recovery coverage proving valid WebSocket publications continue after malformed binary and text frames.
+- Binary truncation, JSON parse failures, nested envelopes, and error isolation are exercised as one compatibility sequence.
+
 ## 0.20.1 delivered scope
 
 - Added persistence mutation-sequence soak coverage spanning hydration, retry recovery, topic cleanup, subsequent append, and full cleanup.

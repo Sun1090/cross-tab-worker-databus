@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.20.2 已完成范围
+
+- 新增协议恢复回归：malformed binary/text frame 之后，合法 WebSocket publication 仍可继续投递。
+- 将二进制截断、JSON 解析失败、nested envelope 和错误隔离串成一个兼容性序列验证。
+
 ## 0.20.1 已完成范围
 
 - 新增 persistence mutation sequence soak 覆盖：hydration、重试恢复、topic 清理、后续 append 和全量清理。
