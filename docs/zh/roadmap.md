@@ -2,6 +2,11 @@
 
 0.19.0 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
 
+## 0.19.9 已完成范围
+
+- 新增 dedup 与 replay/persistence 组合回归覆盖。
+- 被 dedup 抑制的 publication 不会污染 replay 历史；TTL 到期后同一 message ID 可以再次被接受。
+
 ## 0.19.8 已完成范围
 
 - IndexedDB replay adapter 在事务或请求失败后会使缓存连接失效。

@@ -1304,6 +1304,39 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('does not add dedup-suppressed publications to replay history or persistence', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 8, persistence }, { maxEntries: 8 });
+    const replayed: unknown[] = [];
+    bus.subscribe('t', message => replayed.push(message.data), { replay: true });
+    await bus.ready();
+    transport.emit('t', 'first', 'same-id');
+    transport.emit('t', 'duplicate', 'same-id');
+    expect(replayed).toEqual(['first']);
+    expect(persistence.append).toHaveBeenCalledTimes(1);
+    expect(bus.getDedupStats()).toMatchObject({ accepted: 1, suppressed: 1, tracked: 1 });
+    await bus.stop();
+  });
+
+  it('allows the same message ID to enter replay again after dedup TTL expiry', async () => {
+    let now = 1_000;
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 8 }, { ttlMs: 100, now: () => now });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    transport.emit('t', 'first', 'same-id');
+    now += 101;
+    transport.emit('t', 'second', 'same-id');
+
+    const replayed: unknown[] = [];
+    bus.subscribe('t', message => replayed.push(message.data), { replay: true });
+    expect(replayed).toEqual(['first', 'second']);
+    expect(bus.getDedupStats()).toMatchObject({ accepted: 2, suppressed: 0 });
+    await bus.stop();
+  });
+
   it('uses the injected dedup clock for TTL expiry', async () => {
     let now = 1_000;
     const { bus, transport } = makeReplayBus(undefined, { ttlMs: 100, now: () => now });
