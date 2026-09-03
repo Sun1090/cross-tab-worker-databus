@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.28] - 2026-09-04
+
+### Added
+
+- Expanded packed-consumer verification into a release compatibility matrix covering package version metadata, dual-format export targets, declaration files, and root/subpath consumers.
+
 ## [0.20.27] - 2026-09-04
 
 ### Added

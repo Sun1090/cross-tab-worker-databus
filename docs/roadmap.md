@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.27 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.28 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.28 delivered scope
+
+- Expanded packed-consumer verification into a release compatibility matrix for package metadata, ESM/CJS export targets, declaration files, and all public subpaths.
 
 ## 0.20.27 delivered scope
 
