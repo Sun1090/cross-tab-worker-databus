@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.41] - 2026-09-04
+
+### Added
+
+- Added repeated SharedWorker stop/start resource-soak coverage proving listeners and heartbeat timers are released after every cycle.
+
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
 ## [0.20.40] - 2026-09-04

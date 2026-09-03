@@ -623,6 +623,42 @@ describe('createCentrifugeDataBus', () => {
     await bus.stop();
   });
 
+  it('releases SharedWorker listeners and heartbeat across repeated stop/start cycles', async () => {
+    vi.useFakeTimers();
+    const sharedWorkers: SharedWorkerDouble[] = [];
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'shared-resource-soak'
+    });
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      sharedWorkerFactory: () => {
+        const shared = new SharedWorkerDouble();
+        sharedWorkers.push(shared);
+        return shared as unknown as SharedWorker;
+      },
+      workerMode: 'shared',
+      heartbeatIntervalMs: 100
+    });
+
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      bus.subscribe(`market.tick.${cycle}`, vi.fn());
+      await bus.ready();
+      const current = sharedWorkers.at(-1)!;
+      await vi.advanceTimersByTimeAsync(250);
+      const pingsBeforeStop = current.port.messages.filter(message => message.type === 'PING').length;
+      expect(pingsBeforeStop).toBeGreaterThan(0);
+      await bus.stop();
+      expect(current.port.activeListeners.size).toBe(0);
+      expect(current.errorListenerCount).toBe(0);
+      const countAfterStop = current.port.messages.length;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(current.port.messages.length).toBe(countAfterStop);
+    }
+  });
+
   it('keeps only the newest dedicated worker active across repeated failures', async () => {
     vi.useFakeTimers();
     const workers: WorkerDouble[] = [];
