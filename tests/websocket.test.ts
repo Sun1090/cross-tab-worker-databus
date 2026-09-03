@@ -306,6 +306,26 @@ describe('WebSocketTransport', () => {
     expect(onStatus).toHaveBeenCalledWith('error');
   });
 
+  it('survives repeated socket errors with only the newest connection active', () => {
+    const sockets: FakeWebSocket[] = [];
+    const onStatus = vi.fn();
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => { const socket = new FakeWebSocket(url); sockets.push(socket); return socket; }
+    });
+    const handlers = { onMessage: vi.fn(), onStatus, onError: vi.fn() };
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      transport.start({ url: 'wss://example.test/ws' }, handlers);
+      const socket = sockets.at(-1)!;
+      socket.open();
+      socket.onerror?.();
+      transport.stop();
+      socket.serverFrame({ topic: 'stale', data: cycle });
+    }
+    expect(sockets).toHaveLength(4);
+    expect(handlers.onMessage).not.toHaveBeenCalled();
+  });
+
   it('delivers server publications with a string topic and ignores other frames', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.45] - 2026-09-04
+
+### Added
+
+- Added repeated WebSocket error/restart coverage proving only the newest connection remains active.
+
 ## [0.20.44] - 2026-09-04
 
 ### Added
