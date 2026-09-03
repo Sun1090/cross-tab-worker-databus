@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.13] - 2026-09-03
+
+### Added
+
+- CI now uploads Playwright reports and test results when browser E2E fails, preserving actionable diagnostics for flaky runner failures.
+
 ## [0.20.12] - 2026-09-03
 
 ### Added

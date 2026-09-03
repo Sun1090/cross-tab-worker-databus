@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.12 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.13 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.13 delivered scope
+
+- Browser CI failures now retain Playwright reports and test results as workflow artifacts for post-run diagnosis.
 
 ## 0.20.12 delivered scope
 
