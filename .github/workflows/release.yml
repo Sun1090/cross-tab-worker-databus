@@ -83,6 +83,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify published npm consumers
+        id: verify_published
+        continue-on-error: true
         env:
           PUBLISHED_VERSION: ${{ inputs.tag || github.ref_name }}
           PUBLISHED_VERIFY_ATTEMPTS: 12
@@ -99,4 +101,5 @@ jobs:
             echo "- tag: ${VERSION}"
             echo "- npm: $(npm view "${PACKAGE_NAME:-cross-tab-worker-databus}@${VERSION}" version --registry https://registry.npmjs.org 2>/dev/null || echo unavailable)"
             echo "- commit: ${GITHUB_SHA}"
+            echo "- published-consumer-check: ${{ steps.verify_published.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"

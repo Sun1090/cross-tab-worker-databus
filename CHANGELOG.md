@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.14] - 2026-09-03
+
+### Changed
+
+- Release jobs now preserve published-consumer verification failures as explicit summary diagnostics without marking an otherwise successful publish as failed; local verification remains strict.
+
 ## [0.20.13] - 2026-09-03
 
 ### Added
