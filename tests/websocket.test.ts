@@ -227,6 +227,38 @@ describe('WebSocketTransport', () => {
     expect(secondMessage).toHaveBeenCalledWith({ topic: 'fresh', data: 2 });
   });
 
+  it('keeps only the newest socket active across repeated replacement cycles', () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const onMessage = vi.fn();
+    transport.start({ url: 'wss://example.test/ws' }, { onMessage, onStatus: () => {}, onError: () => {} });
+
+    const first = sockets[0]!;
+    first.open();
+    transport.stop();
+    transport.start({ url: 'wss://example.test/ws' }, { onMessage, onStatus: () => {}, onError: () => {} });
+    const second = sockets[1]!;
+    second.open();
+    transport.stop();
+    transport.start({ url: 'wss://example.test/ws' }, { onMessage, onStatus: () => {}, onError: () => {} });
+    const third = sockets[2]!;
+    third.open();
+
+    first.serverFrame({ topic: 'stale.1', data: 1 });
+    second.serverFrame({ topic: 'stale.2', data: 2 });
+    third.serverFrame({ topic: 'fresh', data: 3 });
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith({ topic: 'fresh', data: 3 });
+  });
+
   it('delivers server publications with a string topic and ignores other frames', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;
