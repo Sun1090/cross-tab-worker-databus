@@ -2,7 +2,7 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [0.20.32] - 2026-09-04
+## [0.20.32] - 2026-09-03
 
 ### Added
 
