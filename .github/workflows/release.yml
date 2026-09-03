@@ -15,6 +15,10 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -84,3 +88,15 @@ jobs:
           PUBLISHED_VERIFY_ATTEMPTS: 12
           PUBLISHED_VERIFY_DELAY_MS: 5000
         run: pnpm verify:published
+
+      - name: Record release verification context
+        if: ${{ always() }}
+        run: |
+          VERSION="${{ inputs.tag || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          {
+            echo "### Release verification"
+            echo "- tag: ${VERSION}"
+            echo "- npm: $(npm view "${PACKAGE_NAME:-cross-tab-worker-databus}@${VERSION}" version --registry https://registry.npmjs.org 2>/dev/null || echo unavailable)"
+            echo "- commit: ${GITHUB_SHA}"
+          } >> "$GITHUB_STEP_SUMMARY"

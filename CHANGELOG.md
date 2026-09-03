@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.11] - 2026-09-03
+
+### Added
+
+- Release workflow runs one serialized job per tag and records the exact npm version, tag, and commit in the GitHub step summary for easier failure diagnosis.
+
 ## [0.20.10] - 2026-09-02
 
 ### Added
