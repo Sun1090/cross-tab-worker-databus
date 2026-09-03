@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.36 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.37 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.37 delivered scope
+
+- Added repeated WebSocket stop/start replacement coverage verifying stale callbacks from multiple superseded sockets are ignored.
 
 ## 0.20.36 delivered scope
 

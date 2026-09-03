@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.37] - 2026-09-03
+
+### Added
+
+- Added a repeated WebSocket replacement regression proving stale lifecycle/message callbacks from multiple superseded sockets cannot leak into the newest session.
+
 ## [0.20.36] - 2026-09-03
 
 ### Added
