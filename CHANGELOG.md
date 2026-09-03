@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.47] - 2026-09-04
+
+### Added
+
+- Added extended reconnect flapping coverage proving replay stays bounded and duplicate-free.
+
 ## [0.20.46] - 2026-09-04
 
 ### Added
