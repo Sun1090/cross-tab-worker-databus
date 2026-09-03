@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.10 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.11 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.11 delivered scope
+
+- Release jobs are serialized per tag and always record npm version, tag, and commit context in the GitHub step summary, making registry or workflow failures easier to diagnose.
 
 ## 0.20.10 delivered scope
 
