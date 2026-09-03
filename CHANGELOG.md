@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.27] - 2026-09-04
+
+### Added
+
+- Added a real Chromium long-soak regression covering repeated BFCache pagehide/pageshow cycles, reloads, owner handoff, reconnect readiness, and duplicate-free delivery.
+
 ## [0.20.26] - 2026-09-04
 
 ### Added
