@@ -578,6 +578,41 @@ describe('createCentrifugeDataBus', () => {
     expect(received).toEqual([3]);
     await bus.stop();
   });
+
+  it('keeps only the newest dedicated worker active across repeated failures', async () => {
+    vi.useFakeTimers();
+    const workers: WorkerDouble[] = [];
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'repeated-dedicated-failure'
+    });
+    const received: number[] = [];
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      workerFactory: () => {
+        const worker = new WorkerDouble();
+        workers.push(worker);
+        return worker as unknown as Worker;
+      },
+      workerMode: 'dedicated'
+    });
+
+    bus.subscribe('market.tick', message => received.push(message.data as number));
+    await bus.ready();
+    workers[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1_500);
+    workers[1]!.fail();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(workers).toHaveLength(3);
+
+    workers[0]!.emit({ type: 'MESSAGE', topic: 'market.tick', data: 1 });
+    workers[1]!.emit({ type: 'MESSAGE', topic: 'market.tick', data: 2 });
+    workers[2]!.emit({ type: 'MESSAGE', topic: 'market.tick', data: 3 });
+    expect(received).toEqual([3]);
+    await bus.stop();
+  });
 });
 
 describe('CentrifugeWorkerTransport heartbeatIntervalMs validation', () => {
