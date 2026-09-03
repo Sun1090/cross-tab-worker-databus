@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.44] - 2026-09-04
+
+### Added
+
+- Added a lifecycle contract regression proving stale WebSocket close/error callbacks cannot affect a restarted session.
+
 ## [0.20.43] - 2026-09-04
 
 ### Added
