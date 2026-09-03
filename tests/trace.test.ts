@@ -179,4 +179,112 @@ describe('DataBusTraceReporter', () => {
       expect.any(Error)
     );
   });
+
+  it('continues emitting after a sink failure and keeps trace data bounded', () => {
+    const events: DataBusTraceEvent[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let calls = 0;
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      sink: event => {
+        calls += 1;
+        if (calls === 1) throw new Error('first sink failure');
+        events.push(event);
+      }
+    });
+
+    reporter.event({ type: 'lifecycle', action: 'start' });
+    reporter.event({ type: 'status', status: 'connected' });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'status', status: 'connected' });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps sensitive publication and error details out of diagnostic events', () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events) });
+    const sensitivePayload = 'super-secret-payload';
+    const sensitiveUrl = 'https://user:password@example.test/private';
+    const sensitiveError = 'server response body: bearer-token';
+
+    reporter.event({ type: 'subscription', action: 'subscribe', topic: 'chat.secret', activeTopics: 1 });
+    reporter.event({
+      type: 'reliability',
+      operation: 'persistence_retry',
+      persistenceOperation: 'append',
+      attempt: 2,
+      topic: 'chat.secret'
+    });
+    reporter.event({ type: 'error', source: 'transport' });
+    reporter.recordReceived('chat.secret');
+    reporter.recordDispatched('chat.secret');
+    reporter.flush();
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(sensitivePayload);
+    expect(serialized).not.toContain(sensitiveUrl);
+    expect(serialized).not.toContain(sensitiveError);
+    for (const event of events) {
+      expect(event.timestamp).toEqual(expect.any(Number));
+      expect(event).not.toHaveProperty('payload');
+      expect(event).not.toHaveProperty('data');
+      expect(event).not.toHaveProperty('credentials');
+      expect(event).not.toHaveProperty('errorBody');
+    }
+  });
+
+  it('isolates event and metrics modes while all mode emits both categories', () => {
+    const events: DataBusTraceEvent[] = [];
+    const eventReporter = new DataBusTraceReporter({ enabled: true, mode: 'events', sink: collect(events) });
+    eventReporter.start();
+    eventReporter.event({ type: 'lifecycle', action: 'start' });
+    eventReporter.recordReceived('events');
+    eventReporter.flush();
+
+    const metricsReporter = new DataBusTraceReporter({ enabled: true, mode: 'metrics', sink: collect(events) });
+    metricsReporter.event({ type: 'lifecycle', action: 'start' });
+    metricsReporter.recordReceived('metrics');
+    metricsReporter.flush();
+
+    const allReporter = new DataBusTraceReporter({ enabled: true, mode: 'all', sink: collect(events) });
+    allReporter.event({ type: 'lifecycle', action: 'start' });
+    allReporter.recordReceived('all');
+    allReporter.flush();
+
+    expect(events.filter(event => event.type === 'lifecycle')).toHaveLength(2);
+    expect(events.filter(event => event.type === 'message_metrics')).toHaveLength(2);
+    expect(events.filter(event => event.type === 'message_metrics').map(event => event.type)).toEqual([
+      'message_metrics',
+      'message_metrics'
+    ]);
+  });
+
+  it('starts a fresh metrics window after pause and resume, and stop prevents later flushes', () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      mode: 'metrics',
+      metricsIntervalMs: 1_000,
+      sink: collect(events)
+    });
+
+    reporter.start();
+    reporter.recordReceived('before-pause');
+    reporter.pause();
+    reporter.flush();
+    expect(events).toHaveLength(0);
+
+    reporter.start();
+    reporter.recordReceived('after-resume');
+    reporter.flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ received: 1, topics: 1, durationMs: expect.any(Number) });
+
+    reporter.stop();
+    reporter.recordReceived('after-stop');
+    reporter.flush();
+    vi.advanceTimersByTime(5_000);
+    expect(events).toHaveLength(1);
+  });
 });

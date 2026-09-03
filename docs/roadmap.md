@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.25 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.26 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.26 delivered scope
+
+- Added trace privacy, mode-isolation, sink-failure, reliability-schema, bounded-state, and lifecycle metrics-window regression coverage.
+- Stopped trace reporters now remain inert until explicitly started again.
 
 ## 0.20.25 delivered scope
 

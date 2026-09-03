@@ -144,6 +144,9 @@ export class DataBusTraceReporter {
   private readonly now: () => number;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private intervalStartedAt = 0;
+  // A reporter may be flushed explicitly before start(), but once stop() is
+  // called it must remain inert until a new start() begins another session.
+  private stopped = false;
   private received = 0;
   private dispatched = 0;
   private latencySamples = 0;
@@ -168,6 +171,7 @@ export class DataBusTraceReporter {
    * (no metrics to emit), when disabled, or when already running. */
   start(): void {
     if (!this.enabled || this.intervalHandle || this.mode === 'events') return;
+    this.stopped = false;
     this.intervalStartedAt = this.now();
     this.intervalHandle = setInterval(() => this.flush(), this.metricsIntervalMs);
   }
@@ -181,6 +185,7 @@ export class DataBusTraceReporter {
   }
 
   stop(): void {
+    this.stopped = true;
     this.pause();
   }
 
@@ -262,7 +267,7 @@ export class DataBusTraceReporter {
 
   /** Emit the accumulated metrics snapshot if the interval is active. */
   flush(): void {
-    if (!this.metricsActive) return;
+    if (!this.metricsActive || this.stopped) return;
     this.flushNow();
   }
 

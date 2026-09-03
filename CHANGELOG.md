@@ -2,6 +2,16 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.26] - 2026-09-04
+
+### Added
+
+- Added trace diagnostics contract coverage for privacy-safe fields, events/metrics mode isolation, repeated sink failures, reliability schema timestamps, bounded state, and lifecycle metrics windows.
+
+### Fixed
+
+- Stopped trace reporters no longer emit metrics from later manual flushes until explicitly started again.
+
 ## [0.20.25] - 2026-09-03
 
 ### Added
