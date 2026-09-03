@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.46] - 2026-09-04
+
+### Added
+
+- Added repeated worker capability-probe coverage proving auto backend selection remains deterministic across repeated checks.
+
 ## [0.20.45] - 2026-09-04
 
 ### Added

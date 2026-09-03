@@ -98,4 +98,17 @@ describe('selectWorkerBackend availability overrides', () => {
       expect(selectWorkerBackend(mode, { worker, sharedWorker })).toBe(expected);
     }
   });
+
+  it('remains deterministic when capability probes are repeated', () => {
+    const probes = [
+      { worker: true, sharedWorker: false, expected: 'dedicated' },
+      { worker: false, sharedWorker: true, expected: 'shared' },
+      { worker: false, sharedWorker: false, expected: 'local' }
+    ] as const;
+    for (let round = 0; round < 20; round += 1) {
+      for (const probe of probes) {
+        expect(selectWorkerBackend('auto', probe)).toBe(probe.expected);
+      }
+    }
+  });
 });
