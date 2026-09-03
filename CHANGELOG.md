@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.43] - 2026-09-04
+
+### Added
+
+- Added repeated WebSocket stop/start cleanup coverage proving subscriptions and stale callbacks are cleared across lifecycle cycles.
+
 ## [0.20.42] - 2026-09-04
 
 ### Added
