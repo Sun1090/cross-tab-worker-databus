@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.13 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.14 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.14 delivered scope
+
+- Release jobs keep publishing successful when only the post-publish consumer diagnostic fails, while preserving the exact check outcome in the step summary; local checks remain strict.
 
 ## 0.20.13 delivered scope
 
