@@ -220,6 +220,20 @@ describe('WebSocketTransport', () => {
     expect(onError).toHaveBeenCalledTimes(2);
   });
 
+  it('accepts legacy and nested publication frames with unknown fields', () => {
+    const { sockets, onMessage } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.serverFrame({ version: 1, topic: 'legacy', data: 1, requestId: 'ignored' });
+    socket.serverFrame({
+      op: 'publication.v2',
+      publication: { topic: 'nested', data: 2, messageId: 'm-2', futureField: true },
+      traceId: 'ignored'
+    });
+    expect(onMessage).toHaveBeenNthCalledWith(1, { topic: 'legacy', data: 1 });
+    expect(onMessage).toHaveBeenNthCalledWith(2, { topic: 'nested', data: 2, messageId: 'm-2' });
+  });
+
   it('drops frames with an onError report while the socket is not open', () => {
     const { transport, onError } = makeTransport();
     // Socket created but never opened (readyState 0).

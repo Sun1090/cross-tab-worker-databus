@@ -169,6 +169,18 @@ describe('CentrifugeSession', () => {
 });
 
 describe('CentrifugeSession additional coverage', () => {
+  it('ignores unknown worker protocol variants without disturbing the session', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({ post: (message: CentrifugeWorkerOutput) => sink(message) });
+    session.handle({ type: 'INIT', url: 'wss://example.test/connection/websocket', config: {} });
+    const client = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'FUTURE', topic: 'ignored' } as never);
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    expect(client.subscriptions.has('market.tick')).toBe(true);
+    expect(sink).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ERROR' }));
+  });
+
   it('transfers an ArrayBuffer via MESSAGE_BIN when transferable is enabled', async () => {
     FakeCentrifuge.instances.length = 0;
     const sink = vi.fn();
