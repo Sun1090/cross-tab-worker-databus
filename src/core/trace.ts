@@ -63,7 +63,7 @@ export interface DataBusReliabilityTraceEvent {
   persistenceOperation?: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore';
   attempt?: number;
   /** Outcome for a transport recovery attempt. */
-  outcome?: 'scheduled' | 'succeeded' | 'failed';
+  outcome?: 'scheduled' | 'succeeded' | 'failed' | 'exhausted';
   durationMs?: number;
   timestamp: number;
 }
