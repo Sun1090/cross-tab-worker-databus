@@ -162,6 +162,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // Monotonic attempt number within one runtime recovery sequence; reset once
   // a transport reopen succeeds so traces can correlate repeated failures.
   private recoveryAttempt = 0;
+  private recoveryExhausted = false;
   // True while the tab is hidden so an in-flight transport start does not mark
   // the transport ready after suspendTransport() has stopped it.
   private suspended = false;
@@ -875,7 +876,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.lastRecoveryAt = now;
         const attempt = ++this.recoveryAttempt;
         if (attempt > this.recoveryMaxAttempts) {
-          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: this.recoveryMaxAttempts, outcome: 'exhausted' });
+          if (!this.recoveryExhausted) {
+            this.recoveryExhausted = true;
+            this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: this.recoveryMaxAttempts, outcome: 'exhausted' });
+          }
           return;
         }
         this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
@@ -1031,6 +1035,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (traceAttempt !== undefined) {
           this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: traceAttempt, outcome: 'succeeded' });
           this.recoveryAttempt = 0;
+          this.recoveryExhausted = false;
         }
         if (this.startPromise === opening) this.startPromise = null;
       },

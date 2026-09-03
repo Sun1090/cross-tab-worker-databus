@@ -714,6 +714,10 @@ describe('CrossTabDataBus', () => {
     }
     expect(transport.startCalls).toBe(3);
     expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'exhausted' }));
+    expect(events.filter(event => typeof event === 'object' && event !== null && 'outcome' in event && (event as { outcome?: string }).outcome === 'exhausted')).toHaveLength(1);
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(250);
+    expect(events.filter(event => typeof event === 'object' && event !== null && 'outcome' in event && (event as { outcome?: string }).outcome === 'exhausted')).toHaveLength(1);
     transport.startShouldFail = false;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();

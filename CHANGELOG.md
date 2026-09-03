@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.21] - 2026-09-03
+
+### Fixed
+
+- Recovery exhaustion diagnostics are now emitted at most once per failed recovery sequence and reset after a successful reopen.
+
 ## [0.20.20] - 2026-09-03
 
 ### Added
