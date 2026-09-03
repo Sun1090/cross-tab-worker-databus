@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.32 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.33 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.33 delivered scope
+
+- Added a tag-based release compatibility check for public exports, ESM/CJS conditions, and type metadata.
 
 ## 0.20.32 delivered scope
 
