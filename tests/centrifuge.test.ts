@@ -693,6 +693,37 @@ describe('createCentrifugeDataBus', () => {
     expect(received).toEqual([3]);
     await bus.stop();
   });
+
+  it('releases Dedicated Worker listeners across repeated stop/start cycles', async () => {
+    const workers: WorkerDouble[] = [];
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'dedicated-resource-soak'
+    });
+    const received: number[] = [];
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      workerFactory: () => {
+        const worker = new WorkerDouble();
+        workers.push(worker);
+        return worker as unknown as Worker;
+      },
+      workerMode: 'dedicated'
+    });
+
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      bus.subscribe(`market.tick.${cycle}`, message => received.push(message.data as number));
+      await bus.ready();
+      const current = workers.at(-1)!;
+      await bus.stop();
+      expect(current.messages.at(-1)?.type).toBe('STOP');
+      current.emit({ type: 'MESSAGE', topic: 'market.tick', data: cycle });
+      expect(received).toEqual([]);
+    }
+    expect(workers).toHaveLength(5);
+  });
 });
 
 describe('CentrifugeWorkerTransport heartbeatIntervalMs validation', () => {

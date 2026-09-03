@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.42] - 2026-09-04
+
+### Added
+
+- Added repeated Dedicated Worker stop/start cleanup coverage proving STOP boundaries detach stale worker delivery across lifecycle cycles.
+
 ## [0.20.41] - 2026-09-04
 
 ### Added
