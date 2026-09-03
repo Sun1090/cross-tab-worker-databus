@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.31 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.32 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.32 delivered scope
+
+- Added replay/dedup combined coverage for hydration, post-recovery live delivery, duplicate suppression, persistence append boundaries, and late-handler ordering.
 
 ## 0.20.31 delivered scope
 
