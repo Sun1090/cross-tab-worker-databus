@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.35] - 2026-09-03
+
+### Added
+
+- Added public data-bus hot-path benchmarks for publish and receive/dispatch throughput, complementing routing and cluster coordination baselines.
+
 ## [0.20.34] - 2026-09-04
 
 ### Added

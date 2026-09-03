@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.34 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.35 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.35 delivered scope
+
+- Added publish and receive/dispatch hot-path benchmarks to establish repeatable throughput baselines alongside routing and cluster coordination measurements.
 
 ## 0.20.34 delivered scope
 
