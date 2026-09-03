@@ -1567,6 +1567,35 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('keeps replay and dedup consistent when a live duplicate follows hydration', async () => {
+    const persistence = {
+      load: vi.fn(async () => [{ topic: 't', data: 'hydrated', messageId: 'hydrated-id' }]),
+      append: vi.fn(async () => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 8, persistence }, { maxEntries: 8 });
+    const seen: Array<{ data: unknown; replayed?: boolean | undefined }> = [];
+    bus.subscribe('t', message => seen.push({ data: message.data, replayed: message.replayed }), { replay: true });
+    await bus.ready();
+
+    // Hydrated history is replayed once, while the same live publication is
+    // accepted only once by dedup and is then appended to replay history.
+    expect(seen).toEqual([{ data: 'hydrated', replayed: true }]);
+    transport.emit('t', 'live', 'live-id');
+    transport.emit('t', 'live-duplicate', 'live-id');
+    const late: unknown[] = [];
+    bus.subscribe('t', message => late.push(message.data), { replay: true });
+    await Promise.resolve();
+
+    expect(seen).toEqual([
+      { data: 'hydrated', replayed: true },
+      { data: 'live', replayed: undefined }
+    ]);
+    expect(late).toEqual(['hydrated', 'live']);
+    expect(persistence.append).toHaveBeenCalledTimes(1);
+    expect(bus.getDedupStats()).toMatchObject({ accepted: 1, suppressed: 1 });
+    await bus.stop();
+  });
+
   it('allows the same message ID to enter replay again after dedup TTL expiry', async () => {
     let now = 1_000;
     const { bus, transport } = makeReplayBus({ maxPerTopic: 8 }, { ttlMs: 100, now: () => now });

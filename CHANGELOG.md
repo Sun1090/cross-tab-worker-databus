@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.32] - 2026-09-04
+
+### Added
+
+- Added a replay/dedup combination regression covering hydrated history, live delivery after recovery, duplicate suppression, persistence append boundaries, and late-handler replay ordering.
+
 ## [0.20.31] - 2026-09-04
 
 ### Fixed
