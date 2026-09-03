@@ -107,6 +107,20 @@ describe('CrossTabDataBus', () => {
     expect(new Set(transport.subscribeCalls).size).toBe(2);
   });
 
+  it('keeps reconnect replay bounded and duplicate-free across extended flapping', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'reconnect-extended' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'reconnect-extended', environment: environment.environment, initialConfig: {}, transport });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    for (let cycle = 0; cycle < 20; cycle += 1) {
+      transport.setStatus('disconnected');
+      transport.setStatus('connected');
+    }
+    expect(transport.subscribeCalls).toHaveLength(21);
+    expect(new Set(transport.subscribeCalls)).toEqual(new Set(['topic']));
+  });
+
   it('does not duplicate subscriptions during status flapping', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'status-flap' });

@@ -1,8 +1,10 @@
 # Roadmap
 
-0.20.46 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.47 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
-## 0.20.46 delivered scope
+## 0.20.47 delivered scope
+
+- Added extended reconnect flapping coverage proving replay stays bounded and duplicate-free.
 
 - Added repeated worker capability-probe coverage proving auto backend selection remains deterministic across repeated checks.
 
