@@ -77,6 +77,35 @@ describe('CrossTabDataBus', () => {
     expect(transport.subscribeCalls).toEqual(['topic', 'topic']);
   });
 
+  it('replays each assigned topic exactly once per reconnect cycle', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reconnect-cycles' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reconnect-cycles',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic-a', vi.fn());
+    bus.subscribe('topic-b', vi.fn());
+    await bus.ready();
+
+    expect(transport.subscribeCalls).toEqual(['topic-a', 'topic-b']);
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      transport.setStatus('disconnected');
+      transport.setStatus('connected');
+    }
+
+    expect(transport.subscribeCalls).toEqual([
+      'topic-a', 'topic-b',
+      'topic-a', 'topic-b',
+      'topic-a', 'topic-b',
+      'topic-a', 'topic-b'
+    ]);
+    expect(new Set(transport.subscribeCalls).size).toBe(2);
+  });
+
   it('routes one transport subscription across tabs and migrates after owner shutdown', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

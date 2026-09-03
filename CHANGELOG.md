@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.10] - 2026-09-02
+
+### Added
+
+- Added reconnect-cycle regression coverage proving every assigned topic is replayed exactly once per transport reconnect.
+
 ## [0.20.9] - 2026-09-02
 
 ### Fixed

@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.9 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.10 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.10 delivered scope
+
+- Added repeated reconnect-cycle coverage for multi-topic subscription replay, guarding against duplicate or missing transport subscriptions during recovery.
 
 ## 0.20.9 delivered scope
 
