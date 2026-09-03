@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.23 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.24 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.24 delivered scope
+
+- Added a combined replay/dedup quiet-period regression covering TTL expiry, periodic sweeps, durable retention cleanup, async hydration, and timer shutdown.
 
 ## 0.20.23 delivered scope
 

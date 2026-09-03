@@ -1612,6 +1612,60 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     }
   });
 
+  it('keeps replay history consistent when dedup TTL expires during a quiet retention window', async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 1_000;
+      const persistence = {
+        load: vi.fn(async () => []),
+        append: vi.fn(async (_message: { topic: string; data: unknown; timestamp?: number }) => undefined),
+        clearBefore: vi.fn(async (_timestamp: number) => undefined)
+      };
+      const storage = new MemoryStorage();
+      const environment = createFakeEnvironment({ storage, now: () => now, randomId: 'replay-dedup-combo' });
+      const transport = new FakeTransport<unknown>();
+      const bus = new CrossTabDataBus({
+        autoStart: true,
+        clusterKey: 'replay-dedup-combo',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        replay: { maxPerTopic: 8, retentionMs: 100, retentionSweepMs: 25, persistence },
+        dedup: { ttlMs: 100, sweepMs: 25, now: () => now }
+      });
+      const live: unknown[] = [];
+      bus.subscribe('t', message => live.push(message.data));
+      await bus.ready();
+
+      transport.emit('t', 'first', 'same-id', now);
+      transport.emit('t', 'duplicate', 'same-id', now);
+      expect(live).toEqual(['first']);
+      expect(bus.getDedupStats()).toMatchObject({ accepted: 1, suppressed: 1, tracked: 1 });
+
+      now += 101;
+      await vi.advanceTimersByTimeAsync(25);
+      expect(bus.getDedupStats()).toMatchObject({ tracked: 0 });
+      transport.emit('t', 'second', 'same-id', now);
+      expect(live).toEqual(['first', 'second']);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const replayed: unknown[] = [];
+      bus.subscribe('t', message => replayed.push(message.data), { replay: true });
+      await vi.runAllTicks();
+      expect(replayed).toEqual(['first', 'second']);
+      expect(persistence.append).toHaveBeenCalledTimes(2);
+      expect(persistence.clearBefore).toHaveBeenCalled();
+
+      await bus.stop();
+      persistence.clearBefore.mockClear();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(persistence.clearBefore).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resets dedup state across a full stop and restart lifecycle', async () => {
     const { bus, transport } = makeReplayBus(undefined, { maxEntries: 4 });
     bus.subscribe('t', () => {});
