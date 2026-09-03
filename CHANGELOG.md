@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.22] - 2026-09-03
+
+### Fixed
+
+- Explicit stop/restart lifecycles now reset recovery attempt and exhaustion state so a new session starts with a fresh diagnostic sequence.
+
 ## [0.20.21] - 2026-09-03
 
 ### Fixed

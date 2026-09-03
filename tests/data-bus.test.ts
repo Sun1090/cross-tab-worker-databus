@@ -730,6 +730,30 @@ describe('CrossTabDataBus', () => {
     expect(() => new CrossTabDataBus({ clusterKey: 'bad-max-float', transport: new FakeTransport(), recovery: { maxAttempts: 1.5 } })).toThrow('recovery.maxAttempts');
   });
 
+  it('resets recovery diagnostics after an explicit stop and restart', async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-reset' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'recovery-reset', environment: environment.environment, initialConfig: {}, transport, recovery: { cooldownMs: 100, maxAttempts: 1 }, trace: { enabled: true, mode: 'events', sink: event => events.push(event) } });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    await bus.stop();
+    transport.startShouldFail = false;
+    await bus.start({});
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    const scheduled = events.filter(event => typeof event === 'object' && event !== null && 'outcome' in event && (event as { outcome?: string }).outcome === 'scheduled') as Array<{ attempt: number }>;
+    expect(scheduled.at(-1)?.attempt).toBe(1);
+    await bus.stop();
+  });
+
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

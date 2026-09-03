@@ -634,6 +634,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.pendingStop = null;
       this.lastError = null;
       this.activeConfig = undefined;
+      this.recoveryAttempt = 0;
+      this.recoveryExhausted = false;
       this.updateStatus('disconnected');
     }
   }
