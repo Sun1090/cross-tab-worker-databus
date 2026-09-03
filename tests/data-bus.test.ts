@@ -106,6 +106,30 @@ describe('CrossTabDataBus', () => {
     expect(new Set(transport.subscribeCalls).size).toBe(2);
   });
 
+  it('does not duplicate subscriptions during status flapping', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'status-flap' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'status-flap',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    transport.setStatus('connected');
+    transport.setStatus('connected');
+    transport.setStatus('disconnected');
+    transport.setStatus('disconnected');
+    transport.setStatus('error');
+    transport.setStatus('connected');
+
+    expect(transport.subscribeCalls).toEqual(['topic', 'topic']);
+    expect(new Set(transport.subscribeCalls)).toEqual(new Set(['topic']));
+  });
+
   it('routes one transport subscription across tabs and migrates after owner shutdown', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
