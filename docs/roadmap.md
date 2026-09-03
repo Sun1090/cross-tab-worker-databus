@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.18 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.19 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.19 delivered scope
+
+- Automatic recovery attempts can be bounded with `recovery.maxAttempts`; explicit subscription demand can still reopen a failed transport.
+- Invalid attempt limits and capped recovery sequences are covered by tests.
 
 ## 0.20.18 delivered scope
 

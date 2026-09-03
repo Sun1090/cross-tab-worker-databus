@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.19] - 2026-09-03
+
+### Added
+
+- Added optional `recovery.maxAttempts` to cap automatic transport reopen attempts while preserving explicit demand-driven recovery.
+- Added validation and regression coverage for capped recovery sequences.
+
 ## [0.20.18] - 2026-09-03
 
 ### Added
