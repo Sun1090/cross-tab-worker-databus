@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.40 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.41 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.41 delivered scope
+
+- Added repeated SharedWorker stop/start resource-soak coverage proving listeners and heartbeat timers are released after every cycle.
 
 ## 0.20.40 delivered scope
 
