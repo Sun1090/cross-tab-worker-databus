@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.35 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.36 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.36 delivered scope
+
+- Added a 1,000-message publish burst regression covering ordering and storage-read avoidance on the local-owner fast path.
 
 ## 0.20.35 delivered scope
 

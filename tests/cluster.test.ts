@@ -69,6 +69,35 @@ describe('WorkerClusterRuntime', () => {
     expect(getItem).not.toHaveBeenCalled();
   });
 
+  it('preserves publish order and avoids storage reads during a burst', async () => {
+    const storage = new MemoryStorage();
+    const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'publish-burst' });
+    const control = vi.fn();
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'publish-burst',
+      environment: env.environment,
+      tabId: 'tab-publish-burst',
+      workerId: 'worker-publish-burst',
+      handlers: { onControl: control, onEvent: vi.fn() }
+    });
+
+    runtime.start();
+    runtime.subscribe('hot-topic');
+    await Promise.resolve();
+    control.mockClear();
+    const getItem = vi.spyOn(storage, 'getItem');
+
+    for (let index = 0; index < 1_000; index += 1) {
+      expect(runtime.publish('hot-topic', { sequence: index })).toBe(true);
+    }
+
+    expect(getItem).not.toHaveBeenCalled();
+    expect(control).toHaveBeenCalledTimes(1_000);
+    expect(control.mock.calls.map(call => (call[2] as { sequence: number }).sequence)).toEqual(
+      Array.from({ length: 1_000 }, (_, index) => index)
+    );
+  });
+
   it('preserves publication metadata across a remote owner control message', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

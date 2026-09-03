@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.36] - 2026-09-03
+
+### Added
+
+- Added a high-frequency publish regression proving local-owner fast-path publication preserves ordering and avoids storage reads across a 1,000-message burst.
+
 ## [0.20.35] - 2026-09-03
 
 ### Added
