@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.21 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.22 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.22 delivered scope
+
+- Explicit stop/restart boundaries reset recovery attempt and exhaustion diagnostics for a fresh session.
 
 ## 0.20.21 delivered scope
 
