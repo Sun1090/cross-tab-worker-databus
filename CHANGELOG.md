@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.30] - 2026-09-04
+
+### Added
+
+- Extended the real IndexedDB replay persistence E2E through a BFCache round trip before reload, verifying ordered durable history and asynchronous replay hydration across both lifecycle transitions.
+
 ## [0.20.29] - 2026-09-04
 
 ### Added
