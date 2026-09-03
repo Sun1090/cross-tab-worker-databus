@@ -215,6 +215,38 @@ test.describe('cross-tab databus demo', () => {
     await publishJson(survivor);
     await expect.poll(() => receivedCount(owner)).toBe(beforeReload + 1);
   });
+
+  test('repeated BFCache round trips and reload keep delivery exactly-once', async ({ context }) => {
+    const topic = `e2e.longsoak.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+    const tabs = [tabA, tabB];
+
+    await expect.poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length).toBe(1);
+
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      const ownerIndex = (await Promise.all(tabs.map(assignedCount))).indexOf(1);
+      const owner = tabs[ownerIndex]!;
+      const standby = tabs[ownerIndex === 0 ? 1 : 0]!;
+
+      const before = await receivedCount(standby);
+      await publishJson(owner);
+      await expect.poll(() => receivedCount(standby)).toBe(before + 1);
+
+      await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+      await expect.poll(() => assignedCount(standby), { timeout: 30_000 }).toBe(1);
+      await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+      await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
+
+      await owner.reload();
+      await connectDemo(owner, 'dedicated', topic);
+      const afterReload = await receivedCount(owner);
+      await publishJson(standby);
+      await expect.poll(() => receivedCount(owner)).toBe(afterReload + 1);
+    }
+  });
 });
 
 test.describe('cross-tab databus demo — BFCache round trip', () => {

@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.26 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.27 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.27 delivered scope
+
+- Added a real Chromium repeated BFCache/reload/owner-handoff soak that verifies reconnect readiness and exactly-once cross-tab delivery across consecutive lifecycle cycles.
 
 ## 0.20.26 delivered scope
 
