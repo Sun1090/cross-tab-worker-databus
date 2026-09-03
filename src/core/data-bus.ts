@@ -95,6 +95,8 @@ export interface CrossTabDataBusOptions<TConfig, TData>
   replay?: DataBusReplayOptions<TData>;
   /** Optional duplicate suppression; absent means every publication is delivered. */
   dedup?: DataBusDedupOptions;
+  /** Automatic transport recovery pacing. */
+  recovery?: { cooldownMs?: number };
 }
 
 /**
@@ -169,7 +171,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // stop to settle.
   private pendingStop: Promise<void> | null = null;
   // Minimum interval in ms between automatic recovery attempts.
-  private static readonly RECOVERY_COOLDOWN_MS = 1000;
+  private readonly recoveryCooldownMs: number;
 
   constructor(options: CrossTabDataBusOptions<TConfig, TData>) {
     const replay = options.replay;
@@ -200,7 +202,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (!Number.isFinite(this.persistenceRetryBackoffMs) || this.persistenceRetryBackoffMs < 0) {
       throw new TypeError('replay.persistenceRetry.backoffMs must be a non-negative finite number.');
     }
-    const { autoStart, initialConfig, trace, transport, dedup, ...clusterOptions } = options;
+    const { autoStart, initialConfig, trace, transport, dedup, recovery, ...clusterOptions } = options;
+    this.recoveryCooldownMs = recovery?.cooldownMs ?? 1000;
+    if (!Number.isFinite(this.recoveryCooldownMs) || this.recoveryCooldownMs <= 0) {
+      throw new TypeError('recovery.cooldownMs must be a positive finite number.');
+    }
     this.now = dedup?.now ?? Date.now;
     this.replayHydration = this.hydrateReplay();
     this.transport = transport;
@@ -860,7 +866,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // callback that produced this status (e.g. openTransport's catch).
     if (status === 'error' && this.started && !this.stopping) {
       const now = this.now();
-      if (now - this.lastRecoveryAt >= CrossTabDataBus.RECOVERY_COOLDOWN_MS) {
+      if (now - this.lastRecoveryAt >= this.recoveryCooldownMs) {
         this.lastRecoveryAt = now;
         const attempt = ++this.recoveryAttempt;
         this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
@@ -870,7 +876,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           // (or is in flight), so this stale timer must not open it again.
           if (this.status !== 'error') return;
           void this.reopenTransport(attempt);
-        }, CrossTabDataBus.RECOVERY_COOLDOWN_MS);
+        }, this.recoveryCooldownMs);
       }
     }
     this.invokeHandlers(this.statusHandlers, handler => handler(status));

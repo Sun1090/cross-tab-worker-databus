@@ -12,6 +12,7 @@
 | `transport` | `DataBusTransport<TConfig, TData>` | Required | Actual connection and subscription implementation |
 | `initialConfig` | `TConfig` | None | Passed to transport on auto-start |
 | `autoStart` | `boolean` | `true` when `initialConfig` is provided | Whether to auto-start after instance creation |
+| `recovery.cooldownMs` | `number` | `1000` | Minimum delay before automatic transport reopen after an error |
 | `storagePrefix` | `string` | `cross-tab-worker-databus` | Namespace for storage keys and BroadcastChannel |
 | `maxActiveWorkers` | `number` | `3` | Maximum number of Workers that can be Topic owners |
 | `heartbeatIntervalMs` | `number` | `3000` | Worker heartbeat interval |

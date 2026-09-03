@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.17 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.18 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.18 delivered scope
+
+- Automatic transport recovery pacing is configurable through `recovery.cooldownMs`.
+- Custom cooldown validation and timer-boundary regression coverage are included.
 
 ## 0.20.17 delivered scope
 

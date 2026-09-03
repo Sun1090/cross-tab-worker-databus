@@ -679,6 +679,25 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('honours a custom recovery cooldown and validates it', async () => {
+    expect(() => new CrossTabDataBus({ clusterKey: 'bad-recovery', transport: new FakeTransport(), recovery: { cooldownMs: 0 } })).toThrow('recovery.cooldownMs');
+    vi.useFakeTimers();
+    let now = 1_000;
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'custom-recovery' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'custom-recovery', environment: environment.environment, initialConfig: {}, transport, recovery: { cooldownMs: 250 } });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(249);
+    expect(transport.startCalls).toBe(1);
+    now += 249;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
