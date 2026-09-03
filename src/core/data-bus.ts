@@ -96,7 +96,7 @@ export interface CrossTabDataBusOptions<TConfig, TData>
   /** Optional duplicate suppression; absent means every publication is delivered. */
   dedup?: DataBusDedupOptions;
   /** Automatic transport recovery pacing. */
-  recovery?: { cooldownMs?: number };
+  recovery?: { cooldownMs?: number; maxAttempts?: number };
 }
 
 /**
@@ -172,6 +172,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private pendingStop: Promise<void> | null = null;
   // Minimum interval in ms between automatic recovery attempts.
   private readonly recoveryCooldownMs: number;
+  private readonly recoveryMaxAttempts: number;
 
   constructor(options: CrossTabDataBusOptions<TConfig, TData>) {
     const replay = options.replay;
@@ -204,8 +205,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     const { autoStart, initialConfig, trace, transport, dedup, recovery, ...clusterOptions } = options;
     this.recoveryCooldownMs = recovery?.cooldownMs ?? 1000;
+    this.recoveryMaxAttempts = recovery?.maxAttempts ?? Number.POSITIVE_INFINITY;
     if (!Number.isFinite(this.recoveryCooldownMs) || this.recoveryCooldownMs <= 0) {
       throw new TypeError('recovery.cooldownMs must be a positive finite number.');
+    }
+    if (!(this.recoveryMaxAttempts === Number.POSITIVE_INFINITY || (Number.isSafeInteger(this.recoveryMaxAttempts) && this.recoveryMaxAttempts > 0))) {
+      throw new TypeError('recovery.maxAttempts must be a positive safe integer.');
     }
     this.now = dedup?.now ?? Date.now;
     this.replayHydration = this.hydrateReplay();
@@ -869,6 +874,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       if (now - this.lastRecoveryAt >= this.recoveryCooldownMs) {
         this.lastRecoveryAt = now;
         const attempt = ++this.recoveryAttempt;
+        if (attempt > this.recoveryMaxAttempts) return;
         this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;

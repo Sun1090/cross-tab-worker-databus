@@ -39,9 +39,10 @@ describe('CrossTabDataBus', () => {
     const bus = new CrossTabDataBus({
       clusterKey: 'cluster',
       environment: environment.environment,
+      initialConfig: {},
       transport
     });
-    await bus.start({});
+    await bus.ready();
     const first = vi.fn();
     const second = vi.fn();
     const removeFirst = bus.subscribe('topic', first);
@@ -696,6 +697,31 @@ describe('CrossTabDataBus', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(transport.startCalls).toBe(2);
     await bus.stop();
+  });
+
+  it('caps automatic recovery attempts while keeping explicit retry available', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-cap' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'recovery-cap', environment: environment.environment, initialConfig: {}, transport, recovery: { cooldownMs: 250, maxAttempts: 2 } });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    for (let i = 0; i < 3; i += 1) {
+      transport.setStatus('error');
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(transport.startCalls).toBe(3);
+    transport.startShouldFail = false;
+    bus.subscribe('topic-2', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(4);
+    await bus.stop();
+  });
+
+  it('rejects invalid recovery attempt limits', () => {
+    expect(() => new CrossTabDataBus({ clusterKey: 'bad-max', transport: new FakeTransport(), recovery: { maxAttempts: 0 } })).toThrow('recovery.maxAttempts');
+    expect(() => new CrossTabDataBus({ clusterKey: 'bad-max-float', transport: new FakeTransport(), recovery: { maxAttempts: 1.5 } })).toThrow('recovery.maxAttempts');
   });
 
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
