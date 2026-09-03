@@ -84,4 +84,18 @@ describe('selectWorkerBackend availability overrides', () => {
     expect(selectWorkerBackend('auto', {})).toBe('shared');
     expect(selectWorkerBackend('auto')).toBe('shared');
   });
+
+  it('keeps the fallback matrix deterministic for every preference and capability pair', () => {
+    const cases = [
+      ['dedicated', true, true, 'dedicated'], ['dedicated', true, false, 'dedicated'],
+      ['dedicated', false, true, 'shared'], ['dedicated', false, false, 'local'],
+      ['shared', true, true, 'shared'], ['shared', true, false, 'dedicated'],
+      ['shared', false, true, 'shared'], ['shared', false, false, 'local'],
+      ['auto', true, true, 'shared'], ['auto', true, false, 'dedicated'],
+      ['auto', false, true, 'shared'], ['auto', false, false, 'local']
+    ] as const;
+    for (const [mode, worker, sharedWorker, expected] of cases) {
+      expect(selectWorkerBackend(mode, { worker, sharedWorker })).toBe(expected);
+    }
+  });
 });

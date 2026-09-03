@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.29] - 2026-09-04
+
+### Added
+
+- Added an exhaustive worker backend fallback matrix covering dedicated, shared, and auto preferences across every capability combination.
+
 ## [0.20.28] - 2026-09-04
 
 ### Added

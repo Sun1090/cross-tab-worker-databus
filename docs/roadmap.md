@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.28 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.29 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.29 delivered scope
+
+- Added exhaustive Dedicated/Shared/auto worker backend fallback coverage across all capability combinations.
 
 ## 0.20.28 delivered scope
 
