@@ -646,6 +646,39 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('numbers consecutive failed recovery attempts and resets after success', async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => Date.now(), randomId: 'recovery-attempts' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-attempts', environment: environment.environment, initialConfig: {}, transport,
+      trace: { enabled: true, mode: 'events', sink: event => events.push(event) }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(1_500);
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(1_500);
+    const failed = events.filter((event): event is { outcome: string; attempt: number } =>
+      typeof event === 'object' && event !== null && 'outcome' in event && 'attempt' in event && (event as { outcome: string }).outcome === 'failed');
+    expect(failed.map(event => event.attempt).slice(0, 2)).toEqual([1, 2]);
+    transport.startShouldFail = false;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(1_500);
+    const succeeded = events.filter((event): event is { outcome: string; attempt: number } =>
+      typeof event === 'object' && event !== null && 'outcome' in event && 'attempt' in event && (event as { outcome: string }).outcome === 'succeeded');
+    expect(succeeded.at(-1)?.attempt).toBeGreaterThanOrEqual(3);
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(1_500);
+    const scheduled = events.filter((event): event is { outcome: string; attempt: number } =>
+      typeof event === 'object' && event !== null && 'outcome' in event && 'attempt' in event && (event as { outcome: string }).outcome === 'scheduled');
+    expect(scheduled.at(-1)?.attempt).toBe(1);
+    await bus.stop();
+  });
+
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

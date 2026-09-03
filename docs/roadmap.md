@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.16 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.17 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.17 delivered scope
+
+- Recovery diagnostics now number consecutive reopen attempts and reset the sequence after success.
+- Added multi-failure recovery regression coverage.
 
 ## 0.20.16 delivered scope
 

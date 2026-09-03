@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.17] - 2026-09-03
+
+### Added
+
+- Consecutive transport recovery traces now carry monotonic attempt numbers and reset after a successful reopen.
+- Added regression coverage for multi-failure recovery sequences.
+
 ## [0.20.16] - 2026-09-03
 
 ### Added
