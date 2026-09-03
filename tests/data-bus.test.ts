@@ -1596,6 +1596,53 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('keeps replay and dedup stable across transport recovery and resubscription', async () => {
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined)
+    };
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'recovery-replay-dedup'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-replay-dedup',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100 },
+      replay: { maxPerTopic: 8, persistence },
+      dedup: { maxEntries: 8 }
+    });
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data), { replay: true });
+    await bus.ready();
+
+    transport.emit('t', 1, 'message-1');
+    transport.setStatus('error');
+    await new Promise(resolve => setTimeout(resolve, 120));
+
+    // Recovery reopens the transport and replays the assigned subscription.
+    expect(transport.startCalls).toBe(2);
+    expect(transport.subscribeCalls).toEqual(['t', 't']);
+
+    // A duplicate delivered after reconnect must be suppressed, while a new
+    // publication is delivered and persisted exactly once.
+    transport.emit('t', 1_000, 'message-1');
+    transport.emit('t', 2_000, 'message-2');
+    expect(seen).toEqual([1, 2_000]);
+    expect(persistence.append).toHaveBeenCalledTimes(2);
+
+    const late: unknown[] = [];
+    bus.subscribe('t', message => late.push(message.data), { replay: true });
+    await Promise.resolve();
+    expect(late).toEqual([1, 2_000]);
+    expect(bus.getDedupStats()).toMatchObject({ accepted: 2, suppressed: 1 });
+    await bus.stop();
+  });
+
   it('allows the same message ID to enter replay again after dedup TTL expiry', async () => {
     let now = 1_000;
     const { bus, transport } = makeReplayBus({ maxPerTopic: 8 }, { ttlMs: 100, now: () => now });
