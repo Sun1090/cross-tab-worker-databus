@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.20 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.21 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.21 delivered scope
+
+- Recovery exhaustion diagnostics are deduplicated within each failure sequence and reset after success.
 
 ## 0.20.20 delivered scope
 
