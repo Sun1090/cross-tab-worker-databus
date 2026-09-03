@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,7 +35,11 @@ execFileSync('tar', ['-xzf', join(tempRoot, filename), '-C', tempRoot]);
 const nodeModules = join(tempRoot, 'node_modules');
 mkdirSync(nodeModules);
 symlinkSync(packageDir, join(nodeModules, packageName), 'dir');
-for (const dependency of ['react', 'vue', 'centrifuge']) symlinkSync(join(workspace, 'node_modules', dependency), join(nodeModules, dependency), 'dir');
+for (const dependency of ['react', 'vue', 'centrifuge']) {
+  const source = join(workspace, 'node_modules', dependency);
+  if (!existsSync(source)) throw new Error(`Missing workspace dependency required by published consumer: ${dependency}`);
+  symlinkSync(source, join(nodeModules, dependency), 'dir');
+}
 
 const consumer = `
   import { CrossTabDataBus, createWebSocketDataBus } from '${packageName}';
@@ -52,5 +56,11 @@ const consumer = `
     if (typeof value !== 'function') throw new Error('published consumer export is not callable');
   }
 `;
-execFileSync(process.execPath, ['--input-type=module', '-e', consumer], { cwd: tempRoot, stdio: 'inherit' });
+try {
+  execFileSync(process.execPath, ['--input-type=module', '-e', consumer], { cwd: tempRoot, stdio: 'inherit' });
+} catch (error) {
+  console.error(`[npm] consumer import failed for ${packageName}@${version}; package=${packageDir}`);
+  console.error(`[npm] dependency links: ${['react', 'vue', 'centrifuge'].map(name => `${name}=${existsSync(join(nodeModules, name))}`).join(', ')}`);
+  throw error;
+}
 console.log(`[npm] verified published ${packageName}@${version} ESM/CJS consumers`);
