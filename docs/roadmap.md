@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.44 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.45 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.45 delivered scope
+
+- Added repeated WebSocket error/restart coverage proving only the newest connection remains active.
 
 ## 0.20.44 delivered scope
 
