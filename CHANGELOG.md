@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.39] - 2026-09-03
+
+### Added
+
+- Added repeated Dedicated Worker failure/recovery coverage proving stale messages from superseded workers cannot reach the reopened session.
+
 ## [0.20.38] - 2026-09-03
 
 ### Added

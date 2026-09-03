@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.38 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.39 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.39 delivered scope
+
+- Added repeated Dedicated Worker failure and recovery coverage verifying only the newest worker can deliver publications.
 
 ## 0.20.38 delivered scope
 
