@@ -859,7 +859,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       const now = this.now();
       if (now - this.lastRecoveryAt >= CrossTabDataBus.RECOVERY_COOLDOWN_MS) {
         this.lastRecoveryAt = now;
-        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1 });
+        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'scheduled' });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;
           // An explicit resume or subscribe already recovered the transport
@@ -1008,9 +1008,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // fresh reopen instead of reusing this settled promise.
     void opening.then(
       () => {
+        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'succeeded' });
         if (this.startPromise === opening) this.startPromise = null;
       },
-      () => undefined
+      () => {
+        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'failed' });
+      }
     );
     void opening.catch(() => undefined);
     return opening;

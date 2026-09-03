@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.15 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.16 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.16 delivered scope
+
+- Transport recovery reliability traces now distinguish scheduled, failed, and successful reopen attempts.
+- Recovery regression coverage now spans a failed reopen followed by a successful retry.
 
 ## 0.20.15 delivered scope
 

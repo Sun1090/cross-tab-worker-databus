@@ -623,6 +623,29 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('traces scheduled, failed, and successful transport recovery outcomes', async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-trace' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-trace', environment: environment.environment, initialConfig: {}, transport,
+      trace: { enabled: true, mode: 'events', sink: event => events.push(event) }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'scheduled' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'failed' }));
+    transport.startShouldFail = false;
+    bus.subscribe('topic-2', vi.fn());
+    await bus.ready();
+    expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'succeeded' }));
+    await bus.stop();
+  });
+
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
