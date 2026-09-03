@@ -259,6 +259,30 @@ describe('WebSocketTransport', () => {
     expect(onMessage).toHaveBeenCalledWith({ topic: 'fresh', data: 3 });
   });
 
+  it('clears subscriptions and stale callbacks across repeated stop/start cycles', () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => { const socket = new FakeWebSocket(url); sockets.push(socket); return socket; }
+    });
+    const onMessage = vi.fn();
+    const handlers = { onMessage, onStatus: vi.fn(), onError: vi.fn() };
+    for (let cycle = 0; cycle < 5; cycle += 1) {
+      transport.start({ url: 'wss://example.test/ws' }, handlers);
+      const socket = sockets.at(-1)!;
+      socket.open();
+      transport.subscribe(`topic.${cycle}`);
+      transport.stop();
+      socket.serverFrame({ topic: 'stale', data: cycle });
+      expect(onMessage).not.toHaveBeenCalled();
+      transport.start({ url: 'wss://example.test/ws' }, handlers);
+      const reopened = sockets.at(-1)!;
+      reopened.open();
+      expect(reopened.sent.filter(frame => typeof frame === 'string' && frame.includes('"op":"subscribe"'))).toEqual([]);
+      transport.stop();
+    }
+  });
+
   it('delivers server publications with a string topic and ignores other frames', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;
