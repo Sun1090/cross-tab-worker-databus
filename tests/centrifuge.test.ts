@@ -505,6 +505,50 @@ describe('createCentrifugeDataBus', () => {
     ]);
   });
 
+  it('keeps auto mode on SharedWorker across repeated failures', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('SharedWorker', SharedWorkerDouble);
+    vi.stubGlobal('Worker', undefined);
+    const sharedWorkers: SharedWorkerDouble[] = [];
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'auto-repeated-shared-failure'
+    });
+    const received: number[] = [];
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      sharedWorkerFactory: () => {
+        const shared = new SharedWorkerDouble();
+        sharedWorkers.push(shared);
+        return shared as unknown as SharedWorker;
+      },
+      workerMode: 'auto'
+    });
+
+    bus.subscribe('market.tick', message => received.push(message.data as number));
+    await bus.ready();
+    expect(sharedWorkers).toHaveLength(1);
+
+    sharedWorkers[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(sharedWorkers).toHaveLength(2);
+    sharedWorkers[1]!.fail();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(sharedWorkers).toHaveLength(3);
+    await Promise.resolve();
+
+    for (const shared of sharedWorkers) {
+      expect(shared.port.messages[0]?.type).toBe('INIT');
+    }
+    sharedWorkers[0]!.port.emit({ type: 'MESSAGE', topic: 'market.tick', data: 1 });
+    sharedWorkers[1]!.port.emit({ type: 'MESSAGE', topic: 'market.tick', data: 2 });
+    sharedWorkers[2]!.port.emit({ type: 'MESSAGE', topic: 'market.tick', data: 3 });
+    expect(received).toEqual([3]);
+    await bus.stop();
+  });
+
   it('discards the failed shared worker so late messages do not reach the reopened session', async () => {
     vi.useFakeTimers();
     const sharedWorkers: SharedWorkerDouble[] = [];

@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.40] - 2026-09-04
+
+### Added
+
+- Added auto worker-mode repeated failure/recovery coverage proving SharedWorker preference remains stable and stale ports cannot deliver publications after successive reopen cycles.
+
 ## [0.20.39] - 2026-09-03
 
 ### Added
