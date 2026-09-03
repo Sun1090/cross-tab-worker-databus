@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.33 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.34 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.34 delivered scope
+
+- Added a transport-recovery composition regression covering automatic reopen/resubscription, replay history, duplicate suppression, persistence append boundaries, and late-handler ordering.
 
 ## 0.20.33 delivered scope
 
