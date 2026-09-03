@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.39 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.40 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.40 delivered scope
+
+- Added auto worker-mode repeated failure and recovery coverage verifying SharedWorker preference remains stable and stale ports cannot deliver publications after successive reopen cycles.
 
 ## 0.20.39 delivered scope
 
