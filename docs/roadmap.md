@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.11 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.12 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.12 delivered scope
+
+- Published-consumer verification now emits package and peer-dependency link diagnostics when CI imports fail, making runner-only failures actionable.
 
 ## 0.20.11 delivered scope
 
