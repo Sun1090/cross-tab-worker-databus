@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.29 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.30 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.30 delivered scope
+
+- Extended IndexedDB replay persistence E2E across BFCache, stop, reload, asynchronous hydration, ordered history, and replay markers.
 
 ## 0.20.29 delivered scope
 

@@ -417,6 +417,10 @@ test.describe('cross-tab databus replay persistence', () => {
     await page.waitForFunction(() => window.__replayAssigned?.(), undefined, { timeout: 30_000 });
     await page.evaluate(() => window.__replayEmit?.('persisted-value'));
     await page.waitForTimeout(500);
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await page.evaluate(() => window.__replayEmit?.('bfcache-value'));
+    await page.waitForTimeout(500);
     const stored = await page.evaluate(async name => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open(name);
@@ -429,7 +433,9 @@ test.describe('cross-tab databus replay persistence', () => {
         request.onerror = () => reject(request.error);
       });
     }, dbName);
-    expect(stored).toEqual([{ topic, messages: [{ topic, data: 'persisted-value' }] }]);
+    expect(stored).toEqual([
+      { topic, messages: [{ topic, data: 'persisted-value' }, { topic, data: 'bfcache-value' }] }
+    ]);
     await page.evaluate(async () => window.__replayBus?.stop());
     await page.reload();
 
@@ -460,6 +466,12 @@ test.describe('cross-tab databus replay persistence', () => {
       return { seen, errors };
     }, { dbName, topic });
 
-    expect(replayed).toEqual({ seen: [{ data: 'persisted-value', replayed: true }], errors: [] });
+    expect(replayed).toEqual({
+      seen: [
+        { data: 'persisted-value', replayed: true },
+        { data: 'bfcache-value', replayed: true }
+      ],
+      errors: []
+    });
   });
 });
