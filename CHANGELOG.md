@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.33] - 2026-09-03
+
+### Added
+
+- Added `pnpm verify:compat` to compare the current package manifest with a prior release tag and reject removed public exports, module conditions, or type metadata.
+
 ## [0.20.32] - 2026-09-03
 
 ### Added
