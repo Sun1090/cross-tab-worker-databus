@@ -1090,6 +1090,68 @@ describe('CrossTabDataBus', () => {
     expect(transportA.publishCalls).toEqual([]);
     await Promise.all([busA.stop(), busB.stop()]);
   });
+
+  it('hands off after an owner transport error during BFCache and avoids duplicate recovery delivery', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'bfcache-recovery-handoff',
+      environment: envA.environment,
+      initialConfig: {},
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA,
+      recovery: { cooldownMs: 100_000 }
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'bfcache-recovery-handoff',
+      environment: envB.environment,
+      initialConfig: {},
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB,
+      recovery: { cooldownMs: 100_000 }
+    });
+    const receivedA: number[] = [];
+    const receivedB: number[] = [];
+
+    await busA.start({});
+    busA.subscribe('market.tick', message => receivedA.push(message.data));
+    now += 1;
+    await busB.start({});
+    busB.subscribe('market.tick', message => receivedB.push(message.data));
+    await Promise.resolve();
+
+    expect(transportA.subscribeCalls).toEqual(['market.tick']);
+    expect(transportB.subscribeCalls).toEqual([]);
+
+    transportA.setStatus('error');
+    envA.pageHide();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(transportA.subscribed.has('market.tick')).toBe(false);
+    expect(transportB.subscribeCalls).toEqual(['market.tick']);
+
+    transportB.emit('market.tick', 1, 'handoff-1', now);
+    expect(receivedA).toEqual([]);
+    expect(receivedB).toEqual([1]);
+
+    envA.pageShow();
+    await busA.ready().catch(() => undefined);
+    expect(transportA.startCalls).toBe(2);
+    expect(transportA.subscribeCalls).toEqual(['market.tick']);
+    expect(transportB.subscribeCalls).toEqual(['market.tick']);
+
+    transportB.emit('market.tick', 2, 'handoff-2', now + 1);
+    expect(receivedA).toEqual([2]);
+    expect(receivedB).toEqual([1, 2]);
+
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
 });
 
 describe('CrossTabDataBus wildcard subscriptions', () => {

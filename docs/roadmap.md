@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.22 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.23 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.23 delivered scope
+
+- Added a two-tab BFCache and transport-error handoff regression covering owner takeover, resume, and duplicate-free delivery.
 
 ## 0.20.22 delivered scope
 
