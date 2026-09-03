@@ -157,6 +157,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // Timestamp of the last automatic transport recovery attempt.
   // Used to avoid a tight retry loop when the transport fails repeatedly.
   private lastRecoveryAt = 0;
+  // Monotonic attempt number within one runtime recovery sequence; reset once
+  // a transport reopen succeeds so traces can correlate repeated failures.
+  private recoveryAttempt = 0;
   // True while the tab is hidden so an in-flight transport start does not mark
   // the transport ready after suspendTransport() has stopped it.
   private suspended = false;
@@ -859,13 +862,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       const now = this.now();
       if (now - this.lastRecoveryAt >= CrossTabDataBus.RECOVERY_COOLDOWN_MS) {
         this.lastRecoveryAt = now;
-        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'scheduled' });
+        const attempt = ++this.recoveryAttempt;
+        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;
           // An explicit resume or subscribe already recovered the transport
           // (or is in flight), so this stale timer must not open it again.
           if (this.status !== 'error') return;
-          void this.reopenTransport();
+          void this.reopenTransport(attempt);
         }, CrossTabDataBus.RECOVERY_COOLDOWN_MS);
       }
     }
@@ -983,7 +987,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * its rejection so the reopen is not blocked. Returns the opening promise so
    * callers can queue operations behind it.
    */
-  private reopenTransport(): Promise<void> {
+  private reopenTransport(recoveryAttempt?: number): Promise<void> {
     if (this.stopping || this.activeConfig === undefined) return Promise.resolve();
     // A resume/recovery already has an opening in flight. Reuse it so a stale
     // recovery timer or a second caller cannot open a second transport. A
@@ -993,6 +997,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // chain the new open after that pending stop.
     if (this.startPromise && this.startPromise !== this.pendingStop) return this.startPromise;
     const config = this.activeConfig;
+    const traceAttempt = recoveryAttempt ?? (this.recoveryAttempt > 0 ? this.recoveryAttempt : undefined);
     // A resume/recovery means the bus is meant to keep running, even after an
     // initial start failed and then recovered while hidden. Without this, a
     // later stop() would be a no-op and leave the reopened transport running.
@@ -1008,11 +1013,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // fresh reopen instead of reusing this settled promise.
     void opening.then(
       () => {
-        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'succeeded' });
+        if (traceAttempt !== undefined) {
+          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: traceAttempt, outcome: 'succeeded' });
+          this.recoveryAttempt = 0;
+        }
         if (this.startPromise === opening) this.startPromise = null;
       },
       () => {
-        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: 1, outcome: 'failed' });
+        if (traceAttempt !== undefined) {
+          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: traceAttempt, outcome: 'failed' });
+        }
       }
     );
     void opening.catch(() => undefined);
