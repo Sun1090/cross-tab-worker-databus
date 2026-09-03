@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.43 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.44 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.44 delivered scope
+
+- Added a lifecycle contract regression proving stale WebSocket close/error callbacks cannot affect a restarted session.
 
 ## 0.20.43 delivered scope
 

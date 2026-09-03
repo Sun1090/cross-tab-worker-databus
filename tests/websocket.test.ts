@@ -283,6 +283,29 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('ignores stale close and error callbacks after a restart', () => {
+    const sockets: FakeWebSocket[] = [];
+    const onStatus = vi.fn();
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => { const socket = new FakeWebSocket(url); sockets.push(socket); return socket; }
+    });
+    const handlers = { onMessage: vi.fn(), onStatus, onError: vi.fn() };
+    transport.start({ url: 'wss://example.test/ws' }, handlers);
+    const first = sockets[0]!;
+    first.open();
+    transport.stop();
+    transport.start({ url: 'wss://example.test/ws' }, handlers);
+    const second = sockets[1]!;
+    second.open();
+    onStatus.mockClear();
+    first.onerror?.();
+    first.onclose?.();
+    expect(onStatus).not.toHaveBeenCalled();
+    second.onerror?.();
+    expect(onStatus).toHaveBeenCalledWith('error');
+  });
+
   it('delivers server publications with a string topic and ignores other frames', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;
