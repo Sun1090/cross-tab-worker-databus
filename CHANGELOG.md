@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.23] - 2026-09-03
+
+### Added
+
+- Added a BFCache + transport-error owner-handoff regression covering recovery, takeover, and duplicate-free delivery across two tabs.
+
 ## [0.20.22] - 2026-09-03
 
 ### Fixed
