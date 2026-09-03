@@ -2,6 +2,16 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.31] - 2026-09-04
+
+### Fixed
+
+- WebSocket transport now isolates stale socket lifecycle and message callbacks after stop/start replacement, preventing late frames from an old connection entering a new session.
+
+### Added
+
+- Added regression coverage for stale-socket isolation during transport replacement.
+
 ## [0.20.30] - 2026-09-04
 
 ### Added

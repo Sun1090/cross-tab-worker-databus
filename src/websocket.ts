@@ -93,6 +93,7 @@ export class WebSocketTransport<TData = unknown>
       return;
     }
     socket.onopen = () => {
+      if (this.socket !== socket || this.handlers !== handlers) return;
       // Re-assert every topic so a reopened socket (recovery path) restores
       // the server-side subscriptions without DataBus involvement.
       for (const topic of this.subscribedTopics) {
@@ -100,9 +101,15 @@ export class WebSocketTransport<TData = unknown>
       }
       handlers.onStatus('connected');
     };
-    socket.onclose = () => handlers.onStatus('disconnected');
-    socket.onerror = () => handlers.onStatus('error');
-    socket.onmessage = event => { void this.handleMessage(event.data); };
+    socket.onclose = () => {
+      if (this.socket === socket && this.handlers === handlers) handlers.onStatus('disconnected');
+    };
+    socket.onerror = () => {
+      if (this.socket === socket && this.handlers === handlers) handlers.onStatus('error');
+    };
+    socket.onmessage = event => {
+      if (this.socket === socket && this.handlers === handlers) void this.handleMessage(event.data);
+    };
     this.socket = socket;
   }
 

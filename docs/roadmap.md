@@ -1,6 +1,11 @@
 # Roadmap
 
-0.20.30 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.31 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.31 delivered scope
+
+- WebSocket lifecycle and message callbacks are isolated by socket identity after replacement.
+- Added stale-connection regression coverage for transport stop/start recovery.
 
 ## 0.20.30 delivered scope
 
