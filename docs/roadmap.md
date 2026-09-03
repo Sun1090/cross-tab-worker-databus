@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.24 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.25 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.25 delivered scope
+
+- Added protocol compatibility coverage for legacy and nested WebSocket/Centrifuge publication frames, unknown fields, invalid metadata, and unknown worker messages.
 
 ## 0.20.24 delivered scope
 

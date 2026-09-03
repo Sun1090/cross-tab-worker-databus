@@ -40,4 +40,27 @@ describe('parseDataBusPublication', () => {
     expect(parseDataBusPublication({ topic: '', data: 1, messageId: 'm' })).toBeNull();
     expect(parseDataBusPublication({ topic: '', data: 1 }, '')).toBeNull();
   });
+
+  it('keeps legacy and future envelope variants interoperable', () => {
+    expect(parseDataBusPublication({
+      version: 1,
+      topic: 'legacy.topic',
+      data: { value: 1 },
+      requestId: 'ignored',
+      extra: { future: true }
+    })).toEqual({ topic: 'legacy.topic', data: { value: 1 } });
+    expect(parseDataBusPublication({
+      op: 'publication.v2',
+      publication: {
+        topic: 'nested.topic',
+        data: { value: 2 },
+        messageId: 'm-2',
+        timestamp: 123,
+        serverSequence: 9
+      },
+      traceId: 'ignored'
+    })).toEqual({ topic: 'nested.topic', data: { value: 2 }, messageId: 'm-2', timestamp: 123 });
+    expect(parseDataBusPublication({ topic: 'topic', data: 3, messageId: null, timestamp: 'later' }))
+      .toEqual({ topic: 'topic', data: 3 });
+  });
 });

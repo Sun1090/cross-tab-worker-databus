@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.25] - 2026-09-03
+
+### Added
+
+- Added WebSocket, Centrifuge, and shared publication-parser compatibility coverage for legacy frames, nested envelopes, unknown fields, invalid optional metadata, and unknown worker protocol variants.
+
 ## [0.20.24] - 2026-09-03
 
 ### Added
