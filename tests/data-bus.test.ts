@@ -701,9 +701,10 @@ describe('CrossTabDataBus', () => {
 
   it('caps automatic recovery attempts while keeping explicit retry available', async () => {
     vi.useFakeTimers();
+    const events: unknown[] = [];
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-cap' });
     const transport = new FakeTransport<number>();
-    const bus = new CrossTabDataBus({ clusterKey: 'recovery-cap', environment: environment.environment, initialConfig: {}, transport, recovery: { cooldownMs: 250, maxAttempts: 2 } });
+    const bus = new CrossTabDataBus({ clusterKey: 'recovery-cap', environment: environment.environment, initialConfig: {}, transport, recovery: { cooldownMs: 250, maxAttempts: 2 }, trace: { enabled: true, mode: 'events', sink: event => events.push(event) } });
     bus.subscribe('topic', vi.fn());
     await bus.ready();
     transport.startShouldFail = true;
@@ -712,6 +713,7 @@ describe('CrossTabDataBus', () => {
       await vi.advanceTimersByTimeAsync(250);
     }
     expect(transport.startCalls).toBe(3);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'exhausted' }));
     transport.startShouldFail = false;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();

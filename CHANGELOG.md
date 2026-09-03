@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.20] - 2026-09-03
+
+### Added
+
+- Automatic recovery now emits an `exhausted` reliability event when `recovery.maxAttempts` is reached, instead of stopping silently.
+
 ## [0.20.19] - 2026-09-03
 
 ### Added

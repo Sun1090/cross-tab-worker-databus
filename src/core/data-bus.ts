@@ -874,7 +874,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       if (now - this.lastRecoveryAt >= this.recoveryCooldownMs) {
         this.lastRecoveryAt = now;
         const attempt = ++this.recoveryAttempt;
-        if (attempt > this.recoveryMaxAttempts) return;
+        if (attempt > this.recoveryMaxAttempts) {
+          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: this.recoveryMaxAttempts, outcome: 'exhausted' });
+          return;
+        }
         this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;

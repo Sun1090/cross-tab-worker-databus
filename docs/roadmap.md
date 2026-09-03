@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.19 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.20 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.20 delivered scope
+
+- Capped automatic recovery now emits an explicit `exhausted` diagnostic when the configured attempt limit is reached.
 
 ## 0.20.19 delivered scope
 
