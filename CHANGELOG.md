@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)；变更记录格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [0.20.18] - 2026-09-03
+
+### Added
+
+- Added optional `recovery.cooldownMs` to tune automatic transport reopen pacing for different runtime environments.
+- Added validation and fake-timer coverage for custom recovery cooldowns.
+
 ## [0.20.17] - 2026-09-03
 
 ### Added
