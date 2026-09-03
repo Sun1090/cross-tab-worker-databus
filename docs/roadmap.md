@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.14 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.15 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.15 delivered scope
+
+- Added transport status-flapping coverage for duplicate `connected`/`disconnected`/`error` notifications and exact topic resubscription behavior.
 
 ## 0.20.14 delivered scope
 
