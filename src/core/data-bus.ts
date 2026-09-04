@@ -97,6 +97,7 @@ export interface DataBusDiagnostics {
   recovery: { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null; generation: number; lastSuccessAt: number | null };
   dedup: DataBusDedupStats;
   replay: { enabled: boolean; topics: number; messages: number };
+  protocol: { unknownMessages: number; lastUnknownMessageType: string | null };
   cluster: WorkerClusterSnapshot;
 }
 
@@ -716,6 +717,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
       replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
+      protocol: { unknownMessages: this.cluster.getUnknownMessageStats().count, lastUnknownMessageType: this.cluster.getUnknownMessageStats().lastType },
       cluster: this.cluster.getSnapshot()
     };
   }

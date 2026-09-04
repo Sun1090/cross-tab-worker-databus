@@ -198,6 +198,8 @@ export class WorkerClusterRuntime {
   private readonly routeOwnerCacheMax: number;
   private routeOwnerCacheHits = 0;
   private routeOwnerCacheMisses = 0;
+  private unknownMessageCount = 0;
+  private lastUnknownMessageType: string | null = null;
   private touchRouteOwnerCache(topicKey: string, value: { workerId: string; generation: number }): void {
     if (this.routeOwnerCache.has(topicKey)) this.routeOwnerCache.delete(topicKey);
     this.routeOwnerCache.set(topicKey, value);
@@ -665,6 +667,9 @@ export class WorkerClusterRuntime {
     return false;
   }
 
+  /** Count and last type of unknown protocol messages observed. */
+  getUnknownMessageStats(): { count: number; lastType: string | null } { return { count: this.unknownMessageCount, lastType: this.lastUnknownMessageType }; }
+
   /** Read-only snapshot of the cluster state (workers, routes, assignments). */
   getSnapshot(): WorkerClusterSnapshot {
     const routes = this.storage
@@ -736,9 +741,13 @@ export class WorkerClusterRuntime {
       case 'REGISTRY':
         this.reconcile();
         return;
-      default:
+      default: {
+        this.unknownMessageCount += 1;
+        const unknown = message as unknown as { type?: unknown };
+        this.lastUnknownMessageType = typeof unknown.type === 'string' ? unknown.type : null;
         this.handlers.onUnknownMessage?.(message);
         return;
+      }
     }
   };
 
