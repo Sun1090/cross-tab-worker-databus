@@ -180,6 +180,7 @@ export class WorkerClusterRuntime {
   // membership drives isAssigned() and load. Grows only via CONTROL/SUBSCRIBE
   // (or local self-subscribe), never via the reverse cache.
   private readonly assignedTopics = new Map<string, string>();
+  private readonly wildcardPublishCache = new Map<string, string | null>();
   // Reverse mapping: opaque topicKey → plaintext topic. A bounded cache with
   // FIFO eviction — NOT authoritative. It can hold a topicKey that is also in
   // assignedTopics (the owned guard prevents evicting those), because it is
@@ -249,6 +250,7 @@ export class WorkerClusterRuntime {
     this.removeLifecycleListeners();
     this.subscribedTopics.clear();
     this.assignedTopics.clear();
+    this.wildcardPublishCache.clear();
     this.knownTopics.clear();
     this.suspended = false;
   }
@@ -313,6 +315,7 @@ export class WorkerClusterRuntime {
     for (const topic of this.subscribedTopics) this.releaseSubscription(topic, false);
     this.handoffAssignedTopics();
     this.assignedTopics.clear();
+    this.wildcardPublishCache.clear();
     this.removeStorage(this.workerStorageKey(this.workerId));
     // Persist the final routes and worker removal before asking peers to
     // reconcile. A pagehide CONTROL message may be lost; REGISTRY must still
@@ -450,11 +453,20 @@ export class WorkerClusterRuntime {
     if (this.assignedTopics.has(topicKey)) {
       return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
     }
+    const cachedPattern = this.wildcardPublishCache.get(topic);
+    if (cachedPattern !== undefined) {
+      if (cachedPattern === null || this.assignedTopics.has(cachedPattern)) {
+        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+      }
+      this.wildcardPublishCache.delete(topic);
+    }
     for (const pattern of this.assignedTopics.values()) {
       if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
+        this.wildcardPublishCache.set(topic, pattern);
         return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
       }
     }
+    this.wildcardPublishCache.set(topic, null);
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
     const target = this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
