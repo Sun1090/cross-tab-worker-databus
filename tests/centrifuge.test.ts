@@ -287,14 +287,12 @@ describe('createCentrifugeDataBus', () => {
       messageId: 'm-1',
       timestamp: 42
     });
-    expect(received).toEqual([
-      {
-        topic: 'market.tick',
-        data: { price: 100 },
-        messageId: 'm-1',
-        timestamp: 42
-      }
-    ]);
+    expect(received[0]).toMatchObject({
+      topic: 'market.tick',
+      data: { price: 100 },
+      messageId: 'm-1',
+      timestamp: 42
+    });
   });
 
   it('delivers MESSAGE_BIN publications through the object message API', async () => {

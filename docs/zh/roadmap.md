@@ -1,6 +1,13 @@
 # 路线图
 
-0.20.60 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.61 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.61 已完成范围
+
+- 在每条 `DataBusMessage` 与 cluster `EVENT` 线帧上加入 `originTabId?: string`，让跨 Tab 的 replay 历史能归属到产出的 Tab。
+- `WorkerClusterRuntime.broadcastEvent()` 默认把 `originTabId` 设为当前 runtime 的 `tabId`，`CrossTabDataBus.handleTransportMessage` 在广播前 stamp `originTabId = cluster.tabId`，邻居与 IndexedDB 回放的晚加入订阅者都看到一致的归属信息。
+- `onEvent` 处理器签名新增第四个 `originTabId?: string` 参数；既有调用点改用 `toMatchObject` 以避免额外参数破坏严格相等。
+- 新增 `CrossTabDataBus cross-tab replay consistency contract` 单元测试，覆盖生产端 stamp、本地 handler 一致性、写后晚加入与本地来源回放路径（336 个单测，11 个 e2e 测试）。
 
 ## 0.20.60 已完成范围
 

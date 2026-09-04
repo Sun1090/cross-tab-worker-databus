@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.60 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.61 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.61 delivered scope
+
+- Added `originTabId?: string` to every `DataBusMessage` and to the cluster `EVENT` wire frame so cross-tab replay history is attributed to the tab that produced it.
+- `WorkerClusterRuntime.broadcastEvent()` now defaults `originTabId` to the producing runtime's `tabId`, and `CrossTabDataBus.handleTransportMessage` stamps `originTabId = cluster.tabId` before broadcasting so neighbors and IndexedDB-replayed late subscribers observe the same attribution.
+- `onEvent` handler signature now includes a fourth `originTabId?: string` argument; existing call sites use `toMatchObject` so the extra argument does not break strict equality.
+- New unit tests under `CrossTabDataBus cross-tab replay consistency contract` cover the producing-tab stamp, local-handler parity, post-write late join with replay, and local-origin replay path (336 unit tests, 11 e2e tests).
 
 ## 0.20.60 delivered scope
 

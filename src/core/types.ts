@@ -139,12 +139,16 @@ export type WorkerClusterMessage<TEvent = unknown> =
       items?: Array<{ data: unknown; messageId?: string; timestamp?: number }>;
     }
   /** The owning worker fans out a publication to every tab. `eventType`
-   * distinguishes databus publications from future event types. */
+   * distinguishes databus publications from future event types.
+   * `originTabId` (when present) is the browser tab that produced the event;
+   * it survives the EVENT hop so listeners can tell local dispatch from
+   * cross-tab relay, including for late subscribers replaying history. */
   | {
       type: 'EVENT';
       sourceWorkerId: string;
       eventType: string;
       payload: TEvent;
+      originTabId?: string;
     }
   /** Nudge peers to reconcile immediately after a registry/route/subscriber
    * write, instead of waiting for the next heartbeat (3 s default). */
@@ -169,6 +173,11 @@ export interface DataBusMessage<TData = unknown> extends DataBusPublication<TDat
   /** True when this delivery is a historical replay (see the `replay`
    * subscription option) rather than a live publication. */
   replayed?: boolean;
+  /** Identifier of the browser tab that originally produced this publication.
+   * Carried across the cluster EVENT hop so handlers can distinguish local
+   * dispatch from cross-tab relay, and so late subscribers replaying history
+   * can still attribute each entry to its source tab. */
+  originTabId?: string;
 }
 
 /** Callbacks the transport calls to notify the DataBus of events.

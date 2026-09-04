@@ -433,8 +433,8 @@ test.describe('cross-tab databus replay persistence', () => {
         request.onerror = () => reject(request.error);
       });
     }, dbName);
-    expect(stored).toEqual([
-      { topic, messages: [{ topic, data: 'persisted-value' }, { topic, data: 'bfcache-value' }] }
+    expect(stored).toMatchObject([
+      { topic, messages: [expect.objectContaining({ topic, data: 'persisted-value' }), expect.objectContaining({ topic, data: 'bfcache-value' })] }
     ]);
     await page.evaluate(async () => window.__replayBus?.stop());
     await page.reload();

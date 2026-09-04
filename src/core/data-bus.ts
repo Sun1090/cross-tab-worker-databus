@@ -274,9 +274,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // typed `unknown` at the cluster boundary (the cluster is transport-
         // agnostic); here we narrow it to DataBusMessage — the sender is our
         // own broadcastEvent call, which always posts a DataBusMessage.
-        onEvent: (eventType, payload) => {
+        onEvent: (eventType, payload, _sourceWorkerId, originTabId) => {
           if (eventType !== PUBLICATION_EVENT) return;
-          const message = payload as DataBusMessage<TData>;
+          const incoming = payload as DataBusMessage<TData>;
+          // Prefer the originTabId the sender stamped; only fall back to the
+          // broadcast cluster tabId when the older cluster version is in use.
+          const message: DataBusMessage<TData> = incoming.originTabId !== undefined
+            ? incoming
+            : originTabId !== undefined
+              ? { ...incoming, originTabId }
+              : incoming;
           if (this.cluster.hasLocalSubscriber(message.topic)) this.dispatch(message);
         },
         onSuspend: () => {
@@ -725,9 +732,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.trace.recordDiscarded(message.topic);
       return;
     }
-    this.cluster.broadcastEvent(PUBLICATION_EVENT, message);
+    // Stamp the originating tab BEFORE broadcasting so neighbors replaying
+    // history can attribute each entry to the tab that produced it. Locally
+    // we publish first and dispatch second to keep the contract: a handler
+    // called before the broadcast settled would still observe originTabId.
+    const stamped: DataBusMessage<TData> = message.originTabId === undefined
+      ? { ...message, originTabId: this.cluster.tabId }
+      : message;
+    this.cluster.broadcastEvent(PUBLICATION_EVENT, stamped, stamped.originTabId);
     if (this.cluster.hasLocalSubscriber(message.topic)) {
-      this.dispatch(message);
+      this.dispatch(stamped);
       return;
     }
     this.trace.recordDiscarded(message.topic);
