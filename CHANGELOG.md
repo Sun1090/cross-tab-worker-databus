@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.64] - 2026-09-05
+
+### Added
+- Added opt-in `asyncSink` trace mode, batching sink delivery onto a microtask while preserving event order and sink error isolation.
+- Added regression coverage for asynchronous trace batching (339 unit tests).
+
 ## [0.20.63] - 2026-09-05
 
 ### Added

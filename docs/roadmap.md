@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.63 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.64 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.64 delivered scope
+
+- Added opt-in `asyncSink` trace mode, batching sink delivery onto a microtask while preserving event order and sink error isolation (339 unit tests).
 
 ## 0.20.63 delivered scope
 

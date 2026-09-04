@@ -118,6 +118,8 @@ export interface DataBusTraceOptions {
   now?: () => number;
   /** Callback invoked for each emitted trace event. */
   sink: (event: DataBusTraceEvent) => void;
+  /** Queue sink delivery onto a microtask to keep hot paths non-blocking. */
+  asyncSink?: boolean;
 }
 
 // Default bounds for the metrics aggregation window.
@@ -142,6 +144,9 @@ export class DataBusTraceReporter {
   private readonly metricsIntervalMs: number;
   private readonly sink: (event: DataBusTraceEvent) => void;
   private readonly now: () => number;
+  private readonly asyncSink: boolean;
+  private pendingEvents: DataBusTraceEvent[] = [];
+  private sinkFlushScheduled = false;
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private intervalStartedAt = 0;
   // A reporter may be flushed explicitly before start(), but once stop() is
@@ -164,6 +169,7 @@ export class DataBusTraceReporter {
     this.mode = options?.mode ?? 'all';
     this.metricsIntervalMs = normalizeInterval(options?.metricsIntervalMs);
     this.sink = options?.sink ?? (() => undefined);
+    this.asyncSink = options?.asyncSink ?? false;
     this.now = now;
   }
 
@@ -312,6 +318,23 @@ export class DataBusTraceReporter {
   }
 
   private emit(event: DataBusTraceEvent): void {
+    if (this.asyncSink) {
+      this.pendingEvents.push(event);
+      if (!this.sinkFlushScheduled) {
+        this.sinkFlushScheduled = true;
+        queueMicrotask(() => {
+          this.sinkFlushScheduled = false;
+          const events = this.pendingEvents;
+          this.pendingEvents = [];
+          for (const queued of events) this.emitSync(queued);
+        });
+      }
+      return;
+    }
+    this.emitSync(event);
+  }
+
+  private emitSync(event: DataBusTraceEvent): void {
     try {
       this.sink(event);
     } catch (error) {
