@@ -37,6 +37,12 @@ describe('cluster coordination', () => {
     }
   });
 
+  bench('publish / 1000 messages / cold route cache', () => {
+    for (let index = 0; index < 1000; index += 1) {
+      runtime.publish(`bench.cold.${index}`, { value: index });
+    }
+  });
+
   bench('reconcile / 100 topics + 1 worker', () => {
     now += 3_000;
     runtime.getSnapshot();
