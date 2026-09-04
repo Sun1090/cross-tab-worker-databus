@@ -164,6 +164,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // a transport reopen succeeds so traces can correlate repeated failures.
   private recoveryAttempt = 0;
   private recoveryExhausted = false;
+  /** Monotonic generation incremented on every successful transport open.
+   * Stays in lockstep with `lastSuccessAt` so callers can detect that the
+   * transport has been reopened even if the timestamp window is short. */
+  private recoveryGeneration = 0;
+  /** Timestamp of the most recent successful transport open. Null until the
+   * transport has reached the `ready` state at least once. */
+  private lastSuccessAt: number | null = null;
   // True while the tab is hidden so an in-flight transport start does not mark
   // the transport ready after suspendTransport() has stopped it.
   private suspended = false;
@@ -394,7 +401,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           if (this.status === 'error') {
             throw new Error('Transport failed during startup.');
           }
-          if (!this.suspended && !this.stopping) this.transportReady = true;
+          if (!this.suspended && !this.stopping) {
+            this.recoveryGeneration += 1;
+            this.lastSuccessAt = this.now();
+            this.transportReady = true;
+          }
         });
       })
       .catch(error => {
@@ -597,9 +608,31 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   /** Return the current automatic transport recovery state. `hasError` means a transport error is currently retained. */
-  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null } {
+  /** Return the current automatic transport recovery state plus diagnostics.
+   * `generation` increments on every successful transport open (initial start
+   * and every recovery); `lastSuccessAt` is the timestamp of the most recent
+   * successful open, or `null` until the transport reaches `ready`. */
+  getRecoveryStats(): {
+    attempt: number;
+    exhausted: boolean;
+    maxAttempts: number;
+    hasError: boolean;
+    errorMessage: string | null;
+    errorAt: number | null;
+    generation: number;
+    lastSuccessAt: number | null;
+  } {
     const errorMessage = this.lastError instanceof Error ? this.lastError.message : this.lastError === null ? null : String(this.lastError);
-    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts, hasError: this.lastError !== null, errorMessage, errorAt: this.lastErrorAt };
+    return {
+      attempt: this.recoveryAttempt,
+      exhausted: this.recoveryExhausted,
+      maxAttempts: this.recoveryMaxAttempts,
+      hasError: this.lastError !== null,
+      errorMessage,
+      errorAt: this.lastErrorAt,
+      generation: this.recoveryGeneration,
+      lastSuccessAt: this.lastSuccessAt
+    };
   }
 
   /** Snapshot of the cluster state (workers, routes, assignments).

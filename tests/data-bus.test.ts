@@ -810,7 +810,7 @@ describe('CrossTabDataBus', () => {
       clusterKey: 'recovery-stats', environment: environment.environment, initialConfig: {}, transport,
       recovery: { cooldownMs: 100, maxAttempts: 2 }
     });
-    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: false, errorMessage: null, errorAt: null });
+    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: false, errorMessage: null, errorAt: null, generation: 0, lastSuccessAt: null });
     bus.subscribe('topic', vi.fn());
     await bus.ready();
     transport.startShouldFail = true;
@@ -821,11 +821,39 @@ describe('CrossTabDataBus', () => {
     transport.startShouldFail = false;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();
-    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.', errorAt: expect.any(Number) });
+    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.', errorAt: expect.any(Number), generation: expect.any(Number), lastSuccessAt: expect.any(Number) });
     await bus.stop();
   });
 
-  it('reopens transport on subscribe when resume failed and transport is down', async () => {
+  it('exposes generation and lastSuccessAt that increment on each successful open', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-gen' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-gen', environment: environment.environment, initialConfig: {}, transport,
+      recovery: { cooldownMs: 100, maxAttempts: 3 }
+    });
+    expect(bus.getRecoveryStats()).toMatchObject({ generation: 0, lastSuccessAt: null });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    const first = bus.getRecoveryStats();
+    expect(first.generation).toBe(1);
+    expect(first.lastSuccessAt).toBeTypeOf('number');
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(bus.getRecoveryStats().generation).toBe(1);
+    transport.startShouldFail = false;
+    bus.subscribe('topic-2', vi.fn());
+    await bus.ready();
+    const second = bus.getRecoveryStats();
+    expect(second.generation).toBe(2);
+    expect(second.lastSuccessAt).not.toBe(first.lastSuccessAt);
+    await bus.stop();
+  });
+
+    it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'resume-fail' });
