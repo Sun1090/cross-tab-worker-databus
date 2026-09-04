@@ -1,4 +1,9 @@
 # Changelog
+## [0.20.56] - 2026-09-04
+
+### Changed
+- Added generation-checked route-owner caching for publish routing and cleared it across lifecycle teardown.
+
 ## [0.20.55] - 2026-09-04
 
 ### Changed

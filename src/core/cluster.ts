@@ -180,6 +180,7 @@ export class WorkerClusterRuntime {
   // membership drives isAssigned() and load. Grows only via CONTROL/SUBSCRIBE
   // (or local self-subscribe), never via the reverse cache.
   private readonly assignedTopics = new Map<string, string>();
+  private readonly routeOwnerCache = new Map<string, { workerId: string; generation: number }>();
   private readonly wildcardPublishCache = new Map<string, string | null>();
   // Reverse mapping: opaque topicKey → plaintext topic. A bounded cache with
   // FIFO eviction — NOT authoritative. It can hold a topicKey that is also in
@@ -250,6 +251,7 @@ export class WorkerClusterRuntime {
     this.removeLifecycleListeners();
     this.subscribedTopics.clear();
     this.assignedTopics.clear();
+    this.routeOwnerCache.clear();
     this.wildcardPublishCache.clear();
     this.knownTopics.clear();
     this.suspended = false;
@@ -315,6 +317,7 @@ export class WorkerClusterRuntime {
     for (const topic of this.subscribedTopics) this.releaseSubscription(topic, false);
     this.handoffAssignedTopics();
     this.assignedTopics.clear();
+    this.routeOwnerCache.clear();
     this.wildcardPublishCache.clear();
     this.removeStorage(this.workerStorageKey(this.workerId));
     // Persist the final routes and worker removal before asking peers to
@@ -469,7 +472,11 @@ export class WorkerClusterRuntime {
     this.wildcardPublishCache.set(topic, null);
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
-    const target = this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
+    const cached = this.routeOwnerCache.get(topicKey);
+    const cachedLive = cached && route && route.generation === cached.generation && route.workerId === cached.workerId && workers.some(worker => worker.workerId === cached.workerId);
+    const target = cachedLive ? cached.workerId : this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
+    if (route && target === route.workerId) this.routeOwnerCache.set(topicKey, { workerId: route.workerId, generation: route.generation });
+    else this.routeOwnerCache.delete(topicKey);
     return this.sendControl(target, 'PUBLISH', topic, topicKey, data, metadata);
   }
 
