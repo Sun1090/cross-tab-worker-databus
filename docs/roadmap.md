@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.53 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.55 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.55 delivered scope
+
+- Added a lifecycle-safe wildcard publish decision cache; benchmark variance remains under investigation before claiming a throughput win.
 
 ## 0.20.53 delivered scope
 
