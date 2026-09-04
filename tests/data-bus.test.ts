@@ -802,6 +802,29 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('exposes the current recovery error state and configured attempt limit', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-stats' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-stats', environment: environment.environment, initialConfig: {}, transport,
+      recovery: { cooldownMs: 100, maxAttempts: 2 }
+    });
+    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: false });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 1, exhausted: false, maxAttempts: 2 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 2, exhausted: false, maxAttempts: 2, hasError: true });
+    transport.startShouldFail = false;
+    bus.subscribe('topic-2', vi.fn());
+    await bus.ready();
+    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true });
+    await bus.stop();
+  });
+
   it('reopens transport on subscribe when resume failed and transport is down', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

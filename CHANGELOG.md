@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+## [0.20.52] - 2026-09-04
+
+### Added
+
+- Extended `getRecoveryStats()` with `hasError`, exposing whether the current transport error is still retained.
+
 ## [0.20.51] - 2026-09-04
 
 ### Added
