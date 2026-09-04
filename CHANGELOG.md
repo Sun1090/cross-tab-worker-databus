@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.49] - 2026-09-04
+
+### Added
+
+- Added unsubscribe-before-reconnect coverage proving removed topics are not replayed after lifecycle recovery.
+
 ## [0.20.48] - 2026-09-04
 
 ### Added

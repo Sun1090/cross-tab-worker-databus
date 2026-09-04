@@ -1,8 +1,10 @@
 # Roadmap
 
-0.20.48 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.49 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
-## 0.20.48 delivered scope
+## 0.20.49 delivered scope
+
+- Added unsubscribe-before-reconnect coverage proving removed topics are not replayed after lifecycle recovery.
 
 - Added multi-topic recovery coverage proving every topic is restored exactly once after reconnect.
 

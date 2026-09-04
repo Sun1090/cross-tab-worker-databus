@@ -121,6 +121,22 @@ describe('CrossTabDataBus', () => {
     expect(new Set(transport.subscribeCalls)).toEqual(new Set(['topic']));
   });
 
+  it('drops an unsubscribed topic before the next reconnect replay', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'unsubscribe-replay' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'unsubscribe-replay', environment: environment.environment, initialConfig: {}, transport });
+    const remove = vi.fn();
+    const unsubscribe = bus.subscribe('remove', remove);
+    await bus.ready();
+    unsubscribe();
+    environment.runIntervals();
+    transport.setStatus('disconnected');
+    transport.setStatus('connected');
+    expect(transport.subscribeCalls).toEqual(['remove']);
+    transport.emit('remove', 1);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it('restores every topic exactly once after multi-topic recovery', async () => {
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'multi-topic-recovery' });
     const transport = new FakeTransport<number>();
