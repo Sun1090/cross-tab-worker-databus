@@ -1,4 +1,9 @@
 # Changelog
+## [0.20.57] - 2026-09-04
+
+### Added
+- Added warm/cold route-cache publish benchmark coverage to make owner-routing performance measurable.
+
 ## [0.20.56] - 2026-09-04
 
 ### Changed
