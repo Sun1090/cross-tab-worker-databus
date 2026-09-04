@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.67] - 2026-09-05
+
+### Added
+- Added bounded unknown protocol message diagnostics on `WorkerClusterRuntime` and `CrossTabDataBus.getDiagnostics()`, including count and last message type while preserving safe ignore behavior.
+
 ## [0.20.66] - 2026-09-05
 
 ### Added
