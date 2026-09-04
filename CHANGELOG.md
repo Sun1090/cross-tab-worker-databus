@@ -1,4 +1,9 @@
 # Changelog
+## [0.20.54] - 2026-09-04
+
+### Added
+- Added `errorAt` to `getRecoveryStats()` for recovery incident timing.
+
 
 ## [0.20.53] - 2026-09-04
 
