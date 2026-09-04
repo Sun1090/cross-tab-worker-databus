@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.51] - 2026-09-04
+
+### Added
+
+- Added a public recovery-state snapshot API via `getRecoveryStats()`.
+
 ## [0.20.50] - 2026-09-04
 
 ### Added
