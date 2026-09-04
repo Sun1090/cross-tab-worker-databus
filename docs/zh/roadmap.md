@@ -1,6 +1,10 @@
 # 路线图
 
-0.20.59 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.60 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.60 已完成范围
+
+- 在 `CrossTabDataBus` 与 `WorkerClusterRuntime` 上新增 `publishBatch(topic, items)`，让调用方把多条 item 合并进单次 BroadcastChannel postMessage。每条 item 的 `messageId` / `timestamp` 在传输后保留，dedup / replay / 顺序仍按 item 维度生效；空 batch 为 no-op，单 item batch 直接走 `publish()`。基准用例 `publishBatch / 1000 messages / 10 per call` 为突发路径提供上限参考（332 个单测）。
 
 ## 0.20.59 已完成范围
 

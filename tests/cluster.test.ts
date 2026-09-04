@@ -826,6 +826,186 @@ describe('WorkerClusterRuntime', () => {
   });
 });
 
+
+describe('WorkerClusterRuntime publishBatch', () => {
+  function makeBatchRuntime(options: {
+    clusterKey: string;
+    tabId: string;
+    workerId: string;
+    onControl: ReturnType<typeof vi.fn>;
+    onEvent?: ReturnType<typeof vi.fn>;
+  }): { runtime: WorkerClusterRuntime; env: ReturnType<typeof createFakeEnvironment> } {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const env = createFakeEnvironment({
+      storage,
+      hub,
+      now: () => now,
+      randomId: options.workerId
+    });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: options.clusterKey,
+      environment: env.environment,
+      tabId: options.tabId,
+      workerId: options.workerId,
+      handlers: { onControl: options.onControl, onEvent: options.onEvent ?? vi.fn() }
+    });
+    return { runtime, env };
+  }
+
+  it('treats an empty batch as a no-op', () => {
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-empty',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: vi.fn()
+    });
+    runtime.start();
+    expect(runtime.publishBatch('any', [])).toBe(true);
+    runtime.stop();
+  });
+
+  it('delegates a single-item batch to publish()', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-single',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('feed.tick');
+    await Promise.resolve();
+    const before = control.mock.calls.length;
+    expect(runtime.publishBatch('feed.tick', [{ data: { p: 1 }, messageId: 'm-single', timestamp: 7 }])).toBe(true);
+    await Promise.resolve();
+    expect(control).toHaveBeenLastCalledWith('PUBLISH', 'feed.tick', { p: 1 }, 'm-single', 7);
+    expect(control.mock.calls.length).toBe(before + 1);
+    runtime.stop();
+  });
+
+  it('dispatches every item locally when the topic is assigned to this worker', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-local',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('feed.live');
+    await Promise.resolve();
+    control.mockClear();
+    expect(runtime.publishBatch('feed.live', [
+      { data: 1, messageId: 'a' },
+      { data: 2, timestamp: 99 },
+      { data: 3, messageId: 'c', timestamp: 100 }
+    ])).toBe(true);
+    await Promise.resolve();
+    const publishCalls = control.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishCalls).toHaveLength(3);
+    expect(publishCalls[0]).toEqual(['PUBLISH', 'feed.live', 1, 'a', undefined]);
+    expect(publishCalls[1]).toEqual(['PUBLISH', 'feed.live', 2, undefined, 99]);
+    expect(publishCalls[2]).toEqual(['PUBLISH', 'feed.live', 3, 'c', 100]);
+    runtime.stop();
+  });
+
+  it('routes a batch through a remote owner and unpacks every item on the receiver', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'batch-remote-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'batch-remote-b' });
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'batch-remote',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'batch-remote',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: controlB, onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('remote.feed');
+    await Promise.resolve();
+    now += 1;
+    runtimeB.start();
+    controlA.mockClear();
+
+    expect(runtimeB.publishBatch('remote.feed', [
+      { data: { i: 0 }, messageId: 'm0' },
+      { data: { i: 1 }, timestamp: 11 },
+      { data: { i: 2 }, messageId: 'm2', timestamp: 22 }
+    ])).toBe(true);
+    await Promise.resolve();
+    const publishCalls = controlA.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishCalls).toHaveLength(3);
+    expect(publishCalls[0]).toEqual(['PUBLISH', 'remote.feed', { i: 0 }, 'm0', undefined]);
+    expect(publishCalls[1]).toEqual(['PUBLISH', 'remote.feed', { i: 1 }, undefined, 11]);
+    expect(publishCalls[2]).toEqual(['PUBLISH', 'remote.feed', { i: 2 }, 'm2', 22]);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('dispatches a batch through a wildcard assignment when the concrete topic is not owned', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-wildcard',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('feed.*');
+    await Promise.resolve();
+    control.mockClear();
+    expect(runtime.publishBatch('feed.room-1', [
+      { data: 'a' },
+      { data: 'b' },
+      { data: 'c' }
+    ])).toBe(true);
+    await Promise.resolve();
+    const publishCalls = control.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishCalls.map(call => call[1])).toEqual(['feed.room-1', 'feed.room-1', 'feed.room-1']);
+    expect(publishCalls.map(call => call[2])).toEqual(['a', 'b', 'c']);
+    runtime.stop();
+  });
+
+  it('preserves item order for large batches', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-order',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('order.topic');
+    await Promise.resolve();
+    control.mockClear();
+    const N = 50;
+    const items = Array.from({ length: N }, (_, i) => ({ data: i, messageId: `id-${i}` }));
+    expect(runtime.publishBatch('order.topic', items)).toBe(true);
+    await Promise.resolve();
+    const publishCalls = control.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishCalls).toHaveLength(N);
+    publishCalls.forEach((call, index) => {
+      expect(call[2]).toBe(index);
+      expect(call[3]).toBe(`id-${index}`);
+    });
+    runtime.stop();
+  });
+});
+
+
 describe('WorkerClusterRuntime resilience', () => {
   function makeRuntime(options: {
     storage: MemoryStorage;

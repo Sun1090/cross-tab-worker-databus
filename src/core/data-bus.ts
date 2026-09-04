@@ -585,6 +585,36 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
   }
 
+  /**
+   * Burst-friendly variant of `publish()`: delivers `items` in a single
+   * BroadcastChannel postMessage so the receiving owner can dispatch them all
+   * in one tick. Per-item dedup / replay / ordering is preserved; each item
+   * may carry its own `messageId` / `timestamp` via `options`. Empty array is
+   * a no-op; single-item array delegates to `publish()`.
+   */
+  publishBatch(
+    topic: string,
+    items: ReadonlyArray<{ data: unknown; options?: DataBusPublishOptions }>
+  ): void {
+    this.ensureStarted();
+    if (items.length === 0) return;
+    if (items.length === 1) {
+      const first = items[0]!;
+      this.publish(topic, first.data, first.options);
+      return;
+    }
+    const mapped = items.map(item => ({
+      data: item.data,
+      ...(item.options?.messageId !== undefined ? { messageId: item.options.messageId } : {}),
+      ...(item.options?.timestamp !== undefined ? { timestamp: item.options.timestamp } : {})
+    }));
+    if (!this.cluster.publishBatch(topic, mapped)) {
+      this.reportError(
+        new Error('Failed to send the batched publish control message to the owning worker.')
+      );
+    }
+  }
+
   /** Register a handler that fires on every transport status change. Immediately invoked with the current status. */
   onStatus(handler: DataBusStatusHandler): () => void {
     this.statusHandlers.add(handler);

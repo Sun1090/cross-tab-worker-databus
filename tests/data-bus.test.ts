@@ -1253,6 +1253,79 @@ describe('CrossTabDataBus', () => {
   });
 });
 
+
+describe('CrossTabDataBus publishBatch', () => {
+  function makeBus(workerId: string) {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: workerId });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: workerId,
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    return { bus, transport };
+  }
+
+  it('is a no-op when the batch is empty', async () => {
+    const { bus, transport } = makeBus('bus-batch-empty');
+    await bus.start({});
+    bus.publishBatch('topic', []);
+    await Promise.resolve();
+    expect(transport.publishCalls).toEqual([]);
+    await bus.stop();
+  });
+
+  it('delegates a single-item batch to publish()', async () => {
+    const { bus, transport } = makeBus('bus-batch-single');
+    await bus.start({});
+    bus.subscribe('topic', vi.fn());
+    bus.publishBatch('topic', [{ data: 1, options: { messageId: 'b-0' } }]);
+    await Promise.resolve();
+    expect(transport.publishCalls).toEqual([{ topic: 'topic', data: 1, options: { messageId: 'b-0' } }]);
+    await bus.stop();
+  });
+
+  it('publishes every batch item via a per-item transport call', async () => {
+    const { bus, transport } = makeBus('bus-batch-multi');
+    await bus.start({});
+    bus.subscribe('topic', vi.fn());
+    bus.publishBatch('topic', [
+      { data: 1, options: { messageId: 'a' } },
+      { data: 2 },
+      { data: 3, options: { messageId: 'c', timestamp: 9 } }
+    ]);
+    await Promise.resolve();
+    expect(transport.publishCalls).toHaveLength(3);
+    expect(transport.publishCalls.map(call => call.topic)).toEqual(['topic', 'topic', 'topic']);
+    expect(transport.publishCalls.map(call => call.data)).toEqual([1, 2, 3]);
+    expect(transport.publishCalls.map(call => call.options)).toEqual([
+      { messageId: 'a' },
+      undefined,
+      { messageId: 'c', timestamp: 9 }
+    ]);
+    await bus.stop();
+  });
+
+  it('reports an error when the cluster publishBatch reports failure', async () => {
+    const { bus } = makeBus('bus-batch-err');
+    await bus.start({});
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    // Stub the runtime method via casting to any — cluster is private.
+    const runtime = (bus as unknown as { cluster: { publishBatch: ReturnType<typeof vi.fn> } }).cluster;
+    const spy = vi.spyOn(runtime, 'publishBatch').mockReturnValue(false);
+    bus.publishBatch('topic', [{ data: 1 }, { data: 2 }]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    spy.mockRestore();
+    await bus.stop();
+  });
+});
+
+
 describe('CrossTabDataBus wildcard subscriptions', () => {
   function makeBus(workerId: string, storage: MemoryStorage, hub: ChannelHub) {
     const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: workerId });
