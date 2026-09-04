@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.66] - 2026-09-05
+
+### Added
+- Extended IndexedDB replay persistence with optional `pruneStrategy` (`count`, `age`, `both`) and `retentionMs`, applying the same trimming semantics as in-memory replay.
+
 ## [0.20.65] - 2026-09-05
 
 ### Added
