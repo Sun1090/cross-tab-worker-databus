@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.48] - 2026-09-04
+
+### Added
+
+- Added multi-topic recovery coverage proving every topic is restored exactly once after reconnect.
+
 ## [0.20.47] - 2026-09-04
 
 ### Added

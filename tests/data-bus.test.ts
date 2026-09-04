@@ -121,6 +121,24 @@ describe('CrossTabDataBus', () => {
     expect(new Set(transport.subscribeCalls)).toEqual(new Set(['topic']));
   });
 
+  it('restores every topic exactly once after multi-topic recovery', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'multi-topic-recovery' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'multi-topic-recovery', environment: environment.environment, initialConfig: {}, transport });
+    const first = vi.fn();
+    const second = vi.fn();
+    bus.subscribe('alpha', first);
+    bus.subscribe('beta', second);
+    await bus.ready();
+    transport.setStatus('disconnected');
+    transport.setStatus('connected');
+    expect(transport.subscribeCalls).toEqual(['alpha', 'beta', 'alpha', 'beta']);
+    transport.emit('alpha', 1);
+    transport.emit('beta', 2);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   it('does not duplicate subscriptions during status flapping', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'status-flap' });
