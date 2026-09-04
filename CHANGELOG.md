@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.65] - 2026-09-05
+
+### Added
+- Added opt-in adaptive dedup TTL sampling with bounded `minMs`/`maxMs` controls and diagnostics exposure.
+- Added replay `pruneStrategy` configuration (`count`, `age`, `both`) for memory history trimming while preserving legacy defaults.
+
 ## [0.20.64] - 2026-09-05
 
 ### Added

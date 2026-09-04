@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.64 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.65 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.65 delivered scope
+
+- Added opt-in adaptive dedup TTL sampling with bounded min/max controls and diagnostics exposure. Added replay `pruneStrategy` (`count`, `age`, `both`) for memory history trimming while preserving legacy defaults.
 
 ## 0.20.64 delivered scope
 
