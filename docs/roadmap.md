@@ -1,8 +1,10 @@
 # Roadmap
 
-0.20.47 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.48 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
-## 0.20.47 delivered scope
+## 0.20.48 delivered scope
+
+- Added multi-topic recovery coverage proving every topic is restored exactly once after reconnect.
 
 - Added extended reconnect flapping coverage proving replay stays bounded and duplicate-free.
 
