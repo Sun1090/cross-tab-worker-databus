@@ -2244,3 +2244,19 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
     await busA.stop();
   });
 });
+
+describe('adaptive dedup TTL', () => {
+  it('reports bounded TTL and resets its sampling window', async () => {
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'adaptive' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'adaptive', environment: env.environment, tabId: 'tab-adaptive', workerId: 'worker-adaptive', transport, dedup: { ttlMs: 1000, adaptiveTtl: { minMs: 100, maxMs: 2000 }, now: () => now } });
+    await bus.start({}); await bus.ready(); bus.subscribe('topic', () => {});
+    transport.emit('topic', 1, 'm1');
+    expect(bus.getDedupStats().ttlMs).toBeGreaterThanOrEqual(100);
+    now += 6000;
+    expect(bus.getDedupStats().ttlMs).toBe(2000);
+    await bus.stop();
+  });
+});
+

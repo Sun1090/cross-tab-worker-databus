@@ -55,6 +55,8 @@ export interface DataBusReplayOptions<TData = unknown> {
   persistence?: DataBusReplayPersistence<TData>;
   /** Optional producer-timestamp retention window in milliseconds. */
   retentionMs?: number;
+  /** History trimming policy. Defaults to both when both limits are configured. */
+  pruneStrategy?: 'count' | 'age' | 'both';
   /** Optional periodic sweep interval for durable retention cleanup. */
   retentionSweepMs?: number;
   /** Optional bounded retry policy for transient persistence failures. */
@@ -76,6 +78,8 @@ export interface DataBusDedupOptions {
   sweepMs?: number;
   /** Injectable epoch clock for deterministic tests and non-wall-clock hosts. */
   now?: () => number;
+  /** Optional adaptive TTL bounds; enabled only when both are provided. */
+  adaptiveTtl?: { minMs: number; maxMs: number };
 }
 
 export interface DataBusDedupStats {
@@ -83,6 +87,7 @@ export interface DataBusDedupStats {
   tracked: number;
   suppressed: number;
   accepted: number;
+  ttlMs?: number;
 }
 
 export interface DataBusDiagnostics {
@@ -133,6 +138,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly replayMaxPerTopic: number;
   private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
   private readonly replayRetentionMs: number | undefined;
+  private readonly replayPruneStrategy: 'count' | 'age' | 'both';
   private readonly replayRetentionSweepMs: number | undefined;
   private readonly persistenceRetryMaxAttempts: number;
   private readonly persistenceRetryBackoffMs: number;
@@ -148,6 +154,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly trace: DataBusTraceReporter;
   private readonly dedupMaxEntries: number;
   private readonly dedupTtlMs: number;
+  private readonly dedupAdaptiveBounds: { minMs: number; maxMs: number } | undefined;
+  private dedupWindowStartedAt = 0;
+  private dedupWindowAccepted = 0;
+  private readonly dedupAdaptiveWindowMs = 5_000;
   private readonly dedupSweepMs: number | undefined;
   private dedupSweepTimer: ReturnType<typeof setInterval> | null = null;
   private readonly dedupEnabled: boolean;
@@ -207,6 +217,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.replayBuffers = replay ? new Map() : null;
     this.replayPersistence = (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null;
     this.replayRetentionMs = replay?.retentionMs;
+    this.replayPruneStrategy = replay?.pruneStrategy ?? 'count';
+    if (!['count', 'age', 'both'].includes(this.replayPruneStrategy)) throw new TypeError('replay.pruneStrategy must be count, age, or both.');
     if (this.replayRetentionMs !== undefined && (!Number.isFinite(this.replayRetentionMs) || this.replayRetentionMs <= 0)) {
       throw new TypeError('replay.retentionMs must be a positive finite number.');
     }
@@ -239,6 +251,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.trace = new DataBusTraceReporter(trace);
     this.dedupMaxEntries = dedup?.maxEntries ?? 1_000;
     this.dedupTtlMs = dedup?.ttlMs ?? 60_000;
+    this.dedupAdaptiveBounds = dedup?.adaptiveTtl;
+    if (this.dedupAdaptiveBounds && (this.dedupAdaptiveBounds.minMs <= 0 || this.dedupAdaptiveBounds.maxMs < this.dedupAdaptiveBounds.minMs)) throw new TypeError('dedup.adaptiveTtl bounds are invalid.');
+    this.dedupWindowStartedAt = this.now();
     this.dedupSweepMs = dedup?.sweepMs;
     this.dedupEnabled = dedup !== undefined;
     if (!Number.isSafeInteger(this.dedupMaxEntries) || this.dedupMaxEntries <= 0) {
@@ -581,7 +596,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       enabled: this.dedupEnabled,
       tracked: this.seenMessageIds.size,
       suppressed: this.dedupSuppressed,
-      accepted: this.dedupAccepted
+      accepted: this.dedupAccepted,
+      ...(this.dedupAdaptiveBounds ? { ttlMs: this.currentDedupTtl() } : {})
     };
   }
 
@@ -786,6 +802,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     this.seenMessageIds.set(message.messageId, now);
     this.dedupAccepted += 1;
+    this.dedupWindowAccepted += 1;
     this.trace.recordDedupAccepted();
     while (this.seenMessageIds.size > this.dedupMaxEntries) {
       const oldest = this.seenMessageIds.keys().next().value;
@@ -806,10 +823,24 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   private pruneExpiredDedup(): void {
-    const cutoff = this.now() - this.dedupTtlMs;
+    const cutoff = this.now() - this.currentDedupTtl();
     for (const [id, timestamp] of this.seenMessageIds) {
       if (timestamp < cutoff) this.seenMessageIds.delete(id);
     }
+  }
+
+  private currentDedupTtl(): number {
+    if (!this.dedupAdaptiveBounds) return this.dedupTtlMs;
+    const now = this.now();
+    const elapsed = now - this.dedupWindowStartedAt;
+    if (elapsed >= this.dedupAdaptiveWindowMs) {
+      this.dedupWindowStartedAt = now;
+      this.dedupWindowAccepted = 0;
+      return this.dedupAdaptiveBounds.maxMs;
+    }
+    const rate = this.dedupWindowAccepted / Math.max(1, elapsed);
+    const factor = Math.min(1, rate / 0.01);
+    return this.dedupAdaptiveBounds.maxMs - (this.dedupAdaptiveBounds.maxMs - this.dedupAdaptiveBounds.minMs) * factor;
   }
 
   /** Deliver a message to every local handler registered for its topic,
@@ -839,7 +870,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // applies to messages that carry an explicit producer timestamp.
     const storedMessage = message;
     buffer.push(storedMessage);
-    if (buffer.length > this.replayMaxPerTopic) buffer.shift();
+    if (this.replayPruneStrategy !== 'age') {
+      while (buffer.length > this.replayMaxPerTopic) buffer.shift();
+    }
+    if (this.replayPruneStrategy !== 'count' && this.replayRetentionMs !== undefined) {
+      const cutoff = this.now() - this.replayRetentionMs;
+      while (buffer.length > 0) { const first = buffer[0]; if (!first || first.timestamp === undefined || first.timestamp >= cutoff) break; buffer.shift(); }
+    }
     if (this.replayPersistence) {
       void this.withPersistenceRetry('append', () => this.replayPersistence!.append(storedMessage))
         .catch(error => this.reportPersistenceError(error));
