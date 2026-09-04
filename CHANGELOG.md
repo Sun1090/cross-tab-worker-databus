@@ -1,5 +1,18 @@
 # Changelog
-## [0.20.60] - 2026-09-04
+
+## [0.20.61] - 2026-09-05
+
+### Added
+- `originTabId?: string` on every `DataBusMessage` (and on the cluster `EVENT` wire frame) so cross-tab replay history is attributed to the tab that produced it.
+- `WorkerClusterRuntime.broadcastEvent()` now defaults `originTabId` to the producing runtime's `tabId` so existing callers (and tests) get source-tab attribution without threading the value manually.
+- `CrossTabDataBus.handleTransportMessage` stamps `originTabId = cluster.tabId` before broadcasting, so neighbors and IndexedDB-replayed late subscribers see the same attribution.
+- Four unit tests under `CrossTabDataBus cross-tab replay consistency contract` cover the producing-tab stamp, local-handler parity, post-write late join with replay, and local-origin replay path.
+- One e2e replay-persistence test now uses `toMatchObject` to tolerate the additional `originTabId` field on persisted entries.
+
+### Changed
+- `WorkerClusterRuntime.onEvent` handler signature now includes a fourth `originTabId?: string` argument; existing call sites use `toMatchObject` so the extra argument does not break strict equality.
+
+# [0.20.60] - 2026-09-04
 
 ### Added
 - `publishBatch(topic, items)` on both `CrossTabDataBus` and `WorkerClusterRuntime` packs multiple items into a single BroadcastChannel postMessage so the receiving owner can dispatch them in one tick instead of one channel post per item.

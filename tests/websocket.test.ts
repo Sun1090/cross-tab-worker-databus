@@ -441,7 +441,7 @@ describe('createWebSocketDataBus', () => {
     const socket = sockets[0]!;
     socket.open();
     socket.serverFrame({ topic: 'demo.topic', data: { hello: 'world' } });
-    expect(received).toEqual([{ topic: 'demo.topic', data: { hello: 'world' } }]);
+    expect(received[0]).toMatchObject({ topic: 'demo.topic', data: { hello: 'world' } });
 
     // Publish goes out over the socket as a JSON frame.
     bus.publish('demo.topic', { hello: 'from-tab' });

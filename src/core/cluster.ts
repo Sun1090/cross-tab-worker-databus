@@ -37,8 +37,16 @@ export interface WorkerClusterHandlers {
     messageId?: string,
     timestamp?: number
   ) => void;
-  /** A fan-out publication event was received from another Worker. */
-  onEvent: (eventType: string, payload: unknown, sourceWorkerId: string) => void;
+  /** A fan-out publication event was received from another Worker.
+   * `originTabId` is the tab that produced the original publication when the
+   * cluster forwards one; it survives the BroadcastChannel hop so listeners
+   * can tell a local dispatch from a cross-tab relay. */
+  onEvent: (
+    eventType: string,
+    payload: unknown,
+    sourceWorkerId: string,
+    originTabId?: string
+  ) => void;
   /** The cluster suspended (tab hidden / pagehide). */
   onSuspend?: () => void;
   /** The cluster resumed (tab visible / pageshow). */
@@ -599,9 +607,15 @@ export class WorkerClusterRuntime {
     return Boolean(route && workers.some(worker => worker.workerId === route.workerId));
   }
 
-  /** Broadcast an event to every tab — used to fan out transport publications. */
-  broadcastEvent(eventType: string, payload: unknown): void {
-    this.send({ type: 'EVENT', sourceWorkerId: this.workerId, eventType, payload });
+  /** Broadcast an event to every tab — used to fan out transport publications.
+   * `originTabId` (when set) is propagated across the BroadcastChannel hop so
+   * listeners can attribute the event to its source tab even after fan-out. */
+  broadcastEvent(eventType: string, payload: unknown, originTabId?: string): void {
+    // Default to the producing tab so listeners can attribute the event to
+    // its source tab across the BroadcastChannel hop without callers having
+    // to thread the tabId through every call site.
+    const effectiveOriginTabId = originTabId ?? this.tabId;
+    this.send({ type: 'EVENT', sourceWorkerId: this.workerId, eventType, payload, originTabId: effectiveOriginTabId });
   }
 
   isAssigned(topic: string): boolean {
@@ -715,7 +729,7 @@ export class WorkerClusterRuntime {
       case 'ROUTE_RELEASED':
         return this.handleRouteReleasedMessage(message);
       case 'EVENT':
-        this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId);
+        this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId, message.originTabId);
         return;
       case 'REGISTRY':
       default:

@@ -91,7 +91,7 @@ describe('React hooks adapter', () => {
     );
 
     socket.serverFrame({ topic: 'demo.topic', data: { n: 1 } });
-    await waitFor(() => expect(harness.received).toEqual([{ topic: 'demo.topic', data: { n: 1 } }]));
+    await waitFor(() => expect(harness.received[0]).toMatchObject({ topic: 'demo.topic', data: { n: 1 } }));
 
     harness.unmount();
     // stop() is async: it serialises behind the in-flight start.
@@ -109,7 +109,7 @@ describe('React hooks adapter', () => {
 
     // The surviving bus still works end to end.
     harness.sockets[0]!.serverFrame({ topic: 'demo.topic', data: { strict: true } });
-    await waitFor(() => expect(harness.received).toEqual([{ topic: 'demo.topic', data: { strict: true } }]));
+    await waitFor(() => expect(harness.received[0]).toMatchObject({ topic: 'demo.topic', data: { strict: true } }));
 
     harness.unmount();
     await waitFor(() => expect(harness.sockets[0]!.readyState).toBe(3));

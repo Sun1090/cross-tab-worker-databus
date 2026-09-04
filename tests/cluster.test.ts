@@ -414,7 +414,8 @@ describe('WorkerClusterRuntime', () => {
     expect(onEvent).toHaveBeenCalledWith(
       'publication',
       { topic: 'secret-topic', value: 'payload-secret' },
-      'worker-a'
+      'worker-a',
+      'tab-a'
     );
     const persisted = storage.entries().flat().join('\n');
     expect(persisted).not.toContain('private-connection-context');

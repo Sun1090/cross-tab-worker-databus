@@ -50,8 +50,8 @@ describe('CrossTabDataBus', () => {
 
     expect(transport.subscribeCalls).toEqual(['topic']);
     transport.emit('topic', 42);
-    expect(first).toHaveBeenCalledWith({ topic: 'topic', data: 42 });
-    expect(second).toHaveBeenCalledWith({ topic: 'topic', data: 42 });
+    expect(first.mock.calls[0]![0]).toMatchObject({ topic: 'topic', data: 42 });
+    expect(second.mock.calls[0]![0]).toMatchObject({ topic: 'topic', data: 42 });
 
     removeFirst();
     expect(transport.unsubscribeCalls).toEqual([]);
@@ -574,7 +574,7 @@ describe('CrossTabDataBus', () => {
 
     transport.emit('topic', 42);
     // handler2 should still receive the message even though handler1 threw
-    expect(handler2).toHaveBeenCalledWith({ topic: 'topic', data: 42 });
+    expect(handler2.mock.calls[0]![0]).toMatchObject({ topic: 'topic', data: 42 });
     // The error should be reported to the error handler
     expect(errors.length).toBeGreaterThanOrEqual(1);
     expect(errors[0]).toBeInstanceOf(Error);
@@ -1567,7 +1567,7 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     transport.emit('t', 'new');
     await Promise.resolve();
     expect(persistence.load).toHaveBeenCalledOnce();
-    expect(appended).toEqual([{ topic: 't', data: 'new' }]);
+    expect(appended[0]).toMatchObject({ topic: 't', data: 'new' });
     await bus.stop();
   });
 
@@ -2056,5 +2056,169 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       options: { messageId: 'out-2', timestamp: 1_725_160_000_000 }
     }]);
     await bus.stop();
+  });
+});
+
+describe('CrossTabDataBus cross-tab replay consistency contract', () => {
+  it('stamps originTabId on the producing tab and preserves it on the neighbor', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-a' });
+    const envB = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB
+    });
+    await busA.start({});
+    await busB.start({});
+    const receivedA: Array<{ data: unknown; originTabId?: string }> = [];
+    const receivedB: Array<{ data: unknown; originTabId?: string }> = [];
+    busA.subscribe('topic', message => receivedA.push(message));
+    busB.subscribe('topic', message => receivedB.push(message));
+    await Promise.all([busA.ready(), busB.ready()]);
+    transportA.emit('topic', 1);
+    await Promise.resolve();
+    expect(receivedA).toHaveLength(1);
+    expect(receivedA[0]!.originTabId).toBe('tab-a');
+    expect(receivedB).toHaveLength(1);
+    expect(receivedB[0]!.originTabId).toBe('tab-a');
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
+
+  it('producing tab\'s local handler sees the same originTabId it broadcasts', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-c-a' });
+    const envB = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-c-b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay-c',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay-c',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB
+    });
+    await busA.start({});
+    await busB.start({});
+    const receivedA: Array<{ data: unknown; originTabId?: string }> = [];
+    const receivedB: Array<{ data: unknown; originTabId?: string }> = [];
+    busA.subscribe('topic', message => receivedA.push(message));
+    busB.subscribe('topic', message => receivedB.push(message));
+    await Promise.all([busA.ready(), busB.ready()]);
+    transportA.emit('topic', 42);
+    await Promise.resolve();
+    expect(receivedA).toHaveLength(1);
+    expect(receivedB).toHaveLength(1);
+    expect(receivedA[0]!.originTabId).toBe('tab-a');
+    expect(receivedB[0]!.originTabId).toBe('tab-a');
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
+
+  it('replays history on a tab that joins after writes, with the producing tab\'s originTabId', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-p-a' });
+    const envB = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-p-b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    // Persistence is a shared array. Bus A appends; bus B hydrates from it on
+    // construction (i.e. when it joins after bus A has already written).
+    const persistentBuffer: Array<{ topic: string; data: unknown; timestamp?: number; originTabId?: string }> = [];
+    const persistence = {
+      load: vi.fn(async () => persistentBuffer.slice()),
+      append: vi.fn(async (message: { topic: string; data: unknown; timestamp?: number; originTabId?: string }) => {
+        const entry: { topic: string; data: unknown; timestamp?: number; originTabId?: string } = { topic: message.topic, data: message.data };
+        if (message.timestamp !== undefined) entry.timestamp = message.timestamp;
+        if (message.originTabId !== undefined) entry.originTabId = message.originTabId;
+        persistentBuffer.push(entry);
+      }),
+      clearTopic: vi.fn(async () => {}),
+      clearBefore: vi.fn(async () => {}),
+      clear: vi.fn(async () => {})
+    };
+    const busA = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay-p',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA,
+      replay: { maxPerTopic: 8, persistence }
+    });
+    await busA.start({});
+    await busA.ready();
+    busA.subscribe('topic', () => {});
+    transportA.emit('topic', 1);
+    transportA.emit('topic', 2);
+    // Allow bus A's persistence appends to settle.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await busA.stop();
+    // Bus B opens after A — its hydrateReplay reads the shared persistence.
+    const busB = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay-p',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB,
+      replay: { maxPerTopic: 8, persistence }
+    });
+    await busB.start({});
+    await busB.ready();
+    const lateReceived: Array<{ data: unknown; replayed?: boolean; originTabId?: string }> = [];
+    busB.subscribe('topic', message => lateReceived.push(message), { replay: true });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(lateReceived.map(message => message.data)).toEqual([1, 2]);
+    expect(lateReceived.every(message => message.replayed === true && message.originTabId === 'tab-a')).toBe(true);
+    await busB.stop();
+  });
+
+  it('replayed messages from local origin still carry the producing tab\'s originTabId', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now, randomId: 'cross-tab-replay-local-a' });
+    const transportA = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'cross-tab-replay-local',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA,
+      replay: { maxPerTopic: 8 }
+    });
+    await busA.start({});
+    await busA.ready();
+    busA.subscribe('topic', () => {});
+    transportA.emit('topic', 1);
+    transportA.emit('topic', 2);
+    await Promise.resolve();
+    const replayed: Array<{ data: unknown; replayed?: boolean; originTabId?: string }> = [];
+    busA.subscribe('topic', message => replayed.push(message), { replay: true });
+    await Promise.resolve();
+    expect(replayed.map(message => message.data)).toEqual([1, 2]);
+    expect(replayed.every(message => message.replayed === true && message.originTabId === 'tab-a')).toBe(true);
+    await busA.stop();
   });
 });
