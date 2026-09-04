@@ -15,6 +15,8 @@ export interface DataBusReplayPersistence<TData = unknown> {
 export interface IndexedDbReplayPersistenceOptions {
   dbName?: string;
   maxPerTopic: number;
+  pruneStrategy?: 'count' | 'age' | 'both';
+  retentionMs?: number;
 }
 
 /** Create a browser IndexedDB-backed replay store. */
@@ -26,6 +28,10 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
   const dbName = options.dbName ?? 'cross-tab-worker-databus';
   const storeName = 'replay';
   const maxPerTopic = options.maxPerTopic;
+  const pruneStrategy = options.pruneStrategy ?? 'count';
+  const retentionMs = options.retentionMs;
+  if (!['count', 'age', 'both'].includes(pruneStrategy)) throw new TypeError('pruneStrategy must be count, age, or both.');
+  if (retentionMs !== undefined && (!Number.isFinite(retentionMs) || retentionMs <= 0)) throw new TypeError('retentionMs must be a positive finite number.');
   if (!Number.isSafeInteger(maxPerTopic) || maxPerTopic <= 0) {
     throw new TypeError(`maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`);
   }
@@ -105,7 +111,12 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         const store = transaction.objectStore(storeName);
         const request = store.get(message.topic);
         request.onsuccess = () => {
-          const messages = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(message).slice(-maxPerTopic);
+          let messages = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(message);
+          if (pruneStrategy !== 'count' && retentionMs !== undefined) {
+            const cutoff = Date.now() - retentionMs;
+            messages = messages.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
+          }
+          if (pruneStrategy !== 'age') messages = messages.slice(-maxPerTopic);
           store.put({ topic: message.topic, messages });
         };
         request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
