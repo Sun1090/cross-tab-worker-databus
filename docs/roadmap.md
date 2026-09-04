@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.62 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.63 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.63 delivered scope
+
+- Added optional `onUnknownMessage` handling so older runtimes safely ignore future cluster message variants without throwing, with regression coverage (338 unit tests).
 
 ## 0.20.62 delivered scope
 

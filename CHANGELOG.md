@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.63] - 2026-09-05
+
+### Added
+- Added an optional `onUnknownMessage` hook and forward-compatible protocol handling so older runtimes ignore future cluster message variants without throwing.
+- Added regression coverage for unknown protocol variants (338 unit tests).
+
 ## [0.20.62] - 2026-09-05
 
 ### Added

@@ -423,6 +423,18 @@ describe('WorkerClusterRuntime', () => {
     expect(persisted).not.toContain('payload-secret');
   });
 
+  it('ignores unknown protocol message variants and reports them to the opt-in hook', () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'unknown' });
+    const onUnknownMessage = vi.fn();
+    const runtime = new WorkerClusterRuntime({ clusterKey: 'unknown', environment: env.environment, tabId: 'tab-unknown', workerId: 'worker-unknown', handlers: { onControl: vi.fn(), onEvent: vi.fn(), onUnknownMessage } });
+    runtime.start();
+    (runtime as unknown as { handleMessage: (event: MessageEvent) => void }).handleMessage({ data: { type: 'FUTURE_PROTOCOL_V2', sourceWorkerId: 'other', payload: { value: 1 } } } as MessageEvent);
+    expect(onUnknownMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'FUTURE_PROTOCOL_V2' }));
+    runtime.stop();
+  });
+
   it('falls back to the local worker when BroadcastChannel is unavailable', () => {
     const storage = new MemoryStorage();
     const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'local' });

@@ -41,6 +41,8 @@ export interface WorkerClusterHandlers {
    * `originTabId` is the tab that produced the original publication when the
    * cluster forwards one; it survives the BroadcastChannel hop so listeners
    * can tell a local dispatch from a cross-tab relay. */
+  /** Optional hook for forward-compatible messages from newer runtimes. */
+  onUnknownMessage?: (message: unknown) => void;
   onEvent: (
     eventType: string,
     payload: unknown,
@@ -732,8 +734,10 @@ export class WorkerClusterRuntime {
         this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId, message.originTabId);
         return;
       case 'REGISTRY':
-      default:
         this.reconcile();
+        return;
+      default:
+        this.handlers.onUnknownMessage?.(message);
         return;
     }
   };
