@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.58 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.59 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.59 delivered scope
+
+- Extended `CrossTabDataBus.getRecoveryStats()` with `generation` and `lastSuccessAt`, exposing the lifetime transport-open history for diagnostics.
 
 ## 0.20.58 delivered scope
 

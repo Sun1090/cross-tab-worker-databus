@@ -1,4 +1,10 @@
 # Changelog
+## [0.20.59] - 2026-09-04
+
+### Added
+- Extended `CrossTabDataBus.getRecoveryStats()` with `generation` (monotonic counter incremented on every successful transport open) and `lastSuccessAt` (timestamp of the most recent successful open, or `null` until the transport reaches `ready`).
+- Added a unit test asserting generation/lastSuccessAt advance on the initial start and after a recovery, and stay stable across failed recovery attempts.
+
 ## [0.20.58] - 2026-09-04
 
 ### Changed
