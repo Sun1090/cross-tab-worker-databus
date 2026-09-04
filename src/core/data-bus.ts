@@ -153,6 +153,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // Last transport failure, retained so ready() can surface it to callers who
   // never awaited start() directly. Cleared on the next successful start.
   private lastError: unknown = null;
+  private lastErrorAt: number | null = null;
   // Gate that serialises start/stop/suspend/resume — only one lifecycle
   // transition at a time. Resets to null once the operation settles.
   private startPromise: Promise<void> | null = null;
@@ -410,6 +411,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.updateStatus('error');
         this.reportError(error);
         this.lastError = error;
+        this.lastErrorAt = this.now();
         this.transportReady = false;
         if (stopClusterOnFailure) {
           this.stopping = true;
@@ -595,9 +597,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   /** Return the current automatic transport recovery state. `hasError` means a transport error is currently retained. */
-  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null } {
+  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null } {
     const errorMessage = this.lastError instanceof Error ? this.lastError.message : this.lastError === null ? null : String(this.lastError);
-    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts, hasError: this.lastError !== null, errorMessage };
+    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts, hasError: this.lastError !== null, errorMessage, errorAt: this.lastErrorAt };
   }
 
   /** Snapshot of the cluster state (workers, routes, assignments).
@@ -639,6 +641,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.startPromise = null;
       this.pendingStop = null;
       this.lastError = null;
+      this.lastErrorAt = null;
       this.activeConfig = undefined;
       this.recoveryAttempt = 0;
       this.recoveryExhausted = false;
