@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.59 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.60 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.60 delivered scope
+
+- Added `publishBatch(topic, items)` to `CrossTabDataBus` and `WorkerClusterRuntime` so callers can pack many items into a single BroadcastChannel postMessage. Per-item `messageId` / `timestamp` survive the wire frame, dedup / replay / ordering apply per item in source order. Empty batch is a no-op; single-item batch delegates to `publish()`. Bench case `publishBatch / 1000 messages / 10 per call` gives an upper-bound reference for the burst path (332 unit tests).
 
 ## 0.20.59 delivered scope
 

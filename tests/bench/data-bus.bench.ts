@@ -34,4 +34,13 @@ describe('data bus hot paths', () => {
       transport.emit('bench.topic', { value: index });
     }
   });
+
+  bench('publishBatch / 1000 messages / 10 per call', () => {
+    for (let batch = 0; batch < 100; batch += 1) {
+      const items = Array.from({ length: 10 }, (_, index) => ({
+        data: { value: batch * 10 + index }
+      }));
+      bus.publishBatch('bench.topic', items);
+    }
+  });
 });

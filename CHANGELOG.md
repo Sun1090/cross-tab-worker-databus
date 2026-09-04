@@ -1,4 +1,12 @@
 # Changelog
+## [0.20.60] - 2026-09-04
+
+### Added
+- `publishBatch(topic, items)` on both `CrossTabDataBus` and `WorkerClusterRuntime` packs multiple items into a single BroadcastChannel postMessage so the receiving owner can dispatch them in one tick instead of one channel post per item.
+- Per-item `messageId` / `timestamp` is preserved across the batched wire frame, so dedup / replay / ordering still apply per item in the original order.
+- Empty batch is a no-op; single-item batch delegates to `publish()` so callers do not have to special-case the boundary.
+- Added a `data bus hot paths` bench case (`publishBatch / 1000 messages / 10 per call`) to give an upper-bound reference for the burst path.
+
 ## [0.20.59] - 2026-09-04
 
 ### Added

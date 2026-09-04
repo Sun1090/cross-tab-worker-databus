@@ -491,15 +491,104 @@ export class WorkerClusterRuntime {
       }
       this.wildcardPublishCache.set(topic, null);
     }
+    return this.sendControl(this.resolvePublishTarget(topic, topicKey), 'PUBLISH', topic, topicKey, data, metadata);
+  }
+
+  /**
+   * Burst-friendly variant of `publish()`: packs up to N items into a single
+   * BroadcastChannel postMessage so the receiving owner dispatches them all in
+   * one tick. Per-item dedup / replay / dispatch ordering is preserved; items
+   * may carry their own messageId/timestamp. Empty batch is a no-op,
+   * single-item batch delegates to `publish()`.
+   */
+  publishBatch(
+    topic: string,
+    items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>
+  ): boolean {
+    if (items.length === 0) return true;
+    if (items.length === 1) {
+      const single = items[0]!;
+      const metadata = single.messageId !== undefined || single.timestamp !== undefined
+        ? {
+            ...(single.messageId !== undefined ? { messageId: single.messageId } : {}),
+            ...(single.timestamp !== undefined ? { timestamp: single.timestamp } : {})
+          }
+        : undefined;
+      return this.publish(topic, single.data, metadata);
+    }
+    const topicKey = this.rememberTopic(topic);
+    if (this.assignedTopics.has(topicKey)) {
+      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      return true;
+    }
+    const cachedPattern = this.wildcardPublishCache.get(topic);
+    if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
+      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      return true;
+    }
+    if (cachedPattern === undefined) {
+      for (const pattern of this.assignedTopics.values()) {
+        if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
+          this.wildcardPublishCache.set(topic, pattern);
+          for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+          return true;
+        }
+      }
+      this.wildcardPublishCache.set(topic, null);
+    }
+    const target = this.resolvePublishTarget(topic, topicKey);
+    if (target === this.workerId) {
+      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      return true;
+    }
+    return this.send({
+      type: 'CONTROL',
+      sourceWorkerId: this.workerId,
+      targetWorkerId: target,
+      action: 'PUBLISH',
+      topic,
+      topicKey,
+      items: items.map(item => ({
+        data: item.data,
+        ...(item.messageId !== undefined ? { messageId: item.messageId } : {}),
+        ...(item.timestamp !== undefined ? { timestamp: item.timestamp } : {})
+      }))
+    });
+  }
+
+  /** Resolve which worker should receive a PUBLISH for `topic`. Centralises the
+   * route-owner cache lookup so `publish()` and `publishBatch()` share one path. */
+  private resolvePublishTarget(topic: string, topicKey: string): string {
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
     const cached = this.routeOwnerCache.get(topicKey);
     const cachedLive = cached && route && route.generation === cached.generation && route.workerId === cached.workerId && workers.some(worker => worker.workerId === cached.workerId);
     if (cachedLive) this.routeOwnerCacheHits += 1; else this.routeOwnerCacheMisses += 1;
-    const target = cachedLive ? cached.workerId : this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
-    if (route && target === route.workerId) this.touchRouteOwnerCache(topicKey, { workerId: route.workerId, generation: route.generation });
-    else this.routeOwnerCache.delete(topicKey);
-    return this.sendControl(target, 'PUBLISH', topic, topicKey, data, metadata);
+    const target = cachedLive
+      ? cached.workerId
+      : this.routeOwnerIsLive(route, workers)
+        ? route?.workerId ?? this.workerId
+        : this.workerId;
+    if (route && target === route.workerId) {
+      this.touchRouteOwnerCache(topicKey, { workerId: route.workerId, generation: route.generation });
+    } else {
+      this.routeOwnerCache.delete(topicKey);
+    }
+    return target;
+  }
+
+  /** Fan out a single batched item to the local onControl path. */
+  private dispatchLocalPublish(
+    topic: string,
+    topicKey: string,
+    data: unknown,
+    messageId?: string,
+    timestamp?: number
+  ): void {
+    void topicKey;
+    const meta = publicationMetadata(messageId, timestamp);
+    if (meta) this.handlers.onControl('PUBLISH', topic, data, meta.messageId, meta.timestamp);
+    else this.handlers.onControl('PUBLISH', topic, data);
   }
 
   /** True when `route` exists and its owner worker is among `workers`.
@@ -651,6 +740,15 @@ export class WorkerClusterRuntime {
         if (this.releaseHandoffOnUnsubscribe(message)) return;
         break;
       case 'PUBLISH':
+        if (message.items && message.items.length > 0) {
+          for (const item of message.items) {
+            const itemMeta = publicationMetadata(item.messageId, item.timestamp);
+            if (itemMeta) this.handlers.onControl('PUBLISH', message.topic, item.data, itemMeta.messageId, itemMeta.timestamp);
+            else this.handlers.onControl('PUBLISH', message.topic, item.data);
+          }
+          return;
+        }
+        break;
       default:
         break;
     }

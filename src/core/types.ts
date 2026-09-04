@@ -124,12 +124,19 @@ export type WorkerClusterMessage<TEvent = unknown> =
       action: WorkerControlAction;
       topic: string;
       topicKey: string;
-      /** Present only for PUBLISH actions; the publication payload. */
+      /** Present only for PUBLISH actions; the publication payload.
+       * Mutually exclusive with `items` — a single-message PUBLISH carries
+       * `data`, a batched PUBLISH carries `items`. */
       data?: unknown;
       /** Optional stable identifier for the publication. */
       messageId?: string;
       /** Optional producer timestamp propagated with PUBLISH actions. */
       timestamp?: number;
+      /** Present only for batched PUBLISH actions. When set, the receiver
+       * unpacks each entry into an individual publication, preserving order
+       * and applying per-item dedup/replay. The receiver ignores `data`,
+       * `messageId`, and `timestamp` when `items` is set. */
+      items?: Array<{ data: unknown; messageId?: string; timestamp?: number }>;
     }
   /** The owning worker fans out a publication to every tab. `eventType`
    * distinguishes databus publications from future event types. */
