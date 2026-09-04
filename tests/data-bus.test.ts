@@ -810,7 +810,7 @@ describe('CrossTabDataBus', () => {
       clusterKey: 'recovery-stats', environment: environment.environment, initialConfig: {}, transport,
       recovery: { cooldownMs: 100, maxAttempts: 2 }
     });
-    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: false, errorMessage: null });
+    expect(bus.getRecoveryStats()).toEqual({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: false, errorMessage: null, errorAt: null });
     bus.subscribe('topic', vi.fn());
     await bus.ready();
     transport.startShouldFail = true;
@@ -821,7 +821,7 @@ describe('CrossTabDataBus', () => {
     transport.startShouldFail = false;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();
-    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.' });
+    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.', errorAt: 1_000 });
     await bus.stop();
   });
 
