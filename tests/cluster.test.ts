@@ -619,6 +619,211 @@ describe('WorkerClusterRuntime', () => {
     // A published-but-unowned topic resolves through rememberTopic's cache path.
     expect(runtime.isAssigned('fill-topic-599')).toBe(false);
   });
+
+  it('evicts the oldest route owner cache entry once the cap is reached', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-cap' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'lru-cap',
+      environment: env.environment,
+      tabId: 'tab-cap',
+      workerId: 'worker-cap',
+      routeOwnerCacheMax: 3,
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtime.start();
+    await Promise.resolve();
+    env.runIntervals();
+    for (let i = 0; i < 5; i += 1) {
+      runtime.publish(`bench.cap.${i}`, { value: i });
+      await Promise.resolve();
+      env.runIntervals();
+    }
+    const snap = runtime.getSnapshot().routeOwnerCache;
+    expect(snap?.max).toBe(3);
+    expect(snap?.size).toBeLessThanOrEqual(3);
+    runtime.stop();
+  });
+
+  it('clears route owner cache diagnostics when stopped', () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-stop' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'lru-stop',
+      environment: env.environment,
+      tabId: 'tab-stop',
+      workerId: 'worker-stop',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtime.start();
+    runtime.publish('bench.stop.topic', { value: 1 });
+    expect(runtime.getSnapshot().routeOwnerCache?.misses).toBe(1);
+    runtime.stop();
+    expect(runtime.getSnapshot().routeOwnerCache?.size).toBe(0);
+  });
+
+  it('route owner cache populates for a remote owner and serves subsequent publishes from cache', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-remote-A' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-remote-B' });
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'lru-remote',
+      environment: envA.environment,
+      tabId: 'tab-remote-A',
+      workerId: 'worker-remote-A',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'lru-remote',
+      environment: envB.environment,
+      tabId: 'tab-remote-B',
+      workerId: 'worker-remote-B',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    runtimeB.subscribe('bench.remote.topic');
+    await Promise.resolve();
+    envA.runIntervals();
+    envB.runIntervals();
+    runtimeA.publish('bench.remote.topic', { value: 1 });
+    const after1 = runtimeA.getSnapshot().routeOwnerCache;
+
+    expect(after1?.misses).toBe(1);
+    expect(after1?.hits).toBe(0);
+
+    runtimeA.publish('bench.remote.topic', { value: 2 });
+    const after2 = runtimeA.getSnapshot().routeOwnerCache;
+
+    expect(after2?.hits).toBeGreaterThanOrEqual(1);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('route owner cache misses on the first publish and reuses a fresh route', () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-miss' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'lru-miss',
+      environment: env.environment,
+      tabId: 'tab-miss',
+      workerId: 'worker-miss',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtime.start();
+    const before = runtime.getSnapshot().routeOwnerCache;
+    expect(before?.misses).toBe(0);
+    runtime.publish('bench.miss.topic', { value: 1 });
+    const after = runtime.getSnapshot().routeOwnerCache;
+    expect(after?.misses).toBe(1);
+  });
+
+  it('route owner cache falls back when the cached worker TTL expires', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const environmentA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'lru-ttl-A' });
+    const environmentB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'lru-ttl-B' });
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'lru-ttl',
+      environment: environmentA.environment,
+      tabId: 'tab-ttl-A',
+      workerId: 'worker-ttl-A',
+      workerTtlMs: 5_000,
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'lru-ttl',
+      environment: environmentB.environment,
+      tabId: 'tab-ttl-B',
+      workerId: 'worker-ttl-B',
+      workerTtlMs: 5_000,
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    runtimeB.subscribe('bench.ttl.topic');
+    await Promise.resolve();
+    environmentA.runIntervals();
+    environmentB.runIntervals();
+    runtimeA.publish('bench.ttl.topic', { value: 1 });
+    const firstSnapshot = runtimeA.getSnapshot().routeOwnerCache;
+    expect(firstSnapshot?.misses).toBe(1);
+    // Worker B 'crashes' (no pagehide, no stop): we stop ticking B and jump
+    // time past its 5s TTL, then let only A reconcile. A's route cache for B
+    // should now be invalid; the next publish must re-resolve.
+    now += 5_001;
+    environmentA.runIntervals();
+    await Promise.resolve();
+    runtimeA.publish('bench.ttl.topic', { value: 2 });
+    const secondSnapshot = runtimeA.getSnapshot().routeOwnerCache;
+    expect(secondSnapshot?.misses).toBeGreaterThanOrEqual(2);
+    expect(secondSnapshot?.size).toBeLessThanOrEqual(1);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('route owner cache survives an owner migration and routes to the new owner', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-mig-A' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-mig-B' });
+    const envC = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-mig-C' });
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'lru-mig',
+      environment: envA.environment,
+      tabId: 'tab-mig-A',
+      workerId: 'worker-mig-A',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'lru-mig',
+      environment: envB.environment,
+      tabId: 'tab-mig-B',
+      workerId: 'worker-mig-B',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    const runtimeC = new WorkerClusterRuntime({
+      clusterKey: 'lru-mig',
+      environment: envC.environment,
+      tabId: 'tab-mig-C',
+      workerId: 'worker-mig-C',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    runtimeC.start();
+    // B subscribes first; A and C publish to its topic.
+    runtimeB.subscribe('bench.mig.topic');
+    await Promise.resolve();
+    envA.runIntervals();
+    envB.runIntervals();
+    envC.runIntervals();
+    runtimeA.publish('bench.mig.topic', { value: 1 });
+    const cacheA = runtimeA.getSnapshot().routeOwnerCache;
+    expect(cacheA?.misses).toBe(1);
+    // B hands off (pagehide) and C takes ownership. B's pagehide triggers a
+    // graceful handoff; C is the least-loaded worker so it wins the race.
+    envB.pageHide();
+    await Promise.resolve();
+    envA.runIntervals();
+    envB.runIntervals();
+    envC.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+    // After migration the route owner should have changed. A's next publish
+    // must miss (cached owner is stale) and successfully route to the new owner.
+    runtimeA.publish('bench.mig.topic', { value: 2 });
+    const cacheA2 = runtimeA.getSnapshot().routeOwnerCache;
+    expect(cacheA2?.misses).toBeGreaterThanOrEqual(2);
+    runtimeA.stop();
+    runtimeB.stop();
+    runtimeC.stop();
+  });
 });
 
 describe('WorkerClusterRuntime resilience', () => {

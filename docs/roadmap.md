@@ -1,6 +1,20 @@
 # Roadmap
 
-0.20.55 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.58 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.58 delivered scope
+
+- Bounded the publish route-owner cache with a configurable LRU cap (default 256) and surfaced size/max/hits/misses diagnostics on `WorkerClusterRuntime.getSnapshot()`.
+- Fixed a remote-owner publish correctness bug where `wildcardPublishCache`'s `null` entry short-circuited the route-owner lookup; topics with no local wildcard subscription now correctly forward to the remote owner.
+- Added unit tests for LRU eviction, TTL-based cache invalidation, owner migration, and remote-owner cache hits (319 → 321 unit tests).
+
+## 0.20.57 delivered scope
+
+- Added warm/cold route-cache publish benchmarks to make owner-routing performance measurable.
+
+## 0.20.56 delivered scope
+
+- Added generation-checked route-owner caching for publish routing and cleared it across lifecycle teardown.
 
 ## 0.20.55 delivered scope
 

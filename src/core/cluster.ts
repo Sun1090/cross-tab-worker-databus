@@ -67,6 +67,9 @@ export interface WorkerClusterOptions {
   heartbeatIntervalMs?: number;
   /** TTL after which a silent worker is pruned (default 10000). */
   workerTtlMs?: number;
+  /** Maximum entries kept in the publish route-owner cache (default 256).
+   * When the cap is reached, the oldest (FIFO) entry is evicted. */
+  routeOwnerCacheMax?: number;
 }
 
 /** Read-only snapshot of the cluster state for diagnostics and tracing. */
@@ -81,6 +84,7 @@ export interface WorkerClusterSnapshot {
   assignedTopics: string[];
   /** Opaque key → plaintext topic mapping for debugging. */
   knownTopics: Array<{ topicKey: string; topic: string }>;
+  routeOwnerCache?: { size: number; max: number; hits: number; misses: number };
 }
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
@@ -181,6 +185,18 @@ export class WorkerClusterRuntime {
   // (or local self-subscribe), never via the reverse cache.
   private readonly assignedTopics = new Map<string, string>();
   private readonly routeOwnerCache = new Map<string, { workerId: string; generation: number }>();
+  private readonly routeOwnerCacheMax: number;
+  private routeOwnerCacheHits = 0;
+  private routeOwnerCacheMisses = 0;
+  private touchRouteOwnerCache(topicKey: string, value: { workerId: string; generation: number }): void {
+    if (this.routeOwnerCache.has(topicKey)) this.routeOwnerCache.delete(topicKey);
+    this.routeOwnerCache.set(topicKey, value);
+    while (this.routeOwnerCache.size > this.routeOwnerCacheMax) {
+      const oldest = this.routeOwnerCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.routeOwnerCache.delete(oldest);
+    }
+  }
   private readonly wildcardPublishCache = new Map<string, string | null>();
   // Reverse mapping: opaque topicKey → plaintext topic. A bounded cache with
   // FIFO eviction — NOT authoritative. It can hold a topicKey that is also in
@@ -200,6 +216,7 @@ export class WorkerClusterRuntime {
     this.handlers = options.handlers;
     this.maxActiveWorkers = options.maxActiveWorkers ?? DEFAULT_MAX_ACTIVE_WORKERS;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.routeOwnerCacheMax = options.routeOwnerCacheMax ?? 256;
     this.workerTtlMs = options.workerTtlMs ?? DEFAULT_WORKER_TTL_MS;
     // Derive storage keys from a hash of the cluster key so that the plaintext
     // cluster identifier never appears in localStorage.
@@ -456,26 +473,31 @@ export class WorkerClusterRuntime {
     if (this.assignedTopics.has(topicKey)) {
       return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
     }
+    // `cachedPattern` is `undefined` (never computed), a pattern string
+    // (this worker owns the topic via a local wildcard subscription), or
+    // `null` (no local wildcard subscription). A `null` entry must NOT
+    // short-circuit: the topic may still have a remote owner and the
+    // route-owner cache lookup below has to run.
     const cachedPattern = this.wildcardPublishCache.get(topic);
-    if (cachedPattern !== undefined) {
-      if (cachedPattern === null || this.assignedTopics.has(cachedPattern)) {
-        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
-      }
-      this.wildcardPublishCache.delete(topic);
+    if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
+      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
     }
-    for (const pattern of this.assignedTopics.values()) {
-      if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
-        this.wildcardPublishCache.set(topic, pattern);
-        return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+    if (cachedPattern === undefined) {
+      for (const pattern of this.assignedTopics.values()) {
+        if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
+          this.wildcardPublishCache.set(topic, pattern);
+          return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+        }
       }
+      this.wildcardPublishCache.set(topic, null);
     }
-    this.wildcardPublishCache.set(topic, null);
     const workers = this.readWorkers();
     const route = this.readRoute(topicKey);
     const cached = this.routeOwnerCache.get(topicKey);
     const cachedLive = cached && route && route.generation === cached.generation && route.workerId === cached.workerId && workers.some(worker => worker.workerId === cached.workerId);
+    if (cachedLive) this.routeOwnerCacheHits += 1; else this.routeOwnerCacheMisses += 1;
     const target = cachedLive ? cached.workerId : this.routeOwnerIsLive(route, workers) ? route?.workerId ?? this.workerId : this.workerId;
-    if (route && target === route.workerId) this.routeOwnerCache.set(topicKey, { workerId: route.workerId, generation: route.generation });
+    if (route && target === route.workerId) this.touchRouteOwnerCache(topicKey, { workerId: route.workerId, generation: route.generation });
     else this.routeOwnerCache.delete(topicKey);
     return this.sendControl(target, 'PUBLISH', topic, topicKey, data, metadata);
   }
@@ -554,7 +576,8 @@ export class WorkerClusterRuntime {
       routes,
       subscribedTopics: Array.from(this.subscribedTopics),
       assignedTopics: Array.from(this.assignedTopics.values()),
-      knownTopics: Array.from(this.knownTopics.entries(), ([topicKey, topic]) => ({ topicKey, topic }))
+      knownTopics: Array.from(this.knownTopics.entries(), ([topicKey, topic]) => ({ topicKey, topic })),
+      routeOwnerCache: { size: this.routeOwnerCache.size, max: this.routeOwnerCacheMax, hits: this.routeOwnerCacheHits, misses: this.routeOwnerCacheMisses }
     };
   }
 

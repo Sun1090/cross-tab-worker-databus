@@ -1,6 +1,20 @@
 # 路线图
 
-0.20.55 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.58 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.58 已完成范围
+
+- 把 publish 路径的 route-owner 缓存加上可配置 LRU 上限（默认 256），并在 `WorkerClusterRuntime.getSnapshot()` 上暴露 size/max/hits/misses 诊断信息。
+- 修复了一个远程 owner 的 publish 正确性 bug：此前 `wildcardPublishCache` 的 `null` 项会提前 return，导致没有本地 wildcard 订阅的 topic 不再走 route-owner 查找；现在会正确转发到远程 owner。
+- 新增 LRU 淘汰、TTL 失效、owner 迁移和远程 owner 命中缓存的单元测试（319 → 321 个单测）。
+
+## 0.20.57 已完成范围
+
+- 新增 warm/cold route-cache publish 基准，便于衡量 owner 路由的性能。
+
+## 0.20.56 已完成范围
+
+- 为 publish 路由引入带 generation 比对的 route-owner 缓存，并在生命周期关闭时清空。
 
 ## 0.20.55 已完成范围
 

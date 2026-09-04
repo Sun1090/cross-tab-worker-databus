@@ -1,4 +1,15 @@
 # Changelog
+## [0.20.58] - 2026-09-04
+
+### Changed
+- Bounded the publish route-owner cache to a configurable LRU cap (default 256), evicting the oldest entry on overflow.
+- Surfaced route-owner cache diagnostics (`size`, `max`, `hits`, `misses`) on `WorkerClusterRuntime.getSnapshot()` so callers can observe warm vs. cold route resolution.
+- Fixed a correctness bug where `wildcardPublishCache`'s `null` entry short-circuited the remote-owner publish path; topics with no local wildcard subscription now still consult the route-owner cache and forward to the remote owner.
+
+### Added
+- Added `routeOwnerCacheMax` to `WorkerClusterOptions` for tuning the route-owner cache size per workload.
+- Added unit tests for LRU eviction, TTL-based cache invalidation, owner migration, and remote-owner cache hits.
+
 ## [0.20.57] - 2026-09-04
 
 ### Added
@@ -25,8 +36,6 @@
 ### Added
 
 - Extended `getRecoveryStats()` with a safe `errorMessage` summary for diagnostics without exposing the raw error object.
-
-## [Unreleased]
 
 ## [0.20.52] - 2026-09-04
 
