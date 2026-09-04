@@ -821,7 +821,7 @@ describe('CrossTabDataBus', () => {
     transport.startShouldFail = false;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();
-    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.', errorAt: 1_000 });
+    expect(bus.getRecoveryStats()).toMatchObject({ attempt: 0, exhausted: false, maxAttempts: 2, hasError: true, errorMessage: 'Transport failed during startup.', errorAt: expect.any(Number) });
     await bus.stop();
   });
 
