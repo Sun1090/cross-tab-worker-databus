@@ -594,9 +594,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return this.status;
   }
 
-  /** Return a bounded snapshot of automatic transport recovery state. */
-  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number } {
-    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts };
+  /** Return the current automatic transport recovery state. `hasError` means a transport error is currently retained. */
+  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean } {
+    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts, hasError: this.lastError !== null };
   }
 
   /** Snapshot of the cluster state (workers, routes, assignments).

@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.51 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.52 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.52 delivered scope
+
+- Extended `getRecoveryStats()` with `hasError`, making the currently retained transport error observable.
 
 ## 0.20.51 delivered scope
 
