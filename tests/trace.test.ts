@@ -288,3 +288,15 @@ describe('DataBusTraceReporter', () => {
     expect(events).toHaveLength(1);
   });
 });
+
+describe('async trace sink', () => {
+  it('batches events onto a microtask while preserving order', async () => {
+    const sink = vi.fn();
+    const reporter = new DataBusTraceReporter({ enabled: true, asyncSink: true, sink });
+    reporter.event({ type: 'lifecycle', action: 'start' });
+    reporter.event({ type: 'lifecycle', action: 'resume' });
+    expect(sink).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(sink.mock.calls.map(([event]) => event.type)).toEqual(['lifecycle', 'lifecycle']);
+  });
+});
