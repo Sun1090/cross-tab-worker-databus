@@ -6,7 +6,7 @@
  * queuing, message dispatch, and clean lifecycle management (start/stop/BFCache).
  */
 import { WorkerClusterRuntime } from './cluster';
-import type { WorkerClusterOptions } from './cluster';
+import type { WorkerClusterOptions, WorkerClusterSnapshot } from './cluster';
 import { isWildcardTopic, topicMatchesPattern } from './routing';
 import type {
   DataBusErrorHandler,
@@ -83,6 +83,16 @@ export interface DataBusDedupStats {
   tracked: number;
   suppressed: number;
   accepted: number;
+}
+
+export interface DataBusDiagnostics {
+  status: WorkerStatus;
+  started: boolean;
+  transportReady: boolean;
+  recovery: { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null; generation: number; lastSuccessAt: number | null };
+  dedup: DataBusDedupStats;
+  replay: { enabled: boolean; topics: number; messages: number };
+  cluster: WorkerClusterSnapshot;
 }
 
 export interface CrossTabDataBusOptions<TConfig, TData>
@@ -677,6 +687,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * nested arrays are snapshots at call time. */
   getClusterSnapshot() {
     return this.cluster.getSnapshot();
+  }
+
+  /** Return a single health snapshot combining lifecycle, recovery, dedup, replay, and cluster state. */
+  getDiagnostics(): DataBusDiagnostics {
+    let messages = 0;
+    if (this.replayBuffers) for (const buffer of this.replayBuffers.values()) messages += buffer.length;
+    return {
+      status: this.status,
+      started: this.started,
+      transportReady: this.transportReady,
+      recovery: this.getRecoveryStats(),
+      dedup: this.getDedupStats(),
+      replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
+      cluster: this.cluster.getSnapshot()
+    };
   }
 
   /**

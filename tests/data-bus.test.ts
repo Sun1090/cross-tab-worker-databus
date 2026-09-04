@@ -2059,6 +2059,28 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
   });
 });
 
+describe('CrossTabDataBus diagnostics', () => {
+  it('combines lifecycle, dedup, replay, recovery, and cluster snapshots', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'diag' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'diag', environment: env.environment, tabId: 'tab-diag', workerId: 'worker-diag', transport, replay: { maxPerTopic: 4 }, dedup: { maxEntries: 8 } });
+    await bus.start({});
+    await bus.ready();
+    bus.subscribe('topic', () => {});
+    transport.emit('topic', 1);
+    await Promise.resolve();
+    const diagnostics = bus.getDiagnostics();
+    expect(['connected', 'ready']).toContain(diagnostics.status);
+    expect(diagnostics.started).toBe(true);
+    expect(diagnostics.transportReady).toBe(true);
+    expect(diagnostics.replay).toMatchObject({ enabled: true, topics: 1, messages: 1 });
+    expect(diagnostics.dedup.enabled).toBe(true);
+    expect(diagnostics.cluster.currentWorker.workerId).toBe('worker-diag');
+    expect(diagnostics.recovery.generation).toBeGreaterThanOrEqual(1);
+    await bus.stop();
+  });
+});
+
 describe('CrossTabDataBus cross-tab replay consistency contract', () => {
   it('stamps originTabId on the producing tab and preserves it on the neighbor', async () => {
     const storage = new MemoryStorage();

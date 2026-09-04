@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.62] - 2026-09-05
+
+### Added
+- Added `CrossTabDataBus.getDiagnostics()` combining lifecycle status, transport readiness, recovery history, dedup counters, replay buffer usage, and cluster snapshot into one health-oriented view.
+- Added coverage for the top-level diagnostics contract.
+
 ## [0.20.61] - 2026-09-05
 
 ### Added
