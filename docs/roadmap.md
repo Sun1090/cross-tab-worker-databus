@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.52 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.53 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.53 delivered scope
+
+- Extended recovery diagnostics with a safe serializable `errorMessage` summary.
 
 ## 0.20.52 delivered scope
 
