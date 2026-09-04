@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.53] - 2026-09-04
+
+### Added
+
+- Extended `getRecoveryStats()` with a safe `errorMessage` summary for diagnostics without exposing the raw error object.
+
 ## [Unreleased]
 
 ## [0.20.52] - 2026-09-04
