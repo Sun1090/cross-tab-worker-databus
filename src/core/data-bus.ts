@@ -594,6 +594,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return this.status;
   }
 
+  /** Return a bounded snapshot of automatic transport recovery state. */
+  getRecoveryStats(): { attempt: number; exhausted: boolean; maxAttempts: number } {
+    return { attempt: this.recoveryAttempt, exhausted: this.recoveryExhausted, maxAttempts: this.recoveryMaxAttempts };
+  }
+
   /** Snapshot of the cluster state (workers, routes, assignments).
    * For diagnostics only — the returned object is a shallow copy but
    * nested arrays are snapshots at call time. */
