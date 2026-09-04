@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.50] - 2026-09-04
+
+### Added
+
+- Added owner-handoff unsubscribe coverage proving a handed-off route is not recreated after the surviving tab unsubscribes.
+
 ## [0.20.49] - 2026-09-04
 
 ### Added

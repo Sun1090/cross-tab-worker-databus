@@ -1,8 +1,10 @@
 # Roadmap
 
-0.20.49 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.50 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
 
-## 0.20.49 delivered scope
+## 0.20.50 delivered scope
+
+- Added owner-handoff unsubscribe coverage proving a handed-off route is not recreated after the surviving tab unsubscribes.
 
 - Added unsubscribe-before-reconnect coverage proving removed topics are not replayed after lifecycle recovery.
 

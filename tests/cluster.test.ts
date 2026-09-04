@@ -223,6 +223,21 @@ describe('WorkerClusterRuntime', () => {
     expect(runtimeB.isAssigned('shared-topic')).toBe(true);
   });
 
+  it('does not recreate a handed-off route after the surviving tab unsubscribes', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'handoff-unsub' });
+    const control = vi.fn();
+    const runtime = new WorkerClusterRuntime({ clusterKey: 'handoff-unsub', environment: env.environment, tabId: 'tab-a', workerId: 'worker-a', handlers: { onControl: control, onEvent: vi.fn() } });
+    runtime.start();
+    runtime.subscribe('topic');
+    await Promise.resolve();
+    runtime.unsubscribe('topic');
+    env.runIntervals();
+    expect(runtime.isAssigned('topic')).toBe(false);
+    expect(control).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic', undefined);
+  });
+
   it('completes a four-tab handoff when the pagehide control message is lost', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
