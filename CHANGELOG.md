@@ -1,4 +1,9 @@
 # Changelog
+## [0.20.55] - 2026-09-04
+
+### Changed
+- Added a bounded wildcard publish decision cache with lifecycle-safe invalidation.
+
 ## [0.20.54] - 2026-09-04
 
 ### Added
