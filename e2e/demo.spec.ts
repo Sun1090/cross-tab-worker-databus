@@ -516,6 +516,30 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     expect(after.publishBatch).toBe(baseline.publishBatch + 1);
     expect(after.publish).toBe(baseline.publish);
   });
+
+  test('batch burst fanned out across tabs stays exactly-once per tab', async ({ context }) => {
+    const topic = `e2e.batch2tab.${Date.now()}`;
+    const setupWsTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      await page.click('#modeSwitch [data-mode="websocket"]');
+      await page.fill('#topicInput', topic);
+      await page.click('#applyConnection');
+      await expect(page.locator('#statusBadge')).toHaveText('已连接');
+      return page;
+    };
+
+    const tabA = await setupWsTab();
+    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    const tabB = await setupWsTab();
+    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+
+    // The batch travels as one wire frame and fans out through the cluster:
+    // the non-owner tab receives all ten via the EVENT broadcast, both tabs
+    // end on exactly ten (no duplicates from double-delivery / echo races).
+    await tabA.click('#publishBatch');
+    await expect.poll(() => receivedCount(tabB)).toBe(10);
+    await expect.poll(() => receivedCount(tabA)).toBe(10);
+  });
 });
 
 test.describe('cross-tab databus demo — binary publish', () => {
