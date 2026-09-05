@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.74 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.75 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.75 delivered scope
+
+- Hot-path performance gates joined the unit suite, and IndexedDB replay persistence gained scripted fault-injection coverage for its invalidate-and-recover error paths. The Release workflow's published-consumer verification was audited and confirmed complete.
 
 ## 0.20.74 delivered scope
 

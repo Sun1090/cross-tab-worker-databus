@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.75] - 2026-09-05
+
+### Added
+- Added hot-path performance gates to the unit suite: generous-ceiling assertions over wildcard/exact topic matching, opaque-key hashing, and worker selection loops, so catastrophic hot-path regressions fail CI while real benchmarking stays in `pnpm bench`.
+- Extended IndexedDB replay persistence tests with scripted fault injection (transaction-construction failure and failing store requests), covering the adapter's invalidate-and-recover error paths.
+
 ## [0.20.74] - 2026-09-05
 
 ### Added

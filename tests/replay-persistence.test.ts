@@ -132,4 +132,106 @@ describe('createIndexedDbReplayPersistence', () => {
     await persistence.append(message('t', 2));
     expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
   });
+
+  /** Wrap the real fake-indexeddb factory so the adapter's DB surface fails
+   * in scripted ways. The open() stub resolves with a proxied IDBDatabase:
+   * 'transaction-throws' breaks transaction construction, 'request-fails'
+   * makes store requests error. Only exists to drive the adapter's
+   * error/invalidation paths that a healthy fake-indexeddb cannot reach. */
+  function makeBrokenFactory(mode: 'transaction-throws' | 'request-fails') {
+    // The adapter captures the factory at creation time, so recovery must go
+    // through the same factory; `disabled` switches it back to healthy.
+    const control = { disabled: false };
+    const wrapped = {
+      open(name: string, version?: number) {
+        if (control.disabled) return factory.open(name, version);
+        const stub: {
+          onupgradeneeded: unknown;
+          onsuccess: ((event: unknown) => void) | null;
+          onerror: ((event: unknown) => void) | null;
+          result: IDBDatabase | null;
+          error: unknown;
+        } = { onupgradeneeded: null, onsuccess: null, onerror: null, result: null, error: null };
+        const inner = factory.open(name, version);
+        // Forward the upgrade handler so a fresh database still gets its
+        // object store; the adapter's handler reads `request.result`, which
+        // must point at the upgrading connection during the upgrade.
+        inner.onupgradeneeded = () => {
+          stub.result = inner.result;
+          (stub.onupgradeneeded as ((event: unknown) => void) | null)?.({ target: stub });
+        };
+        inner.onsuccess = () => {
+          const realDb = inner.result;
+          stub.result = new Proxy(realDb, {
+            get(target, prop) {
+              if (prop === 'transaction') {
+                if (mode === 'transaction-throws') {
+                  return () => {
+                    throw new DOMException('The connection is closed.', 'InvalidStateError');
+                  };
+                }
+                return (storeNames: string, txMode: IDBTransactionMode) => {
+                  const tx = target.transaction(storeNames, txMode);
+                  if (mode === 'request-fails') {
+                    const originalStore = tx.objectStore(storeNames);
+                    const failingRequest = () => {
+                      const requestStub: {
+                        onsuccess: ((event: unknown) => void) | null;
+                        onerror: ((event: unknown) => void) | null;
+                        result: undefined;
+                        error: Error;
+                        readyState: string;
+                      } = { onsuccess: null, onerror: null, result: undefined, error: new Error('request failed'), readyState: 'done' };
+                      queueMicrotask(() => requestStub.onerror?.({ target: requestStub }));
+                      return requestStub;
+                    };
+                    return {
+                      objectStore: () => ({
+                        get: failingRequest,
+                        getAll: failingRequest,
+                        put: originalStore.put.bind(originalStore),
+                        delete: originalStore.delete.bind(originalStore),
+                        clear: originalStore.clear.bind(originalStore)
+                      })
+                    };
+                  }
+                  return tx;
+                };
+              }
+              const value = Reflect.get(target, prop);
+              return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+            }
+          });
+          stub.onsuccess?.({ target: stub });
+        };
+        inner.onerror = () => stub.onerror?.({ target: stub });
+        return stub;
+      }
+    };
+    return Object.assign(wrapped, { disable: () => { control.disabled = true; } });
+  }
+
+  it('invalidates the connection when transaction construction fails', async () => {
+    const broken = makeBrokenFactory('transaction-throws');
+    // The adapter captures the factory at creation time, so the broken
+    // factory must be installed first.
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    await expect(persistence.append(message('t', 1))).rejects.toThrow('connection is closed');
+    // The failed connection was invalidated; disabling the fault recovers
+    // through the same captured factory.
+    broken.disable();
+    await persistence.append(message('t', 2));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
+  });
+
+  it('rejects and invalidates when the store request fails mid-append', async () => {
+    const broken = makeBrokenFactory('request-fails');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    await expect(persistence.append(message('t', 1))).rejects.toThrow();
+    broken.disable();
+    await persistence.append(message('t', 2));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
+  });
 });
