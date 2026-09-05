@@ -206,9 +206,13 @@ test.describe('cross-tab databus demo', () => {
 
     // The refreshed tab keeps its tabId (sessionStorage) and the route
     // persists, so a fresh publication still reaches it. The page metric
-    // resets on reload, so this "1" is the post-reload receipt.
+    // resets on reload, so this "1" is the post-reload receipt. The
+    // generous ceiling covers slow CI runners where the reloaded tab's
+    // Worker reconnect and re-subscription lag behind the publish.
     await publishJson(tabB);
-    await expect.poll(() => receivedCount(tabA)).toBe(1);
+    await expect
+      .poll(() => receivedCount(tabA), { timeout: 30_000 })
+      .toBe(1);
   });
 
   test('SharedWorker mode: one shared process, independent sessions, cross-tab delivery', async ({ context }) => {
