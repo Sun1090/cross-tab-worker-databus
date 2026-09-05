@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.76] - 2026-09-05
+
+### Added
+- Added an opt-in coordination channel fallback for environments without BroadcastChannel: `createBrowserEnvironment({ channelFallback: 'storage-event' })` installs a localStorage storage-event `ClusterChannel` (exported as `createStorageEventChannel`), preserving cross-tab owner coordination instead of degrading to local mode. Coordination payloads persist to localStorage under a dedicated key namespace — a documented security trade-off, which is why the fallback is opt-in.
+
 ## [0.20.75] - 2026-09-05
 
 ### Added

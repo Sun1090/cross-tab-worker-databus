@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.75 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.76 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.76 delivered scope
+
+- Opt-in storage-event coordination fallback for BroadcastChannel-less environments, with an owner-election integration test over the fallback channel and updated degradation documentation and capabilities matrix.
 
 ## 0.20.75 delivered scope
 

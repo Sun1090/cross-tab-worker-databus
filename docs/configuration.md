@@ -146,6 +146,12 @@ The full chain for `auto` is **SharedWorker -> Dedicated Worker -> main-thread l
 
 When neither `sharedWorkerFactory` nor `workerFactory` is provided, the transport detects global `SharedWorker` / `Worker` capability at startup. When a custom factory is provided, the corresponding backend is considered available, avoiding false negatives from global capability detection in Node, SSR, or embedded environments. All modes perform the same structured clone validation; config and `publish` data must be structured-clonable.
 
+## Coordination Channel Fallback (BroadcastChannel unavailable)
+
+When `BroadcastChannel` is unavailable (some WebViews, older browsers), the cluster normally degrades to local-only operation: the transport works, but tabs do not coordinate ownership.
+
+`createBrowserEnvironment({ channelFallback: 'storage-event' })` opts into a fallback `ClusterChannel` backed by localStorage `storage` events, preserving cross-tab coordination. It is opt-in because of a security trade-off: BroadcastChannel messages live in memory only, while the fallback writes coordination payloads (which carry plaintext topic names) to localStorage under the `cross-tab-worker-databus:channel:` key namespace — at least transiently, and indefinitely after a tab crash. The key is removed when the channel closes.
+
 ## SharedWorker Session Reaper
 
 A `MessagePort` has no `close` event, so the SharedWorker cannot know when a tab has crashed or been closed without sending a `STOP` message. To avoid leaking a `CentrifugeSession` (and its WebSocket) for a dead tab, the transport sends a periodic **PING heartbeat** to the SharedWorker, and the SharedWorker runs a **reaper** that closes any session whose port has been silent for longer than its timeout.
