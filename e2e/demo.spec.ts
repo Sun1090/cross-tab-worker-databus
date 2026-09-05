@@ -17,7 +17,10 @@ import type { BrowserContext, Page } from '@playwright/test';
 
 declare global {
   interface Window {
-    __bus?: { getHealthSummary: () => { healthy: boolean; state: string } };
+    __bus?: {
+      getHealthSummary: () => { healthy: boolean; state: string };
+      getClusterSnapshot: () => { assignedTopics: string[] };
+    };
     __replayBus?: { stop: () => Promise<void> };
     __replayEmit?: (data: unknown) => void;
     __replayAssigned?: () => boolean;
@@ -61,9 +64,36 @@ async function receivedCount(page: Page): Promise<number> {
   return Number(await page.locator('#metricReceived').textContent());
 }
 
-/** Number of topics this tab's Worker is assigned as owner. */
-async function assignedCount(page: Page): Promise<number> {
+/** Number of topics this tab's Worker is assigned as owner, read from the live
+ * cluster snapshot (the demo re-renders `#assignedCount` on a 1s interval, so
+ * the DOM is a stale view; the snapshot is the authoritative state). */
+async function ownerCount(page: Page): Promise<number> {
+  const live = await page.evaluate(() => window.__bus?.getClusterSnapshot().assignedTopics.length ?? null);
+  if (live !== null) return live;
   return Number(await page.locator('#assignedCount').textContent());
+}
+
+/** Wait until the provided tabs have converged to exactly one topic owner and
+ * return that owner's index. The owner identity is captured from the same
+ * observation that satisfies the exactly-one check, so a later one-shot re-read
+ * (which can flip between per-tab snapshots during reconciliation) is not
+ * needed. */
+async function waitForSingleOwner(tabs: Page[], options: { timeout?: number } = {}): Promise<number> {
+  const timeout = options.timeout ?? 30_000;
+  let ownerIndex = -1;
+  await expect
+    .poll(
+      async () => {
+        const counts = await Promise.all(tabs.map(ownerCount));
+        const holders = counts.filter(count => count === 1).length;
+        if (holders === 1) ownerIndex = counts.findIndex(count => count === 1);
+        return holders;
+      },
+      { timeout }
+    )
+    .toBe(1);
+  expect(ownerIndex).toBeGreaterThan(-1);
+  return ownerIndex;
 }
 
 /** Publish one JSON message from this tab (demo `#publishJson`). */
@@ -87,8 +117,8 @@ test.describe('cross-tab databus demo', () => {
 
     // Exactly one tab owns the transport subscription; the other is a
     // standby that must still receive publications via the EVENT fan-out.
-    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
-    const ownerIsA = (await assignedCount(tabA)) === 1;
+    const ownerIndex = await waitForSingleOwner([tabA, tabB]);
+    const ownerIsA = ownerIndex === 0;
     // The configured preference must be the REAL backend — a silent fallback
     // to the local session is exactly the regression this guards against.
     await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
@@ -114,33 +144,18 @@ test.describe('cross-tab databus demo', () => {
     const tabC = await openDemoTab(context);
     await connectDemo(tabC, 'dedicated', topic);
 
-    // Wait until exactly one of the three tabs owns the topic. The explicit
-    // ceiling absorbs slow-runner variance in worker startup + election.
-    await expect
-      .poll(
-        async () =>
-          Promise.all([tabA, tabB, tabC].map(assignedCount)).then(counts => counts.filter(count => count === 1).length),
-        { timeout: 30_000 }
-      )
-      .toBe(1);
-
     // Identify and close the owning tab (pagehide triggers a graceful handoff;
-    // a missed pagehide falls back to heartbeat-TTL migration).
+    // a missed pagehide falls back to heartbeat-TTL migration). The converge
+    // helper returns the owner from the same observation that satisfied the
+    // exactly-one check, so no separate one-shot read can race it.
     const owners = [tabA, tabB, tabC];
-    const ownerIndex = await Promise.all(owners.map(assignedCount)).then(counts => counts.indexOf(1));
-    expect(ownerIndex).toBeGreaterThan(-1);
+    const ownerIndex = await waitForSingleOwner(owners, { timeout: 30_000 });
     await owners[ownerIndex]!.close();
 
     // One of the survivors takes ownership and continues receiving.
     const survivors = owners.filter((_, index) => index !== ownerIndex);
     const [survivorA, survivorB] = survivors as [Page, Page];
-    await expect
-      .poll(
-        async () =>
-          Promise.all(survivors.map(assignedCount)).then(counts => counts.filter(count => count === 1).length),
-        { timeout: 30_000 }
-      )
-      .toBe(1);
+    await waitForSingleOwner(survivors, { timeout: 30_000 });
 
     await publishJson(survivorA);
     await expect.poll(() => receivedCount(survivorB)).toBe(1);
@@ -156,9 +171,7 @@ test.describe('cross-tab databus demo', () => {
     await connectDemo(tabC, 'dedicated', topic);
     const tabs = [tabA, tabB, tabC];
 
-    await expect
-      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length)
-      .toBe(1);
+    await waitForSingleOwner(tabs);
 
     // All three tabs publish three messages each — non-owner publishers route
     // through CONTROL, the owner fans out via EVENT. Every tab must observe
@@ -189,20 +202,14 @@ test.describe('cross-tab databus demo', () => {
     await connectDemo(tabB, 'dedicated', topic);
 
     const tabs = [tabA, tabB];
-    await expect
-      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length)
-      .toBe(1);
+    await waitForSingleOwner(tabs);
 
     // Full stop/start of tabB's bus while tabA keeps running: the stopped tab
     // releases its records, then rejoins and keeps receiving. Ownership must
     // stay unique across the restart.
     await tabB.click('#applyConnection');
     await expect(tabB.locator('#statusBadge')).toHaveText('已连接');
-    await expect
-      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, {
-        timeout: 30_000
-      })
-      .toBe(1);
+    await waitForSingleOwner(tabs, { timeout: 30_000 });
 
     const beforeB = await receivedCount(tabB);
     await publishJson(tabA);
@@ -227,9 +234,7 @@ test.describe('cross-tab databus demo', () => {
     // a fresh workerId, so wait until exactly one of the two tabs owns the
     // topic again. Publishing before convergence races the standby's
     // re-subscription — the flake this pattern removes.
-    await expect
-      .poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB)), { timeout: 30_000 })
-      .toBe(1);
+    await waitForSingleOwner([tabA, tabB], { timeout: 30_000 });
 
     // The refreshed tab keeps its tabId (sessionStorage) and the route
     // persists, so a fresh publication still reaches it. The page metric
@@ -291,7 +296,7 @@ test.describe('cross-tab databus demo', () => {
     await connectDemo(tabC, 'dedicated', topic);
 
     const tabs = [tabA, tabB, tabC];
-    await expect.poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length).toBe(1);
+    await waitForSingleOwner(tabs);
 
     // Exercise steady-state fan-out repeatedly before any lifecycle transition.
     for (let index = 0; index < 3; index += 1) {
@@ -308,19 +313,14 @@ test.describe('cross-tab databus demo', () => {
 
     // Put the current owner through a graceful page-cache transition, then
     // verify a survivor takes over without duplicate delivery.
-    const ownerIndex = (await Promise.all(tabs.map(assignedCount))).indexOf(1);
-    expect(ownerIndex).toBeGreaterThan(-1);
+    const ownerIndex = await waitForSingleOwner(tabs);
     const owner = tabs[ownerIndex]!;
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
     const survivors = tabs.filter(tab => tab !== owner);
-    await expect
-      .poll(async () => (await Promise.all(survivors.map(assignedCount))).filter(count => count === 1).length, {
-        // Heartbeat-TTL fallback is heartbeatInterval + workerTtl (~13s);
-        // leave generous headroom for shared CI runners.
-        timeout: 45_000
-      })
-      .toBe(1);
-    const survivor = survivors[(await Promise.all(survivors.map(assignedCount))).indexOf(1)]!;
+    // Heartbeat-TTL fallback is heartbeatInterval + workerTtl (~13s);
+    // leave generous headroom for shared CI runners.
+    const survivorIndex = await waitForSingleOwner(survivors, { timeout: 45_000 });
+    const survivor = survivors[survivorIndex]!;
 
     const receiver = survivors.find(tab => tab !== survivor)!;
     const beforeMigration = await receivedCount(receiver);
@@ -334,9 +334,7 @@ test.describe('cross-tab databus demo', () => {
     await owner.reload();
     await connectDemo(owner, 'dedicated', topic);
     // Converge before the final publication (same pattern as the reload test).
-    await expect
-      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
-      .toBe(1);
+    await waitForSingleOwner(tabs, { timeout: 30_000 });
     const beforeReload = await receivedCount(owner);
     await publishJson(survivor);
     await expect.poll(() => receivedCount(owner), { timeout: 30_000 }).toBe(beforeReload + 1);
@@ -350,12 +348,10 @@ test.describe('cross-tab databus demo', () => {
     await connectDemo(tabB, 'dedicated', topic);
     const tabs = [tabA, tabB];
 
-    await expect
-      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
-      .toBe(1);
+    await waitForSingleOwner(tabs, { timeout: 30_000 });
 
     for (let cycle = 0; cycle < 2; cycle += 1) {
-      const ownerIndex = (await Promise.all(tabs.map(assignedCount))).indexOf(1);
+      const ownerIndex = await waitForSingleOwner(tabs);
       const owner = tabs[ownerIndex]!;
       const standby = tabs[ownerIndex === 0 ? 1 : 0]!;
 
@@ -364,16 +360,14 @@ test.describe('cross-tab databus demo', () => {
       await expect.poll(() => receivedCount(standby)).toBe(before + 1);
 
       await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
-      await expect.poll(() => assignedCount(standby), { timeout: 30_000 }).toBe(1);
+      await expect.poll(() => ownerCount(standby), { timeout: 30_000 }).toBe(1);
       await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
       await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
 
       await owner.reload();
       await connectDemo(owner, 'dedicated', topic);
       // Converge before publishing (same pattern as the reload test).
-      await expect
-        .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
-        .toBe(1);
+      await waitForSingleOwner(tabs, { timeout: 30_000 });
       const afterReload = await receivedCount(owner);
       await publishJson(standby);
       await expect.poll(() => receivedCount(owner), { timeout: 30_000 }).toBe(afterReload + 1);
@@ -391,8 +385,8 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
 
     // Wait until exactly one tab owns the topic, and make sure it is tabA:
     // if B won the race, reload A's ownership picture by reassigning roles.
-    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
-    const ownerIsA = (await assignedCount(tabA)) === 1;
+    const ownerIndex = await waitForSingleOwner([tabA, tabB]);
+    const ownerIsA = ownerIndex === 0;
     // The configured preference must be the REAL backend — a silent fallback
     // to the local session is exactly the regression this guards against.
     await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
@@ -411,7 +405,7 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
 
     // The survivor takes over ownership and keeps receiving.
-    await expect.poll(() => assignedCount(standby), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(standby), { timeout: 30_000 }).toBe(1);
 
     // Returning from the page cache: pageshow re-subscribes the returning tab.
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
@@ -446,11 +440,11 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     const tabA = await setupWsTab();
     // Let tabA take ownership before tabB joins — two simultaneous
     // first-subscribers can race and both create their own route.
-    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(tabA), { timeout: 30_000 }).toBe(1);
     const tabB = await setupWsTab();
 
     // Cluster coordination still applies: exactly one tab owns the topic.
-    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+    await waitForSingleOwner([tabA, tabB]);
 
     // The demo WebSocket server echoes publications to the sender as well,
     // so each tab ends up with both messages after the two-way exchange.
@@ -502,7 +496,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     await page.click('#applyConnection');
     await expect(page.locator('#statusBadge')).toHaveText('已连接');
     // This tab owns the topic, so its publishBatch reaches the server directly.
-    await expect.poll(() => assignedCount(page), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(page), { timeout: 30_000 }).toBe(1);
 
     const statsUrl = 'http://localhost:4173/debug/wsstats';
     const baseline = (await (await request.get(statsUrl)).json()) as { publish: number; publishBatch: number };
@@ -529,9 +523,9 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     };
 
     const tabA = await setupWsTab();
-    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(tabA), { timeout: 30_000 }).toBe(1);
     const tabB = await setupWsTab();
-    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+    await waitForSingleOwner([tabA, tabB]);
 
     // The batch travels as one wire frame and fans out through the cluster:
     // the non-owner tab receives all ten via the EVENT broadcast, both tabs
@@ -555,9 +549,9 @@ test.describe('cross-tab databus demo — binary publish', () => {
     };
 
     const tabA = await setupWsTab();
-    await expect.poll(() => assignedCount(tabA), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(tabA), { timeout: 30_000 }).toBe(1);
     const tabB = await setupWsTab();
-    await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
+    await waitForSingleOwner([tabA, tabB]);
 
     await tabA.click('#publishBinary');
     // The demo wraps binary payloads as base64 JSON ({__bin}) — the event
