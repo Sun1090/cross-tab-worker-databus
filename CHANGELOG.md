@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.72] - 2026-09-05
+
+### Added
+- Added advanced hot-path benchmarks for `publishBatch`, wildcard routing, deduplication, replay pruning, `appendBatch` persistence, and asynchronous trace sinks.
+
 ## [0.20.71] - 2026-09-05
 
 ### Added
