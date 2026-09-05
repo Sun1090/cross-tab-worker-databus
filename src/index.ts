@@ -31,8 +31,8 @@ export type {
   WorkerClusterOptions,
   WorkerClusterSnapshot
 } from './core/cluster';
-export { createBrowserEnvironment, getOrCreateTabId } from './core/environment';
-export type { ClusterChannel, ClusterEnvironment, StorageLike } from './core/environment';
+export { createBrowserEnvironment, createStorageEventChannel, getOrCreateTabId } from './core/environment';
+export type { ClusterChannel, ClusterEnvironment, StorageEventWindow, StorageLike } from './core/environment';
 export { createOpaqueKey } from './core/hash';
 export {
   WebSocketTransport,

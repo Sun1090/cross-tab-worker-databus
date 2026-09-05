@@ -81,6 +81,89 @@ function randomId(): string {
   }
 }
 
+/** Minimal window surface the storage-event channel needs (injectable for tests). */
+export interface StorageEventWindow {
+  addEventListener(type: 'storage', listener: (event: { key: string | null; newValue: string | null }) => void): void;
+  removeEventListener(type: 'storage', listener: (event: { key: string | null; newValue: string | null }) => void): void;
+}
+
+/** localStorage key prefix for storage-event channel payloads. */
+const STORAGE_CHANNEL_PREFIX = 'cross-tab-worker-databus:channel:';
+
+/**
+ * Create a {@link ClusterChannel} backed by localStorage `storage` events, as
+ * a coordination fallback for environments where BroadcastChannel is
+ * unavailable. Returns null when localStorage or a storage-event source is
+ * missing.
+ *
+ * Semantics mirror BroadcastChannel: writes are not echoed to the sender
+ * (per spec, the writing tab receives no `storage` event) and every message
+ * is JSON-serializable. The payload is written under a dedicated key and
+ * removed on close.
+ *
+ * Security note: unlike BroadcastChannel messages (memory only), these
+ * payloads transit through localStorage and therefore persist — at least
+ * transiently, and after a crash indefinitely. Coordination frames carry
+ * plaintext topic names; callers who enable this fallback accept that
+ * trade-off (see docs/configuration.md).
+ */
+export function createStorageEventChannel(options: {
+  name: string;
+  storage: StorageLike | null;
+  win: StorageEventWindow | null;
+}): ClusterChannel | null {
+  const { name, storage, win } = options;
+  if (!storage || !win) return null;
+  const key = `${STORAGE_CHANNEL_PREFIX}${name}`;
+  const listeners = new Set<(event: MessageEvent<WorkerClusterMessage>) => void>();
+  // A per-sender monotonically increasing sequence guarantees every write has
+  // a distinct value, so a browser that suppresses same-value storage events
+  // still delivers every message.
+  let sequence = 0;
+
+  const onStorage = (event: { key: string | null; newValue: string | null }) => {
+    if (event.key !== key || event.newValue === null) return;
+    let message: WorkerClusterMessage;
+    try {
+      const parsed = JSON.parse(event.newValue) as { seq?: unknown; message?: WorkerClusterMessage };
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.seq !== 'number' || !parsed.message) return;
+      message = parsed.message;
+    } catch {
+      return;
+    }
+    // Cluster messages are read-only downstream; deliver a plain envelope.
+    const event_ = { data: message } as MessageEvent<WorkerClusterMessage>;
+    for (const listener of [...listeners]) listener(event_);
+  };
+
+  win.addEventListener('storage', onStorage);
+  let closed = false;
+  return {
+    addEventListener(_type, listener) {
+      listeners.add(listener);
+    },
+    removeEventListener(_type, listener) {
+      listeners.delete(listener);
+    },
+    postMessage(message: WorkerClusterMessage): void {
+      // A closed channel must not resurrect the payload in storage.
+      if (closed) return;
+      sequence += 1;
+      storage.setItem(key, JSON.stringify({ seq: sequence, message }));
+    },
+    close(): void {
+      closed = true;
+      win.removeEventListener('storage', onStorage);
+      listeners.clear();
+      try {
+        storage.removeItem(key);
+      } catch {
+        // Removal is best-effort; the key is namespaced and harmless.
+      }
+    }
+  };
+}
+
 // A document can create multiple DataBus runtimes (for example market and
 // notice connections). Regenerate a copied opener id only on the first lookup
 // in that document; subsequent runtimes must continue sharing the same tabId.
@@ -91,7 +174,13 @@ let tabIdentityInitialized = false;
  * Probes for localStorage, BroadcastChannel, document, and window APIs
  * and gracefully returns null / no-ops when they are absent (SSR, Node).
  */
-export function createBrowserEnvironment(): ClusterEnvironment {
+export function createBrowserEnvironment(options?: {
+  /** When BroadcastChannel is unavailable, fall back to a localStorage
+   * storage-event channel instead of degrading to local mode. Opt-in because
+   * the fallback persists coordination payloads in localStorage. */
+  channelFallback?: 'none' | 'storage-event';
+}): ClusterEnvironment {
+  const channelFallback = options?.channelFallback ?? 'none';
   return {
     storage: getStorage('localStorage'),
     sessionStorage: getStorage('sessionStorage'),
@@ -99,10 +188,17 @@ export function createBrowserEnvironment(): ClusterEnvironment {
     randomId,
     createChannel: name => {
       try {
-        return typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(name);
+        if (typeof BroadcastChannel !== 'undefined') return new BroadcastChannel(name);
       } catch {
-        return null;
+        // fall through to the storage-event fallback.
       }
+      return channelFallback === 'storage-event'
+        ? createStorageEventChannel({
+            name,
+            storage: getStorage('localStorage'),
+            win: typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null
+          })
+        : null;
     },
     setInterval: (callback, intervalMs) => globalThis.setInterval(callback, intervalMs),
     clearInterval: handle => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),

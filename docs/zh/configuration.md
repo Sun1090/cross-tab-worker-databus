@@ -144,6 +144,12 @@ const bus = createCentrifugeDataBus({
 
 `sharedWorkerFactory` 和 `workerFactory` 都未提供时，transport 在启动时检测全局 `SharedWorker` / `Worker` 能力。提供自定义 factory 时，对应后端视为可用，避免在 Node、SSR 或嵌入环境中被全局能力检测误判。各模式都会执行相同的结构化克隆校验，配置和 `publish` 数据必须可结构化克隆。
 
+## 协调通道降级（BroadcastChannel 不可用）
+
+当 `BroadcastChannel` 不可用（部分 WebView、旧浏览器）时，集群通常降级为本地模式：transport 可用，但 Tab 之间不协调 owner。
+
+`createBrowserEnvironment({ channelFallback: 'storage-event' })` 可选择启用基于 localStorage `storage` 事件的降级 `ClusterChannel`，保留跨 Tab 协调能力。该能力为 opt-in，原因是安全权衡：BroadcastChannel 消息仅存在于内存，而降级通道会把协调载荷（含明文 Topic 名称）写入 localStorage 的 `cross-tab-worker-databus:channel:` 键空间——至少短暂落盘，Tab 崩溃后可能长期留存。通道关闭时会清除该键。
+
 ## SharedWorker 会话回收
 
 `MessagePort` 没有 `close` 事件，因此 SharedWorker 无法在 Tab 崩溃或关闭时获知（除非收到 `STOP` 消息）。为避免泄漏已死 Tab 的 `CentrifugeSession`（及其 WebSocket），transport 定期向 SharedWorker 发送 **PING 心跳**，SharedWorker 运行一个**回收器**来关闭超过静默超时的端口会话。

@@ -20,6 +20,7 @@
 | 异常恢复 | Worker TTL、过期 owner 迁移和协调缓存清理 | ✅ 已实现 | 回收死 Worker、孤儿 subscriber 和无 subscriber 的过期路由 |
 | Transport | 重连后重放 owner Topic | ✅ 已实现 | 断开连接不清除业务 handler 和订阅意图 |
 | 降级 | localStorage 或 BroadcastChannel 不可用时本地运行 | ✅ 已实现 | 保留当前 Tab 的连接和订阅能力 |
+| 降级 | BroadcastChannel 不可用时 opt-in 启用 localStorage storage-event 协调通道 | ✅ 已实现 | `createBrowserEnvironment({ channelFallback: 'storage-event' })`；协调载荷（明文 Topic 名称）会写入 localStorage，已在文档中标注权衡 |
 | Centrifuge | 内置 Dedicated / Shared Worker transport | ✅ 已实现 | 支持 subscribe、unsubscribe、publish、连接状态和错误上报；`auto` 从 SharedWorker → Dedicated Worker → 主线程 WebSocket 降级 |
 | 安全边界 | localStorage 使用连接和 Topic 派生不透明 key；BroadcastChannel 协调消息以明文传输 Topic 名称 | ✅ 已实现 | 不持久化 URL、原始 Topic 名称、凭证或 publication payload。BroadcastChannel 协调消息仅存在于内存中，以明文传输 Topic 名称——不会被持久化。 |
 | 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调 |
