@@ -10,7 +10,7 @@
  */
 
 export { CrossTabDataBus } from './core/data-bus';
-export type { CrossTabDataBusOptions, DataBusDedupOptions, DataBusDedupStats, DataBusDiagnostics, DataBusPersistenceRetryOptions, DataBusReplayOptions } from './core/data-bus';
+export type { CrossTabDataBusOptions, DataBusDedupOptions, DataBusDedupStats, DataBusDiagnostics, DataBusFailureSource, DataBusHealthSummary, DataBusLastFailure, DataBusPersistenceHealth, DataBusPersistenceRetryOptions, DataBusReplayOptions } from './core/data-bus';
 export { createIndexedDbReplayPersistence } from './core/replay-persistence';
 export type { DataBusReplayPersistence, IndexedDbReplayPersistenceOptions } from './core/replay-persistence';
 export type {

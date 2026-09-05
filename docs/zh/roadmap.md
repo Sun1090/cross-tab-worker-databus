@@ -5,6 +5,8 @@
 ## 0.20.72 已完成范围
 
 - 扩展基准矩阵，覆盖 `publishBatch`、wildcard routing、dedup、replay prune、批量持久化与异步 trace sink。
+- 长时稳定性加固：补齐 handoff ACK 世代校验、BFCache 往返、恢复耗尽重置、存储写退避恢复与 replay 持久化清理竞态的回归测试；修复反向的 stale-ACK 世代比较与批量 flush 复活清理历史两处缺陷。
+- 生产能力：`getHealthSummary()` 就绪判定、`getPersistenceStats()`、diagnostics 中 transport 状态细化（status/suspended），以及构建时注入的 SDK 版本。
 
 ## 0.20.71 已完成范围
 

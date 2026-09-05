@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataBusTraceReporter } from '../src/core/trace';
 import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
+import { SDK_VERSION } from '../src/core/version';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
@@ -2077,9 +2078,118 @@ describe('CrossTabDataBus diagnostics', () => {
     expect(diagnostics.dedup.enabled).toBe(true);
     expect(diagnostics.cluster.currentWorker.workerId).toBe('worker-diag');
     expect(diagnostics.protocol).toMatchObject({ version: 1, peers: { 'worker-diag': 1 } });
-    expect(diagnostics.sdkVersion).toBe('0.20.69');
+    expect(diagnostics.sdkVersion).toBe(SDK_VERSION);
     expect(diagnostics.transport).toMatchObject({ name: 'FakeTransport' });
     expect(diagnostics.recovery.generation).toBeGreaterThanOrEqual(1);
+    await bus.stop();
+  });
+
+  it('reports a healthy summary while started, visible, and connected', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-ok' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'health-ok', environment: env.environment, transport });
+    await bus.start({});
+    await bus.ready();
+    const health = bus.getHealthSummary();
+    expect(health).toMatchObject({
+      healthy: true,
+      state: 'healthy',
+      started: true,
+      suspended: false,
+      sdkVersion: SDK_VERSION
+    });
+    expect(health.transport).toMatchObject({ name: 'FakeTransport', backend: null, ready: true });
+    expect(health.lastFailure).toBeNull();
+    expect(health.persistence).toEqual({ failures: 0, lastFailureAt: null, lastErrorMessage: null });
+    expect(health.recovery.generation).toBeGreaterThanOrEqual(1);
+    await bus.stop();
+  });
+
+  it('degrades the summary once automatic recovery is exhausted', async () => {
+    vi.useFakeTimers();
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-degraded' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'health-degraded',
+      environment: env.environment,
+      transport,
+      recovery: { cooldownMs: 250, maxAttempts: 1 }
+    });
+    await bus.start({});
+    await bus.ready();
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(250);
+    const health = bus.getHealthSummary();
+    expect(health.healthy).toBe(false);
+    expect(health.state).toBe('degraded');
+    expect(health.recovery.exhausted).toBe(true);
+    expect(health.lastFailure).toMatchObject({ source: 'transport' });
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('unifies persistence failures into the health ledger and diagnostics', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-persist' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'health-persist',
+      environment: env.environment,
+      transport,
+      replay: { persistence: { load: async () => [], append: async () => { throw new Error('quota blown'); } } }
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.start({});
+    await bus.ready();
+    bus.subscribe('topic', () => {});
+    transport.emit('topic', 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors.length).toBeGreaterThan(0);
+    expect(bus.getPersistenceStats()).toMatchObject({ failures: 1, lastErrorMessage: 'quota blown' });
+    expect(bus.getHealthSummary().lastFailure).toMatchObject({ source: 'persistence', message: 'quota blown' });
+    expect(bus.getHealthSummary().healthy).toBe(true);
+    expect(bus.getDiagnostics().persistence).toMatchObject({ failures: 1 });
+    await bus.stop();
+  });
+
+  it('reports the suspended state while the tab is hidden', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-suspend' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'health-suspend', environment: env.environment, transport });
+    await bus.start({});
+    await bus.ready();
+    env.pageHide();
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: false, state: 'suspended', suspended: true });
+    expect(bus.getDiagnostics().transport).toMatchObject({ suspended: true, status: 'disconnected' });
+    env.pageShow();
+    await bus.ready();
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
+  it('resets the failure ledger on a fresh start', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-reset' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'health-reset',
+      environment: env.environment,
+      transport,
+      replay: { persistence: { load: async () => [], append: async () => { throw new Error('boom'); } } }
+    });
+    await bus.start({});
+    await bus.ready();
+    bus.subscribe('topic', () => {});
+    transport.emit('topic', 1);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(bus.getPersistenceStats().failures).toBe(1);
+    await bus.stop();
+
+    await bus.start({});
+    expect(bus.getPersistenceStats()).toEqual({ failures: 0, lastFailureAt: null, lastErrorMessage: null });
+    expect(bus.getHealthSummary().lastFailure).toBeNull();
     await bus.stop();
   });
 });

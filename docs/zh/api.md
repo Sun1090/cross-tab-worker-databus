@@ -170,6 +170,48 @@ getStatus(): WorkerStatus
 
 返回当前状态：`connecting`、`connected`、`disconnected` 或 `error`。
 
+### `getHealthSummary()`
+
+```ts
+getHealthSummary(): DataBusHealthSummary
+```
+
+面向仪表盘、就绪探针与支持包的紧凑健康判定。先回答「总线当前是否可用」，再附带解释该结论的失败与恢复上下文：
+
+```ts
+interface DataBusHealthSummary {
+  healthy: boolean;   // 已启动、未挂起、transport 就绪
+  state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
+  status: WorkerStatus;
+  sdkVersion: string;
+  started: boolean;
+  suspended: boolean;                       // Tab 隐藏（BFCache）期间为 true
+  transport: { name; backend; ready; status };
+  recovery: { attempt; exhausted; maxAttempts; generation; lastSuccessAt; hasError; errorMessage; errorAt };
+  lastFailure: { source: 'transport' | 'persistence' | 'dispatch'; message: string; at: number } | null;
+  persistence: { failures: number; lastFailureAt: number | null; lastErrorMessage: string | null };
+}
+```
+
+`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。
+
+### `getRecoveryStats()` / `getPersistenceStats()`
+
+```ts
+getRecoveryStats(): { attempt; exhausted; maxAttempts; hasError; errorMessage; errorAt; generation; lastSuccessAt }
+getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
+```
+
+`recovery.generation` 在每次 transport 成功打开时递增（首次启动与每次恢复）；`lastSuccessAt` 是该次成功的时间戳（首次成功前为 `null`）。持久化计数仅覆盖可选的 replay 持久化后端。
+
+### `getDiagnostics()`
+
+```ts
+getDiagnostics(): DataBusDiagnostics
+```
+
+完整诊断快照，合并生命周期、transport 身份（`name`、`backend`、实时 `status`、`suspended`）、恢复、dedup、replay、持久化、协议（`version`、`unknownMessages`、`peers`）与集群快照。`sdkVersion` 构建时从 `package.json` 注入。只需要就绪结论的调用方应优先使用 `getHealthSummary()`。
+
 ### `getClusterSnapshot()`
 
 返回诊断快照：

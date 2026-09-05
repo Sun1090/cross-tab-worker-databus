@@ -4,6 +4,14 @@
 
 ### Added
 - Added advanced hot-path benchmarks for `publishBatch`, wildcard routing, deduplication, replay pruning, `appendBatch` persistence, and asynchronous trace sinks.
+- Added `CrossTabDataBus.getHealthSummary()` with a single-object readiness verdict (`healthy`, lifecycle-derived `state`, unified `lastFailure` ledger, transport identity, and recovery context) for dashboards and readiness probes.
+- Added `getPersistenceStats()` and surfaced persistence failure counters in `getDiagnostics()`; transport diagnostics now include the live connection `status` and `suspended` flag.
+- Added long-session stability regression coverage for owner-handoff ACK validation, repeated BFCache round-trips, recovery exhaustion reset, storage write backoff recovery, and replay persistence cleanup races.
+
+### Fixed
+- Stale `ROUTE_RELEASED` ACKs whose generation is older than the current route record are now rejected; the comparison was inverted, so a replayed ACK from an earlier handoff round could confirm a newer handoff.
+- Replay persistence cleanup no longer resurrects cleared history: a queued batch flush is filtered for topics cleared via `unsubscribe`/`clearReplayTopic` and for entries pruned via `clearReplayBefore`.
+- Diagnostics report the released SDK version, injected from `package.json` at build time, instead of a stale hardcoded constant.
 
 ## [0.20.71] - 2026-09-05
 

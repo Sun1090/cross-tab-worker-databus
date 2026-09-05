@@ -20,6 +20,7 @@ import type {
 import { DataBusTraceReporter } from './trace';
 import type { DataBusTraceOptions } from './trace';
 import type { DataBusReplayPersistence } from './replay-persistence';
+import { SDK_VERSION } from './version';
 
 /**
  * Event type used to broadcast topic publications across tabs via the cluster.
@@ -30,7 +31,6 @@ import type { DataBusReplayPersistence } from './replay-persistence';
  * The cluster's `onEvent` handler filters on this to distinguish databus
  * publications from other control-plane events. */
 const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
-const SDK_VERSION = '0.20.69';
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
 class PersistenceRetryCancelledError extends Error {
@@ -99,9 +99,49 @@ export interface DataBusDiagnostics {
   recovery: { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null; generation: number; lastSuccessAt: number | null };
   dedup: DataBusDedupStats;
   replay: { enabled: boolean; topics: number; messages: number };
+  persistence: DataBusPersistenceHealth;
   protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null; peers: Record<string, number | null> };
-  transport: { name: string; backend: string | null };
+  transport: { name: string; backend: string | null; status: WorkerStatus; suspended: boolean };
   cluster: WorkerClusterSnapshot;
+}
+
+/** Where a retained failure originated, as surfaced by {@link DataBusHealthSummary}. */
+export type DataBusFailureSource = 'transport' | 'persistence' | 'dispatch';
+
+export interface DataBusLastFailure {
+  source: DataBusFailureSource;
+  message: string;
+  at: number;
+}
+
+/** Bounded failure counters for the optional replay persistence backend. */
+export interface DataBusPersistenceHealth {
+  /** Total persistence failures reported since the last explicit start(). */
+  failures: number;
+  lastFailureAt: number | null;
+  lastErrorMessage: string | null;
+}
+
+/** Compact single-object health verdict for dashboards and readiness probes.
+ * Unlike {@link DataBusDiagnostics} this answers one question first — is the
+ * bus usable right now — then attaches the failure and recovery context that
+ * explains the verdict. */
+export interface DataBusHealthSummary {
+  /** True only while the bus is started, not suspended, and the transport is ready. */
+  healthy: boolean;
+  /** Lifecycle-derived verdict: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded'.
+   * 'degraded' means automatic recovery is exhausted and the transport is still
+   * down — a manual start() (or resume) is required. */
+  state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
+  status: WorkerStatus;
+  sdkVersion: string;
+  started: boolean;
+  suspended: boolean;
+  transport: { name: string; backend: string | null; ready: boolean; status: WorkerStatus };
+  recovery: ReturnType<CrossTabDataBus['getRecoveryStats']>;
+  /** Most recent failure of any source since the last explicit start(). */
+  lastFailure: DataBusLastFailure | null;
+  persistence: DataBusPersistenceHealth;
 }
 
 export interface CrossTabDataBusOptions<TConfig, TData>
@@ -180,6 +220,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // never awaited start() directly. Cleared on the next successful start.
   private lastError: unknown = null;
   private lastErrorAt: number | null = null;
+  // Unified failure ledger for the health summary: the most recent failure of
+  // any source (transport, persistence, dispatch) since the last explicit start.
+  private lastFailure: DataBusLastFailure | null = null;
+  private persistenceFailureCount = 0;
+  private persistenceLastFailureAt: number | null = null;
+  private persistenceLastErrorMessage: string | null = null;
   // Gate that serialises start/stop/suspend/resume — only one lifecycle
   // transition at a time. Resets to null once the operation settles.
   private startPromise: Promise<void> | null = null;
@@ -359,6 +405,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.suspended = false;
     this.activeConfig = config;
     this.lastError = null;
+    // A fresh start begins a new failure ledger so health consumers correlate
+    // failures with the current session, not the previous one.
+    this.lastFailure = null;
+    this.persistenceFailureCount = 0;
+    this.persistenceLastFailureAt = null;
+    this.persistenceLastErrorMessage = null;
     this.trace.event({ type: 'lifecycle', action: 'start' });
     this.trace.start();
     this.startDedupSweep();
@@ -543,6 +595,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (handlers.size > 0) return;
     this.topicHandlers.delete(topic);
     this.replayBuffers?.delete(topic);
+    // A batched persistence flush may still be queued behind this task; drop
+    // the topic's pending entries so clearTopic is not undone by the append.
+    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
     if (this.replayPersistence?.clearTopic) {
       void this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic))
         .catch(error => this.reportPersistenceError(error));
@@ -553,6 +608,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Clear all in-memory replay buffers and, when supported, durable history. */
   async clearReplay(): Promise<void> {
     this.replayBuffers?.clear();
+    // Cancel any queued batch flush so cleared history is not re-appended.
+    this.pendingReplayPersistence = [];
     if (this.replayPersistence?.clear) {
       try {
         await this.withPersistenceRetry('clear', () => this.replayPersistence!.clear!());
@@ -566,6 +623,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Clear replay history for one exact topic, including durable storage. */
   async clearReplayTopic(topic: string): Promise<void> {
     this.replayBuffers?.delete(topic);
+    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
     if (this.replayPersistence?.clearTopic) {
       try {
         await this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic));
@@ -586,6 +644,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         else this.replayBuffers.delete(topic);
       }
     }
+    // A queued batch flush must not resurrect pruned entries.
+    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(
+      message => message.timestamp === undefined || message.timestamp >= timestamp
+    );
     if (this.replayPersistence?.clearBefore) {
       try {
         await this.withPersistenceRetry('clearBefore', () => this.replayPersistence!.clearBefore!(timestamp));
@@ -704,6 +766,51 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     };
   }
 
+  /** Bounded failure counters for the replay persistence backend. */
+  getPersistenceStats(): DataBusPersistenceHealth {
+    return {
+      failures: this.persistenceFailureCount,
+      lastFailureAt: this.persistenceLastFailureAt,
+      lastErrorMessage: this.persistenceLastErrorMessage
+    };
+  }
+
+  /** Compact health verdict for dashboards, readiness probes, and support
+   * bundles. Answers "is the bus usable right now" first, then attaches the
+   * unified failure ledger and recovery context that explains the verdict. */
+  getHealthSummary(): DataBusHealthSummary {
+    const transport = this.transport;
+    const state: DataBusHealthSummary['state'] =
+      !this.started
+        ? 'stopped'
+        : this.suspended
+          ? 'suspended'
+          : !this.transportReady
+            ? this.recoveryExhausted
+              ? 'degraded'
+              : this.recoveryAttempt > 0
+                ? 'recovering'
+                : 'starting'
+            : 'healthy';
+    return {
+      healthy: state === 'healthy',
+      state,
+      status: this.status,
+      sdkVersion: SDK_VERSION,
+      started: this.started,
+      suspended: this.suspended,
+      transport: {
+        name: transport.diagnosticsName ?? transport.constructor.name,
+        backend: transport.diagnosticsBackend ?? null,
+        ready: this.transportReady,
+        status: this.status
+      },
+      recovery: this.getRecoveryStats(),
+      lastFailure: this.lastFailure,
+      persistence: this.getPersistenceStats()
+    };
+  }
+
   /** Snapshot of the cluster state (workers, routes, assignments).
    * For diagnostics only — the returned object is a shallow copy but
    * nested arrays are snapshots at call time. */
@@ -726,8 +833,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
       replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
+      persistence: this.getPersistenceStats(),
       protocol: { version: cluster.protocolVersion, unknownMessages: unknownMessages.count, lastUnknownMessageType: unknownMessages.lastType, peers: cluster.peerProtocolVersions },
-      transport: { name: transport.diagnosticsName ?? transport.constructor.name, backend: transport.diagnosticsBackend ?? null },
+      transport: {
+        name: transport.diagnosticsName ?? transport.constructor.name,
+        backend: transport.diagnosticsBackend ?? null,
+        status: this.status,
+        suspended: this.suspended
+      },
       cluster
     };
   }
@@ -1076,15 +1189,25 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.invokeHandlers(this.statusHandlers, handler => handler(status));
   }
 
-  private reportError(error: unknown): void {
-    this.trace.event({ type: 'error', source: 'transport' });
+  private reportError(error: unknown, source: DataBusFailureSource = 'transport'): void {
+    this.lastFailure = {
+      source,
+      message: error instanceof Error ? error.message : String(error),
+      at: this.now()
+    };
+    if (source === 'persistence') {
+      this.persistenceFailureCount += 1;
+      this.persistenceLastFailureAt = this.lastFailure.at;
+      this.persistenceLastErrorMessage = this.lastFailure.message;
+    }
+    this.trace.event({ type: 'error', source: source === 'transport' ? 'transport' : 'operation' });
     this.invokeHandlers(this.errorHandlers, handler => handler(error), 'error handler');
   }
 
   private reportPersistenceError(error: unknown): void {
     if (error instanceof PersistenceRetryCancelledError) return;
     this.trace.event({ type: 'reliability', operation: 'persistence_cleanup' });
-    this.reportError(error);
+    this.reportError(error, 'persistence');
   }
 
   private traceSubscription(action: 'subscribe' | 'unsubscribe', topic: string): void {
@@ -1129,7 +1252,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
             console.warn('[cross-tab-worker-databus] error handler threw:', error);
           }
         } else {
-          this.reportError(error);
+          this.reportError(error, 'dispatch');
         }
       }
     }
