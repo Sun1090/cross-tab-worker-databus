@@ -70,6 +70,12 @@ async function publishJson(page: Page): Promise<void> {
   await page.click('#publishJson');
 }
 
+/** The transport backend the bus actually landed on (dedicated/shared/local),
+ * read from `getDiagnostics().transport.backend` via the config panel. */
+async function transportBackend(page: Page): Promise<string> {
+  return (await page.locator('#configTransportBackend').textContent()) ?? '';
+}
+
 test.describe('cross-tab databus demo', () => {
   test('single-owner routing: one tab owns the topic and all tabs receive', async ({ context }) => {
     const topic = `e2e.owner.${Date.now()}`;
@@ -82,6 +88,9 @@ test.describe('cross-tab databus demo', () => {
     // standby that must still receive publications via the EVENT fan-out.
     await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
     const ownerIsA = (await assignedCount(tabA)) === 1;
+    // The configured preference must be the REAL backend — a silent fallback
+    // to the local session is exactly the regression this guards against.
+    await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
 
     await publishJson(tabA);
     // The publisher tab echoes; the other tab receives through the cluster.
@@ -214,6 +223,10 @@ test.describe('cross-tab databus demo', () => {
     await publishJson(tabA);
     await expect.poll(() => receivedCount(tabB)).toBe(1);
     await expect(tabB.locator('#backendBadge')).toHaveText('SharedWorker');
+    // Both tabs must actually be attached to the SharedWorker backend — a
+    // per-tab local session would still deliver through the demo server.
+    await expect.poll(() => transportBackend(tabA)).toBe('shared');
+    await expect.poll(() => transportBackend(tabB)).toBe('shared');
   });
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
@@ -318,6 +331,9 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     // if B won the race, reload A's ownership picture by reassigning roles.
     await expect.poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB))).toBe(1);
     const ownerIsA = (await assignedCount(tabA)) === 1;
+    // The configured preference must be the REAL backend — a silent fallback
+    // to the local session is exactly the regression this guards against.
+    await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
     const owner = ownerIsA ? tabA : tabB;
     const standby = ownerIsA ? tabB : tabA;
 

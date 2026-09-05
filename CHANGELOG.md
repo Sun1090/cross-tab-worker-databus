@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.78] - 2026-09-05
+
+### Added
+- The demo now shows the REAL transport backend (`getDiagnostics().transport.backend`) and the E2E suite asserts dedicated/shared tabs actually run on Worker backends — a silent fallback to the local session fails CI instead of passing unnoticed.
+- Added a regression pinning the deferred channel close in `pause()` so queued handoff frames always flush.
+- Documented the close-ordering invariant in the architecture docs and added health-summary/fallback quick-start sections to the getting-started guide (English and Chinese).
+
 ## [0.20.77] - 2026-09-05
 
 ### Fixed

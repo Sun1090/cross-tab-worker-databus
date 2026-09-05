@@ -168,3 +168,27 @@ const config = await loadTransportConfig();
 await bus.start(config);
 bus.subscribe('resource.changed', handleResourceEvent);
 ```
+
+## 10. 健康摘要与协调降级
+
+就绪探针与仪表盘可直接消费单对象健康判定，无需自行拼装诊断：
+
+```ts
+const health = bus.getHealthSummary();
+// { healthy: true, state: 'healthy', recovery: { attempt, … }, lastFailure: null, … }
+```
+
+React 与 Vue 适配器提供 `useCrossTabHealth`，在状态变化、错误与轮询间隔时刷新。
+
+当 `BroadcastChannel` 不可用时，各 Tab 通常退化为本地模式。可选择启用基于 localStorage storage 事件的降级通道：
+
+```ts
+import { createBrowserEnvironment } from 'cross-tab-worker-databus';
+
+const bus = new CrossTabDataBus({
+  /* … */
+  environment: createBrowserEnvironment({ channelFallback: 'storage-event' })
+});
+```
+
+该能力为 opt-in：启用后协调载荷（明文 Topic 名称）会写入 localStorage，详见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
