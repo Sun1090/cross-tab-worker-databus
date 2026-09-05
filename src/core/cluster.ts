@@ -11,19 +11,22 @@ import type { ClusterChannel, ClusterEnvironment, StorageLike } from './environm
 import { createOpaqueKey } from './hash';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
+  approximatePayloadBytes,
   selectActiveWorkers,
   selectLeastLoadedWorker,
   topicMatchesPattern
 } from './routing';
 import type {
   DataBusPublicationMetadata,
+  LoadWeightingOptions,
   TopicSubscriberRecord,
   WorkerClusterMessage,
   WorkerControlAction,
   WorkerRecord,
   WorkerRole,
   WorkerRoute,
-  WorkerStatus
+  WorkerStatus,
+  WorkerThroughputSample
 } from './types';
 import { BatchingStorageWriter } from './storage-batch';
 import {
@@ -100,6 +103,11 @@ export interface WorkerClusterOptions {
   /** Maximum entries kept in the publish route-owner cache (default 256).
    * When the cap is reached, the oldest (FIFO) entry is evicted. */
   routeOwnerCacheMax?: number;
+  /** Optional adaptive owner weighting. When set, this worker samples its own
+   * fan-out traffic and publishes it with every heartbeat so peers can steer
+   * NEW routes toward quieter workers; the weights are forwarded to the
+   * least-loaded selection. Absent (default) keeps pure topic-count routing. */
+  loadWeighting?: LoadWeightingOptions;
 }
 
 /** Read-only snapshot of the cluster state for diagnostics and tracing. */
@@ -155,6 +163,14 @@ export class WorkerClusterRuntime {
   private readonly routePrefix: string;
   private readonly subscriberPrefix: string;
   private readonly channelName: string;
+  /** Adaptive load weighting options; undefined keeps legacy topic-count routing. */
+  private readonly loadWeighting: LoadWeightingOptions | undefined;
+  /** Rolling traffic accumulator folded into the worker record on writeRecord. */
+  private throughputWindow: { startedAt: number; messageCount: number; byteCount: number } = {
+    startedAt: 0,
+    messageCount: 0,
+    byteCount: 0
+  };
   // Topics this tab has subscribed to (local interest, plaintext).
   private readonly subscribedTopics = new Set<string>();
   // Topics assigned to this Worker as owner (topicKey → topic). Authoritative:
@@ -197,6 +213,7 @@ export class WorkerClusterRuntime {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.routeOwnerCacheMax = options.routeOwnerCacheMax ?? 256;
     this.workerTtlMs = options.workerTtlMs ?? DEFAULT_WORKER_TTL_MS;
+    this.loadWeighting = options.loadWeighting;
     // Derive storage keys from a hash of the cluster key so that the plaintext
     // cluster identifier never appears in localStorage.
     const clusterHash = createOpaqueKey(options.clusterKey || '__default__');
@@ -366,7 +383,7 @@ export class WorkerClusterRuntime {
     }
 
     const activeWorkers = selectActiveWorkers(workers, this.maxActiveWorkers);
-    const owner = selectLeastLoadedWorker(activeWorkers) ?? this.currentRecord;
+    const owner = selectLeastLoadedWorker(activeWorkers, undefined, this.loadWeighting) ?? this.currentRecord;
     // A missing live owner cannot participate in a strict handoff. Assign and
     // subscribe immediately; pagehide uses handoffAssignedTopics() while the
     // old owner is still present when release ordering is required.
@@ -423,7 +440,9 @@ export class WorkerClusterRuntime {
         continue;
       }
       const owner = selectLeastLoadedWorker(
-        activeWorkers.map(worker => ({ ...worker, load: projectedLoads.get(worker.workerId) ?? worker.load }))
+        activeWorkers.map(worker => ({ ...worker, load: projectedLoads.get(worker.workerId) ?? worker.load })),
+        undefined,
+        this.loadWeighting
       );
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
@@ -612,7 +631,36 @@ export class WorkerClusterRuntime {
     // its source tab across the BroadcastChannel hop without callers having
     // to thread the tabId through every call site.
     const effectiveOriginTabId = originTabId ?? this.tabId;
+    this.recordTraffic(payload);
     this.send({ type: CLUSTER_MESSAGE_TYPE.EVENT, sourceWorkerId: this.workerId, eventType, payload, originTabId: effectiveOriginTabId });
+  }
+
+  /** Count one fan-out unit toward the adaptive load sample. No-op unless
+   * adaptive weighting is configured. */
+  private recordTraffic(payload: unknown): void {
+    if (this.loadWeighting === undefined) return;
+    this.throughputWindow.messageCount += 1;
+    this.throughputWindow.byteCount += approximatePayloadBytes(payload);
+  }
+
+  /** Convert the accumulated window into a publishable throughput sample and
+   * reset the accumulator. Returns undefined until a full window has elapsed
+   * so the first write does not emit a zero-width sample. */
+  private sampleThroughput(now: number): WorkerThroughputSample | undefined {
+    if (this.throughputWindow.startedAt === 0) {
+      this.throughputWindow.startedAt = now;
+      return undefined;
+    }
+    const windowMs = now - this.throughputWindow.startedAt;
+    if (windowMs <= 0) return undefined;
+    const sample: WorkerThroughputSample = {
+      windowMs,
+      messageCount: this.throughputWindow.messageCount,
+      byteCount: this.throughputWindow.byteCount,
+      sampledAt: now
+    };
+    this.throughputWindow = { startedAt: now, messageCount: 0, byteCount: 0 };
+    return sample;
   }
 
   isAssigned(topic: string): boolean {
@@ -904,7 +952,7 @@ export class WorkerClusterRuntime {
       this.writeSubscriber(topicKey);
       const route = this.readRoute(topicKey);
       if (!route || !liveWorkerIds.has(route.workerId)) {
-        const owner = selectLeastLoadedWorker(activeWorkers) ?? this.currentRecord;
+        const owner = selectLeastLoadedWorker(activeWorkers, undefined, this.loadWeighting) ?? this.currentRecord;
         // A route invalidated by owner departure or heartbeat expiry is
         // recovered immediately. Graceful pagehide uses the strict ACK path in
         // handoffAssignedTopics(), where the departing owner is still known.
@@ -1139,7 +1187,13 @@ export class WorkerClusterRuntime {
    *   avoid a REGISTRY storm every 3 s; true on status/role changes that
    *   peers should observe promptly. */
   private writeRecord(notify: boolean): void {
-    this.currentRecord = { ...this.currentRecord, heartbeatAt: this.environment.now() };
+    const now = this.environment.now();
+    const sample = this.loadWeighting !== undefined ? this.sampleThroughput(now) : undefined;
+    this.currentRecord = {
+      ...this.currentRecord,
+      heartbeatAt: now,
+      ...(sample ? { throughput: sample } : {})
+    };
     if (this.storage) writeJson(this.storage, this.workerStorageKey(this.workerId), this.currentRecord);
     if (notify) this.notifyRegistry();
   }

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createOpaqueKey } from '../src/core/hash';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
+  approximatePayloadBytes,
+  effectiveWorkerLoad,
   hasActiveOwner,
   isWildcardTopic,
   selectActiveWorkers,
@@ -198,5 +200,99 @@ describe('wildcard topic matching', () => {
     expect(topicMatchesPattern('chat.room.1', 'chat.room.2')).toBe(false);
     expect(topicMatchesPattern('', '')).toBe(false);
     expect(topicMatchesPattern('a.*', '')).toBe(false);
+  });
+});
+
+describe('adaptive load weighting', () => {
+  const makeWorker = (overrides: Partial<WorkerRecord> = {}): WorkerRecord => ({
+    workerId: 'w1',
+    tabId: 't1',
+    load: 0,
+    role: 'active',
+    status: 'connected',
+    visibilityState: 'visible',
+    heartbeatAt: 0,
+    registeredAt: 0,
+    ...overrides
+  });
+
+  const busySample = {
+    windowMs: 1_000,
+    messageCount: 100,
+    byteCount: 10_000,
+    sampledAt: 5_000
+  };
+
+  it('effectiveWorkerLoad returns the raw topic count without a sample or weights', () => {
+    const quiet = makeWorker({ workerId: 'quiet', load: 7 });
+    expect(effectiveWorkerLoad(quiet)).toBe(7);
+    expect(effectiveWorkerLoad(quiet, {})).toBe(7);
+    // A sample alone changes nothing while the weights stay at their defaults.
+    expect(effectiveWorkerLoad({ ...quiet, throughput: busySample })).toBe(7);
+  });
+
+  it('effectiveWorkerLoad adds normalized per-second rates when weights are set', () => {
+    const worker = makeWorker({ workerId: 'w', load: 3, throughput: busySample });
+    // 100 msg/s * 0.5 + 10_000 B/s * 0.001 = 50 + 10 = 60 → score 63.
+    expect(effectiveWorkerLoad(worker, { messageRateWeight: 0.5, byteRateWeight: 0.001 })).toBeCloseTo(63, 10);
+  });
+
+  it('effectiveWorkerLoad ignores a non-positive window (no usable rate)', () => {
+    const degenerate = makeWorker({
+      workerId: 'w',
+      load: 2,
+      throughput: { windowMs: 0, messageCount: 10, byteCount: 0, sampledAt: 0 }
+    });
+    expect(effectiveWorkerLoad(degenerate, { messageRateWeight: 1 })).toBe(2);
+  });
+
+  it('selectLeastLoadedWorker stays topic-count-only without options (legacy parity)', () => {
+    const heavy = makeWorker({ workerId: 'heavy', load: 5, throughput: { ...busySample, messageCount: 1 } });
+    const light = makeWorker({ workerId: 'light', load: 1, throughput: { ...busySample, messageCount: 999 } });
+    expect(selectLeastLoadedWorker([heavy, light])?.workerId).toBe('light');
+  });
+
+  it('selectLeastLoadedWorker weights throughput when enabled, steering away from a busy owner', () => {
+    const equalTopics = [
+      makeWorker({ workerId: 'quiet', load: 2, throughput: { ...busySample, messageCount: 1 } }),
+      makeWorker({ workerId: 'busy', load: 2, throughput: busySample })
+    ];
+    const options = { messageRateWeight: 0.5, byteRateWeight: 0.001 };
+    // Same topic count; the quieter worker has the lower effective score.
+    expect(selectLeastLoadedWorker(equalTopics, undefined, options)?.workerId).toBe('quiet');
+    // Reversing array order must not change the result (deterministic scoring).
+    expect(selectLeastLoadedWorker([equalTopics[1]!, equalTopics[0]!], undefined, options)?.workerId).toBe('quiet');
+  });
+
+  it('selectLeastLoadedWorker keeps a live sticky owner regardless of throughput', () => {
+    const owner = makeWorker({ workerId: 'owner', load: 9, throughput: busySample });
+    const standby = makeWorker({ workerId: 'standby', load: 1 });
+    const options = { messageRateWeight: 1 };
+    expect(selectLeastLoadedWorker([owner, standby], 'owner', options)?.workerId).toBe('owner');
+  });
+});
+
+describe('approximatePayloadBytes', () => {
+  it('sizes primitives and empty values', () => {
+    expect(approximatePayloadBytes(null)).toBe(0);
+    expect(approximatePayloadBytes(undefined)).toBe(0);
+    expect(approximatePayloadBytes(true)).toBe(4);
+    expect(approximatePayloadBytes(42)).toBe(8);
+    expect(approximatePayloadBytes('hello')).toBe(5);
+    expect(approximatePayloadBytes(() => undefined)).toBe(0);
+    expect(approximatePayloadBytes(Symbol('x'))).toBe(0);
+  });
+
+  it('uses the byte length of binary payloads', () => {
+    expect(approximatePayloadBytes(new ArrayBuffer(16))).toBe(16);
+    expect(approximatePayloadBytes(new Uint8Array(8).buffer)).toBe(8);
+  });
+
+  it('adds an array header plus elements', () => {
+    expect(approximatePayloadBytes(['ab', true])).toBe(8 + 2 + 4);
+  });
+
+  it('sums object values recursively', () => {
+    expect(approximatePayloadBytes({ a: 'x', b: { c: 3 } })).toBe(1 + 8);
   });
 });

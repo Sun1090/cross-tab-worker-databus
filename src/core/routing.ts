@@ -5,7 +5,7 @@
  * owner, and decide when to migrate a topic. All side-effect-free, making
  * them straightforward to test and reason about.
  */
-import type { WorkerRecord, WorkerRoute } from './types';
+import type { LoadWeightingOptions, WorkerRecord, WorkerRoute } from './types';
 import { TAB_VISIBILITY, WORKER_STATUS } from '../utils/constants';
 
 /** Default cap on the number of Workers that can own topics concurrently.
@@ -14,7 +14,70 @@ import { TAB_VISIBILITY, WORKER_STATUS } from '../utils/constants';
 export const DEFAULT_MAX_ACTIVE_WORKERS = 3;
 
 /**
- * Pick the Worker with the fewest owned topics, optionally preferring a
+ * Compute the effective load score used for owner selection.
+ *
+ * Legacy behavior: `worker.load` (owned-topic count) with no throughput
+ * contribution. When a Worker publishes a traffic sample AND weights are set,
+ * the normalized per-second rates are added on top, so a busy owner becomes
+ * less attractive for NEW routes without ever migrating an existing one.
+ * Returns the raw topic count when no sample or no weight is present.
+ */
+export function effectiveWorkerLoad(
+  worker: WorkerRecord,
+  options?: LoadWeightingOptions
+): number {
+  const sample = worker.throughput;
+  const messageRateWeight = options?.messageRateWeight ?? 0;
+  const byteRateWeight = options?.byteRateWeight ?? 0;
+  // A missing sample, unset weights, or a non-positive window (no elapsed
+  // time to derive a rate from) all fall back to the raw topic count.
+  if (!sample || sample.windowMs <= 0 || (messageRateWeight === 0 && byteRateWeight === 0)) return worker.load;
+  const windowSeconds = sample.windowMs / 1000;
+  const messageRate = sample.messageCount / windowSeconds;
+  const byteRate = sample.byteCount / windowSeconds;
+  return worker.load + messageRateWeight * messageRate + byteRateWeight * byteRate;
+}
+
+/**
+ * Cheap, allocation-free estimate of a payload's wire size, used to populate
+ * the byte side of an adaptive load sample. Only runs when adaptive routing is
+ * enabled, so approximate sizes are fine — the goal is a stable cross-worker
+ * comparison, not an exact byte count. Sizes: null/undefined 0, booleans 4,
+ * numbers 8, strings their length, binary views their byteLength, arrays an
+ * 8-byte header plus elements, plain objects the sum of their values.
+ */
+export function approximatePayloadBytes(payload: unknown): number {
+  if (payload === null || payload === undefined) return 0;
+  switch (typeof payload) {
+    case 'boolean':
+      return 4;
+    case 'number':
+    case 'bigint':
+      return 8;
+    case 'string':
+      return payload.length;
+    case 'symbol':
+    case 'function':
+      return 0;
+    case 'object':
+      break;
+  }
+  if (payload instanceof ArrayBuffer) return payload.byteLength;
+  if (ArrayBuffer.isView(payload)) return payload.byteLength;
+  if (Array.isArray(payload)) {
+    let sum = 8;
+    for (const item of payload) sum += approximatePayloadBytes(item);
+    return sum;
+  }
+  let sum = 0;
+  for (const value of Object.values(payload as Record<string, unknown>)) {
+    sum += approximatePayloadBytes(value);
+  }
+  return sum;
+}
+
+/**
+ * Pick the Worker with the fewest effective load, optionally preferring a
  * specific sticky owner when it is still in the candidate set.
  * Uses a single reduce pass instead of a full sort — O(n) — and breaks
  * load ties by workerId for deterministic routing across tabs (the
@@ -22,13 +85,14 @@ export const DEFAULT_MAX_ACTIVE_WORKERS = 3;
  */
 export function selectLeastLoadedWorker(
   workers: readonly WorkerRecord[],
-  preferredWorkerId?: string
+  preferredWorkerId?: string,
+  options?: LoadWeightingOptions
 ): WorkerRecord | undefined {
   const preferred = workers.find(worker => worker.workerId === preferredWorkerId);
   if (preferred) return preferred;
   return workers.reduce<WorkerRecord | undefined>((least, worker) => {
     if (!least) return worker;
-    const byLoad = worker.load - least.load;
+    const byLoad = effectiveWorkerLoad(worker, options) - effectiveWorkerLoad(least, options);
     if (byLoad !== 0) return byLoad < 0 ? worker : least;
     // Tie-break by workerId with a locale-independent comparison so routing
     // is deterministic regardless of the host's collation order.
