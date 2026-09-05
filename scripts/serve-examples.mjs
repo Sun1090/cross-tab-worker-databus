@@ -34,6 +34,13 @@ const server = createServer(async (request, response) => {
       response.end('Forbidden');
       return;
     }
+    // Connection-count observability: lets the e2e suite verify that the
+    // SharedWorker session reaper actually closes a dead tab's WebSocket.
+    if (pathname === '/debug/connections') {
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ centrifugo: centrifugoHub?.clients.size ?? 0 }));
+      return;
+    }
     const stats = await stat(filePath);
     if (stats.isDirectory()) filePath = join(filePath, 'index.html');
     const body = await readFile(filePath);
@@ -48,8 +55,9 @@ const server = createServer(async (request, response) => {
   }
 });
 
-installDemoWebSocketServer(server, demoWebSocketPath);
+let centrifugoHub;
 installDemoWsBusServer(server, '/ws/demo');
+centrifugoHub = installDemoWebSocketServer(server, demoWebSocketPath);
 
 server.listen(port, () => {
   console.log(`Examples server: http://localhost:${port}/examples/demo/`);

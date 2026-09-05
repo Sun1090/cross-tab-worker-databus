@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.81 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.82 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.82 delivered scope
+
+- A 20 s default E2E assertion ceiling, structured-clone rejection coverage, and shared-mode session lifecycle verified end to end through the examples server's connection-count endpoint.
 
 ## 0.20.81 delivered scope
 

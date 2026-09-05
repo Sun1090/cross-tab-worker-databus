@@ -24,7 +24,9 @@ export default defineConfig({
   // a little CI time for stable scheduling on shared runners.
   ...(process.env.CI ? { workers: 1 } : {}),
   timeout: 60_000,
-  expect: { timeout: 15_000 },
+  // 20s default assertion ceiling: generous for slow shared runners; polls that
+  // need more carry explicit timeouts.
+  expect: { timeout: 20_000 },
   reporter: [['list']],
   use: {
     ...devices['Desktop Chrome'],

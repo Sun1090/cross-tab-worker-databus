@@ -258,6 +258,29 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => transportBackend(tabB)).toBe('shared');
   });
 
+  test('shared-mode session closes server-side when a tab closes', async ({ context }) => {
+    test.setTimeout(120_000);
+    const topic = `e2e.reap.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'shared', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'shared', topic);
+
+    // Each shared-worker port holds its own WebSocket, so two tabs mean two
+    // server connections (see the SharedWorker session reaper docs).
+    const connections = async () => {
+      const response = await fetch('http://localhost:4173/debug/connections');
+      return (await response.json()) as { centrifugo: number };
+    };
+    await expect.poll(async () => (await connections()).centrifugo, { timeout: 30_000 }).toBe(2);
+
+    // Closing the tab stops its transport gracefully; the demo server must
+    // drop the corresponding WebSocket. The silent-death variant of this
+    // lifecycle is covered by the PortReaper unit tests.
+    await tabB.close();
+    await expect.poll(async () => (await connections()).centrifugo, { timeout: 45_000 }).toBe(1);
+  });
+
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
     const topic = `e2e.soak.${Date.now()}`;
     const tabA = await openDemoTab(context);
