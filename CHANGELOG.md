@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.79] - 2026-09-05
+
+### Added
+- The Release workflow now fails when the published-package consumer verification fails (retry budget raised to 24 × 5 s to cover registry propagation); releases without an npm token keep skipping the check.
+- Added a regression pinning the full lost-handoff-ACK recovery chain: TTL cleanup of the orphaned route followed by ownership re-election when the original owner resumes.
+
 ## [0.20.78] - 2026-09-05
 
 ### Added

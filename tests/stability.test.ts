@@ -434,6 +434,7 @@ describe('stability: replay persistence cleanup races', () => {
     expect(appendBatch).not.toHaveBeenCalled();
     await bus.stop();
   });
+});
 
 describe('stability: handoff channel close ordering', () => {
   it('defers the channel close so queued handoff frames flush', async () => {
@@ -473,4 +474,64 @@ describe('stability: handoff channel close ordering', () => {
     expect(closeCalls).toBe(1);
   });
 });
+
+describe('stability: lost handoff ACK recovery chain', () => {
+  it('recovers a topic whose ROUTE_RELEASED was lost: TTL cleanup then owner resume re-subscribes', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'lost-ack-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'lost-ack-b' });
+    const controlA = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'lost-ack',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'lost-ack',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('topic.lost');
+    await Promise.resolve();
+    runtimeB.start();
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('topic.lost')).toBe(true);
+
+    // Graceful handoff with the ACK deliberately lost (simulating the
+    // delivery gap the deferred-close fix narrowed further): B's runtime
+    // never learns about the handoff, so no survivor owns the topic.
+    hub.dropNextControl();
+    envA.pageHide();
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('topic.lost')).toBe(false);
+    expect(runtimeB.isAssigned('topic.lost')).toBe(false);
+
+    // While A stays hidden the route is orphaned; the TTL cleanup reclaims
+    // it once both the worker record and the subscriber window expire.
+    now += 15_000;
+    envB.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'));
+    expect(routeEntry).toBeUndefined();
+
+    // The recovery contract: A retains its subscription intent across the
+    // hidden window; on resume it re-enters the cluster and ownership is
+    // re-elected (A or B, by load) so the topic is owned again.
+    now += 1;
+    envA.pageShow();
+    await Promise.resolve();
+    await Promise.resolve();
+    const owners = [runtimeA, runtimeB].filter(runtime => runtime.isAssigned('topic.lost'));
+    expect(owners).toHaveLength(1);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
 });
