@@ -56,6 +56,8 @@ export type TabVisibilityState = 'visible' | 'hidden';
  * so sibling tabs can discover and route to it.
  */
 export interface WorkerRecord {
+  /** Cluster protocol version advertised by this worker. */
+  protocolVersion?: number;
   /** Stable identity of this runtime instance. Random-suffixed; survives refresh. */
   workerId: string;
   /** Identity of the browser tab hosting this worker. Survives refresh. */

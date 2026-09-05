@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.20.69] - 2026-09-05
+
+### Added
+- Exposed peer protocol capability versions in `WorkerClusterSnapshot.peerProtocolVersions` and `CrossTabDataBus.getDiagnostics().protocol.peers`; legacy peers are represented as `null`.
+- Worker registration records now advertise `protocolVersion: 1` for runtime capability discovery.
+
 ## [0.20.68] - 2026-09-05
 
 ### Added

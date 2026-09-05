@@ -97,7 +97,7 @@ export interface DataBusDiagnostics {
   recovery: { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null; generation: number; lastSuccessAt: number | null };
   dedup: DataBusDedupStats;
   replay: { enabled: boolean; topics: number; messages: number };
-  protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null };
+  protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null; peers: Record<string, number | null> };
   cluster: WorkerClusterSnapshot;
 }
 
@@ -710,6 +710,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   getDiagnostics(): DataBusDiagnostics {
     let messages = 0;
     if (this.replayBuffers) for (const buffer of this.replayBuffers.values()) messages += buffer.length;
+    const cluster = this.cluster.getSnapshot();
+    const unknownMessages = this.cluster.getUnknownMessageStats();
     return {
       status: this.status,
       started: this.started,
@@ -717,8 +719,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
       replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
-      protocol: { version: this.cluster.getSnapshot().protocolVersion, unknownMessages: this.cluster.getUnknownMessageStats().count, lastUnknownMessageType: this.cluster.getUnknownMessageStats().lastType },
-      cluster: this.cluster.getSnapshot()
+      protocol: { version: cluster.protocolVersion, unknownMessages: unknownMessages.count, lastUnknownMessageType: unknownMessages.lastType, peers: cluster.peerProtocolVersions },
+      cluster
     };
   }
 

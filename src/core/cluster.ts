@@ -85,6 +85,8 @@ export interface WorkerClusterOptions {
 /** Read-only snapshot of the cluster state for diagnostics and tracing. */
 export interface WorkerClusterSnapshot {
   protocolVersion: number;
+  /** Protocol versions advertised by each currently visible peer; null means legacy peer. */
+  peerProtocolVersions: Record<string, number | null>;
   coordinated: boolean;
   suspended: boolean;
   currentWorker: WorkerRecord;
@@ -249,6 +251,7 @@ export class WorkerClusterRuntime {
     this.workerId = options.workerId ?? `worker-${this.tabId}-${this.environment.randomId()}`;
     const now = this.environment.now();
     this.currentRecord = {
+      protocolVersion: CLUSTER_PROTOCOL_VERSION,
       workerId: this.workerId,
       tabId: this.tabId,
       load: 0,
@@ -674,6 +677,7 @@ export class WorkerClusterRuntime {
 
   /** Read-only snapshot of the cluster state (workers, routes, assignments). */
   getSnapshot(): WorkerClusterSnapshot {
+    const workers = this.storage ? this.readWorkers() : [{ ...this.currentRecord }];
     const routes = this.storage
       ? readAllByPrefix<WorkerRoute>(this.storage, this.routePrefix).map(({ value }) => ({
           ...value,
@@ -682,10 +686,11 @@ export class WorkerClusterRuntime {
       : [];
     return {
       protocolVersion: CLUSTER_PROTOCOL_VERSION,
+      peerProtocolVersions: Object.fromEntries(workers.map(worker => [worker.workerId, worker.protocolVersion ?? null])),
       coordinated: Boolean(this.storage && this.channel),
       suspended: this.suspended,
       currentWorker: { ...this.currentRecord },
-      workers: this.readWorkers().map(worker => ({ ...worker })),
+      workers: workers.map(worker => ({ ...worker })),
       routes,
       subscribedTopics: Array.from(this.subscribedTopics),
       assignedTopics: Array.from(this.assignedTopics.values()),
