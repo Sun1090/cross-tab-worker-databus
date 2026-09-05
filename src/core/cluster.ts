@@ -366,9 +366,20 @@ export class WorkerClusterRuntime {
     // let peers observe the completed handoff immediately.
     this.flushStorage();
     this.notifyRegistry();
-    this.channel?.close();
+    const channel = this.channel;
     this.channel = null;
     this.handlers.onSuspend?.();
+    // Defer the physical close by one task: BroadcastChannel.close() discards
+    // messages still queued for delivery — including the handoff's
+    // ROUTE_RELEASED — which can strand the handoff target with an
+    // unconfirmed route on a loaded runner. Letting the queued frames flush
+    // first keeps the strict handoff live; on a frozen BFCache page the task
+    // simply never runs and the channel object is garbage-collected with it.
+    if (typeof globalThis.setTimeout === 'function') {
+      globalThis.setTimeout(() => channel?.close(), 0);
+    } else {
+      channel?.close();
+    }
   }
 
   /** Update the worker's connection status and persist the change. */
