@@ -21,6 +21,7 @@ export type {
   DataBusReliabilityTraceEvent,
   DataBusStatusTraceEvent,
   DataBusSubscriptionTraceEvent,
+  DataBusMetricsSnapshot,
   DataBusTraceEvent,
   DataBusTraceMode,
   DataBusTraceOptions
