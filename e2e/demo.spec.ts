@@ -114,10 +114,13 @@ test.describe('cross-tab databus demo', () => {
     const tabC = await openDemoTab(context);
     await connectDemo(tabC, 'dedicated', topic);
 
-    // Wait until exactly one of the three tabs owns the topic.
+    // Wait until exactly one of the three tabs owns the topic. The explicit
+    // ceiling absorbs slow-runner variance in worker startup + election.
     await expect
-      .poll(async () =>
-        Promise.all([tabA, tabB, tabC].map(assignedCount)).then(counts => counts.filter(count => count === 1).length)
+      .poll(
+        async () =>
+          Promise.all([tabA, tabB, tabC].map(assignedCount)).then(counts => counts.filter(count => count === 1).length),
+        { timeout: 30_000 }
       )
       .toBe(1);
 
@@ -324,7 +327,9 @@ test.describe('cross-tab databus demo', () => {
     await connectDemo(tabB, 'dedicated', topic);
     const tabs = [tabA, tabB];
 
-    await expect.poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length).toBe(1);
+    await expect
+      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
+      .toBe(1);
 
     for (let cycle = 0; cycle < 2; cycle += 1) {
       const ownerIndex = (await Promise.all(tabs.map(assignedCount))).indexOf(1);
