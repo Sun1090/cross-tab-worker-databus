@@ -37,6 +37,21 @@
 | 运行时模型 | Service Worker transport | 未实现 | 刻意延后；生命周期与长连接约束见 `docs/zh/architecture.md` |
 | 持久消息 | 跨页面关闭持久化 publication 或发布命令 | 未实现 | SDK 不持久化业务 payload，也不在恢复后重放发布命令 |
 
+## 已验证保证（由回归套件钉住）
+
+以下不变量统一收自 `docs/zh/architecture.md` 的「稳定性不变量」一节（由 `tests/stability.test.ts` 与 `tests/replay-persistence.test.ts` 固化的回归），保证每条保证既成文又被回归锁定：
+
+| 不变量 | 领域 | 被回归固化的保证 |
+|---|---|---|
+| 交接 ACK 有效性 | 协调 | 仅当 route 仍指向接收方、释放方匹配 `handoffFromWorkerId`、且 ACK 代数 ≥ 存储 route 代数时才接受 `ROUTE_RELEASED`——更早交接轮次的过期 ACK（如 a↔b 乒乓）会被丢弃 |
+| 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目）；已清历史不会被进行中的 flush 重新追加 |
+| 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）而不阻塞其他排队键；队列清空或 `clear()` 取消后退避重置 |
+| 传输恢复预算 | 生命周期 | 自动恢复由冷却间隔节流、以 `recovery.maxAttempts` 为界，预算耗尽时报 `exhausted`；成功重开后重置尝试计数与 exhausted，断线传输上的显式 `subscribe` 仍可手动恢复 |
+| BFCache 挂起 | 生命周期 | 隐藏页面停掉传输并静默取消进行中的持久化重试；pageshow 重开传输并每个周期恰好一次重建订阅 |
+| 交接通道关闭顺序 | 协调 | `pause()` 将物理 `channel.close()` 推迟一个任务，确保排队中的交接帧（含 `ROUTE_RELEASED`）先冲刷再关闭 |
+| 丢失与恢复矩阵 | 协调 | 每条协调消息都有有界的恢复路径（未确认 SUBSCRIBE 的重发、REGISTRY 催促、丢失 ACK 的 TTL 清理 + 重新选举）；传输断线窗口内丢失的发布是唯一有文档佐证的不恢复损失 |
+| 恢复诊断 | 可观测性 | `getHealthSummary()` 得出单一就绪判定，统一的 `lastFailure` 账本跨传输失败持续保留，并在每次显式 `start()` 时重置 |
+
 ## 验收标准
 
 - "已实现"不代表每个浏览器环境都能提供跨 Tab 能力；缺少 localStorage 或 BroadcastChannel 时，按设计降级为本地运行。

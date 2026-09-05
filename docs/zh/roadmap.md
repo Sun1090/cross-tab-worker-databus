@@ -5,6 +5,8 @@
 ## 0.20.83 已完成范围
 
 - 健康钩子的适配器边界用例、可归档对比的浏览器基准、与当前能力对齐的 README 特性清单。
+- 一次大规模内部清理：全部运行时字符串字面量集中到 `utils/constants.ts` 并由之派生字面量类型，回放与去重从 `CrossTabDataBus` 拆分为自包含的 `ReplayManager` / `DedupManager`。
+- demo 的「批量 10」publishBatch 按钮与 `/debug/wsstats` 帧计数及单帧 E2E，`asyncSink: true` 投递语义文档，以及与阻塞式发布消费者校验对齐的发布检查清单。
 
 ## 0.20.82 已完成范围
 

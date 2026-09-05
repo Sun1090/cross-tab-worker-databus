@@ -1,3 +1,17 @@
+## [0.20.83] - 2026-09-05
+
+### Added
+- `useCrossTabHealth` edge-case coverage for both adapters (React and Vue): interval polling refreshes the health snapshot, detaching a stopped bus resets it to `null` and unsubscribes its status/error listeners, and unmounting never leaks the polling timer.
+- Browser benchmarks now archive every run under `bench-results/` (gitignored), and a new `scripts/bench-compare.mjs` prints per-metric deltas between two runs so publish-throughput and hot-path regressions can be checked locally.
+- The demo gains a "批量 10" button that publishes ten JSON items through `CrossTabDataBus.publishBatch` with per-item `messageId`s; the demo WebSocket hub counts `publish` vs `publishBatch` wire frames and exposes them via `/debug/wsstats`, and a new E2E asserts the burst travels as exactly one frame with no per-item publishes.
+- Documented the `asyncSink: true` delivery semantics in the API reference (English and Chinese): microtask-batched FIFO delivery, unchanged error isolation, and the ordering boundary versus the synchronous sink.
+- Added the `src/utils/` toolbox: shared string constants with literal-derived types, `publicationMetadata`, fault-tolerant storage primitives (`readJson`/`writeJson`/`listKeys`/`readAllByPrefix`), option-validation asserts, and Worker-boundary error serialization.
+
+### Changed
+- Every runtime string literal in the SDK is centralized in `utils/constants.ts`; status/role/action unions and cluster/worker/message/trace discriminants are derived from those constants so values and types cannot drift apart, and the repeated magic strings across source and tests were unified.
+- Replay buffering and inbound deduplication moved out of `CrossTabDataBus` into self-contained `ReplayManager` and `DedupManager` classes with their own lifecycle; the DataBus delegates to them and deliberately keeps its lifecycle state machine in place (`data-bus.ts` shrank from ~1440 to ~1094 lines).
+- The release checklist (English and Chinese) now documents the tagged-release workflow's blocking published-consumer verification (`verify:published`, 24×5 s retry budget) instead of treating it as a post-publication side note.
+
 ## [0.20.82] - 2026-09-05
 
 ### Added
