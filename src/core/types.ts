@@ -119,6 +119,8 @@ export type WorkerClusterMessage<TEvent = unknown> =
    * (for storage/route bookkeeping). */
   | {
       type: 'CONTROL';
+      /** Protocol version; omitted by legacy peers and treated as version 1. */
+      protocolVersion?: number;
       sourceWorkerId: string;
       targetWorkerId: string;
       action: WorkerControlAction;
@@ -145,6 +147,8 @@ export type WorkerClusterMessage<TEvent = unknown> =
    * cross-tab relay, including for late subscribers replaying history. */
   | {
       type: 'EVENT';
+      /** Protocol version; omitted by legacy peers and treated as version 1. */
+      protocolVersion?: number;
       sourceWorkerId: string;
       eventType: string;
       payload: TEvent;
@@ -154,12 +158,16 @@ export type WorkerClusterMessage<TEvent = unknown> =
    * write, instead of waiting for the next heartbeat (3 s default). */
   | {
       type: 'REGISTRY';
+      /** Protocol version; omitted by legacy peers and treated as version 1. */
+      protocolVersion?: number;
       sourceWorkerId: string;
     }
   /** The old owner acknowledges it released the transport subscription.
    * Only the new owner whose route `generation` matches may act on this. */
   | {
       type: 'ROUTE_RELEASED';
+      /** Protocol version; omitted by legacy peers and treated as version 1. */
+      protocolVersion?: number;
       sourceWorkerId: string;
       targetWorkerId: string;
       topic: string;

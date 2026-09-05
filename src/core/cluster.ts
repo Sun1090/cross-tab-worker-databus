@@ -84,6 +84,7 @@ export interface WorkerClusterOptions {
 
 /** Read-only snapshot of the cluster state for diagnostics and tracing. */
 export interface WorkerClusterSnapshot {
+  protocolVersion: number;
   coordinated: boolean;
   suspended: boolean;
   currentWorker: WorkerRecord;
@@ -97,6 +98,7 @@ export interface WorkerClusterSnapshot {
   routeOwnerCache?: { size: number; max: number; hits: number; misses: number };
 }
 
+const CLUSTER_PROTOCOL_VERSION = 1;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
 const DEFAULT_WORKER_TTL_MS = 10_000;
 const DEFAULT_STORAGE_PREFIX = 'cross-tab-worker-databus';
@@ -679,6 +681,7 @@ export class WorkerClusterRuntime {
         }))
       : [];
     return {
+      protocolVersion: CLUSTER_PROTOCOL_VERSION,
       coordinated: Boolean(this.storage && this.channel),
       suspended: this.suspended,
       currentWorker: { ...this.currentRecord },
@@ -987,7 +990,7 @@ export class WorkerClusterRuntime {
   private send(message: WorkerClusterMessage): boolean {
     if (!this.channel) return false;
     try {
-      this.channel.postMessage(message);
+      this.channel.postMessage({ ...message, protocolVersion: CLUSTER_PROTOCOL_VERSION });
       return true;
     } catch {
       return false;

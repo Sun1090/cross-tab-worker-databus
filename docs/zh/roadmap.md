@@ -373,6 +373,17 @@
 - publication metadata 做兼容性归一化：只接受非空 ID 与有限 timestamp。
 - 补充 legacy、嵌套、fallback topic 和坏 metadata 协议夹具测试。
 
+## 0.20.68 已交付
+
+- 为集群帧和 worker snapshot 增加协议版本元数据，并保持旧版本缺失字段时的兼容处理。
+
+## 0.20.69 候选
+
+1. 增加 peer 能力矩阵，并在 diagnostics 暴露 SDK、后端与 transport 身份；
+2. 统一 replay、dedup、trace、recovery 与 cluster 健康指标；
+3. 优化 IndexedDB 并发 append 与清理路径；
+4. 增加 adaptive dedup、async trace、prune 和长时多 Tab 性能基线。
+
 ## 0.13.0 候选
 
 ## 更长期候选
