@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.69 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.70 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.70 delivered scope
+
+- Added SDK version and transport/backend identity to the unified diagnostics snapshot.
 
 ## 0.20.69 delivered scope
 

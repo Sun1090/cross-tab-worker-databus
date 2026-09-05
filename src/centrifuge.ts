@@ -78,6 +78,7 @@ export interface CreateCentrifugeDataBusOptions<TData = unknown>
 export class CentrifugeWorkerTransport<TData = unknown>
   implements DataBusTransport<CentrifugeDataBusConfig, TData>
 {
+  readonly diagnosticsName = 'centrifuge';
   private readonly workerMode: WorkerMode;
   private readonly transferable: boolean;
   private readonly heartbeatIntervalMs: number;
@@ -96,6 +97,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
   // Generation captured when the current backend was created. Error handlers
   // only act when the backend that registered them is still current.
   private backendGeneration = 0;
+
+  get diagnosticsBackend(): string {
+    return this.backend ?? 'uninitialized';
+  }
 
   constructor(options: CentrifugeWorkerTransportOptions = {}) {
     this.workerMode = options.workerMode ?? 'dedicated';

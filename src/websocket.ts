@@ -69,6 +69,8 @@ const WS_OPEN = 1;
 export class WebSocketTransport<TData = unknown>
   implements DataBusTransport<WebSocketDataBusConfig, TData>
 {
+  readonly diagnosticsName = 'websocket';
+  readonly diagnosticsBackend = 'native-websocket';
   private socket: WebSocketLike | null = null;
   private handlers: DataBusTransportHandlers<TData> | null = null;
   private readonly subscribedTopics = new Set<string>();
