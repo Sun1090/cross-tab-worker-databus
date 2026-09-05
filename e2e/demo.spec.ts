@@ -492,6 +492,30 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
       timestamp: 42
     });
   });
+
+  test('publishBatch button sends ten items in a single wire frame', async ({ context, request }) => {
+    const topic = `e2e.batch.${Date.now()}`;
+
+    const page = await openDemoTab(context);
+    await page.click('#modeSwitch [data-mode="websocket"]');
+    await page.fill('#topicInput', topic);
+    await page.click('#applyConnection');
+    await expect(page.locator('#statusBadge')).toHaveText('已连接');
+    // This tab owns the topic, so its publishBatch reaches the server directly.
+    await expect.poll(() => assignedCount(page), { timeout: 30_000 }).toBe(1);
+
+    const statsUrl = 'http://localhost:4173/debug/wsstats';
+    const baseline = (await (await request.get(statsUrl)).json()) as { publish: number; publishBatch: number };
+
+    await page.click('#publishBatch');
+    // All ten items arrive in this tab (echoed back through the batch).
+    await expect.poll(() => receivedCount(page)).toBe(10);
+    const after = (await (await request.get(statsUrl)).json()) as { publish: number; publishBatch: number };
+    // Exactly one publishBatch wire frame — and no extra individual publishes,
+    // proving the burst was not decomposed into per-item frames.
+    expect(after.publishBatch).toBe(baseline.publishBatch + 1);
+    expect(after.publish).toBe(baseline.publish);
+  });
 });
 
 test.describe('cross-tab databus demo — binary publish', () => {

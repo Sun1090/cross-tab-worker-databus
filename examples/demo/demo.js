@@ -38,6 +38,7 @@ const elements = {
   payloadInput: document.querySelector('#payloadInput'),
   publishJson: document.querySelector('#publishJson'),
   publishBinary: document.querySelector('#publishBinary'),
+  publishBatch: document.querySelector('#publishBatch'),
   autoPublish: document.querySelector('#autoPublish'),
   metricPublished: document.querySelector('#metricPublished'),
   metricReceived: document.querySelector('#metricReceived'),
@@ -331,6 +332,39 @@ function publishBinary() {
   crypto.getRandomValues(bytes);
   const buffer = bytes.buffer;
   publishPayload(encodeBinary(buffer), { type: 'binary', payload: `ArrayBuffer(${buffer.byteLength})` });
+}
+
+/** Publish a burst of ten JSON messages through `publishBatch` — the transport
+ * backends with native batch support (e.g. the WebSocket transport) pack the
+ * whole burst into a single wire frame (`publishBatch` op), which this demo's
+ * server can observe frame-by-frame. Each item carries its own `messageId` to
+ * exercise per-item metadata across the batch. */
+function publishBatch() {
+  if (!state.bus) return;
+  const items = [];
+  for (let index = 0; index < 10; index += 1) {
+    items.push({
+      data: {
+        kind: 'flow',
+        from: state.tabId,
+        seq: ++state.seq,
+        sentAt: Date.now(),
+        batch: index
+      },
+      options: { messageId: `batch-${state.tabId}-${state.seq}-${index}` }
+    });
+  }
+  state.published += items.length;
+  state.bus.publishBatch(state.topic, items);
+  addFeed({
+    direction: '发布',
+    pill: 'publish',
+    type: 'batch',
+    topic: state.topic,
+    payload: `批量 ${items.length} 条（单帧）`
+  });
+  animateFlow('publish');
+  renderMetrics();
 }
 
 function encodeBinary(buffer) {
@@ -680,6 +714,7 @@ elements.urlInput.addEventListener('input', () => {
 elements.applyConnection.addEventListener('click', () => void applyConnection());
 elements.publishJson.addEventListener('click', publishJson);
 elements.publishBinary.addEventListener('click', publishBinary);
+elements.publishBatch.addEventListener('click', publishBatch);
 elements.clearLog.addEventListener('click', () => {
   elements.eventBody.replaceChildren();
   elements.eventCounter.textContent = '0 条';

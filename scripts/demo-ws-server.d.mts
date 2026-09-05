@@ -15,6 +15,9 @@ export declare class DemoWsBusHub {
   now: () => number;
   clients: Set<DemoWebSocketConnection>;
   subscriptions: Map<DemoWebSocketConnection, Set<string>>;
+  /** Wire-frame counters for observability (e2e single-frame assertions). */
+  publishFrames: number;
+  publishBatchFrames: number;
 
   attach(connection: DemoWebSocketConnection): void;
   detach(connection: DemoWebSocketConnection): void;
