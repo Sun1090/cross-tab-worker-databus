@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { DependencyList } from 'react';
 import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
 import type { DataBusMessage, WorkerStatus } from './core/types';
+import { WORKER_STATUS } from './utils/constants';
 
 /**
  * Create a CrossTabDataBus for the component's lifetime.
@@ -83,10 +84,10 @@ export function useCrossTabSubscription<TConfig, TData>(
 export function useCrossTabStatus<TConfig, TData>(
   bus: CrossTabDataBus<TConfig, TData> | null
 ): WorkerStatus {
-  const [status, setStatus] = useState<WorkerStatus>('connecting');
+  const [status, setStatus] = useState<WorkerStatus>(WORKER_STATUS.CONNECTING);
   useEffect(() => {
     if (!bus) {
-      setStatus('connecting');
+      setStatus(WORKER_STATUS.CONNECTING);
       return;
     }
     setStatus(bus.getStatus());

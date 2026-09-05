@@ -48,9 +48,25 @@ graph TB
 | 层 | 入口 | 职责 |
 |---|---|---|
 | DataBus | `CrossTabDataBus` | 本地 handler 引用计数、消息分发、状态与 transport 生命周期 |
+| Replay | `ReplayManager` | 有界的每 Topic 历史环形缓冲、IndexedDB 持久化、保留期清理、重试策略 |
+| Dedup  | `DedupManager`  | 可选的按 `messageId` 有界去重、自适应 TTL、过期清扫 |
 | 集群协调 | `WorkerClusterRuntime` | Worker 注册、角色、心跳、Topic owner、迁移和广播协议 |
 | Transport | `DataBusTransport` | 在真实 Worker/连接上执行 subscribe、unsubscribe、publish |
 | Centrifuge | `CentrifugeWorkerTransport` | 主线程与内置 Centrifuge Worker 之间的协议适配 |
+
+## 源码组织与共享工具
+
+`src/` 目录在平台适配器和协调核心之外维护一个轻量工具库 `src/utils/`：
+
+| 文件 | 内容 | 使用方 |
+|---|---|---|
+| `utils/constants.ts` | 全部运行时字符串字面量集中一处——状态、角色、动作、集群/Worker/协议消息类型、trace 事件判别字段、枚举、命名空间前缀。所有由字面量派生的类型（`WorkerStatus`、消息 `type` 判别、trace 的 `action`/`operation` 等）都用 `(typeof X)[keyof typeof X]` 从这些常量派生，值和类型永不脱节。 | 所有模块 |
+| `utils/metadata.ts` | `publicationMetadata(messageId, timestamp)`——只展开已定义字段，此前散落在四个模块各有一份。 | data-bus、cluster、centrifuge、centrifuge-session |
+| `utils/storage-utils.ts` | `readJson` / `writeJson` / `listKeys` / `readAllByPrefix`——容错的存储原语（损坏 JSON 视为不存在；写失败静默）。 | cluster |
+| `utils/validation.ts` | 构造参数/选项校验断言（`assertReplayOptions`、`assertDedupOptions`、`assertRecoveryOptions`、`assertHeartbeatInterval` 等）。可选字段只在显式提供时校验；默认值恒合法。 | data-bus、replay-persistence、centrifuge |
+| `utils/error-utils.ts` | `serializeError` / `deserializeWorkerError` + `SerializedWorkerError`——Error 在 Worker 边界的往返传输。 | centrifuge、centrifuge-session |
+
+提取是刻意的选择：这些是无副作用、依赖轻的助手，其重复副本已经开始漂移（例如四份几乎相同的 `publicationMetadata` 实现）。有自身生命周期的有状态横切关注点——回放缓冲与去重——则作为自包含的 `DedupManager` / `ReplayManager` 类，由 DataBus 委托调用；它们持有自己的 map/timer/统计并暴露薄的 start/stop/record/clear 接口。DataBus 生命周期状态机（start/stop/suspend/resume、promise 门、恢复节奏）则刻意保留在 `CrossTabDataBus` 内部：这些标志紧密互锁，拆出去会重新引入这些门原本要防的竞态。
 
 ## 术语表
 

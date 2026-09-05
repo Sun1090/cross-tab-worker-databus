@@ -4,7 +4,19 @@
  * Defines the shapes of Worker records, topic routes, control messages,
  * transport interfaces, trace events, and all supporting types used across
  * the cluster coordination, DataBus public API, and diagnostics layers.
+ *
+ * The status/role/action unions are derived from the string constants in
+ * `utils/constants.ts` so the runtime values and the static types can never
+ * drift apart (no duplicate literals to keep in sync by hand).
  */
+import type {
+  CLUSTER_MESSAGE_TYPE,
+  CONTROL_ACTION,
+  PUBLICATION_ENVELOPE_OP,
+  TAB_VISIBILITY,
+  WORKER_ROLE,
+  WORKER_STATUS
+} from '../utils/constants';
 
 /** Convenience alias for values that may be synchronously returned or as a
  * Promise. Used by the DataBusTransport contract so implementations can be
@@ -14,15 +26,15 @@ export type MaybePromise<T> = T | Promise<T>;
 /** Whether this Worker can act as a Topic owner. `active` workers are eligible
  * for new topic assignments; `standby` workers hold existing assignments but
  * are not selected for new ones (e.g. a hidden tab that already owns topics). */
-export type WorkerRole = 'active' | 'standby';
+export type WorkerRole = (typeof WORKER_ROLE)[keyof typeof WORKER_ROLE];
 
 /** Connection-level status of the transport. `error` triggers auto-recovery
  * (subject to a cooldown); `disconnected` is a clean or suspend state. */
-export type WorkerStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type WorkerStatus = (typeof WORKER_STATUS)[keyof typeof WORKER_STATUS];
 
 /** Control-plane actions routed between Workers via BroadcastChannel.
  * These are the three operations a subscriber asks the owning worker to perform. */
-export type WorkerControlAction = 'SUBSCRIBE' | 'UNSUBSCRIBE' | 'PUBLISH';
+export type WorkerControlAction = (typeof CONTROL_ACTION)[keyof typeof CONTROL_ACTION];
 
 /** Transport-neutral metadata attached to a publication. */
 export interface DataBusPublicationMetadata {
@@ -43,13 +55,13 @@ export interface DataBusPublication<TData = unknown> extends DataBusPublicationM
 
 /** Forward-compatible JSON envelope accepted from WebSocket-style servers. */
 export interface DataBusPublicationEnvelope<TData = unknown> {
-  op: 'publication';
+  op: typeof PUBLICATION_ENVELOPE_OP;
   publication: DataBusPublication<TData>;
 }
 
 /** Whether the tab is currently visible to the user. Only influences placement
  * of NEW topic routes; existing routes are sticky and never migrated on hide. */
-export type TabVisibilityState = 'visible' | 'hidden';
+export type TabVisibilityState = (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBILITY];
 
 /**
  * A Worker's self-published registration record, written to localStorage
@@ -120,7 +132,7 @@ export type WorkerClusterMessage<TEvent = unknown> =
    * Carries the plaintext topic (for transport calls) and the opaque key
    * (for storage/route bookkeeping). */
   | {
-      type: 'CONTROL';
+      type: typeof CLUSTER_MESSAGE_TYPE.CONTROL;
       /** Protocol version; omitted by legacy peers and treated as version 1. */
       protocolVersion?: number;
       sourceWorkerId: string;
@@ -148,7 +160,7 @@ export type WorkerClusterMessage<TEvent = unknown> =
    * it survives the EVENT hop so listeners can tell local dispatch from
    * cross-tab relay, including for late subscribers replaying history. */
   | {
-      type: 'EVENT';
+      type: typeof CLUSTER_MESSAGE_TYPE.EVENT;
       /** Protocol version; omitted by legacy peers and treated as version 1. */
       protocolVersion?: number;
       sourceWorkerId: string;
@@ -159,7 +171,7 @@ export type WorkerClusterMessage<TEvent = unknown> =
   /** Nudge peers to reconcile immediately after a registry/route/subscriber
    * write, instead of waiting for the next heartbeat (3 s default). */
   | {
-      type: 'REGISTRY';
+      type: typeof CLUSTER_MESSAGE_TYPE.REGISTRY;
       /** Protocol version; omitted by legacy peers and treated as version 1. */
       protocolVersion?: number;
       sourceWorkerId: string;
@@ -167,7 +179,7 @@ export type WorkerClusterMessage<TEvent = unknown> =
   /** The old owner acknowledges it released the transport subscription.
    * Only the new owner whose route `generation` matches may act on this. */
   | {
-      type: 'ROUTE_RELEASED';
+      type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED;
       /** Protocol version; omitted by legacy peers and treated as version 1. */
       protocolVersion?: number;
       sourceWorkerId: string;

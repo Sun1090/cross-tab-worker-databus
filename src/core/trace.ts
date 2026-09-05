@@ -7,32 +7,45 @@
  * message path — errors in the sink are isolated to console.warn.
  */
 import type { WorkerStatus } from './types';
+import type {
+  PERSISTENCE_OPERATION,
+  RECOVERY_OUTCOME,
+  RELIABILITY_OPERATION,
+  SUBSCRIPTION_ACTION,
+  TRACE_ERROR_SOURCE,
+  TRACE_LIFECYCLE_ACTION
+} from '../utils/constants';
+import {
+  DEFAULT_STORAGE_PREFIX,
+  TRACE_EVENT_TYPE,
+  TRACE_MODE
+} from '../utils/constants';
 
 /** Trace reporting mode: record only events, only metrics, or both. */
 /** Selects which trace categories the reporter emits.
  * - `events` — lifecycle/status/subscription/coordination/error events only.
  * - `metrics` — periodic `message_metrics` snapshots only.
  * - `all` — both event streams and metrics snapshots. */
-export type DataBusTraceMode = 'events' | 'metrics' | 'all';
+export type DataBusTraceMode = (typeof TRACE_MODE)[keyof typeof TRACE_MODE];
 
 /** Emitted when the DataBus starts, stops, suspends, or resumes. */
 export interface DataBusLifecycleTraceEvent {
-  type: 'lifecycle';
-  action: 'start' | 'stop' | 'suspend' | 'resume';
+  type: typeof TRACE_EVENT_TYPE.LIFECYCLE;
+  action: (typeof TRACE_LIFECYCLE_ACTION)[keyof typeof TRACE_LIFECYCLE_ACTION];
   timestamp: number;
 }
 
 /** Emitted when the transport connection status changes. */
 export interface DataBusStatusTraceEvent {
-  type: 'status';
+  type: typeof TRACE_EVENT_TYPE.STATUS;
   status: WorkerStatus;
   timestamp: number;
 }
 
 /** Emitted when a topic subscription is added or removed. */
 export interface DataBusSubscriptionTraceEvent {
-  type: 'subscription';
-  action: 'subscribe' | 'unsubscribe';
+  type: typeof TRACE_EVENT_TYPE.SUBSCRIPTION;
+  action: (typeof SUBSCRIPTION_ACTION)[keyof typeof SUBSCRIPTION_ACTION];
   topic: string;
   activeTopics: number;
   timestamp: number;
@@ -40,7 +53,7 @@ export interface DataBusSubscriptionTraceEvent {
 
 /** Emitted on each reconciliation round to record whether the cluster coordinated. */
 export interface DataBusCoordinationTraceEvent {
-  type: 'coordination';
+  type: typeof TRACE_EVENT_TYPE.COORDINATION;
   coordinated: boolean;
   activeWorkers: number;
   workers: string[];
@@ -50,20 +63,20 @@ export interface DataBusCoordinationTraceEvent {
 
 /** Emitted when a transport or operation error occurs. */
 export interface DataBusErrorTraceEvent {
-  type: 'error';
-  source: 'transport' | 'operation';
+  type: typeof TRACE_EVENT_TYPE.ERROR;
+  source: (typeof TRACE_ERROR_SOURCE)[keyof typeof TRACE_ERROR_SOURCE];
   timestamp: number;
 }
 
 /** Bounded reliability diagnostics for recovery, acknowledgments, and migrations. */
 export interface DataBusReliabilityTraceEvent {
-  type: 'reliability';
-  operation: 'transport_recovery' | 'route_ack' | 'route_migration' | 'persistence_cleanup' | 'persistence_retry' | 'dedup_suppressed';
+  type: typeof TRACE_EVENT_TYPE.RELIABILITY;
+  operation: (typeof RELIABILITY_OPERATION)[keyof typeof RELIABILITY_OPERATION];
   topic?: string;
-  persistenceOperation?: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore';
+  persistenceOperation?: (typeof PERSISTENCE_OPERATION)[keyof typeof PERSISTENCE_OPERATION];
   attempt?: number;
   /** Outcome for a transport recovery attempt. */
-  outcome?: 'scheduled' | 'succeeded' | 'failed' | 'exhausted';
+  outcome?: (typeof RECOVERY_OUTCOME)[keyof typeof RECOVERY_OUTCOME];
   durationMs?: number;
   timestamp: number;
 }
@@ -74,7 +87,7 @@ export interface DataBusReliabilityTraceEvent {
  * `metricsIntervalMs`.
  */
 export interface DataBusMetricsTraceEvent {
-  type: 'message_metrics';
+  type: typeof TRACE_EVENT_TYPE.MESSAGE_METRICS;
   durationMs: number;
   received: number;
   dispatched: number;
@@ -176,7 +189,7 @@ export class DataBusTraceReporter {
   /** Start the periodic metrics flush interval. No-op when mode is 'events'
    * (no metrics to emit), when disabled, or when already running. */
   start(): void {
-    if (!this.enabled || this.intervalHandle || this.mode === 'events') return;
+    if (!this.enabled || this.intervalHandle || this.mode === TRACE_MODE.EVENTS) return;
     this.stopped = false;
     this.intervalStartedAt = this.now();
     this.intervalHandle = setInterval(() => this.flush(), this.metricsIntervalMs);
@@ -197,7 +210,7 @@ export class DataBusTraceReporter {
 
   /** Record an instantaneous trace event (lifecycle, status, error, etc.). */
   event(event: DataBusTraceEventInput): void {
-    if (!this.enabled || this.mode === 'metrics') return;
+    if (!this.enabled || this.mode === TRACE_MODE.METRICS) return;
     this.emit({ ...event, timestamp: this.now() } as DataBusTraceEvent);
   }
 
@@ -268,7 +281,7 @@ export class DataBusTraceReporter {
    * Extracted so the four record / flush methods share one guard expression
    * instead of repeating `!this.enabled || this.mode === 'events'` at each. */
   private get metricsActive(): boolean {
-    return this.enabled && this.mode !== 'events';
+    return this.enabled && this.mode !== TRACE_MODE.EVENTS;
   }
 
   /** Emit the accumulated metrics snapshot if the interval is active. */
@@ -285,7 +298,7 @@ export class DataBusTraceReporter {
     if (this.received > 0 || this.dispatched > 0 || this.dedupAccepted > 0 || this.dedupSuppressed > 0) {
       const samples = this.latencySamples;
       this.emit({
-        type: 'message_metrics',
+        type: TRACE_EVENT_TYPE.MESSAGE_METRICS,
         durationMs: Math.max(0, timestamp - this.intervalStartedAt),
         received: this.received,
         dispatched: this.dispatched,
@@ -341,7 +354,7 @@ export class DataBusTraceReporter {
       // Diagnostics must never affect data delivery, but surface a broken sink
       // so instrumentation bugs are not silently hidden.
       if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-        console.warn('[cross-tab-worker-databus] trace sink threw:', error);
+        console.warn(`[${DEFAULT_STORAGE_PREFIX}] trace sink threw:`, error);
       }
     }
   }

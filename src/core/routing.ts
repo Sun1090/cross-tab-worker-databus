@@ -6,6 +6,7 @@
  * them straightforward to test and reason about.
  */
 import type { WorkerRecord, WorkerRoute } from './types';
+import { TAB_VISIBILITY, WORKER_STATUS } from '../utils/constants';
 
 /** Default cap on the number of Workers that can own topics concurrently.
  * Limits fan-out breadth: only N workers are eligible to be new-route
@@ -50,9 +51,11 @@ export function selectActiveWorkers(
   workers: readonly WorkerRecord[],
   maxActiveWorkers = DEFAULT_MAX_ACTIVE_WORKERS
 ): WorkerRecord[] {
-  const healthyWorkers = workers.filter(worker => worker.status === 'connecting' || worker.status === 'connected');
+  const healthyWorkers = workers.filter(
+    worker => worker.status === WORKER_STATUS.CONNECTING || worker.status === WORKER_STATUS.CONNECTED
+  );
   const availableWorkers = healthyWorkers.length > 0 ? healthyWorkers : [...workers];
-  const visibleWorkers = availableWorkers.filter(worker => worker.visibilityState === 'visible');
+  const visibleWorkers = availableWorkers.filter(worker => worker.visibilityState === TAB_VISIBILITY.VISIBLE);
   const candidates = visibleWorkers.length > 0 ? visibleWorkers : availableWorkers;
   return candidates
     .sort(

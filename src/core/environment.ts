@@ -6,6 +6,8 @@
  * with custom adapters injected via `ClusterEnvironment`.
  */
 import type { TabVisibilityState, WorkerClusterMessage } from './types';
+import { CHANNEL_FALLBACK, STORAGE_CHANNEL_PREFIX, TAB_ID_STORAGE_KEY, TAB_VISIBILITY } from '../utils/constants';
+import type { EVENT_TYPE } from '../utils/constants';
 
 /** Minimal storage interface compatible with both localStorage and MemoryStorage. */
 export interface StorageLike {
@@ -19,8 +21,8 @@ export interface StorageLike {
 
 /** Minimal BroadcastChannel interface. The cluster uses it for control messages and event fan-out. */
 export interface ClusterChannel {
-  addEventListener(type: 'message', listener: (event: MessageEvent<WorkerClusterMessage>) => void): void;
-  removeEventListener(type: 'message', listener: (event: MessageEvent<WorkerClusterMessage>) => void): void;
+  addEventListener(type: typeof EVENT_TYPE.MESSAGE, listener: (event: MessageEvent<WorkerClusterMessage>) => void): void;
+  removeEventListener(type: typeof EVENT_TYPE.MESSAGE, listener: (event: MessageEvent<WorkerClusterMessage>) => void): void;
   postMessage(message: WorkerClusterMessage): void;
   close(): void;
 }
@@ -86,9 +88,6 @@ export interface StorageEventWindow {
   addEventListener(type: 'storage', listener: (event: { key: string | null; newValue: string | null }) => void): void;
   removeEventListener(type: 'storage', listener: (event: { key: string | null; newValue: string | null }) => void): void;
 }
-
-/** localStorage key prefix for storage-event channel payloads. */
-const STORAGE_CHANNEL_PREFIX = 'cross-tab-worker-databus:channel:';
 
 /**
  * Create a {@link ClusterChannel} backed by localStorage `storage` events, as
@@ -178,9 +177,9 @@ export function createBrowserEnvironment(options?: {
   /** When BroadcastChannel is unavailable, fall back to a localStorage
    * storage-event channel instead of degrading to local mode. Opt-in because
    * the fallback persists coordination payloads in localStorage. */
-  channelFallback?: 'none' | 'storage-event';
+  channelFallback?: (typeof CHANNEL_FALLBACK)[keyof typeof CHANNEL_FALLBACK];
 }): ClusterEnvironment {
-  const channelFallback = options?.channelFallback ?? 'none';
+  const channelFallback = options?.channelFallback ?? CHANNEL_FALLBACK.NONE;
   return {
     storage: getStorage('localStorage'),
     sessionStorage: getStorage('sessionStorage'),
@@ -192,7 +191,7 @@ export function createBrowserEnvironment(options?: {
       } catch {
         // fall through to the storage-event fallback.
       }
-      return channelFallback === 'storage-event'
+      return channelFallback === CHANNEL_FALLBACK.STORAGE_EVENT
         ? createStorageEventChannel({
             name,
             storage: getStorage('localStorage'),
@@ -203,7 +202,9 @@ export function createBrowserEnvironment(options?: {
     setInterval: (callback, intervalMs) => globalThis.setInterval(callback, intervalMs),
     clearInterval: handle => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
     getVisibilityState: () =>
-      typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 'hidden' : 'visible',
+      typeof document !== 'undefined' && document.visibilityState === TAB_VISIBILITY.HIDDEN
+        ? TAB_VISIBILITY.HIDDEN
+        : TAB_VISIBILITY.VISIBLE,
     addVisibilityChangeListener: listener => {
       if (typeof document !== 'undefined') document.addEventListener('visibilitychange', listener);
     },
@@ -251,7 +252,7 @@ export function canUseStorage(storage: StorageLike | null, probeKey: string): st
  */
 export function getOrCreateTabId(
   environment: ClusterEnvironment,
-  key = 'cross-tab-worker-databus:tab-id'
+  key = TAB_ID_STORAGE_KEY
 ): string {
   const storage = environment.sessionStorage;
   try {

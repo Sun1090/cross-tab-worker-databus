@@ -15,6 +15,7 @@
 import { CrossTabDataBus } from './core/data-bus';
 import { parseDataBusPublication } from './core/publication';
 import type { CrossTabDataBusOptions } from './core/data-bus';
+import { WS_OP, WORKER_STATUS } from './utils/constants';
 import type {
   DataBusTransport,
   DataBusTransportHandlers,
@@ -92,7 +93,7 @@ export class WebSocketTransport<TData = unknown>
     try {
       socket = factory(config.url, protocols);
     } catch (error) {
-      handlers.onStatus('error');
+      handlers.onStatus(WORKER_STATUS.ERROR);
       handlers.onError(error);
       return;
     }
@@ -101,15 +102,15 @@ export class WebSocketTransport<TData = unknown>
       // Re-assert every topic so a reopened socket (recovery path) restores
       // the server-side subscriptions without DataBus involvement.
       for (const topic of this.subscribedTopics) {
-        this.sendFrame({ op: 'subscribe', topic });
+        this.sendFrame({ op: WS_OP.SUBSCRIBE, topic });
       }
-      handlers.onStatus('connected');
+      handlers.onStatus(WORKER_STATUS.CONNECTED);
     };
     socket.onclose = () => {
-      if (this.socket === socket && this.handlers === handlers) handlers.onStatus('disconnected');
+      if (this.socket === socket && this.handlers === handlers) handlers.onStatus(WORKER_STATUS.DISCONNECTED);
     };
     socket.onerror = () => {
-      if (this.socket === socket && this.handlers === handlers) handlers.onStatus('error');
+      if (this.socket === socket && this.handlers === handlers) handlers.onStatus(WORKER_STATUS.ERROR);
     };
     socket.onmessage = event => {
       if (this.socket === socket && this.handlers === handlers) void this.handleMessage(event.data);
@@ -121,13 +122,13 @@ export class WebSocketTransport<TData = unknown>
    * not duplicate the local tracking entry. */
   subscribe(topic: string): MaybePromise<void> {
     this.subscribedTopics.add(topic);
-    this.sendFrame({ op: 'subscribe', topic });
+    this.sendFrame({ op: WS_OP.SUBSCRIBE, topic });
   }
 
   /** Idempotent: unsubscribing an unknown topic is a no-op. */
   unsubscribe(topic: string): MaybePromise<void> {
     this.subscribedTopics.delete(topic);
-    this.sendFrame({ op: 'unsubscribe', topic });
+    this.sendFrame({ op: WS_OP.UNSUBSCRIBE, topic });
   }
 
   /** Publish `data` to `topic` as a JSON frame. Requires an open socket. */
@@ -137,7 +138,7 @@ export class WebSocketTransport<TData = unknown>
       return;
     }
     this.sendFrame({
-      op: 'publish',
+      op: WS_OP.PUBLISH,
       topic,
       data,
       ...(options?.messageId === undefined ? {} : { messageId: options.messageId }),
@@ -164,7 +165,7 @@ export class WebSocketTransport<TData = unknown>
     // Binary payloads are embedded as byte arrays so the whole batch stays in
     // one JSON frame; the server re-fans them out as individual publications.
     this.socket.send(JSON.stringify({
-      op: 'publishBatch',
+      op: WS_OP.PUBLISH_BATCH,
       topic,
       items: items.map(item => ({
         data: item.data instanceof ArrayBuffer ? Array.from(new Uint8Array(item.data)) : item.data,
@@ -199,7 +200,7 @@ export class WebSocketTransport<TData = unknown>
       // Binary frames retain their compact legacy shape; metadata is sent as a
       // JSON envelope so IDs are never silently lost.
       this.sendFrame({
-        op: 'publish',
+        op: WS_OP.PUBLISH,
         topic,
         data: Array.from(new Uint8Array(data)),
         ...(messageId === undefined ? {} : { messageId }),

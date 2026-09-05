@@ -6,6 +6,7 @@ import type {
   CentrifugeWorkerOutput
 } from '../src/centrifuge-protocol';
 import { createFakeEnvironment, MemoryStorage } from './fakes';
+import { EVENT_TYPE } from '../src/utils/constants';
 
 const { FakeCentrifuge } = vi.hoisted(() => {
   type AnyListener = (context: unknown) => void;
@@ -64,19 +65,19 @@ class WorkerDouble {
   private readonly messageListeners = new Set<(event: MessageEvent<CentrifugeWorkerOutput>) => void>();
 
   addEventListener(
-    type: 'message' | 'error',
+    type: typeof EVENT_TYPE.MESSAGE | typeof EVENT_TYPE.ERROR,
     listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
-    if (type === 'error') this.errorListeners.add(listener as (event: ErrorEvent) => void);
-    if (type === 'message') this.messageListeners.add(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === EVENT_TYPE.ERROR) this.errorListeners.add(listener as (event: ErrorEvent) => void);
+    if (type === EVENT_TYPE.MESSAGE) this.messageListeners.add(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
   }
 
   removeEventListener(
-    type: 'message' | 'error',
+    type: typeof EVENT_TYPE.MESSAGE | typeof EVENT_TYPE.ERROR,
     listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
-    if (type === 'error') this.errorListeners.delete(listener as (event: ErrorEvent) => void);
-    if (type === 'message') this.messageListeners.delete(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === EVENT_TYPE.ERROR) this.errorListeners.delete(listener as (event: ErrorEvent) => void);
+    if (type === EVENT_TYPE.MESSAGE) this.messageListeners.delete(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
   }
 
   terminate(): void {
@@ -109,21 +110,21 @@ class PortDouble {
   private readonly decodeErrorListeners = new Set<(event: ErrorEvent) => void>();
 
   addEventListener(
-    type: 'message' | 'messageerror',
+    type: typeof EVENT_TYPE.MESSAGE | typeof EVENT_TYPE.MESSAGEERROR,
     listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
     this.activeListeners.add(type);
-    if (type === 'message') this.messageListeners.add(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
-    if (type === 'messageerror') this.decodeErrorListeners.add(listener as (event: ErrorEvent) => void);
+    if (type === EVENT_TYPE.MESSAGE) this.messageListeners.add(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === EVENT_TYPE.MESSAGEERROR) this.decodeErrorListeners.add(listener as (event: ErrorEvent) => void);
   }
 
   removeEventListener(
-    type: 'message' | 'messageerror',
+    type: typeof EVENT_TYPE.MESSAGE | typeof EVENT_TYPE.MESSAGEERROR,
     listener: (event: MessageEvent<CentrifugeWorkerOutput> | ErrorEvent) => void
   ): void {
     this.activeListeners.delete(type);
-    if (type === 'message') this.messageListeners.delete(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
-    if (type === 'messageerror') this.decodeErrorListeners.delete(listener as (event: ErrorEvent) => void);
+    if (type === EVENT_TYPE.MESSAGE) this.messageListeners.delete(listener as (event: MessageEvent<CentrifugeWorkerOutput>) => void);
+    if (type === EVENT_TYPE.MESSAGEERROR) this.decodeErrorListeners.delete(listener as (event: ErrorEvent) => void);
   }
 
   failDecode(): void {

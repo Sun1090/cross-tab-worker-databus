@@ -12,15 +12,16 @@ import {
   topicMatchesPattern
 } from '../../src/core/routing';
 import type { WorkerRecord } from '../../src/core/types';
+import { TAB_VISIBILITY, WORKER_ROLE, WORKER_STATUS } from '../../src/utils/constants';
 
 function makeWorkers(count: number): WorkerRecord[] {
   return Array.from({ length: count }, (_, index) => ({
     workerId: `worker-${index.toString().padStart(3, '0')}`,
     tabId: `tab-${index}`,
     load: index % 7,
-    role: 'active' as const,
-    status: 'connected' as const,
-    visibilityState: index % 3 === 0 ? 'hidden' : 'visible',
+    role: WORKER_ROLE.ACTIVE,
+    status: WORKER_STATUS.CONNECTED,
+    visibilityState: index % 3 === 0 ? TAB_VISIBILITY.HIDDEN : TAB_VISIBILITY.VISIBLE,
     heartbeatAt: 1_000,
     registeredAt: index
   }));

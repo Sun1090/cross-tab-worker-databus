@@ -6,6 +6,7 @@
  * on quota/failure. Keeps the coordination metadata writes off the hot path.
  */
 import type { StorageLike } from './environment';
+import { DEFAULT_STORAGE_PREFIX } from '../utils/constants';
 
 /** Initial retry delay for a failed storage write (ms). */
 const INITIAL_RETRY_DELAY_MS = 50;
@@ -107,7 +108,7 @@ export class BatchingStorageWriter implements StorageLike {
           this.pending.delete(key);
           this.retryCount.delete(key);
           if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-            console.warn('[cross-tab-worker-databus] storage write gave up after retries, dropping key:', key);
+            console.warn(`[${DEFAULT_STORAGE_PREFIX}] storage write gave up after retries, dropping key:`, key);
           }
           continue;
         }

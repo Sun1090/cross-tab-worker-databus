@@ -5,9 +5,17 @@
  * (dedicated or shared) that runs a centrifuge client. The worker is isolated
  * from the main thread so that WebSocket lifecycle, token refresh, and binary
  * data handling never block the UI.
+ *
+ * The message `type` discriminant values are derived from the constants in
+ * `utils/constants.ts` so main-thread and Worker sides reference the same
+ * values and can never drift apart.
  */
 import type { Options } from 'centrifuge';
+import type { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from './utils/constants';
 import type { WorkerStatus } from './core/types';
+import type { SerializedWorkerError } from './utils/error-utils';
+
+export type { SerializedWorkerError } from './utils/error-utils';
 
 /**
  * Default interval between main-thread PING heartbeats to a SharedWorker. The
@@ -52,42 +60,28 @@ export type CentrifugeWorkerInput =
   /** Initial connection: URL + config. Sent once per backend creation.
    * `transferable` enables ArrayBuffer zero-copy for subsequent PUBLISH_BIN.
    * `heartbeatIntervalMs` overrides the SharedWorker PING cadence. */
-  | { type: 'INIT'; url: string; config: CentrifugeWorkerConfig; transferable?: boolean; heartbeatIntervalMs?: number }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.INIT; url: string; config: CentrifugeWorkerConfig; transferable?: boolean; heartbeatIntervalMs?: number }
   /** Subscribe to a channel. Idempotent — re-subscribing is a no-op. */
-  | { type: 'SUBSCRIBE'; topic: string }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.SUBSCRIBE; topic: string }
   /** Unsubscribe from a channel. Idempotent. */
-  | { type: 'UNSUBSCRIBE'; topic: string }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.UNSUBSCRIBE; topic: string }
   /** Publish a structured-cloneable payload to a channel. */
-  | { type: 'PUBLISH'; topic: string; data: unknown; messageId?: string; timestamp?: number }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.PUBLISH; topic: string; data: unknown; messageId?: string; timestamp?: number }
   /** Publish an ArrayBuffer via Transferable (zero-copy when `transferable` is on). */
-  | { type: 'PUBLISH_BIN'; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.PUBLISH_BIN; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
   /** Heartbeat from the main thread; the SharedWorker reaps silent ports. */
-  | { type: 'PING' }
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.PING }
   /** Disconnect the client and clear all subscriptions. */
-  | { type: 'STOP' };
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.STOP };
 
 /** Messages sent from the Worker back to the main thread. The main thread
  * routes these to the DataBusTransportHandlers via handleOutput(). */
 export type CentrifugeWorkerOutput<TData = unknown> =
   /** Connection status changed. Maps Centrifuge states to the DataBus vocabulary. */
-  | { type: 'STATUS'; status: WorkerStatus }
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.STATUS; status: WorkerStatus }
   /** A JSON publication arrived. Routed to onMessage via handleOutput. */
-  | { type: 'MESSAGE'; topic: string; data: TData; messageId?: string; timestamp?: number }
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.MESSAGE; topic: string; data: TData; messageId?: string; timestamp?: number }
   /** A binary publication arrived (Transferable). Routed to onMessage with the ArrayBuffer. */
-  | { type: 'MESSAGE_BIN'; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
   /** A non-fatal error occurred. Does not imply disconnection (the client retries internally). */
-  | { type: 'ERROR'; error: SerializedWorkerError };
-
-/** Error object serialized for cross-thread transfer. Error instances cannot
- * be structured-cloned via postMessage, so the Worker converts them to this
- * shape and the main thread rebuilds an Error via deserializeWorkerError(). */
-export interface SerializedWorkerError {
-  /** The Error's `name` (e.g. 'TypeError', 'CentrifugeError'). */
-  name: string;
-  /** The Error's `message`. */
-  message: string;
-  /** The Error's `stack` if available (for debugging). */
-  stack?: string;
-  /** Arbitrary context attached by the Worker (e.g. the failing operation). */
-  context?: unknown;
-}
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.ERROR; error: SerializedWorkerError };
