@@ -83,11 +83,12 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Verify published npm consumers
+        # Blocking: a release whose published package cannot be consumed is a
+        # failed release. The retry budget covers registry propagation lag.
         id: verify_published
-        continue-on-error: true
         env:
           PUBLISHED_VERSION: ${{ inputs.tag || github.ref_name }}
-          PUBLISHED_VERIFY_ATTEMPTS: 12
+          PUBLISHED_VERIFY_ATTEMPTS: 24
           PUBLISHED_VERIFY_DELAY_MS: 5000
         run: pnpm verify:published
 

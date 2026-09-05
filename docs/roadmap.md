@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.78 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.79 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.79 delivered scope
+
+- Published-consumer verification became a blocking release gate, and the lost-handoff-ACK recovery chain (TTL cleanup + resume re-election) is pinned by a regression.
 
 ## 0.20.78 delivered scope
 
