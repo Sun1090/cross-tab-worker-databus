@@ -465,6 +465,17 @@ If a Tab still subscribed to a Topic finds that the owner Worker has departed or
 
 This process prevents overlap during graceful owner handoff while retaining availability during failure recovery; it does not guarantee exactly-once delivery.
 
+## Stability Invariants
+
+These invariants are pinned by regression tests (see `tests/stability.test.ts` and `tests/replay-persistence.test.ts`) and must hold through future refactors:
+
+- **Handoff ACK validity.** A `ROUTE_RELEASED` is accepted only when the route still points at the receiver, the release comes from the recorded `handoffFromWorkerId`, and the ACK generation is at least as new as the stored route generation. Replayed ACKs from an earlier handoff round (e.g. an a↔b ping-pong) carry an older generation and are dropped.
+- **Replay persistence cleanup ordering.** A batched persistence flush queued behind the current task is filtered against the cleanup that wins the race: `unsubscribe` and `clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff. Cleared history is never re-appended by an in-flight flush.
+- **Storage write recovery.** Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap). A structurally failing key is dropped after 5 attempts (with a `console.warn`) without permanently blocking other queued keys, and the backoff delay resets once the queue fully drains or `clear()` cancels the retries.
+- **Transport recovery budget.** Automatic recovery is paced by a cooldown, bounded by `recovery.maxAttempts`, and reports `exhausted` when the budget is spent. A successful reopen resets the attempt counter and the exhausted flag; explicit `subscribe` on a down transport can still recover manually.
+- **BFCache suspension.** Hiding the tab stops the transport, bumps the persistence-retry generation (cancelling in-flight persistence retries without surfacing errors), and gates dispatch; pageshow reopens the transport and re-establishes subscriptions exactly once per cycle.
+- **Recovery diagnostics.** `getHealthSummary()` derives a single readiness verdict from the lifecycle flags (`stopped` / `starting` / `healthy` / `recovering` / `suspended` / `degraded`); the unified `lastFailure` ledger and persistence counters reset on every explicit `start()`.
+
 ## Transport Reconnection
 
 DataBus separates "business subscription intent" from "transport current subscription state". When the transport reports `disconnected` / `error`, it only clears the underlying subscription flag, not the business handler; when it re-enters `connected`, DataBus automatically replays the Topics the current Worker is responsible for.

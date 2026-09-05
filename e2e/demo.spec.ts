@@ -126,6 +126,61 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(survivorB)).toBe(1);
   });
 
+  test('concurrent multi-publisher burst stays duplicate-free across all tabs', async ({ context }) => {
+    const topic = `e2e.burst.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+    const tabC = await openDemoTab(context);
+    await connectDemo(tabC, 'dedicated', topic);
+    const tabs = [tabA, tabB, tabC];
+
+    await expect
+      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length)
+      .toBe(1);
+
+    // All three tabs publish three messages each in parallel — non-owner
+    // publishers route through CONTROL, the owner fans out via EVENT. Every
+    // tab must observe every message exactly once.
+    const perTab = 3;
+    const before = await Promise.all(tabs.map(receivedCount));
+    await Promise.all(tabs.map(tab => Array.from({ length: perTab }, () => publishJson(tab))));
+
+    const expected = before.map(count => count + perTab * tabs.length);
+    for (let index = 0; index < tabs.length; index += 1) {
+      await expect.poll(receivedCount.bind(null, tabs[index]!), { timeout: 30_000 }).toBe(expected[index]);
+    }
+  });
+
+  test('re-applying the connection rebuilds the bus and rejoins the cluster', async ({ context }) => {
+    const topic = `e2e.reapply.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+
+    const tabs = [tabA, tabB];
+    await expect
+      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length)
+      .toBe(1);
+
+    // Full stop/start of tabB's bus while tabA keeps running: the stopped tab
+    // releases its records, then rejoins and keeps receiving. Ownership must
+    // stay unique across the restart.
+    await tabB.click('#applyConnection');
+    await expect(tabB.locator('#statusBadge')).toHaveText('已连接');
+    await expect
+      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, {
+        timeout: 30_000
+      })
+      .toBe(1);
+
+    const beforeB = await receivedCount(tabB);
+    await publishJson(tabA);
+    await expect.poll(() => receivedCount(tabB)).toBe(beforeB + 1);
+  });
+
   test('reload: a refreshed tab re-subscribes and keeps receiving', async ({ context }) => {
     const topic = `e2e.reload.${Date.now()}`;
     const tabA = await openDemoTab(context);
