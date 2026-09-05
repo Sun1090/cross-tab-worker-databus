@@ -26,7 +26,8 @@
 | 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调 |
 | 诊断 | `getHealthSummary()` 单对象健康判定与统一失败账本 | ✅ 已实现 | `healthy`/`state` 覆盖未启动、启动中、恢复中、BFCache 挂起与恢复耗尽降级；`lastFailure` 统一 transport/persistence/dispatch 来源，`start()` 时重置 |
 | 性能 | 协调元数据批量写入 + 退避重试 | ✅ 已实现 | 心跳、路由和 subscriber 写入合并后在微任务中 flush；失败时指数退避；`pagehide` / `stop()` 同步 flush |
-| 性能 | 可选 ArrayBuffer Transferable 传输 | ✅ 已实现 | 开启 `transferable: true` 后，二进制 publish/receive 跳过 structured clone 复制；对象消息 API 不变 |
+| 性能 | 可选 ArrayBuffer Transferable 传输 | ✅ 已实现 |
+| 性能 | 可选 `DataBusTransport.publishBatch` 单帧突发发布 | ✅ 已实现 | 内置 WebSocket transport 将多条消息合并为一帧（`publishBatch` op，demo server 已支持）；无批量能力的 transport 回退逐条 `publish` | 开启 `transferable: true` 后，二进制 publish/receive 跳过 structured clone 复制；对象消息 API 不变 |
 | 消息语义 | exactly-once 投递 | 未实现 | 正常交接会避免重叠，但异常恢复和 transport/服务端行为仍不提供 exactly-once 保证 |
 | 消息语义 | 可插拔的 publication 去重 | ✅ 已实现 | 按 `DataBusMessage.messageId` 做可选有界入站抑制；默认关闭，ID 仍由调用方/服务端控制 |
 | 认证 | Worker 内异步凭证刷新桥接 | 规划中 | 当前 Worker 配置必须可结构化克隆，不能传递函数 |

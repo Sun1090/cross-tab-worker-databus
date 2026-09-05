@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.80 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.81 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.81 delivered scope
+
+- The browser benchmark gained the data-bus hot-path matrix, health summaries are asserted end to end in E2E, and the storage-event channel plus transport batching joined the API docs and capabilities matrix.
 
 ## 0.20.80 delivered scope
 

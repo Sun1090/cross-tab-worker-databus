@@ -315,6 +315,18 @@ const transport = new CentrifugeWorkerTransport({
 - `workerFactory`：自定义 Dedicated Worker 加载方式
 - `sharedWorkerFactory`：自定义 SharedWorker 加载方式
 
+## `createStorageEventChannel(options)`
+
+```ts
+createStorageEventChannel(options: {
+  name: string;
+  storage: StorageLike | null;
+  win: StorageEventWindow | null;
+}): ClusterChannel | null
+```
+
+创建以 localStorage `storage` 事件为载体的 `ClusterChannel`——面向无 BroadcastChannel 环境的协调降级通道。storage 或 storage-event 来源缺失时返回 `null`。投递语义与 BroadcastChannel 一致（不回显给发送方、消息可 JSON 序列化、关闭后拒绝再写入）；载荷信封内的单调序列号保证连续相同消息仍可投递。通过 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 启用；安全权衡见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
+
 ## WebSocket 传输后端
 
 基于原生 WebSocket 的零依赖传输。任何实现下列 JSON 帧协议的服务器都能驱动与 Centrifuge 后端相同的跨 Tab 集群栈（owner 去重、粘性路由、故障转移）。
