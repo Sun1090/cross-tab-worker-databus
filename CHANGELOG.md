@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.71] - 2026-09-05
+
+### Added
+- Added optional bulk replay persistence via `appendBatch`, with IndexedDB transaction coalescing for burst publications while preserving legacy adapters.
+
 ## [0.20.70] - 2026-09-05
 
 ### Added

@@ -4,6 +4,8 @@ import type { DataBusMessage } from './types';
 export interface DataBusReplayPersistence<TData = unknown> {
   load(): Promise<ReadonlyArray<DataBusMessage<TData>>>;
   append(message: DataBusMessage<TData>): Promise<void>;
+  /** Optional bulk append used to amortize IndexedDB transaction overhead. */
+  appendBatch?(messages: ReadonlyArray<DataBusMessage<TData>>): Promise<void>;
   /** Remove all persisted replay history. */
   clear?(): Promise<void>;
   /** Remove persisted replay history for one exact topic. */
@@ -122,6 +124,35 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to persist replay history.')); };
+        });
+      });
+    },
+    appendBatch(messages) {
+      if (messages.length === 0) return Promise.resolve();
+      return serializeMutation(async () => {
+        const db = await open();
+        await new Promise<void>((resolve, reject) => {
+          let transaction: IDBTransaction;
+          try { transaction = db.transaction(storeName, 'readwrite'); }
+          catch (error) { invalidate(db); reject(error); return; }
+          const store = transaction.objectStore(storeName);
+          const grouped = new Map<string, DataBusMessage<TData>[]>();
+          for (const message of messages) grouped.set(message.topic, [...(grouped.get(message.topic) ?? []), message]);
+          for (const [topic, topicMessages] of grouped) {
+            const request = store.get(topic);
+            request.onsuccess = () => {
+              let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
+              if (pruneStrategy !== 'count' && retentionMs !== undefined) {
+                const cutoff = Date.now() - retentionMs;
+                history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
+              }
+              if (pruneStrategy !== 'age') history = history.slice(-maxPerTopic);
+              store.put({ topic, messages: history });
+            };
+            request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
+          }
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to persist replay history batch.')); };
         });
       });
     },
