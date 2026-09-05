@@ -18,6 +18,8 @@ export declare class DemoWsBusHub {
   /** Wire-frame counters for observability (e2e single-frame assertions). */
   publishFrames: number;
   publishBatchFrames: number;
+  /** Wire-frame counters keyed by topic, isolating concurrent sessions. */
+  topicFrames: Map<string, { publish: number; publishBatch: number }>;
 
   attach(connection: DemoWebSocketConnection): void;
   detach(connection: DemoWebSocketConnection): void;

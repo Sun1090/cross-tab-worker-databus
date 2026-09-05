@@ -499,14 +499,25 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     await expect.poll(() => ownerCount(page), { timeout: 30_000 }).toBe(1);
 
     const statsUrl = 'http://localhost:4173/debug/wsstats';
-    const baseline = (await (await request.get(statsUrl)).json()) as { publish: number; publishBatch: number };
+    const topicStats = async () => {
+      const stats = (await (await request.get(statsUrl)).json()) as {
+        publish: number;
+        publishBatch: number;
+        topics: Record<string, { publish: number; publishBatch: number }>;
+      };
+      // Per-topic counters isolate this test's session from concurrent tests
+      // sharing the demo server on a parallel run.
+      return stats.topics[topic] ?? { publish: 0, publishBatch: 0 };
+    };
+    const baseline = await topicStats();
 
     await page.click('#publishBatch');
     // All ten items arrive in this tab (echoed back through the batch).
     await expect.poll(() => receivedCount(page)).toBe(10);
-    const after = (await (await request.get(statsUrl)).json()) as { publish: number; publishBatch: number };
-    // Exactly one publishBatch wire frame — and no extra individual publishes,
-    // proving the burst was not decomposed into per-item frames.
+    const after = await topicStats();
+    // Exactly one publishBatch wire frame on this topic — and no extra
+    // individual publishes, proving the burst was not decomposed into
+    // per-item frames.
     expect(after.publishBatch).toBe(baseline.publishBatch + 1);
     expect(after.publish).toBe(baseline.publish);
   });
