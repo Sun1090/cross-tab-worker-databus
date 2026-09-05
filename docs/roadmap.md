@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.71 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.72 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.72 delivered scope
+
+- Expanded the benchmark matrix across publish batching, wildcard routing, deduplication, replay pruning, bulk persistence, and asynchronous trace sinks.
 
 ## 0.20.71 delivered scope
 
