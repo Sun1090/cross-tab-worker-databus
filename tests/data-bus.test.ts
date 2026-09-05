@@ -2076,6 +2076,7 @@ describe('CrossTabDataBus diagnostics', () => {
     expect(diagnostics.replay).toMatchObject({ enabled: true, topics: 1, messages: 1 });
     expect(diagnostics.dedup.enabled).toBe(true);
     expect(diagnostics.cluster.currentWorker.workerId).toBe('worker-diag');
+    expect(diagnostics.protocol).toMatchObject({ version: 1, peers: { 'worker-diag': 1 } });
     expect(diagnostics.recovery.generation).toBeGreaterThanOrEqual(1);
     await bus.stop();
   });
@@ -2259,4 +2260,3 @@ describe('adaptive dedup TTL', () => {
     await bus.stop();
   });
 });
-

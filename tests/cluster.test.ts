@@ -454,6 +454,36 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('reports versioned and legacy peer capabilities in its snapshot', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'capability-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'capability-b' });
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'capabilities', environment: envA.environment, tabId: 'tab-a', workerId: 'worker-a',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'capabilities', environment: envB.environment, tabId: 'tab-b', workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    await Promise.resolve();
+
+    expect(runtimeA.getSnapshot().peerProtocolVersions).toEqual({ 'worker-a': 1, 'worker-b': 1 });
+    const legacyEntry = storage.entries().find(([key, value]) => key.includes(':worker:worker-b') && value.includes('worker-b'));
+    expect(legacyEntry).toBeDefined();
+    const [legacyKey, legacyValue] = legacyEntry!;
+    const legacyRecord = JSON.parse(legacyValue) as Record<string, unknown>;
+    delete legacyRecord.protocolVersion;
+    storage.setItem(legacyKey, JSON.stringify(legacyRecord));
+
+    expect(runtimeA.getSnapshot().peerProtocolVersions).toEqual({ 'worker-a': 1, 'worker-b': null });
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
   it('falls back to the local worker when BroadcastChannel is unavailable', () => {
     const storage = new MemoryStorage();
     const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'local' });

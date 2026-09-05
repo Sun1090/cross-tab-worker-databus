@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.67 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.69 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.69 delivered scope
+
+- Added peer protocol capability discovery to cluster snapshots and diagnostics. Current runtimes advertise protocol version 1; legacy peers remain visible as `null`.
 
 ## 0.20.67 delivered scope
 
