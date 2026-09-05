@@ -2115,6 +2115,35 @@ describe('CrossTabDataBus diagnostics', () => {
     await bus.stop();
   });
 
+  it('exposes the current trace metrics window via getMetrics and getDiagnostics', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'metrics' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'metrics', environment: env.environment, tabId: 'tab-metrics', workerId: 'worker-metrics', transport, trace: { enabled: true, sink: () => {} } });
+    await bus.start({});
+    await bus.ready();
+    bus.subscribe('metrics-topic', () => {});
+    transport.emit('metrics-topic', 1);
+    await Promise.resolve();
+
+    const metrics = bus.getMetrics();
+    expect(metrics).not.toBeNull();
+    expect(metrics).toMatchObject({ received: 1, dispatched: 1, topics: 1 });
+    // The same counters ride inside the unified diagnostics snapshot.
+    expect(bus.getDiagnostics().metrics).toMatchObject({ received: 1, dispatched: 1 });
+    await bus.stop();
+  });
+
+  it('getMetrics returns null when trace metrics are disabled', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'metrics-off' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({ clusterKey: 'metrics-off', environment: env.environment, transport, trace: { enabled: false, sink: () => {} } });
+    await bus.start({});
+    await bus.ready();
+    expect(bus.getMetrics()).toBeNull();
+    expect(bus.getDiagnostics().metrics).toBeNull();
+    await bus.stop();
+  });
+
   it('reports a healthy summary while started, visible, and connected', async () => {
     const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-ok' });
     const transport = new FakeTransport<number>();

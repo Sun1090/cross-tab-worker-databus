@@ -102,6 +102,32 @@ export interface DataBusMetricsTraceEvent {
   timestamp: number;
 }
 
+/**
+ * Synchronous metrics snapshot: same derived counters as a periodic
+ * `message_metrics` event, but queryable on demand (e.g. from
+ * `getDiagnostics()`) without a sink or an interval flush, and without
+ * resetting the aggregation window.
+ */
+export interface DataBusMetricsSnapshot {
+  /** Milliseconds elapsed in the current aggregation window. */
+  durationMs: number;
+  /** Messages received in the window. */
+  received: number;
+  /** Messages dispatched locally in the window. */
+  dispatched: number;
+  /** Distinct topics touched in the window. */
+  topics: number;
+  /** Latency samples collected in the window. */
+  dispatchSamples: number;
+  dispatchAvgMs: number;
+  dispatchP50Ms: number;
+  dispatchP95Ms: number;
+  dispatchMaxMs: number;
+  dedupAccepted: number;
+  dedupSuppressed: number;
+  timestamp: number;
+}
+
 export type DataBusTraceEvent =
   | DataBusLifecycleTraceEvent
   | DataBusStatusTraceEvent
@@ -212,6 +238,30 @@ export class DataBusTraceReporter {
   event(event: DataBusTraceEventInput): void {
     if (!this.enabled || this.mode === TRACE_MODE.METRICS) return;
     this.emit({ ...event, timestamp: this.now() } as DataBusTraceEvent);
+  }
+
+  /** Synchronous snapshot of the current metrics window without resetting it.
+   * Returns the same derived counters as a periodic `message_metrics` event,
+   * or null when metrics recording is inactive (disabled or events-only mode).
+   * The window keeps accumulating until the next interval flush. */
+  getMetrics(): DataBusMetricsSnapshot | null {
+    if (!this.metricsActive || this.stopped) return null;
+    const timestamp = this.now();
+    const samples = this.latencySamples;
+    return {
+      durationMs: Math.max(0, timestamp - this.intervalStartedAt),
+      received: this.received,
+      dispatched: this.dispatched,
+      topics: this.topics.size,
+      dispatchSamples: samples,
+      dispatchAvgMs: roundMs(samples === 0 ? 0 : this.latencySumMs / samples),
+      dispatchP50Ms: roundMs(percentileMs(this.latencyBuckets, samples, 0.5)),
+      dispatchP95Ms: roundMs(percentileMs(this.latencyBuckets, samples, 0.95)),
+      dispatchMaxMs: roundMs(percentileMs(this.latencyBuckets, samples, 1)),
+      dedupAccepted: this.dedupAccepted,
+      dedupSuppressed: this.dedupSuppressed,
+      timestamp
+    };
   }
 
   /** Record that a message was received on `topic`; stores its timestamp for latency tracking. */

@@ -18,7 +18,7 @@ import type {
   WorkerStatus
 } from './types';
 import { DataBusTraceReporter } from './trace';
-import type { DataBusTraceOptions } from './trace';
+import type { DataBusMetricsSnapshot, DataBusTraceOptions } from './trace';
 import type { DataBusReplayPersistence } from './replay-persistence';
 import { PersistenceRetryCancelledError, ReplayManager } from './replay-manager';
 import { DedupManager } from './dedup-manager';
@@ -92,6 +92,8 @@ export interface DataBusDiagnostics {
   protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null; peers: Record<string, number | null> };
   transport: { name: string; backend: string | null; status: WorkerStatus; suspended: boolean };
   cluster: WorkerClusterSnapshot;
+  /** Current trace metrics window counters, or null when metrics are inactive. */
+  metrics: DataBusMetricsSnapshot | null;
 }
 
 /** Where a retained failure originated, as surfaced by {@link DataBusHealthSummary}. */
@@ -723,8 +725,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         status: this.status,
         suspended: this.suspended
       },
-      cluster
+      cluster,
+      metrics: this.trace.getMetrics()
     };
+  }
+
+  /** Synchronous snapshot of the current trace metrics window (throughput,
+   * dispatch latency, dedup outcomes), without flushing or resetting it.
+   * Returns null when trace metrics are inactive (disabled or events-only). */
+  getMetrics(): DataBusMetricsSnapshot | null {
+    return this.trace.getMetrics();
   }
 
   /**

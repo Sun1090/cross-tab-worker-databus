@@ -260,6 +260,56 @@ describe('DataBusTraceReporter', () => {
     ]);
   });
 
+  it('getMetrics snapshots the current window without resetting it', () => {
+    let now = 0;
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      mode: 'metrics',
+      now: () => now,
+      metricsIntervalMs: 1_000,
+      sink: collect(events)
+    });
+    reporter.start();
+    reporter.recordReceived('t');
+    now += 100;
+    reporter.recordDispatched('t');
+
+    const snapshot = reporter.getMetrics();
+    expect(snapshot).toMatchObject({
+      received: 1,
+      dispatched: 1,
+      topics: 1,
+      dispatchSamples: 1,
+      dispatchAvgMs: 100,
+      dispatchMaxMs: 125,
+      durationMs: 100
+    });
+
+    // The window is NOT reset by getMetrics: a flush still emits the same data.
+    reporter.flush();
+    const metrics = events.find(e => e.type === 'message_metrics') as DataBusMetricsTraceEvent;
+    expect(metrics.received).toBe(1);
+    // A later flush sees a fresh window (counters were reset by flushNow).
+    reporter.recordReceived('t');
+    now += 200;
+    reporter.recordDispatched('t');
+    expect(reporter.getMetrics()).toMatchObject({ received: 1, dispatchAvgMs: 200 });
+    reporter.stop();
+  });
+
+  it('getMetrics returns null while metrics recording is inactive', () => {
+    const reporter = new DataBusTraceReporter({ enabled: false, sink: () => {} });
+    reporter.start();
+    expect(reporter.getMetrics()).toBeNull();
+    reporter.stop();
+
+    const eventsOnly = new DataBusTraceReporter({ enabled: true, mode: 'events', sink: () => {} });
+    eventsOnly.start();
+    expect(eventsOnly.getMetrics()).toBeNull();
+    eventsOnly.stop();
+  });
+
   it('starts a fresh metrics window after pause and resume, and stop prevents later flushes', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({
