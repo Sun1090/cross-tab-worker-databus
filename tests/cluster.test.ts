@@ -435,6 +435,25 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('exposes protocol version and accepts legacy and versioned frames', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'versioned' });
+    const onControl = vi.fn();
+    const onEvent = vi.fn();
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'versioned', environment: env.environment, tabId: 'tab-versioned', workerId: 'worker-versioned',
+      handlers: { onControl, onEvent }
+    });
+    runtime.start();
+    expect(runtime.getSnapshot().protocolVersion).toBe(1);
+    const handleMessage = (runtime as unknown as { handleMessage: (event: MessageEvent) => void }).handleMessage;
+    handleMessage({ data: { type: 'EVENT', sourceWorkerId: 'peer', eventType: 'publication', payload: { value: 1 }, protocolVersion: 1 } } as MessageEvent);
+    handleMessage({ data: { type: 'EVENT', sourceWorkerId: 'peer', eventType: 'publication', payload: { value: 2 } } } as MessageEvent);
+    expect(onEvent).toHaveBeenCalledTimes(2);
+    runtime.stop();
+  });
+
   it('falls back to the local worker when BroadcastChannel is unavailable', () => {
     const storage = new MemoryStorage();
     const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'local' });

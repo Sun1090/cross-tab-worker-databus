@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.68] - 2026-09-05
+
+### Added
+- Added explicit cluster protocol version metadata (`protocolVersion: 1`) to CONTROL, EVENT, REGISTRY, and ROUTE_RELEASED frames and worker snapshots.
+- Legacy frames without the optional field remain accepted, while unknown message types continue to be safely ignored and diagnosed.
+- Added cross-version protocol compatibility regression coverage.
+
 ## [0.20.67] - 2026-09-05
 
 ### Added

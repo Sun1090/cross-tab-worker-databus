@@ -380,6 +380,17 @@
 - Publication metadata compatibility coverage across WebSocket, Centrifuge, Worker boundaries, and browser E2E.
 - Service Worker transport decision: remain deliberately unimplemented until a stable connection-lifetime contract exists across target browsers.
 
+## 0.20.68 delivered scope
+
+- Added protocol version metadata and compatibility behavior for mixed-version cluster peers.
+
+## 0.20.69 candidates
+
+1. Publish a peer capability matrix and expose SDK/backend/transport identity in diagnostics.
+2. Unify replay, deduplication, trace, recovery, and cluster health counters.
+3. Optimize IndexedDB concurrent append and cleanup paths.
+4. Add performance baselines for adaptive dedup, async trace, pruning, and long-running multi-tab workloads.
+
 ## 0.13.0 candidates
 
 1. Freeze the public export surface and transport-neutral publication envelope.
