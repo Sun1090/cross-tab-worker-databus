@@ -466,6 +466,17 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 该过程在正常 owner 交接时避免重复订阅，同时在故障恢复时保持可用；不保证 exactly-once。
 
+## 稳定性不变量
+
+以下不变量由回归测试固化（见 `tests/stability.test.ts` 与 `tests/replay-persistence.test.ts`），后续重构必须继续保持：
+
+- **Handoff ACK 有效性。** `ROUTE_RELEASED` 只有在 route 仍指向接收方、释放来自记录的 `handoffFromWorkerId`、且 ACK generation 不小于存储 route 的 generation 时才被接受。来自更早交接轮次的重复 ACK（如 a↔b 反复交接）携带更旧的 generation，会被丢弃。
+- **Replay 持久化清理顺序。** 排队在当前任务之后的批量持久化 flush 会与竞速的清理操作对账：`unsubscribe` 与 `clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目。已清理的历史不会被在途 flush 复活。
+- **存储写失败恢复。** 合并写入按指数退避重试（50 ms → 1.6 s 封顶）。结构性失败的关键在 5 次尝试后被丢弃（伴随 `console.warn`），且不会永久阻塞其他排队 key；队列完全清空或 `clear()` 取消重试后，退避延迟重置。
+- **Transport 恢复预算。** 自动恢复由冷却时间限速、由 `recovery.maxAttempts` 限量，预算耗尽后标记 `exhausted`。成功的重开会重置尝试计数与 exhausted 标记；transport 宕机时显式 `subscribe` 仍可手动恢复。
+- **BFCache 挂起。** Tab 隐藏时停止 transport、递增持久化重试 generation（取消在途重试且不对外报错）并门控分发；pageshow 时重开 transport，每轮循环只重建一次订阅。
+- **恢复诊断。** `getHealthSummary()` 从生命周期标志推导单一就绪判定（`stopped` / `starting` / `healthy` / `recovering` / `suspended` / `degraded`）；统一的 `lastFailure` 账本与持久化计数在每次显式 `start()` 后重置。
+
 ## Transport 重连
 
 DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transport 上报 `disconnected` / `error` 时，只清除底层订阅标志，不清除业务 handler；重新进入 `connected` 时，DataBus 自动重放当前 Worker 负责的 Topic。

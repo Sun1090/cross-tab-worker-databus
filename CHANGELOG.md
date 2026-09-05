@@ -4,6 +4,8 @@
 
 ### Added
 - Added unit-test coverage for the IndexedDB replay persistence adapter via `fake-indexeddb`: round-trip, count/age/both pruning, `appendBatch` grouping, mutation-queue serialization of concurrent same-topic appends, `clear`/`clearTopic`/`clearBefore` semantics, and recovery after a transient open failure.
+- Added real-browser E2E coverage for concurrent multi-publisher bursts across three tabs and for a full connection re-apply (bus stop/start) that rejoins the cluster without duplicate ownership.
+- Added a "Stability Invariants" section to the architecture docs (English and Chinese) consolidating the handoff, cleanup-ordering, recovery-budget, and BFCache guarantees pinned by the regression suite.
 
 ## [0.20.72] - 2026-09-05
 

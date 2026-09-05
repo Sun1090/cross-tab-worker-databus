@@ -5,6 +5,7 @@
 ## 0.20.73 delivered scope
 
 - IndexedDB replay persistence is now covered by unit tests (via `fake-indexeddb`) across pruning strategies, batch grouping, mutation serialization, cleanup semantics, and transient open-failure recovery.
+- Real-browser E2E now covers concurrent multi-publisher bursts and full connection re-apply; the architecture docs gained a stability-invariants reference (English and Chinese).
 
 ## 0.20.72 delivered scope
 
