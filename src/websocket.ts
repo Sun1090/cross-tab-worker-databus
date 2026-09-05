@@ -8,6 +8,7 @@
  *
  * Wire protocol (JSON text frames):
  * - client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":...,"data":...}`
+ * - client → server (batched): `{"op":"publishBatch","topic":...,"items":[{data,...}]}`
  * - server → client: `{"topic":...,"data":...}` for publications; anything
  *   without a string `topic` field is ignored (forward-compatible).
  */
@@ -18,6 +19,7 @@ import type {
   DataBusTransport,
   DataBusTransportHandlers,
   DataBusPublishOptions,
+  DataBusPublicationItem,
   DataBusMessage,
   MaybePromise,
   WorkerStatus
@@ -141,6 +143,35 @@ export class WebSocketTransport<TData = unknown>
       ...(options?.messageId === undefined ? {} : { messageId: options.messageId }),
       ...(options?.timestamp === undefined ? {} : { timestamp: options.timestamp })
     });
+  }
+
+  /** Publish many items for one topic as a single wire frame. One-item
+   * batches delegate to `publish` so the legacy single-publication frame
+   * shape (including binary framing) is preserved. */
+  publishBatch(topic: string, items: ReadonlyArray<DataBusPublicationItem>): MaybePromise<void> {
+    if (items.length === 0) return;
+    if (items.length === 1) {
+      const single = items[0]!;
+      return this.publish(topic, single.data, {
+        ...(single.messageId === undefined ? {} : { messageId: single.messageId }),
+        ...(single.timestamp === undefined ? {} : { timestamp: single.timestamp })
+      });
+    }
+    if (this.socket?.readyState !== WS_OPEN) {
+      this.handlers?.onError(new Error('WebSocket is not open; dropped "publishBatch" frame.'));
+      return;
+    }
+    // Binary payloads are embedded as byte arrays so the whole batch stays in
+    // one JSON frame; the server re-fans them out as individual publications.
+    this.socket.send(JSON.stringify({
+      op: 'publishBatch',
+      topic,
+      items: items.map(item => ({
+        data: item.data instanceof ArrayBuffer ? Array.from(new Uint8Array(item.data)) : item.data,
+        ...(item.messageId === undefined ? {} : { messageId: item.messageId }),
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp })
+      }))
+    }));
   }
 
   /** Close the socket and drop all state. Safe to call multiple times. */

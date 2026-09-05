@@ -6,6 +6,7 @@ import { createWebSocketDataBus } from '../src/websocket';
 import type { WebSocketLike } from '../src/websocket';
 import {
   useCrossTabDataBus,
+  useCrossTabHealth,
   useCrossTabStatus,
   useCrossTabSubscription
 } from '../src/hooks';
@@ -195,6 +196,29 @@ describe('React hooks adapter', () => {
     socket.serverFrame({ topic: 'first', data: 'old' });
     socket.serverFrame({ topic: 'second', data: 'new' });
     await waitFor(() => expect(received).toEqual(['new']));
+    view.unmount();
+  });
+
+  it('mirrors the health summary and refreshes on status changes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const states: Array<string | null> = [];
+    function Demo() {
+      const bus = useCrossTabDataBus(() => createWebSocketDataBus({
+        connection: { url: 'wss://example.test/ws', webSocketFactory: () => { const socket = new FakeWebSocket(); sockets.push(socket); return socket; } }
+      }));
+      // Event-driven only: no polling, refreshes ride onStatus.
+      const health = useCrossTabHealth(bus, { intervalMs: 0 });
+      states.push(health?.state ?? null);
+      return null;
+    }
+    const view = render(<Demo />);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.open();
+    await waitFor(() => expect(states.at(-1)).toBe('healthy'));
+
+    // A transport error flips the verdict via the status event.
+    sockets[0]!.onerror?.();
+    await waitFor(() => expect(states.at(-1)).toBe('recovering'));
     view.unmount();
   });
 });

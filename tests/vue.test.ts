@@ -1,19 +1,22 @@
 // @vitest-environment jsdom
 import { createApp, defineComponent, h, nextTick, ref, type Ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
-import { useCrossTabDataBus, useCrossTabStatus, useCrossTabSubscription } from '../src/vue';
+import { useCrossTabDataBus, useCrossTabHealth, useCrossTabStatus, useCrossTabSubscription } from '../src/vue';
 import type { CrossTabDataBus } from '../src/core/data-bus';
 
 function fakeBus() {
   let status: 'connecting' | 'connected' | 'disconnected' | 'error' = 'connecting';
   const statusHandlers = new Set<(value: typeof status) => void>();
+  const errorHandlers = new Set<(error: unknown) => void>();
   const handlers = new Map<string, (message: { topic: string; data: unknown }) => void>();
   return {
     ready: vi.fn(async () => {}), stop: vi.fn(async () => {}), getStatus: () => status,
     onStatus: (handler: (value: typeof status) => void) => { statusHandlers.add(handler); handler(status); return () => statusHandlers.delete(handler); },
     subscribe: vi.fn((topic: string, handler: (message: { topic: string; data: unknown }) => void) => { handlers.set(topic, handler); return () => handlers.delete(topic); }),
     emit(topic: string, data: unknown) { handlers.get(topic)?.({ topic, data }); },
-    setStatus(value: typeof status) { status = value; for (const handler of statusHandlers) handler(value); }
+    setStatus(value: typeof status) { status = value; for (const handler of statusHandlers) handler(value); },
+    getHealthSummary: () => ({ healthy: status === 'connected', state: status === 'connected' ? 'healthy' : 'recovering' }),
+    onError: (handler: (error: unknown) => void) => { errorHandlers.add(handler); return () => errorHandlers.delete(handler); }
   } as unknown as CrossTabDataBus<unknown, unknown> & { emit: (topic: string, data: unknown) => void; setStatus: (value: typeof status) => void };
 }
 
@@ -96,6 +99,24 @@ describe('Vue composables adapter', () => {
     await nextTick();
     await Promise.resolve();
     expect(created).toBeLessThanOrEqual(2);
+    app.unmount();
+  });
+
+  it('mirrors the health summary and refreshes on status changes', async () => {
+    const bus = fakeBus();
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const active = useCrossTabDataBus(() => bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      const health = useCrossTabHealth(active, { intervalMs: 0 });
+      return () => h('span', health.value?.state ?? 'none');
+    }}));
+    app.mount(host);
+    await nextTick();
+    await nextTick();
+    expect(host.textContent).toBe('recovering');
+    bus.setStatus('connected');
+    await nextTick();
+    expect(host.textContent).toBe('healthy');
     app.unmount();
   });
 });

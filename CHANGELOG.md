@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.20.74] - 2026-09-05
+
+### Added
+- Added an optional `publishBatch` to the `DataBusTransport` contract: transports that can pack many items into one wire frame (the bundled WebSocket transport sends a single `publishBatch` frame) are used for burst publications, with automatic per-item `publish` fallback for transports without batch support.
+- Added `useCrossTabHealth` to the React and Vue adapters, mirroring `getHealthSummary()` with interval polling (default 1 s, `intervalMs: 0` for event-driven only) plus event-driven refreshes on status changes and errors.
+- The demo WebSocket server accepts `publishBatch` frames and re-fans them out as individual timestamped publications.
+
+### Fixed
+- `getHealthSummary()` now accounts for the live transport status, so a transport reporting `error`/`disconnected` no longer reads as `healthy` while the `transportReady` flag has not yet been cleared.
+
 ## [0.20.73] - 2026-09-05
 
 ### Added

@@ -181,15 +181,29 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   readonly subscribeCalls: string[] = [];
   readonly unsubscribeCalls: string[] = [];
   readonly publishCalls: Array<{ topic: string; data: unknown; options?: { messageId?: string; timestamp?: number } }> = [];
+  readonly publishBatchCalls: Array<{
+    topic: string;
+    items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>;
+  }> = [];
   startCalls = 0;
   stopCalls = 0;
   /** When true, start() calls onStatus('error') instead of 'connected'. */
   startShouldFail = false;
   /** When set, stop() waits for this promise before completing. */
   stopGate?: Promise<void>;
+  /** Only assigned when the transport is constructed with batch support, so
+   * consumers see the same `typeof transport.publishBatch === 'function'`
+   * distinction real batch-capable transports present. */
+  publishBatch?: (topic: string, items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>) => void;
   private handlers: DataBusTransportHandlers<TData> | null = null;
 
-  constructor(private readonly startGate?: Promise<void>) {}
+  constructor(private readonly startGate?: Promise<void>, options?: { supportsPublishBatch?: boolean }) {
+    if (options?.supportsPublishBatch) {
+      this.publishBatch = (topic, items) => {
+        this.publishBatchCalls.push({ topic, items });
+      };
+    }
+  }
 
   start(_config: object, handlers: DataBusTransportHandlers<TData>): void | Promise<void> {
     this.startCalls += 1;

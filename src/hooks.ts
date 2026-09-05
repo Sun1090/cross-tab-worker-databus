@@ -13,10 +13,12 @@
  *   cleanup; the handler is read through a ref, so you can pass inline
  *   closures without resubscribing on every render.
  * - `useCrossTabStatus` mirrors `bus.onStatus()` into React state.
+ * - `useCrossTabHealth` polls `bus.getHealthSummary()` into React state,
+ *   with event-driven refreshes on status changes and errors.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { DependencyList } from 'react';
-import type { CrossTabDataBus } from './core/data-bus';
+import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
 import type { DataBusMessage, WorkerStatus } from './core/types';
 
 /**
@@ -91,4 +93,39 @@ export function useCrossTabStatus<TConfig, TData>(
     return bus.onStatus(setStatus);
   }, [bus]);
   return status;
+}
+
+/**
+ * Mirror the bus health summary into React state.
+ *
+ * `getHealthSummary()` is a snapshot, not an event stream, so the hook polls
+ * it on an interval (default 1000 ms) and refreshes immediately on status
+ * changes and errors. Pass `intervalMs: 0` to rely on event-driven refreshes
+ * only. Returns `null` while the bus has not been created yet.
+ */
+export function useCrossTabHealth<TConfig, TData>(
+  bus: CrossTabDataBus<TConfig, TData> | null,
+  options?: { intervalMs?: number }
+): DataBusHealthSummary | null {
+  const [health, setHealth] = useState<DataBusHealthSummary | null>(null);
+  useEffect(() => {
+    if (!bus) {
+      setHealth(null);
+      return;
+    }
+    const refresh = () => setHealth(bus.getHealthSummary());
+    refresh();
+    const unsubscribeStatus = bus.onStatus(refresh);
+    const unsubscribeError = bus.onError(refresh);
+    const intervalMs = options?.intervalMs ?? 1_000;
+    const timer = intervalMs > 0 ? setInterval(refresh, intervalMs) : null;
+    return () => {
+      unsubscribeStatus();
+      unsubscribeError();
+      if (timer) clearInterval(timer);
+    };
+    // The options object is intentionally not a dependency: callers pass an
+    // inline literal and the interval only affects polling cadence.
+  }, [bus]);
+  return health;
 }

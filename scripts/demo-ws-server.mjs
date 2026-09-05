@@ -107,6 +107,15 @@ export class DemoWsBusHub {
           timestamp: typeof frame.timestamp === 'number' ? frame.timestamp : this.now()
         });
         return true;
+      case 'publishBatch':
+        for (const item of Array.isArray(frame.items) ? frame.items : []) {
+          if (!item || typeof item !== 'object') continue;
+          this.publish(frame.topic, item.data, false, {
+            ...(typeof item.messageId === 'string' ? { messageId: item.messageId } : {}),
+            timestamp: typeof item.timestamp === 'number' ? item.timestamp : this.now()
+          });
+        }
+        return true;
       default:
         return false;
     }

@@ -346,6 +346,28 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
               break;
           }
         },
+        // Batched variant of the PUBLISH action (CONTROL frames carrying
+        // multiple items, and the local publishBatch fast path). Uses the
+        // transport's one-frame publishBatch when available, preserving
+        // per-item metadata; otherwise falls back to per-item publishes.
+        onPublishBatch: (topic, items) => {
+          if (typeof this.transport.publishBatch === 'function') {
+            this.runTransport(() => this.transport.publishBatch!(topic, items));
+            return;
+          }
+          for (const item of items) {
+            this.runTransport(() => this.transport.publish(
+              topic,
+              item.data,
+              item.messageId === undefined && item.timestamp === undefined
+                ? undefined
+                : {
+                    ...(item.messageId === undefined ? {} : { messageId: item.messageId }),
+                    ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp })
+                  }
+            ));
+          }
+        },
         // The cluster calls `onEvent` when a publication broadcast arrives from
         // another tab. Dispatch locally if we have subscribers. The payload is
         // typed `unknown` at the cluster boundary (the cluster is transport-
@@ -780,17 +802,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * unified failure ledger and recovery context that explains the verdict. */
   getHealthSummary(): DataBusHealthSummary {
     const transport = this.transport;
+    // A transport can report 'error'/'disconnected' while transportReady is
+    // still set (the flag only resets via the open/failure paths), so the
+    // live status must participate in the verdict.
+    const transportDown = !this.transportReady || this.status === 'error' || this.status === 'disconnected';
     const state: DataBusHealthSummary['state'] =
       !this.started
         ? 'stopped'
         : this.suspended
           ? 'suspended'
-          : !this.transportReady
+          : transportDown
             ? this.recoveryExhausted
               ? 'degraded'
-              : this.recoveryAttempt > 0
-                ? 'recovering'
-                : 'starting'
+              : this.status === 'connecting' && this.recoveryAttempt === 0
+                ? 'starting'
+                : 'recovering'
             : 'healthy';
     return {
       healthy: state === 'healthy',

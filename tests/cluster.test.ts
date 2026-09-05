@@ -1017,6 +1017,51 @@ describe('WorkerClusterRuntime publishBatch', () => {
     runtimeB.stop();
   });
 
+  it('hands a batched CONTROL to onPublishBatch once when the receiver supports it', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'batch-owner-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'batch-owner-b' });
+    const controlA = vi.fn();
+    const batchA = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'batch-owner',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onPublishBatch: batchA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'batch-owner',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('remote.batch');
+    await Promise.resolve();
+    now += 1;
+    runtimeB.start();
+
+    expect(runtimeB.publishBatch('remote.batch', [
+      { data: { i: 0 }, messageId: 'm0' },
+      { data: { i: 1 }, timestamp: 11 }
+    ])).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(batchA).toHaveBeenCalledTimes(1);
+    expect(batchA).toHaveBeenCalledWith('remote.batch', [
+      { data: { i: 0 }, messageId: 'm0' },
+      { data: { i: 1 }, timestamp: 11 }
+    ]);
+    expect(controlA).not.toHaveBeenCalledWith('PUBLISH', expect.anything(), expect.anything());
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
   it('dispatches a batch through a wildcard assignment when the concrete topic is not owned', async () => {
     const control = vi.fn();
     const { runtime } = makeBatchRuntime({

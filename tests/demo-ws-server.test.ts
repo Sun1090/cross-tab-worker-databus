@@ -130,6 +130,35 @@ describe('DemoWsBusHub protocol', () => {
     })]);
   });
 
+  it('fans a publishBatch frame out as individual timestamped publications', () => {
+    const hub = new DemoWsBusHub({ now: () => 42 });
+    const sender = new FakeConnection();
+    const receiver = new FakeConnection();
+    hub.attach(sender);
+    hub.attach(receiver);
+    sender.sendFrame({ op: 'subscribe', topic: 'feed.bulk' });
+    receiver.sendFrame({ op: 'subscribe', topic: 'feed.bulk' });
+
+    sender.sendFrame({
+      op: 'publishBatch',
+      topic: 'feed.bulk',
+      items: [
+        { data: { i: 0 }, messageId: 'm0' },
+        { data: { i: 1 }, timestamp: 7 },
+        { data: { i: 2 }, messageId: 'm2' }
+      ]
+    });
+
+    // Sender echo + per-item delivery, with explicit timestamps preserved and
+    // missing ones defaulted to the server clock.
+    expect(sender.messages).toEqual([
+      JSON.stringify({ op: 'publication', publication: { topic: 'feed.bulk', data: { i: 0 }, messageId: 'm0', timestamp: 42 } }),
+      JSON.stringify({ op: 'publication', publication: { topic: 'feed.bulk', data: { i: 1 }, timestamp: 7 } }),
+      JSON.stringify({ op: 'publication', publication: { topic: 'feed.bulk', data: { i: 2 }, messageId: 'm2', timestamp: 42 } })
+    ]);
+    expect(receiver.messages).toEqual(sender.messages);
+  });
+
   it('ignores malformed and unknown frames without disconnecting', () => {
     const hub = new DemoWsBusHub({ now: () => 42 });
     const client = new FakeConnection();

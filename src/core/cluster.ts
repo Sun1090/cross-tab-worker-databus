@@ -37,6 +37,13 @@ export interface WorkerClusterHandlers {
     messageId?: string,
     timestamp?: number
   ) => void;
+  /** Optional batched variant of the PUBLISH action: invoked once when a
+   * CONTROL frame carries multiple publication items. When absent, the
+   * cluster falls back to per-item `onControl('PUBLISH', …)` calls. */
+  onPublishBatch?: (
+    topic: string,
+    items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>
+  ) => void;
   /** A fan-out publication event was received from another Worker.
    * `originTabId` is the tab that produced the original publication when the
    * cluster forwards one; it survives the BroadcastChannel hop so listeners
@@ -535,19 +542,19 @@ export class WorkerClusterRuntime {
     }
     const topicKey = this.rememberTopic(topic);
     if (this.assignedTopics.has(topicKey)) {
-      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      this.dispatchLocalPublishBatch(topic, topicKey, items);
       return true;
     }
     const cachedPattern = this.wildcardPublishCache.get(topic);
     if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
-      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      this.dispatchLocalPublishBatch(topic, topicKey, items);
       return true;
     }
     if (cachedPattern === undefined) {
       for (const pattern of this.assignedTopics.values()) {
         if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
           this.wildcardPublishCache.set(topic, pattern);
-          for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+          this.dispatchLocalPublishBatch(topic, topicKey, items);
           return true;
         }
       }
@@ -555,7 +562,7 @@ export class WorkerClusterRuntime {
     }
     const target = this.resolvePublishTarget(topic, topicKey);
     if (target === this.workerId) {
-      for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
+      this.dispatchLocalPublishBatch(topic, topicKey, items);
       return true;
     }
     return this.send({
@@ -606,6 +613,20 @@ export class WorkerClusterRuntime {
     const meta = publicationMetadata(messageId, timestamp);
     if (meta) this.handlers.onControl('PUBLISH', topic, data, meta.messageId, meta.timestamp);
     else this.handlers.onControl('PUBLISH', topic, data);
+  }
+
+  /** Fan out a publication batch to the local onControl path: one
+   * onPublishBatch call when the owner supports it, per-item otherwise. */
+  private dispatchLocalPublishBatch(
+    topic: string,
+    topicKey: string,
+    items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>
+  ): void {
+    if (this.handlers.onPublishBatch) {
+      this.handlers.onPublishBatch(topic, items);
+      return;
+    }
+    for (const item of items) this.dispatchLocalPublish(topic, topicKey, item.data, item.messageId, item.timestamp);
   }
 
   /** True when `route` exists and its owner worker is among `workers`.
@@ -776,6 +797,12 @@ export class WorkerClusterRuntime {
         break;
       case 'PUBLISH':
         if (message.items && message.items.length > 0) {
+          // A batched CONTROL: hand the whole batch to the transport at once
+          // when the owner supports it, preserving per-item metadata.
+          if (this.handlers.onPublishBatch) {
+            this.handlers.onPublishBatch(message.topic, message.items);
+            return;
+          }
           for (const item of message.items) {
             const itemMeta = publicationMetadata(item.messageId, item.timestamp);
             if (itemMeta) this.handlers.onControl('PUBLISH', message.topic, item.data, itemMeta.messageId, itemMeta.timestamp);

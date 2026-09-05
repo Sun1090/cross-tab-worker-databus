@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.73 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.74 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.74 delivered scope
+
+- Optional `DataBusTransport.publishBatch` with a one-frame WebSocket implementation, demo-server support, and per-item fallback; `useCrossTabHealth` bindings for React and Vue; health verdict now honors the live transport status.
 
 ## 0.20.73 delivered scope
 
