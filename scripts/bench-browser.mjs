@@ -61,6 +61,114 @@ async function runMode(browser, mode) {
   return result;
 }
 
+/** Run the data-bus hot-path matrix inside a real browser page using the
+ * built ESM bundle. Mirrors tests/bench/data-bus.bench.ts so local (Node)
+ * and browser numbers can be compared side by side. */
+async function runDatabusMatrix(browser) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(baseUrl);
+  const results = await page.evaluate(async () => {
+    const { CrossTabDataBus } = await import('/dist/index.js');
+    const { createBrowserEnvironment } = await import('/dist/index.js');
+
+    function makeStubTransport() {
+      let handlers = null;
+      return {
+        start: (_config, h) => {
+          handlers = h;
+          h.onStatus('connected');
+        },
+        subscribe() {},
+        unsubscribe() {},
+        publish() {},
+        stop() {},
+        emit(topic, data, messageId) {
+          handlers?.onMessage({ topic, data, ...(messageId ? { messageId } : {}) });
+        }
+      };
+    }
+
+    const timings = {};
+
+    {
+      const transport = makeStubTransport();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-browser-wildcard',
+        environment: createBrowserEnvironment(),
+        initialConfig: {},
+        transport
+      });
+      bus.subscribe('bench.rooms.*', () => {});
+      const start = performance.now();
+      for (let index = 0; index < 1000; index += 1) {
+        transport.emit(`bench.rooms.room-${index % 100}`, { value: index });
+      }
+      timings.wildcardDispatch1000Ms = Number((performance.now() - start).toFixed(2));
+      await bus.stop();
+    }
+
+    {
+      const transport = makeStubTransport();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-browser-batch',
+        environment: createBrowserEnvironment(),
+        initialConfig: {},
+        transport
+      });
+      bus.subscribe('bench.batch', () => {});
+      const start = performance.now();
+      for (let round = 0; round < 10; round += 1) {
+        bus.publishBatch('bench.batch', Array.from({ length: 100 }, (_, index) => ({ data: { value: round * 100 + index } })));
+      }
+      timings.publishBatch1000Ms = Number((performance.now() - start).toFixed(2));
+      await bus.stop();
+    }
+
+    {
+      const transport = makeStubTransport();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-browser-dedup',
+        environment: createBrowserEnvironment(),
+        initialConfig: {},
+        transport,
+        dedup: { maxEntries: 2000, ttlMs: 60_000, now: () => 1000 }
+      });
+      bus.subscribe('bench.dedup', () => {});
+      const start = performance.now();
+      for (let index = 0; index < 1000; index += 1) {
+        transport.emit('bench.dedup', { value: index }, `message-${index % 500}`);
+      }
+      timings.dedup1000Ms = Number((performance.now() - start).toFixed(2));
+      await bus.stop();
+    }
+
+    {
+      const events = [];
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-browser-trace',
+        environment: createBrowserEnvironment(),
+        initialConfig: {},
+        transport: makeStubTransport(),
+        trace: { enabled: true, mode: 'events', asyncSink: true, sink: event => events.push(event) }
+      });
+      await bus.ready();
+      const start = performance.now();
+      for (let index = 0; index < 1000; index += 1) {
+        bus.onStatus(() => {});
+        bus.publish('bench.trace', { value: index });
+      }
+      timings.traceAndPublish1000Ms = Number((performance.now() - start).toFixed(2));
+      await bus.stop();
+    }
+
+    const userAgent = navigator.userAgent;
+    return { userAgent, timings };
+  });
+  await context.close();
+  return results;
+}
+
 let server;
 let ownsServer = false;
 
@@ -82,7 +190,8 @@ try {
   try {
     const results = [];
     for (const mode of modes) results.push(await runMode(browser, mode));
-    console.log(JSON.stringify({ benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results }, null, 2));
+    const databus = await runDatabusMatrix(browser);
+    console.log(JSON.stringify({ benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus }, null, 2));
   } finally {
     await browser.close();
   }

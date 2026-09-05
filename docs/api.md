@@ -318,6 +318,18 @@ Available options:
 - `workerFactory`: custom Dedicated Worker loading method
 - `sharedWorkerFactory`: custom SharedWorker loading method
 
+## `createStorageEventChannel(options)`
+
+```ts
+createStorageEventChannel(options: {
+  name: string;
+  storage: StorageLike | null;
+  win: StorageEventWindow | null;
+}): ClusterChannel | null
+```
+
+Creates a `ClusterChannel` backed by localStorage `storage` events — the coordination fallback for environments without BroadcastChannel. Returns `null` when storage or a storage-event source is unavailable. Delivery semantics mirror BroadcastChannel (no echo to the sender, JSON-serializable messages, closed channels refuse further posts); a monotonic sequence in the payload envelope keeps consecutive identical messages deliverable. Opt in via `createBrowserEnvironment({ channelFallback: 'storage-event' })`; see the security note in [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
+
 ## WebSocket Transport Backend
 
 A dependency-free transport over a plain WebSocket. Any server speaking the JSON frame protocol below can back the same cross-tab clustering stack (owner dedup, sticky routes, failover) as the Centrifuge backend.

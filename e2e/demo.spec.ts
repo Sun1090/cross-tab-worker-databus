@@ -17,6 +17,7 @@ import type { BrowserContext, Page } from '@playwright/test';
 
 declare global {
   interface Window {
+    __bus?: { getHealthSummary: () => { healthy: boolean; state: string } };
     __replayBus?: { stop: () => Promise<void> };
     __replayEmit?: (data: unknown) => void;
     __replayAssigned?: () => boolean;
@@ -91,6 +92,13 @@ test.describe('cross-tab databus demo', () => {
     // The configured preference must be the REAL backend — a silent fallback
     // to the local session is exactly the regression this guards against.
     await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
+
+    // The health summary reads healthy once the transport is up, both through
+    // the demo's health line and the direct API surface.
+    const owner = ownerIsA ? tabA : tabB;
+    await expect.poll(async () => (await owner.locator('#overviewHealthInfo').textContent()) ?? '').toContain('健康');
+    const health = await owner.evaluate(() => window.__bus?.getHealthSummary());
+    expect(health).toMatchObject({ healthy: true, state: 'healthy' });
 
     await publishJson(tabA);
     // The publisher tab echoes; the other tab receives through the cluster.
@@ -360,6 +368,13 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     // The configured preference must be the REAL backend — a silent fallback
     // to the local session is exactly the regression this guards against.
     await expect.poll(() => transportBackend(ownerIsA ? tabA : tabB)).toBe('dedicated');
+
+    // The health summary reads healthy once the transport is up, both through
+    // the demo's health line and the direct API surface.
+    const healthTab = ownerIsA ? tabA : tabB;
+    await expect.poll(async () => (await healthTab.locator('#overviewHealthInfo').textContent()) ?? '').toContain('健康');
+    const health = await healthTab.evaluate(() => window.__bus?.getHealthSummary());
+    expect(health).toMatchObject({ healthy: true, state: 'healthy' });
     const owner = ownerIsA ? tabA : tabB;
     const standby = ownerIsA ? tabB : tabA;
 

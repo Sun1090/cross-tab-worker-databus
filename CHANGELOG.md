@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.81] - 2026-09-05
+
+### Added
+- `bench:browser` now also runs the data-bus hot-path matrix (wildcard dispatch, `publishBatch`, dedup, trace-and-publish) inside a real browser against the built ESM bundle, reported alongside the publish-throughput results for Node-vs-browser comparison.
+- The E2E suite asserts the health summary end to end: the demo's health line reads healthy and `window.__bus.getHealthSummary()` reports `{ healthy: true, state: 'healthy' }` on a connected tab.
+- Documented `createStorageEventChannel` in the API reference (English and Chinese) and added the transport-level `publishBatch` row to the capabilities matrix.
+
 ## [0.20.80] - 2026-09-05
 
 ### Added
