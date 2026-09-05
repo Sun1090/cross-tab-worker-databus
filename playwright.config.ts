@@ -20,7 +20,9 @@ export default defineConfig({
   // desktop. Keep local runs fast while allowing a transient browser/network
   // hiccup to retry without masking persistent failures.
   retries: process.env.CI ? 2 : 0,
-  ...(process.env.CI ? { workers: 2 } : {}),
+  // Multi-tab lifecycle tests are timing-sensitive; serialized workers trade
+  // a little CI time for stable scheduling on shared runners.
+  ...(process.env.CI ? { workers: 1 } : {}),
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: [['list']],

@@ -250,7 +250,9 @@ test.describe('cross-tab databus demo', () => {
     const survivors = tabs.filter(tab => tab !== owner);
     await expect
       .poll(async () => (await Promise.all(survivors.map(assignedCount))).filter(count => count === 1).length, {
-        timeout: 30_000
+        // Heartbeat-TTL fallback is heartbeatInterval + workerTtl (~13s);
+        // leave generous headroom for shared CI runners.
+        timeout: 45_000
       })
       .toBe(1);
     const survivor = survivors[(await Promise.all(survivors.map(assignedCount))).indexOf(1)]!;
