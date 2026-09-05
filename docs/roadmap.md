@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.72 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.73 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.73 delivered scope
+
+- IndexedDB replay persistence is now covered by unit tests (via `fake-indexeddb`) across pruning strategies, batch grouping, mutation serialization, cleanup semantics, and transient open-failure recovery.
 
 ## 0.20.72 delivered scope
 

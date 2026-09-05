@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.73] - 2026-09-05
+
+### Added
+- Added unit-test coverage for the IndexedDB replay persistence adapter via `fake-indexeddb`: round-trip, count/age/both pruning, `appendBatch` grouping, mutation-queue serialization of concurrent same-topic appends, `clear`/`clearTopic`/`clearBefore` semantics, and recovery after a transient open failure.
+
 ## [0.20.72] - 2026-09-05
 
 ### Added
