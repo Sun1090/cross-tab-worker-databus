@@ -28,7 +28,12 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     ...devices['Desktop Chrome'],
-    channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome'
+    channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome',
+    // Failure artifacts: the trace (screens, DOM, network, console) plus the
+    // video are what make runner-load flake diagnosable after the fact. The
+    // CI workflow uploads both from test-results/ on failure.
+    trace: 'retain-on-failure',
+    video: 'on-first-retry'
   },
   webServer: {
     command: 'node scripts/serve-examples.mjs',

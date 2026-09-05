@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.79 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.80 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.80 delivered scope
+
+- E2E reliability governance: failure traces/videos with longer retention, converge-before-publish patterns for reload tests, a staggered burst pattern within documented guarantees, and the loss-and-recovery matrix in the architecture docs.
 
 ## 0.20.79 delivered scope
 

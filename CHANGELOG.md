@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.20.80] - 2026-09-05
+
+### Added
+- E2E failure artifacts now include Playwright traces (retain-on-failure) and first-retry videos; diagnostics retention extended to 14 days.
+- Reload-style E2E tests converge the cluster (exactly one owner) before publishing, removing the standby re-subscription race behind intermittent CI failures.
+- Documented the loss-and-recovery matrix for every coordination message in the architecture docs (English and Chinese).
+
+### Changed
+- The concurrent-burst E2E staggers publishes within each tab: hammering one transport with a same-tick burst can push it into a documented disconnect window where dropped publishes are expected.
+
 ## [0.20.79] - 2026-09-05
 
 ### Added
