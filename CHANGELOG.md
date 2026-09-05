@@ -1,4 +1,9 @@
-# Changelog
+## [0.20.82] - 2026-09-05
+
+### Added
+- The default Playwright assertion ceiling rose to 20 s, covering every remaining poll on slow shared runners.
+- Added non-cloneable-config coverage (symbols) with `cause` preservation for the Worker transport's structured-clone guard.
+- Added a `/debug/connections` endpoint to the examples server and an E2E asserting that a closed shared-mode tab's WebSocket is dropped server-side.
 
 ## [0.20.81] - 2026-09-05
 

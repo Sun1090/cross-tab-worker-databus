@@ -1036,6 +1036,27 @@ describe('CentrifugeWorkerTransport edge paths', () => {
     transport.stop();
   });
 
+  it('rejects non-cloneable config values and preserves the cause', () => {
+    const { worker, transport } = makeDedicatedTransport();
+    const start = () =>
+      transport.start(
+        { url: 'wss://example.test/connection/websocket', options: { flag: Symbol('x') } as never },
+        { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+      );
+    let thrown: unknown;
+    try {
+      start();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TypeError);
+    expect((thrown as Error).message).toMatch(/structured-cloneable/);
+    // The underlying structuredClone failure is retained for diagnostics.
+    expect((thrown as Error & { cause?: unknown }).cause).toBeDefined();
+    expect(worker.messages).toEqual([]);
+    transport.stop();
+  });
+
   it('treats a SharedWorker port messageerror as a worker failure', () => {
     // Stub SharedWorker so backend selection keeps 'shared' instead of
     // degrading to the dedicated-worker path in Node.
