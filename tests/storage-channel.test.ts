@@ -23,6 +23,9 @@ class FakeStorageWindow {
  * registered window except the writer's — mirroring the browser spec. */
 class StorageEventHub {
   private readonly windows: FakeStorageWindow[] = [];
+  /** When true, the next dispatch is silently dropped — modelling the lossy
+   * delivery a storage-event channel can exhibit. */
+  dropNextDispatch = false;
   constructor(readonly storage: MemoryStorage) {}
 
   register(win: FakeStorageWindow): FakeStorageWindow {
@@ -47,6 +50,10 @@ class StorageEventHub {
   }
 
   private dispatch(writer: FakeStorageWindow, key: string): void {
+    if (this.dropNextDispatch) {
+      this.dropNextDispatch = false;
+      return;
+    }
     const newValue = this.storage.getItem(key);
     for (const win of this.windows) {
       if (win === writer) continue;
@@ -170,6 +177,55 @@ describe('cluster over storage-event channels', () => {
 
     // Exactly one owner was elected over the storage-event channel.
     const owners = [runtimeA, runtimeB].filter(runtime => runtime.isAssigned('topic.shared'));
+    expect(owners).toHaveLength(1);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('recovers a dropped storage-event delivery through the reconcile loop', async () => {
+    const storage = new MemoryStorage();
+    const hub = new StorageEventHub(storage);
+    hub.dropNextDispatch = true;
+    const makeEnv = (tabId: string) => {
+      const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: tabId });
+      const win = hub.register(new FakeStorageWindow());
+      env.environment.createChannel = name => createStorageEventChannel({ name, storage: hub.writerStorage(win), win });
+      return env;
+    };
+    const envA = makeEnv('tab-loss-a');
+    const envB = makeEnv('tab-loss-b');
+    const { WorkerClusterRuntime } = await import('../src/core/cluster');
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'storage-channel-loss',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'storage-channel-loss',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('topic.loss');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    runtimeB.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The dropped delivery (e.g. B's registration REGISTRY) is recovered by
+    // the heartbeat reconcile loop, electing exactly one owner.
+    envA.runIntervals();
+    envB.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+    const owners = [runtimeA, runtimeB].filter(runtime => runtime.isAssigned('topic.loss'));
     expect(owners).toHaveLength(1);
     runtimeA.stop();
     runtimeB.stop();

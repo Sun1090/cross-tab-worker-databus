@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.76 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.77 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.77 delivered scope
+
+- Fixed a silent local-session degradation for factory-less consumers (bundled Workers are now actually used), added default-backend and channel loss-recovery coverage, and surfaced coordination-channel diagnostics plus the fallback toggle in the demo.
 
 ## 0.20.76 delivered scope
 

@@ -119,9 +119,12 @@ export class CentrifugeWorkerTransport<TData = unknown>
     if (this.backend) return;
     assertStructuredCloneable(config.options ?? {});
     this.handlers = handlers;
+    // Runtime capability OR an injected factory counts as availability; a
+    // factory-less browser must use the bundled default Workers instead of
+    // silently degrading to the local session.
     const backend = selectWorkerBackend(this.workerMode, {
-      worker: this.workerFactory !== undefined,
-      sharedWorker: this.sharedWorkerFactory !== undefined
+      worker: this.workerFactory !== undefined || typeof Worker !== 'undefined',
+      sharedWorker: this.sharedWorkerFactory !== undefined || typeof SharedWorker !== 'undefined'
     });
     const input = this.buildInitInput(config);
     if (backend === 'shared') {

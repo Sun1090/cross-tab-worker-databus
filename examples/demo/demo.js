@@ -1,5 +1,6 @@
 import { CrossTabDataBus, createWebSocketDataBus, selectWorkerBackend } from '../../dist/index.js';
 import { createCentrifugeDataBus } from '../../dist/centrifuge.js';
+import { createBrowserEnvironment } from '../../dist/index.js';
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const publicDemoUrl = 'wss://faye.centrifugal.dev/connection/websocket';
@@ -66,6 +67,7 @@ const elements = {
   configWorkerMode: document.querySelector('#configWorkerMode'),
   configBackend: document.querySelector('#configBackend'),
   configTransferable: document.querySelector('#configTransferable'),
+  channelFallback: document.querySelector('#channelFallback'),
   configClusterKey: document.querySelector('#configClusterKey'),
   configTabId: document.querySelector('#configTabId'),
   configTopic: document.querySelector('#configTopic'),
@@ -175,6 +177,13 @@ function createBus(mode) {
     metricsIntervalMs: 1000,
     sink: handleTraceEvent
   };
+  // Opt-in coordination fallback for browsers without BroadcastChannel; the
+  // default environment otherwise stays untouched.
+  const environment = createBrowserEnvironment({
+    ...(elements.channelFallback && elements.channelFallback.checked
+      ? { channelFallback: 'storage-event' }
+      : {})
+  });
   if (mode === 'centrifugo') {
     const url = elements.urlInput.value.trim();
     const workerMode = elements.workerMode.value;
@@ -184,6 +193,7 @@ function createBus(mode) {
       connection: { url, options: {} },
       workerMode,
       transferable: elements.transferable.checked,
+      environment,
       trace
     });
   }
@@ -193,6 +203,7 @@ function createBus(mode) {
     state.clusterKey = url;
     return createWebSocketDataBus({
       connection: { url },
+      environment,
       trace
     });
   }
@@ -202,6 +213,7 @@ function createBus(mode) {
     transport: new LocalBroadcastTransport('cross-tab-worker-databus:demo:local'),
     initialConfig: { mode: 'local' },
     clusterKey: 'demo.local',
+    environment,
     trace
   });
 }
@@ -489,6 +501,14 @@ function renderCluster(snapshot) {
   renderRoutes(snapshot.routes);
 }
 
+function renderChannelDiagnostics() {
+  const available = typeof BroadcastChannel !== 'undefined';
+  const fallback = elements.channelFallback?.checked ? 'storage-event 降级' : '本地模式降级';
+  elements.configChannelInfo.textContent = available
+    ? `BroadcastChannel 可用；不可用时的降级策略：${fallback}`
+    : `BroadcastChannel 不可用；当前降级策略：${fallback}`;
+}
+
 function renderConfig() {
   const transport = state.activeTransport;
   const mode =
@@ -684,5 +704,6 @@ setInterval(() => {
   renderCluster(state.bus?.getClusterSnapshot());
   renderConfig();
   renderHealth();
+  renderChannelDiagnostics();
 }, 1000);
 void applyConnection();

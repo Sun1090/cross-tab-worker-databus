@@ -875,6 +875,94 @@ describe('CentrifugeWorkerTransport local fallback session', () => {
   });
 });
 
+describe('CentrifugeWorkerTransport default backends', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports an uninitialized backend identity before start', () => {
+    const transport = new CentrifugeWorkerTransport({ workerMode: 'dedicated' });
+    expect(transport.diagnosticsBackend).toBe('uninitialized');
+  });
+
+  it('creates the bundled default Dedicated Worker when no factory is provided', () => {
+    const created: Array<{ posted: CentrifugeWorkerInput[]; closed: boolean }> = [];
+    class DefaultWorkerDouble {
+      readonly posted: CentrifugeWorkerInput[] = [];
+      closed = false;
+      constructor(_url: URL | string, _options?: { name?: string; type?: string }) {
+        created.push(this);
+      }
+      addEventListener(_type: string, _listener: (event: unknown) => void): void {}
+      removeEventListener(_type: string, _listener: (event: unknown) => void): void {}
+      postMessage(message: CentrifugeWorkerInput): void {
+        this.posted.push(message);
+      }
+      terminate(): void {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal('Worker', DefaultWorkerDouble);
+
+    const transport = new CentrifugeWorkerTransport({ workerMode: 'dedicated' });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    expect(transport.diagnosticsBackend).toBe('dedicated');
+    expect(created).toHaveLength(1);
+    expect(created[0]!.posted[0]).toMatchObject({ type: 'INIT', url: 'wss://example.test/connection/websocket' });
+    transport.stop();
+  });
+
+  it('creates the bundled default SharedWorker when no factory is provided', () => {
+    const ports: Array<{ posted: CentrifugeWorkerInput[]; started: boolean }> = [];
+    class DefaultSharedWorkerDouble {
+      readonly port: {
+        addEventListener: (_type: string, _listener: (event: unknown) => void) => void;
+        removeEventListener: (_type: string, _listener: (event: unknown) => void) => void;
+        postMessage: (message: CentrifugeWorkerInput) => void;
+        start: () => void;
+        close: () => void;
+        posted: CentrifugeWorkerInput[];
+        started: boolean;
+      };
+      constructor(_url: URL | string, _options?: { name?: string; type?: string }) {
+        const port = {
+          posted: [] as CentrifugeWorkerInput[],
+          started: false,
+          addEventListener: (_t: string, _l: (event: unknown) => void) => {},
+          removeEventListener: (_t: string, _l: (event: unknown) => void) => {},
+          postMessage: (message: CentrifugeWorkerInput) => {
+            port.posted.push(message);
+          },
+          start: () => {
+            port.started = true;
+          },
+          close: () => {}
+        };
+        this.port = port;
+        ports.push(port);
+      }
+      addEventListener(_type: string, _listener: (event: unknown) => void): void {}
+      removeEventListener(_type: string, _listener: (event: unknown) => void): void {}
+    }
+    vi.stubGlobal('SharedWorker', DefaultSharedWorkerDouble);
+    vi.stubGlobal('Worker', undefined);
+
+    const transport = new CentrifugeWorkerTransport({ workerMode: 'shared' });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    expect(transport.diagnosticsBackend).toBe('shared');
+    expect(ports).toHaveLength(1);
+    expect(ports[0]!.started).toBe(true);
+    expect(ports[0]!.posted[0]).toMatchObject({ type: 'INIT', url: 'wss://example.test/connection/websocket' });
+    transport.stop();
+  });
+});
+
 describe('CentrifugeWorkerTransport edge paths', () => {
   afterEach(() => {
     vi.useRealTimers();
