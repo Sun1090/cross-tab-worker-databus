@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.20.77] - 2026-09-05
+
+### Fixed
+- Worker-backend availability now honors runtime capability in addition to injected factories: without the fix, a browser consumer that did not pass an explicit `workerFactory`/`sharedWorkerFactory` silently degraded to the main-thread local session and never used the bundled Dedicated/Shared Workers.
+
+### Added
+- Added default-backend coverage for the bundled Dedicated/Shared Worker paths and the `uninitialized` diagnostics identity.
+- Added storage-event channel loss-recovery regressions: a silently dropped delivery is recovered by the heartbeat reconcile loop.
+- The demo now surfaces coordination-channel diagnostics and an opt-in `channelFallback: 'storage-event'` toggle.
+
 ## [0.20.76] - 2026-09-05
 
 ### Added

@@ -225,6 +225,19 @@
               <span class="config-value" id="configTransferable">-</span>
             </div>
             <div class="config-row">
+              <span class="config-label">协调通道</span>
+              <span class="config-value" id="configChannelInfo">检测中</span>
+            </div>
+            <div class="config-row">
+              <span class="config-label">降级开关</span>
+              <span class="config-value">
+                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="checkbox" id="channelFallback" />
+                  BroadcastChannel 不可用时启用 storage-event 降级
+                </label>
+              </span>
+            </div>
+            <div class="config-row">
               <span class="config-label">集群 Key</span>
               <span class="config-value config-key" id="configClusterKey">-</span>
             </div>
