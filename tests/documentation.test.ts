@@ -49,4 +49,24 @@ describe('public documentation', () => {
       }
     }
   });
+
+  it('keeps the CHANGELOG section for the current package version', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string };
+    const changelog = readFileSync('CHANGELOG.md', 'utf8');
+    // The Release workflow extracts release notes by matching `## [<version>]`.
+    // A missing section makes a tagged release fail before npm is reached, so
+    // this guard prevents version bumps that forget the changelog entry.
+    expect(
+      changelog,
+      `CHANGELOG.md must contain a "## [${pkg.version}]" section so the Release workflow can build release notes`
+    ).toContain(`## [${pkg.version}]`);
+  });
+
+  it('documents the blocking published-consumer verification in the release checklist', () => {
+    for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
+      const content = readFileSync(file, 'utf8');
+      expect(content, `${file} must mention the consumer verifier`).toContain('verify:published');
+      expect(content, `${file} must describe the check as blocking`).toMatch(/blocking|阻塞/);
+    }
+  });
 });

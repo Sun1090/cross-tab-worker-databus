@@ -5,6 +5,8 @@
 ## 0.20.83 delivered scope
 
 - Adapter edge-case coverage for the health hook, archived browser benchmarks with a comparison script, and a README feature list aligned with current capabilities.
+- A large internal cleanup: every runtime string literal centralized in `utils/constants.ts` with literal-derived types, and replay/dedup split out of `CrossTabDataBus` into self-contained `ReplayManager` / `DedupManager` classes.
+- The demo's "批量 10" publishBatch button with `/debug/wsstats` frame counting and a single-frame E2E, `asyncSink: true` delivery-semantics documentation, and a release checklist aligned with the blocking published-consumer gate.
 
 ## 0.20.82 delivered scope
 

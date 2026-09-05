@@ -37,6 +37,24 @@ Status Legend: `✅ Implemented` means the current version has code and test cov
 | Runtime Model | Service Worker transport | Not Implemented | Deliberately deferred; lifetime and long-lived connection constraints are documented in `docs/architecture.md` |
 | Durable Messages | Persisting publications or publish commands across page close | Not Implemented | The SDK does not persist business payloads, nor does it replay publish commands after restoration |
 
+## Verified Guarantees (pinned by the regression suite)
+
+These invariants are consolidated from the "Stability Invariants" section of
+`docs/architecture.md` (pinned by `tests/stability.test.ts` and
+`tests/replay-persistence.test.ts`) so each guarantee below is both documented
+and regression-locked:
+
+| Invariant | Area | Regressed guarantee |
+|---|---|---|
+| Handoff ACK validity | coordination | `ROUTE_RELEASED` is honored only when the route still points to the receiver, the release matches `handoffFromWorkerId`, and the ACK generation is at least as new as the stored route — stale ACKs from an earlier a↔b ping-pong are dropped |
+| Replay persistence cleanup ordering | durability | Queued batch flushes are filtered against the winning cleanup (`unsubscribe`/`clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff); cleared history is never re-appended by an in-flight flush |
+| Storage write recovery | coordination | Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap); a structurally failing key is dropped after 5 attempts (with `console.warn`) without blocking other queued keys; backoff resets once the queue drains or `clear()` cancels the retries |
+| Transport recovery budget | lifecycle | Auto-recovery is paced by a cooldown, bounded by `recovery.maxAttempts`, and reports `exhausted` when the budget is spent; a successful reopen resets attempt + exhausted, and an explicit `subscribe` on a down transport can still recover manually |
+| BFCache suspension | lifecycle | Hiding the tab stops the transport and silently cancels in-flight persistence retries; pageshow reopens the transport and re-establishes subscriptions exactly once per cycle |
+| Handoff channel close ordering | coordination | `pause()` defers the physical `channel.close()` by one task so queued handoff frames (including `ROUTE_RELEASED`) flush before the channel dies |
+| Loss & recovery matrix | coordination | Every coordination message has a bounded recovery path (re-send of unconfirmed SUBSCRIBE, REGISTRY nudge, TTL + re-election for lost ACKs); publications lost during a transport disconnect window are the one documented unrecoverable loss |
+| Recovery diagnostics | observability | `getHealthSummary()` derives a single readiness verdict, and the unified `lastFailure` ledger persists across transport failures, resetting on every explicit `start()` |
+
 ## Acceptance Criteria
 
 - "Implemented" does not mean every browser environment provides cross-Tab capability; when localStorage or BroadcastChannel is missing, it falls back to local degradation by design.
