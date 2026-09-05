@@ -434,4 +434,43 @@ describe('stability: replay persistence cleanup races', () => {
     expect(appendBatch).not.toHaveBeenCalled();
     await bus.stop();
   });
+
+describe('stability: handoff channel close ordering', () => {
+  it('defers the channel close so queued handoff frames flush', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'close-defer' });
+    let closeCalls = 0;
+    env.environment.createChannel = name => {
+      const inner = hub.create(name);
+      return {
+        addEventListener: inner.addEventListener.bind(inner),
+        removeEventListener: inner.removeEventListener.bind(inner),
+        postMessage: inner.postMessage.bind(inner),
+        close: () => {
+          closeCalls += 1;
+          inner.close();
+        }
+      };
+    };
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'close-defer',
+      environment: env.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    env.pageHide();
+    // close() must not run synchronously inside pagehide: BroadcastChannel
+    // close() discards messages still queued for delivery, and pause() has
+    // just posted the handoff's ROUTE_RELEASED.
+    expect(closeCalls).toBe(0);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(closeCalls).toBe(1);
+  });
+});
 });

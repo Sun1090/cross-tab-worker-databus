@@ -168,3 +168,27 @@ const config = await loadTransportConfig();
 await bus.start(config);
 bus.subscribe('resource.changed', handleResourceEvent);
 ```
+
+## 10. Health Summary & Coordination Fallback
+
+Readiness probes and dashboards can consume the single-object health verdict instead of assembling diagnostics:
+
+```ts
+const health = bus.getHealthSummary();
+// { healthy: true, state: 'healthy', recovery: { attempt, … }, lastFailure: null, … }
+```
+
+React and Vue adapters mirror it (`useCrossTabHealth`), refreshing on status changes, errors, and an interval.
+
+When `BroadcastChannel` is unavailable, tabs normally degrade to local-only coordination. Opt into a localStorage storage-event fallback channel:
+
+```ts
+import { createBrowserEnvironment } from 'cross-tab-worker-databus';
+
+const bus = new CrossTabDataBus({
+  /* … */
+  environment: createBrowserEnvironment({ channelFallback: 'storage-event' })
+});
+```
+
+The fallback is opt-in because coordination payloads (plaintext topic names) then persist to localStorage — see [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).

@@ -67,6 +67,8 @@ const elements = {
   configWorkerMode: document.querySelector('#configWorkerMode'),
   configBackend: document.querySelector('#configBackend'),
   configTransferable: document.querySelector('#configTransferable'),
+  configTransportBackend: document.querySelector('#configTransportBackend'),
+  configChannelInfo: document.querySelector('#configChannelInfo'),
   channelFallback: document.querySelector('#channelFallback'),
   configClusterKey: document.querySelector('#configClusterKey'),
   configTabId: document.querySelector('#configTabId'),
@@ -501,6 +503,17 @@ function renderCluster(snapshot) {
   renderRoutes(snapshot.routes);
 }
 
+function renderTransportBackend() {
+  const bus = state.bus;
+  if (!bus) return;
+  const backend = bus.getDiagnostics().transport.backend;
+  // Track the REAL transport backend (dedicated/shared/local), not the
+  // configured preference — a silent local degradation is a bug, and this is
+  // what the e2e suite asserts against.
+  elements.configTransportBackend.textContent = String(backend);
+  state.backend = backend;
+}
+
 function renderChannelDiagnostics() {
   const available = typeof BroadcastChannel !== 'undefined';
   const fallback = elements.channelFallback?.checked ? 'storage-event 降级' : '本地模式降级';
@@ -705,5 +718,6 @@ setInterval(() => {
   renderConfig();
   renderHealth();
   renderChannelDiagnostics();
+  renderTransportBackend();
 }, 1000);
 void applyConnection();

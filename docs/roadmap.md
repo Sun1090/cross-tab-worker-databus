@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.77 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.78 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.78 delivered scope
+
+- E2E now asserts the real transport backend per tab, the deferred-close handoff invariant is pinned by a regression test and documented, and the getting-started guide covers health summaries and the coordination fallback.
 
 ## 0.20.77 delivered scope
 
