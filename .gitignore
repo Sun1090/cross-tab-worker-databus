@@ -7,3 +7,6 @@ dist/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Local browser benchmark archives
+bench-results/

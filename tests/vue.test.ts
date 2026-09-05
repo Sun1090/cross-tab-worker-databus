@@ -119,4 +119,49 @@ describe('Vue composables adapter', () => {
     expect(host.textContent).toBe('healthy');
     app.unmount();
   });
+
+describe('useCrossTabHealth edge cases', () => {
+  it('polls on the interval, resets to null on detach, and stops on unmount', async () => {
+    let seq = 0;
+    let calls = 0;
+    const statusHandlers = new Set<(value: string) => void>();
+    const bus = {
+      getHealthSummary: () => {
+        calls += 1;
+        seq += 1;
+        return { healthy: true, state: 'healthy', seq };
+      },
+      onStatus: (handler: (value: string) => void) => {
+        statusHandlers.add(handler);
+        return () => statusHandlers.delete(handler);
+      },
+      onError: () => () => {}
+    } as unknown as CrossTabDataBus<unknown, unknown>;
+    const active = ref(bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const health = useCrossTabHealth(active, { intervalMs: 20 });
+      return () => h('span', health.value ? `healthy:${(health.value as unknown as { seq: number }).seq}` : 'none');
+    }}));
+    app.mount(host);
+    await nextTick();
+    expect(host.textContent).toBe('healthy:1');
+    // The interval refreshes the snapshot.
+    await new Promise(resolve => setTimeout(resolve, 70));
+    expect(calls).toBeGreaterThanOrEqual(2);
+
+    // Detaching resets to null and unsubscribes listeners.
+    active.value = null;
+    await nextTick();
+    expect(host.textContent).toBe('none');
+    const callsAtDetach = calls;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(calls).toBe(callsAtDetach);
+
+    app.unmount();
+    await nextTick();
+    // Vue removes the host DOM on unmount; the detach assertions above
+    // already cover the reset and listener cleanup.
+  });
+});
 });

@@ -28,6 +28,10 @@ By default each tab holds its own Dedicated Worker; when configured with `worker
 - Optional Vue 3 composables adapter (`cross-tab-worker-databus/vue`): lifecycle-safe bus, subscription, and status composables
 - `pagehide` releases resources automatically; `pageshow` rebuilds the Worker and connection automatically
 - Transport reconnect automatically restores the current owner's Topics
+- Optional durable replay persistence with `appendBatch` bulk writes (IndexedDB transaction coalescing; prune strategies `count` / `age` / `both`)
+- Transport-level batch publishing: `publishBatch` packs bursts into one wire frame where the backend supports it
+- Single-object health verdict via `getHealthSummary()` with a unified failure ledger and recovery context
+- Opt-in coordination fallback over localStorage storage events when BroadcastChannel is unavailable
 - After a tab exits abnormally, automatic migration happens via heartbeat TTL
 - Automatically degrades to local mode when BroadcastChannel or localStorage is unavailable
 - The persistence layer does not store connection addresses, raw Topic text, or message content

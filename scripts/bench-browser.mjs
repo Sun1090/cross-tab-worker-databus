@@ -191,7 +191,18 @@ try {
     const results = [];
     for (const mode of modes) results.push(await runMode(browser, mode));
     const databus = await runDatabusMatrix(browser);
-    console.log(JSON.stringify({ benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus }, null, 2));
+    const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus };
+    console.log(JSON.stringify(report, null, 2));
+    // Archive for trend comparison via scripts/bench-compare.mjs. Failures
+    // here must never break the benchmark run itself.
+    try {
+      const { mkdirSync, writeFileSync } = await import('node:fs');
+      mkdirSync(new URL('../bench-results/', import.meta.url), { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      writeFileSync(new URL(`../bench-results/browser-${stamp}.json`, import.meta.url), JSON.stringify(report, null, 2));
+    } catch (error) {
+      console.warn('[bench] failed to archive results:', error instanceof Error ? error.message : error);
+    }
   } finally {
     await browser.close();
   }

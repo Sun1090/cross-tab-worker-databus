@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.82 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.83 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.83 delivered scope
+
+- Adapter edge-case coverage for the health hook, archived browser benchmarks with a comparison script, and a README feature list aligned with current capabilities.
 
 ## 0.20.82 delivered scope
 
