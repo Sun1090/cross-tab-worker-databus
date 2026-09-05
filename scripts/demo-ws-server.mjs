@@ -59,6 +59,11 @@ export class DemoWsBusHub {
     this.clients = new Set();
     /** @type {Map<DemoWebSocketConnection, Set<string>>} subscription patterns per client */
     this.subscriptions = new Map();
+    /** Frames seen split by op, so the e2e suite can assert that a
+     * `publishBatch` burst really travelled as one wire frame rather than ten
+     * individual `publish` frames. */
+    this.publishFrames = 0;
+    this.publishBatchFrames = 0;
   }
 
   attach(connection) {
@@ -102,12 +107,14 @@ export class DemoWsBusHub {
         topics.delete(frame.topic);
         return true;
       case 'publish':
+        this.publishFrames += 1;
         this.publish(frame.topic, frame.data, false, {
           ...(typeof frame.messageId === 'string' ? { messageId: frame.messageId } : {}),
           timestamp: typeof frame.timestamp === 'number' ? frame.timestamp : this.now()
         });
         return true;
       case 'publishBatch':
+        this.publishBatchFrames += 1;
         for (const item of Array.isArray(frame.items) ? frame.items : []) {
           if (!item || typeof item !== 'object') continue;
           this.publish(frame.topic, item.data, false, {

@@ -41,6 +41,17 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ centrifugo: centrifugoHub?.clients.size ?? 0 }));
       return;
     }
+    // Frame-count observability for the WebSocket-bus hub: lets the e2e suite
+    // assert that `publishBatch` travelled as one wire frame and did not
+    // decompose into per-item `publish` frames.
+    if (pathname === '/debug/wsstats') {
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({
+        publish: wsHub?.publishFrames ?? 0,
+        publishBatch: wsHub?.publishBatchFrames ?? 0
+      }));
+      return;
+    }
     const stats = await stat(filePath);
     if (stats.isDirectory()) filePath = join(filePath, 'index.html');
     const body = await readFile(filePath);
@@ -56,7 +67,8 @@ const server = createServer(async (request, response) => {
 });
 
 let centrifugoHub;
-installDemoWsBusServer(server, '/ws/demo');
+let wsHub;
+wsHub = installDemoWsBusServer(server, '/ws/demo');
 centrifugoHub = installDemoWebSocketServer(server, demoWebSocketPath);
 
 server.listen(port, () => {

@@ -157,6 +157,10 @@ describe('DemoWsBusHub protocol', () => {
       JSON.stringify({ op: 'publication', publication: { topic: 'feed.bulk', data: { i: 2 }, messageId: 'm2', timestamp: 42 } })
     ]);
     expect(receiver.messages).toEqual(sender.messages);
+    // Frame accounting: the burst travelled as exactly one publishBatch wire
+    // frame and added no individual publish frames.
+    expect(hub.publishFrames).toBe(0);
+    expect(hub.publishBatchFrames).toBe(1);
   });
 
   it('ignores malformed and unknown frames without disconnecting', () => {
