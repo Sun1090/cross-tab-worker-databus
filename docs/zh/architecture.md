@@ -476,6 +476,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 - **Transport 恢复预算。** 自动恢复由冷却时间限速、由 `recovery.maxAttempts` 限量，预算耗尽后标记 `exhausted`。成功的重开会重置尝试计数与 exhausted 标记；transport 宕机时显式 `subscribe` 仍可手动恢复。
 - **BFCache 挂起。** Tab 隐藏时停止 transport、递增持久化重试 generation（取消在途重试且不对外报错）并门控分发；pageshow 时重开 transport，每轮循环只重建一次订阅。
 - **交接通道关闭顺序。** `pause()` 将物理 `channel.close()` 推迟一个任务。同步关闭会丢弃仍在排队等待投递的消息（包括交接的 `ROUTE_RELEASED`），使交接目标在原 Tab 恢复前一直持有未确认路由。
+- **丢失与恢复矩阵。** 每类协调消息都有有界恢复路径：丢失的 `CONTROL/SUBSCRIBE` 由心跳 reconcile 对未确认路由重发；丢失的 `REGISTRY` 通知最多损失一个心跳间隔（默认 3 秒），因为每次 tick 都会 reconcile；丢失的 `ROUTE_RELEASED` 由孤儿路由的 TTL 清理加原 owner 恢复后的重新选举兜底（已有回归固化）；transport 断连窗口内被丢弃的 publication 是唯一文档化的不可恢复丢失（transport 契约）。storage-event 降级通道通过信封内的单调序列号保证变值投递，丢失的派发由同一 reconcile 循环恢复。
 - **恢复诊断。** `getHealthSummary()` 从生命周期标志推导单一就绪判定（`stopped` / `starting` / `healthy` / `recovering` / `suspended` / `degraded`）；统一的 `lastFailure` 账本与持久化计数在每次显式 `start()` 后重置。
 
 ## Transport 重连

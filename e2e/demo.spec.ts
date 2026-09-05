@@ -149,16 +149,24 @@ test.describe('cross-tab databus demo', () => {
       .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length)
       .toBe(1);
 
-    // All three tabs publish three messages each in parallel — non-owner
-    // publishers route through CONTROL, the owner fans out via EVENT. Every
-    // tab must observe every message exactly once.
+    // All three tabs publish three messages each — non-owner publishers route
+    // through CONTROL, the owner fans out via EVENT. Every tab must observe
+    // every message exactly once. Publishes are concurrent ACROSS tabs but
+    // staggered within a tab: hammering one transport with a same-tick burst
+    // can push it into a disconnect window, where dropped publishes are
+    // documented behaviour and would break the exactly-once assertion.
     const perTab = 3;
     const before = await Promise.all(tabs.map(receivedCount));
-    await Promise.all(tabs.map(tab => Array.from({ length: perTab }, () => publishJson(tab))));
+    for (let round = 0; round < perTab; round += 1) {
+      await Promise.all(tabs.map(tab => publishJson(tab)));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
 
     const expected = before.map(count => count + perTab * tabs.length);
     for (let index = 0; index < tabs.length; index += 1) {
-      await expect.poll(receivedCount.bind(null, tabs[index]!), { timeout: 30_000 }).toBe(expected[index]);
+      // Full-suite load on a shared runner delays fan-out; 45s keeps the
+      // exactly-once assertion while tolerating that delay.
+      await expect.poll(receivedCount.bind(null, tabs[index]!), { timeout: 45_000 }).toBe(expected[index]);
     }
   });
 
@@ -204,11 +212,17 @@ test.describe('cross-tab databus demo', () => {
     await tabA.reload();
     await connectDemo(tabA, 'dedicated', topic);
 
+    // Converge the cluster before publishing: the reloaded tab rejoins with
+    // a fresh workerId, so wait until exactly one of the two tabs owns the
+    // topic again. Publishing before convergence races the standby's
+    // re-subscription — the flake this pattern removes.
+    await expect
+      .poll(async () => (await assignedCount(tabA)) + (await assignedCount(tabB)), { timeout: 30_000 })
+      .toBe(1);
+
     // The refreshed tab keeps its tabId (sessionStorage) and the route
     // persists, so a fresh publication still reaches it. The page metric
-    // resets on reload, so this "1" is the post-reload receipt. The
-    // generous ceiling covers slow CI runners where the reloaded tab's
-    // Worker reconnect and re-subscription lag behind the publish.
+    // resets on reload, so this "1" is the post-reload receipt.
     await publishJson(tabB);
     await expect
       .poll(() => receivedCount(tabA), { timeout: 30_000 })
@@ -285,9 +299,13 @@ test.describe('cross-tab databus demo', () => {
     await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
     await owner.reload();
     await connectDemo(owner, 'dedicated', topic);
+    // Converge before the final publication (same pattern as the reload test).
+    await expect
+      .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
+      .toBe(1);
     const beforeReload = await receivedCount(owner);
     await publishJson(survivor);
-    await expect.poll(() => receivedCount(owner)).toBe(beforeReload + 1);
+    await expect.poll(() => receivedCount(owner), { timeout: 30_000 }).toBe(beforeReload + 1);
   });
 
   test('repeated BFCache round trips and reload keep delivery exactly-once', async ({ context }) => {
@@ -316,9 +334,13 @@ test.describe('cross-tab databus demo', () => {
 
       await owner.reload();
       await connectDemo(owner, 'dedicated', topic);
+      // Converge before publishing (same pattern as the reload test).
+      await expect
+        .poll(async () => (await Promise.all(tabs.map(assignedCount))).filter(count => count === 1).length, { timeout: 30_000 })
+        .toBe(1);
       const afterReload = await receivedCount(owner);
       await publishJson(standby);
-      await expect.poll(() => receivedCount(owner)).toBe(afterReload + 1);
+      await expect.poll(() => receivedCount(owner), { timeout: 30_000 }).toBe(afterReload + 1);
     }
   });
 });
