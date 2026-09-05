@@ -67,6 +67,32 @@ export type TabVisibilityState = (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBI
  * A Worker's self-published registration record, written to localStorage
  * so sibling tabs can discover and route to it.
  */
+export interface WorkerThroughputSample {
+  /** Length of the sample window in ms. */
+  windowMs: number;
+  /** Publications this Worker handled within the window. */
+  messageCount: number;
+  /** Approximate payload bytes shipped by this Worker within the window. */
+  byteCount: number;
+  /** Timestamp (ms) when the sample was captured. */
+  sampledAt: number;
+}
+
+/** Optional adaptive weighting for owner selection. Both weights default to 0,
+ * which keeps scoring equal to the legacy pure topic-count load. When set, the
+ * per-second rates are added to the topic count, so the caller controls how
+ * much traffic activity (vs ownership breadth) should steer new routes. */
+export interface LoadWeightingOptions {
+  /** Weight applied to messages-per-second in the effective load score. */
+  messageRateWeight?: number;
+  /** Weight applied to bytes-per-second in the effective load score. */
+  byteRateWeight?: number;
+}
+
+/**
+ * A Worker's self-published registration record, written to localStorage
+ * so sibling tabs can discover and route to it.
+ */
 export interface WorkerRecord {
   /** Cluster protocol version advertised by this worker. */
   protocolVersion?: number;
@@ -76,6 +102,8 @@ export interface WorkerRecord {
   tabId: string;
   /** Number of topics this Worker owns. NOT a CPU load metric. */
   load: number;
+  /** Optional rolling traffic sample for adaptive owner weighting. */
+  throughput?: WorkerThroughputSample;
   role: WorkerRole;
   status: WorkerStatus;
   visibilityState: TabVisibilityState;

@@ -47,6 +47,8 @@ export { selectWorkerBackend } from './worker-mode';
 export type { WorkerBackend, WorkerMode } from './worker-mode';
 export {
   DEFAULT_MAX_ACTIVE_WORKERS,
+  approximatePayloadBytes,
+  effectiveWorkerLoad,
   hasActiveOwner,
   isWildcardTopic,
   selectActiveWorkers,
@@ -65,6 +67,7 @@ export type {
   DataBusStatusHandler,
   DataBusTransport,
   DataBusTransportHandlers,
+  LoadWeightingOptions,
   MaybePromise,
   TabVisibilityState,
   TopicSubscriberRecord,
@@ -73,5 +76,6 @@ export type {
   WorkerRecord,
   WorkerRole,
   WorkerRoute,
-  WorkerStatus
+  WorkerStatus,
+  WorkerThroughputSample
 } from './core/types';

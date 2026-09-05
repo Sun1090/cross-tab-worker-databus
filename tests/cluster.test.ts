@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkerClusterRuntime } from '../src/core/cluster';
+import { approximatePayloadBytes } from '../src/core/routing';
+import type { WorkerRecord } from '../src/core/types';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -1331,5 +1333,171 @@ describe('WorkerClusterRuntime resilience', () => {
     // A releases its local subscription and stops claiming the topic.
     expect(controlA).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic-a', undefined);
     expect(a.runtime.isAssigned('topic-a')).toBe(false);
+  });
+});
+
+describe('WorkerClusterRuntime adaptive load weighting', () => {
+  const loadWeighting = { messageRateWeight: 1 };
+
+  function workerRecordOf(storage: MemoryStorage, workerId: string): WorkerRecord {
+    const entry = storage.entries().find(([key]) => key.includes(`:worker:${workerId}`));
+    expect(entry).toBeDefined();
+    return JSON.parse(entry![1]) as WorkerRecord;
+  }
+
+  it('leaves the worker record byte-identical to legacy when weighting is unset', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'legacy' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'weighting-legacy',
+      environment: env.environment,
+      tabId: 'tab-legacy',
+      workerId: 'worker-legacy',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    runtime.broadcastEvent('evt', { n: 1 });
+    now += 3_000;
+    env.runIntervals();
+    await Promise.resolve();
+
+    expect(workerRecordOf(storage, 'worker-legacy').throughput).toBeUndefined();
+    runtime.stop();
+  });
+
+  it('publishes a rolling traffic sample when weighting is configured', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'sampled' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'weighting-sampled',
+      environment: env.environment,
+      tabId: 'tab-sampled',
+      workerId: 'worker-sampled',
+      loadWeighting,
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    const payload = { kind: 'flow', seq: 7 };
+    runtime.broadcastEvent('evt', payload);
+    now += 3_000;
+    env.runIntervals();
+    await Promise.resolve();
+
+    const record = workerRecordOf(storage, 'worker-sampled');
+    expect(record.throughput).toEqual({
+      windowMs: 3_000,
+      messageCount: 1,
+      byteCount: approximatePayloadBytes(payload),
+      sampledAt: now
+    });
+    runtime.stop();
+  });
+
+  it('steers a new route to a quieter worker despite a higher topic count', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'weighting-steer',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      loadWeighting,
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'weighting-steer',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      loadWeighting,
+      handlers: { onControl: controlB, onEvent: vi.fn() }
+    });
+
+    runtimeA.start();
+    runtimeA.subscribe('topic-1');
+    runtimeA.subscribe('topic-2');
+    await Promise.resolve();
+    runtimeB.start();
+    runtimeB.subscribe('topic-3');
+    await Promise.resolve();
+
+    // A owns two topics, B owns one — but B handles a heavy fan-out burst.
+    expect(runtimeA.isAssigned('topic-1')).toBe(true);
+    expect(runtimeA.isAssigned('topic-2')).toBe(true);
+    expect(runtimeB.isAssigned('topic-3')).toBe(true);
+    for (let index = 0; index < 50; index += 1) runtimeB.broadcastEvent('evt', { n: index });
+    now += 3_000;
+    envA.runIntervals();
+    envB.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The quieter worker wins the new route despite carrying more topics.
+    runtimeA.subscribe('steer-topic');
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('steer-topic')).toBe(true);
+    expect(runtimeB.isAssigned('steer-topic')).toBe(false);
+    expect(controlA).toHaveBeenCalledWith('SUBSCRIBE', 'steer-topic', undefined);
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'steer-topic', undefined);
+
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('falls back to the legacy fewest-topics rule when weighting is unset', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'weighting-legacy-steer',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'weighting-legacy-steer',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: controlB, onEvent: vi.fn() }
+    });
+
+    runtimeA.start();
+    runtimeA.subscribe('topic-1');
+    runtimeA.subscribe('topic-2');
+    await Promise.resolve();
+    runtimeB.start();
+    runtimeB.subscribe('topic-3');
+    await Promise.resolve();
+
+    // Identical traffic, no weighting → the fewest-topics worker (B) wins.
+    for (let index = 0; index < 50; index += 1) runtimeB.broadcastEvent('evt', { n: index });
+    now += 3_000;
+    envA.runIntervals();
+    envB.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    runtimeA.subscribe('legacy-steer-topic');
+    await Promise.resolve();
+    expect(runtimeB.isAssigned('legacy-steer-topic')).toBe(true);
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'legacy-steer-topic', undefined);
+
+    runtimeA.stop();
+    runtimeB.stop();
   });
 });
