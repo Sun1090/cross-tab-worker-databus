@@ -2077,6 +2077,8 @@ describe('CrossTabDataBus diagnostics', () => {
     expect(diagnostics.dedup.enabled).toBe(true);
     expect(diagnostics.cluster.currentWorker.workerId).toBe('worker-diag');
     expect(diagnostics.protocol).toMatchObject({ version: 1, peers: { 'worker-diag': 1 } });
+    expect(diagnostics.sdkVersion).toBe('0.20.69');
+    expect(diagnostics.transport).toMatchObject({ name: 'FakeTransport' });
     expect(diagnostics.recovery.generation).toBeGreaterThanOrEqual(1);
     await bus.stop();
   });

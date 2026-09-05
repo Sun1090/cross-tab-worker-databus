@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.70] - 2026-09-05
+
+### Added
+- Added SDK version and transport/backend identity to `CrossTabDataBus.getDiagnostics()` for support bundles and health dashboards.
+
 ## [0.20.69] - 2026-09-05
 
 ### Added

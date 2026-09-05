@@ -212,6 +212,10 @@ export interface DataBusTransportHandlers<TData = unknown> {
  * - `publish` may be called before `start` settles (queued by the DataBus).
  */
 export interface DataBusTransport<TConfig = unknown, TData = unknown> {
+  /** Optional stable identity used by diagnostics and support tooling. */
+  readonly diagnosticsName?: string;
+  /** Optional backend details (for example dedicated/shared/local). */
+  readonly diagnosticsBackend?: string;
   /** Open the connection with `config`. Report status changes via `handlers.onStatus`.
    * May return a Promise that resolves on connect or rejects on failure. */
   start(config: TConfig, handlers: DataBusTransportHandlers<TData>): MaybePromise<void>;

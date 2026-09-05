@@ -30,6 +30,7 @@ import type { DataBusReplayPersistence } from './replay-persistence';
  * The cluster's `onEvent` handler filters on this to distinguish databus
  * publications from other control-plane events. */
 const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
+const SDK_VERSION = '0.20.69';
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
 class PersistenceRetryCancelledError extends Error {
@@ -91,6 +92,7 @@ export interface DataBusDedupStats {
 }
 
 export interface DataBusDiagnostics {
+  sdkVersion: string;
   status: WorkerStatus;
   started: boolean;
   transportReady: boolean;
@@ -98,6 +100,7 @@ export interface DataBusDiagnostics {
   dedup: DataBusDedupStats;
   replay: { enabled: boolean; topics: number; messages: number };
   protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null; peers: Record<string, number | null> };
+  transport: { name: string; backend: string | null };
   cluster: WorkerClusterSnapshot;
 }
 
@@ -712,14 +715,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.replayBuffers) for (const buffer of this.replayBuffers.values()) messages += buffer.length;
     const cluster = this.cluster.getSnapshot();
     const unknownMessages = this.cluster.getUnknownMessageStats();
+    const transport = this.transport;
     return {
       status: this.status,
+      sdkVersion: SDK_VERSION,
       started: this.started,
       transportReady: this.transportReady,
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
       replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
       protocol: { version: cluster.protocolVersion, unknownMessages: unknownMessages.count, lastUnknownMessageType: unknownMessages.lastType, peers: cluster.peerProtocolVersions },
+      transport: { name: transport.diagnosticsName ?? transport.constructor.name, backend: transport.diagnosticsBackend ?? null },
       cluster
     };
   }
