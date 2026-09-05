@@ -172,6 +172,48 @@ getStatus(): WorkerStatus
 
 Returns the current status: `connecting`, `connected`, `disconnected`, or `error`.
 
+### `getHealthSummary()`
+
+```ts
+getHealthSummary(): DataBusHealthSummary
+```
+
+Compact readiness verdict for dashboards, readiness probes, and support bundles. Answers "is the bus usable right now" first, then attaches the failure and recovery context that explains the verdict:
+
+```ts
+interface DataBusHealthSummary {
+  healthy: boolean;   // started, not suspended, transport ready
+  state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
+  status: WorkerStatus;
+  sdkVersion: string;
+  started: boolean;
+  suspended: boolean;                       // true while the tab is hidden (BFCache)
+  transport: { name; backend; ready; status };
+  recovery: { attempt; exhausted; maxAttempts; generation; lastSuccessAt; hasError; errorMessage; errorAt };
+  lastFailure: { source: 'transport' | 'persistence' | 'dispatch'; message: string; at: number } | null;
+  persistence: { failures: number; lastFailureAt: number | null; lastErrorMessage: string | null };
+}
+```
+
+`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`.
+
+### `getRecoveryStats()` / `getPersistenceStats()`
+
+```ts
+getRecoveryStats(): { attempt; exhausted; maxAttempts; hasError; errorMessage; errorAt; generation; lastSuccessAt }
+getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
+```
+
+`recovery.generation` increments on every successful transport open (initial start and each recovery); `lastSuccessAt` is the timestamp of that open (`null` before the first one). Persistence counters cover the optional replay persistence backend only.
+
+### `getDiagnostics()`
+
+```ts
+getDiagnostics(): DataBusDiagnostics
+```
+
+Full diagnostics snapshot combining lifecycle, transport identity (`name`, `backend`, live `status`, `suspended`), recovery, dedup, replay, persistence, protocol (`version`, `unknownMessages`, `peers`), and the cluster snapshot. `sdkVersion` is injected from `package.json` at build time. Prefer `getHealthSummary()` when a consumer only needs the readiness verdict.
+
 ### `getClusterSnapshot()`
 
 Returns a diagnostic snapshot:

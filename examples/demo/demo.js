@@ -12,6 +12,7 @@ const elements = {
   tabBadge: document.querySelector('#tabBadge'),
   backendBadge: document.querySelector('#backendBadge'),
   statusBadge: document.querySelector('#statusBadge'),
+  overviewHealthInfo: document.querySelector('#overviewHealthInfo'),
   flowSvg: document.querySelector('#flowSvg'),
   nodeThisSub: document.querySelector('#nodeThisSub'),
   nodeWorkerSub: document.querySelector('#nodeWorkerSub'),
@@ -653,8 +654,35 @@ elements.clearLog.addEventListener('click', () => {
 elements.openTab.addEventListener('click', () => window.open(location.href, '_blank'));
 elements.autoPublish.addEventListener('change', () => setAutoPublish(elements.autoPublish.checked));
 
+const healthStateText = {
+  stopped: '未启动',
+  starting: '启动中',
+  healthy: '健康',
+  recovering: '自动恢复中',
+  suspended: '已挂起（BFCache）',
+  degraded: '降级（需手动恢复）'
+};
+
+function renderHealth() {
+  const el = elements.overviewHealthInfo;
+  const bus = state.bus;
+  if (!el) return;
+  if (!bus) {
+    el.textContent = '连接后显示 getHealthSummary() 的健康状态、恢复计数与最近失败来源';
+    return;
+  }
+  const health = bus.getHealthSummary();
+  const stateLabel = healthStateText[health.state] ?? health.state;
+  const recovery = `恢复 ${health.recovery.attempt}/${health.recovery.maxAttempts}`;
+  const failure = health.lastFailure
+    ? `最近失败：${health.lastFailure.source}（${health.lastFailure.message}）`
+    : '无失败记录';
+  el.textContent = `${stateLabel} · transport ${health.transport.ready ? '就绪' : '未就绪'} · ${recovery} · ${failure}`;
+}
+
 setInterval(() => {
   renderCluster(state.bus?.getClusterSnapshot());
   renderConfig();
+  renderHealth();
 }, 1000);
 void applyConnection();

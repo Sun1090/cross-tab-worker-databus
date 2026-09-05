@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { build } from 'esbuild';
+
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 rmSync(new URL('../dist', import.meta.url), { recursive: true, force: true });
 
@@ -19,6 +21,8 @@ await build({
   format: 'esm',
   outdir: 'dist',
   platform: 'browser',
+  // Injected so diagnostics always report the released version, never a stale constant.
+  define: { __SDK_VERSION__: JSON.stringify(version) },
   sourcemap: true,
   splitting: true,
   target: ['es2022']
@@ -39,6 +43,8 @@ await build({
   outExtension: { '.js': '.cjs' },
   outdir: 'dist/cjs',
   platform: 'browser',
+  // Injected so diagnostics always report the released version, never a stale constant.
+  define: { __SDK_VERSION__: JSON.stringify(version) },
   sourcemap: true,
   target: ['es2022']
 });
@@ -52,6 +58,8 @@ await build({
   format: 'esm',
   outdir: 'dist',
   platform: 'browser',
+  // Injected so diagnostics always report the released version, never a stale constant.
+  define: { __SDK_VERSION__: JSON.stringify(version) },
   sourcemap: true,
   target: ['es2022']
 });

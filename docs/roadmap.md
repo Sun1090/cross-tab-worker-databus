@@ -5,6 +5,8 @@
 ## 0.20.72 delivered scope
 
 - Expanded the benchmark matrix across publish batching, wildcard routing, deduplication, replay pruning, bulk persistence, and asynchronous trace sinks.
+- Long-session stability hardening: regression coverage for handoff ACK generation validation, repeated BFCache round-trips, recovery exhaustion reset, storage write backoff recovery, and replay persistence cleanup races; fixed an inverted stale-ACK generation check and a batch-flush resurrection race in replay cleanup.
+- Production capabilities: `getHealthSummary()` readiness verdict, `getPersistenceStats()`, transport status/suspended granularity in diagnostics, and a build-time injected SDK version.
 
 ## 0.20.71 delivered scope
 

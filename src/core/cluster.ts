@@ -854,7 +854,9 @@ export class WorkerClusterRuntime {
 
   /** A ROUTE_RELEASED is stale (and must be dropped) unless the route still
    * points to us, the release comes from the recorded previous owner, and
-   * the release generation is at least as new as ours. */
+   * the release generation is at least as new as ours. A replayed ACK from an
+   * earlier handoff round (e.g. an a↔b ping-pong) carries an older generation
+   * and must not confirm the current round. */
   private isStaleRouteRelease(
     route: WorkerRoute,
     message: Extract<WorkerClusterMessage, { type: 'ROUTE_RELEASED' }>
@@ -862,7 +864,7 @@ export class WorkerClusterRuntime {
     return (
       route.workerId !== this.workerId ||
       route.handoffFromWorkerId !== message.sourceWorkerId ||
-      route.generation < message.generation
+      message.generation < route.generation
     );
   }
 

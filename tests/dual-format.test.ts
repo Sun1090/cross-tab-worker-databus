@@ -67,6 +67,8 @@ describe('dual-format build artifacts', () => {
     expect(indexTypes).toContain('DataBusPublicationMetadata');
     expect(indexTypes).toContain('DataBusReplayPersistence');
     expect(indexTypes).toContain('DataBusDedupOptions');
+    expect(indexTypes).toContain('DataBusHealthSummary');
+    expect(indexTypes).toContain('DataBusPersistenceHealth');
   });
 
   it('materialises every path declared in package.json exports', () => {
