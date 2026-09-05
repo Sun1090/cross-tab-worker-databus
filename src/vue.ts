@@ -2,7 +2,7 @@
  * Vue is an optional peer dependency; this module is a separate entry point.
  */
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue';
-import type { CrossTabDataBus } from './core/data-bus';
+import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
 import type { DataBusMessage, WorkerStatus } from './core/types';
 
 export function useCrossTabDataBus<TConfig, TData>(
@@ -66,4 +66,46 @@ export function useCrossTabStatus<TConfig, TData>(
   }, { immediate: true });
   onBeforeUnmount(() => cleanup?.());
   return status;
+}
+
+/** Options for {@link useCrossTabHealth}. */
+export interface UseCrossTabHealthOptions {
+  /** Polling cadence in ms for the health snapshot. Default 1000; `0` disables
+   * polling and relies on status/error events only. */
+  intervalMs?: number;
+}
+
+/**
+ * Mirror the bus health summary into a Vue ref. `getHealthSummary()` is a
+ * snapshot, so the composable polls it on an interval (default 1000 ms) and
+ * refreshes on status changes and errors. Returns `null` until the bus exists.
+ */
+export function useCrossTabHealth<TConfig, TData>(
+  bus: Ref<CrossTabDataBus<TConfig, TData> | null>,
+  options?: UseCrossTabHealthOptions
+): Ref<DataBusHealthSummary | null> {
+  const health = ref<DataBusHealthSummary | null>(null);
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let cleanups: Array<() => void> = [];
+  const teardown = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+    for (const cleanup of cleanups) cleanup();
+    cleanups = [];
+  };
+  watch(bus, next => {
+    teardown();
+    if (!next) {
+      health.value = null;
+      return;
+    }
+    const refresh = () => { health.value = next.getHealthSummary(); };
+    refresh();
+    cleanups.push(next.onStatus(refresh));
+    cleanups.push(next.onError(refresh));
+    const intervalMs = options?.intervalMs ?? 1_000;
+    if (intervalMs > 0) timer = setInterval(refresh, intervalMs);
+  }, { immediate: true });
+  onBeforeUnmount(teardown);
+  return health as Ref<DataBusHealthSummary | null>;
 }

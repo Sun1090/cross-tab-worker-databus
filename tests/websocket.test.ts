@@ -78,6 +78,43 @@ describe('WebSocketTransport', () => {
     expect(onStatus).toHaveBeenCalledWith('disconnected');
   });
 
+  it('publishes a multi-item batch as one publishBatch frame', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publishBatch!('market.tick', [
+      { data: { price: 1 }, messageId: 'b-0' },
+      { data: { price: 2 } },
+      { data: { price: 3 }, messageId: 'b-2', timestamp: 42 }
+    ]);
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] as string)).toEqual({
+      op: 'publishBatch',
+      topic: 'market.tick',
+      items: [
+        { data: { price: 1 }, messageId: 'b-0' },
+        { data: { price: 2 } },
+        { data: { price: 3 }, messageId: 'b-2', timestamp: 42 }
+      ]
+    });
+  });
+
+  it('delegates a single-item batch to the legacy publish frame', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publishBatch!('market.tick', [{ data: { price: 1 }, messageId: 'only' }]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 1 }, messageId: 'only' })
+    ]);
+  });
+
+  it('drops a batch frame with onError when the socket is not open', () => {
+    const { transport, onError } = makeTransport();
+    transport.publishBatch!('market.tick', [{ data: 1 }, { data: 2 }]);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('publishBatch') }));
+  });
+
   it('sends JSON subscribe/unsubscribe/publish frames and tracks topics', () => {
     const { sockets, transport } = makeTransport();
     const socket = sockets[0]!;

@@ -1,6 +1,10 @@
 # 路线图
 
-0.20.73 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.74 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.74 已完成范围
+
+- 可选的 `DataBusTransport.publishBatch`：WebSocket transport 单帧批量发送，demo server 支持批量帧，无批量能力的 transport 自动回退逐条发送；React/Vue 新增 `useCrossTabHealth` 绑定；健康判定纳入 transport 实时状态。
 
 ## 0.20.73 已完成范围
 

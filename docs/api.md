@@ -268,6 +268,9 @@ interface DataBusTransport<TConfig, TData> {
   subscribe(topic): void | Promise<void>;
   unsubscribe(topic): void | Promise<void>;
   publish(topic, data): void | Promise<void>;
+  /** Optional: one wire frame for many items. The DataBus falls back to
+   * per-item `publish` calls when this is absent. */
+  publishBatch?(topic, items): void | Promise<void>;
   stop(): void | Promise<void>;
 }
 ```
@@ -377,6 +380,10 @@ Attaches a message handler with automatic cleanup. The handler is read through a
 ### `useCrossTabStatus(bus)`
 
 Mirrors `bus.onStatus()` into React state and reads the current value synchronously whenever the bus identity changes. Returns `'connecting' | 'connected' | 'disconnected' | 'error'`.
+
+### `useCrossTabHealth(bus, options?)`
+
+Mirrors `bus.getHealthSummary()` into React state (`DataBusHealthSummary | null`). Because the summary is a snapshot, the hook polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. Returns `null` while the bus has not been created yet.
 
 ## Vue Composables (`cross-tab-worker-databus/vue`)
 

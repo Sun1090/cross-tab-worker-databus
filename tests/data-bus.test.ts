@@ -1310,6 +1310,37 @@ describe('CrossTabDataBus publishBatch', () => {
     await bus.stop();
   });
 
+  it('routes a multi-item batch through a batch-capable transport in one call', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'bus-batch-transport' });
+    const transport = new FakeTransport<number>(undefined, { supportsPublishBatch: true });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'bus-batch-transport',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    await bus.start({});
+    bus.subscribe('topic', vi.fn());
+    bus.publishBatch('topic', [
+      { data: 1, options: { messageId: 'a' } },
+      { data: 2 },
+      { data: 3, options: { messageId: 'c', timestamp: 9 } }
+    ]);
+    await Promise.resolve();
+    expect(transport.publishBatchCalls).toHaveLength(1);
+    expect(transport.publishBatchCalls[0]).toEqual({
+      topic: 'topic',
+      items: [
+        { data: 1, messageId: 'a' },
+        { data: 2 },
+        { data: 3, messageId: 'c', timestamp: 9 }
+      ]
+    });
+    expect(transport.publishCalls).toEqual([]);
+    await bus.stop();
+  });
+
   it('reports an error when the cluster publishBatch reports failure', async () => {
     const { bus } = makeBus('bus-batch-err');
     await bus.start({});

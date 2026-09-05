@@ -225,8 +225,18 @@ export interface DataBusTransport<TConfig = unknown, TData = unknown> {
   unsubscribe(topic: string): MaybePromise<void>;
   /** Publish `data` to `topic` via the server. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
+  /** Optional burst-friendly publish: one wire frame for many items. When
+   * absent, the DataBus falls back to per-item `publish` calls. */
+  publishBatch?(topic: string, items: ReadonlyArray<DataBusPublicationItem>): MaybePromise<void>;
   /** Close the connection and release all resources. Safe to call multiple times. */
   stop(): MaybePromise<void>;
+}
+
+/** One entry of a batched transport publication. */
+export interface DataBusPublicationItem {
+  data: unknown;
+  messageId?: string;
+  timestamp?: number;
 }
 
 /** Callback invoked for each publication delivered to a subscribed topic. */
