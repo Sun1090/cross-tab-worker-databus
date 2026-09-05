@@ -1,6 +1,10 @@
 # Roadmap
 
-0.20.70 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.71 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.71 delivered scope
+
+- Added optional `appendBatch` replay persistence and IndexedDB transaction coalescing for publication bursts.
 
 ## 0.20.70 delivered scope
 

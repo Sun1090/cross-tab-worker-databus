@@ -147,6 +147,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly persistenceRetryMaxAttempts: number;
   private readonly persistenceRetryBackoffMs: number;
   private persistenceRetryGeneration = 0;
+  private pendingReplayPersistence: DataBusMessage<TData>[] = [];
+  private replayPersistenceFlushScheduled = false;
   private readonly replayHydration: Promise<void>;
   // Retention cleanup is coalesced so a burst of publications does not issue
   // one IndexedDB read/write transaction per message. The newest cutoff wins.
@@ -888,12 +890,31 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       while (buffer.length > 0) { const first = buffer[0]; if (!first || first.timestamp === undefined || first.timestamp >= cutoff) break; buffer.shift(); }
     }
     if (this.replayPersistence) {
-      void this.withPersistenceRetry('append', () => this.replayPersistence!.append(storedMessage))
-        .catch(error => this.reportPersistenceError(error));
+      if (this.replayPersistence.appendBatch) {
+        this.pendingReplayPersistence.push(storedMessage);
+        this.scheduleReplayPersistenceFlush();
+      } else {
+        void this.withPersistenceRetry('append', () => this.replayPersistence!.append(storedMessage))
+          .catch(error => this.reportPersistenceError(error));
+      }
       if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
         this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs);
       }
     }
+  }
+
+  private scheduleReplayPersistenceFlush(): void {
+    if (this.replayPersistenceFlushScheduled) return;
+    this.replayPersistenceFlushScheduled = true;
+    queueMicrotask(() => {
+      this.replayPersistenceFlushScheduled = false;
+      const batch = this.pendingReplayPersistence.splice(0);
+      if (batch.length === 0 || !this.replayPersistence) return;
+      const operation = this.replayPersistence.appendBatch
+        ? () => this.replayPersistence!.appendBatch!(batch)
+        : () => Promise.all(batch.map(message => this.replayPersistence!.append(message))).then(() => undefined);
+      void this.withPersistenceRetry('append', operation).catch(error => this.reportPersistenceError(error));
+    });
   }
 
   private async hydrateReplay(): Promise<void> {
