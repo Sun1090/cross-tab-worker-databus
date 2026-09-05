@@ -26,6 +26,16 @@ import type {
   WorkerStatus
 } from './types';
 import { BatchingStorageWriter } from './storage-batch';
+import {
+  CLUSTER_MESSAGE_TYPE,
+  CONTROL_ACTION,
+  DEFAULT_STORAGE_PREFIX,
+  RELIABILITY_OPERATION,
+  WORKER_ROLE,
+  WORKER_STATUS
+} from '../utils/constants';
+import { publicationMetadata } from '../utils/metadata';
+import { readAllByPrefix, readJson, writeJson } from '../utils/storage-utils';
 
 /** Callbacks the cluster invokes to drive the transport and lifecycle. */
 export interface WorkerClusterHandlers {
@@ -61,7 +71,10 @@ export interface WorkerClusterHandlers {
   /** The cluster resumed (tab visible / pageshow). */
   onResume?: () => void;
   /** Bounded diagnostics for route confirmation and graceful migration. */
-  onDiagnostic?: (event: { operation: 'route_ack' | 'route_migration'; topic: string }) => void;
+  onDiagnostic?: (event: {
+    operation: (typeof RELIABILITY_OPERATION.ROUTE_ACK | typeof RELIABILITY_OPERATION.ROUTE_MIGRATION);
+    topic: string;
+  }) => void;
 }
 
 export interface WorkerClusterOptions {
@@ -110,67 +123,10 @@ export interface WorkerClusterSnapshot {
 const CLUSTER_PROTOCOL_VERSION = 1;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
 const DEFAULT_WORKER_TTL_MS = 10_000;
-const DEFAULT_STORAGE_PREFIX = 'cross-tab-worker-databus';
 // Upper bound on the topicKey → topic reverse cache. Control messages from
 // other workers can reference arbitrary topics, so cap growth to avoid an
 // unbounded memory leak from a misbehaving or malicious peer.
 const MAX_KNOWN_TOPICS = 500;
-
-/** Parse a JSON value from storage, returning null on malformed or missing data.
- * Never throws — a corrupt route/worker record is treated as absent so the
- * reconcile cycle can recreate it. */
-function readJson<T>(storage: StorageLike, key: string): T | null {
-  try {
-    const value = storage.getItem(key);
-    return value ? (JSON.parse(value) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Write a JSON value to storage, swallowing storage errors (coordination is
- * best-effort; a failed write does not break the local transport). The actual
- * write may be coalesced by BatchingStorageWriter — this just calls setItem. */
-function writeJson(storage: StorageLike, key: string, value: unknown): void {
-  try {
-    storage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Coordination is best-effort. The local transport remains usable.
-  }
-}
-
-/** Preserve the legacy undefined callback argument when no metadata exists. */
-function publicationMetadata(
-  messageId?: string,
-  timestamp?: number
-): DataBusPublicationMetadata | undefined {
-  if (messageId === undefined && timestamp === undefined) return undefined;
-  return {
-    ...(messageId === undefined ? {} : { messageId }),
-    ...(timestamp === undefined ? {} : { timestamp })
-  };
-}
-
-/** List all storage keys that start with `prefix`. */
-function listKeys(storage: StorageLike, prefix: string): string[] {
-  try {
-    return Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
-      (key): key is string => Boolean(key?.startsWith(prefix))
-    );
-  } catch {
-    return [];
-  }
-}
-
-/** Read and parse every JSON record whose key starts with `prefix`.
- * Duplicates the `listKeys` + `readJson` loop found in readWorkers,
- * cleanupOrphanedRoutes, cleanupOrphanedSubscribers, and getSnapshot —
- * extracted so each call site reads its records in one line. */
-function readAllByPrefix<T>(storage: StorageLike, prefix: string): Array<{ key: string; value: T }> {
-  return listKeys(storage, prefix)
-    .map(key => ({ key, value: readJson<T>(storage, key) }))
-    .filter((entry): entry is { key: string; value: T } => entry.value !== null);
-}
 
 /**
  * Cross-tab worker coordination runtime.
@@ -262,8 +218,8 @@ export class WorkerClusterRuntime {
       workerId: this.workerId,
       tabId: this.tabId,
       load: 0,
-      role: 'standby',
-      status: 'connecting',
+      role: WORKER_ROLE.STANDBY,
+      status: WORKER_STATUS.CONNECTING,
       visibilityState: this.environment.getVisibilityState(),
       heartbeatAt: now,
       registeredAt: now
@@ -328,7 +284,7 @@ export class WorkerClusterRuntime {
     // cache is populated before either the control message or the subscriber write.
     for (const topic of this.subscribedTopics) {
       const topicKey = this.rememberTopic(topic);
-      if (!this.storage) this.sendControl(this.workerId, 'SUBSCRIBE', topic, topicKey);
+      if (!this.storage) this.sendControl(this.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
       else this.writeSubscriber(topicKey);
     }
     this.reconcile();
@@ -399,7 +355,7 @@ export class WorkerClusterRuntime {
     this.subscribedTopics.add(topic);
     if (!this.started) return false;
     if (!this.storage) {
-      this.sendControl(this.workerId, 'SUBSCRIBE', topic, topicKey);
+      this.sendControl(this.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
       return true;
     }
     this.writeSubscriber(topicKey);
@@ -415,7 +371,7 @@ export class WorkerClusterRuntime {
     // subscribe immediately; pagehide uses handoffAssignedTopics() while the
     // old owner is still present when release ordering is required.
     this.writeRoute(topicKey, owner, undefined, (existingRoute?.generation ?? 0) + 1);
-    this.sendControl(owner.workerId, 'SUBSCRIBE', topic, topicKey);
+    this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
     this.notifyRegistry();
     return owner.workerId === this.workerId;
   }
@@ -442,7 +398,7 @@ export class WorkerClusterRuntime {
     const subscribers = this.readSubscriberTabIds(topicKey, this.readWorkers());
     if (subscribers.length === 0) {
       this.removeStorage(this.routeStorageKey(topicKey));
-      if (notifyOwner) this.sendControl(route.workerId, 'UNSUBSCRIBE', topic, topicKey);
+      if (notifyOwner) this.sendControl(route.workerId, CONTROL_ACTION.UNSUBSCRIBE, topic, topicKey);
     }
     return topicKey;
   }
@@ -473,13 +429,13 @@ export class WorkerClusterRuntime {
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
       const generation = (previous?.generation ?? 0) + 1;
       this.writeRoute(topicKey, owner, previous?.workerId, generation);
-      this.handlers.onDiagnostic?.({ operation: 'route_migration', topic });
+      this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION, topic });
       // Make the new route visible before the target confirms it. This also
       // leaves a durable unconfirmed assignment when unload drops CONTROL.
       this.flushStorage();
       // Release the old server subscription before authorizing the new owner.
       // The ACK is sent after the transport operation has been requested.
-      this.handlers.onControl('UNSUBSCRIBE', topic);
+      this.handlers.onControl(CONTROL_ACTION.UNSUBSCRIBE, topic);
       this.sendRouteReleased(owner.workerId, topic, topicKey, generation);
     }
   }
@@ -506,7 +462,7 @@ export class WorkerClusterRuntime {
     // records on every message. Wildcard assignments also own matching
     // concrete topics, so they can use the same fast path.
     if (this.assignedTopics.has(topicKey)) {
-      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+      return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
     }
     // `cachedPattern` is `undefined` (never computed), a pattern string
     // (this worker owns the topic via a local wildcard subscription), or
@@ -515,18 +471,18 @@ export class WorkerClusterRuntime {
     // route-owner cache lookup below has to run.
     const cachedPattern = this.wildcardPublishCache.get(topic);
     if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
-      return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+      return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
     }
     if (cachedPattern === undefined) {
       for (const pattern of this.assignedTopics.values()) {
         if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
           this.wildcardPublishCache.set(topic, pattern);
-          return this.sendControl(this.workerId, 'PUBLISH', topic, topicKey, data, metadata);
+          return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
         }
       }
       this.wildcardPublishCache.set(topic, null);
     }
-    return this.sendControl(this.resolvePublishTarget(topic, topicKey), 'PUBLISH', topic, topicKey, data, metadata);
+    return this.sendControl(this.resolvePublishTarget(topic, topicKey), CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
   }
 
   /**
@@ -577,10 +533,10 @@ export class WorkerClusterRuntime {
       return true;
     }
     return this.send({
-      type: 'CONTROL',
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
       sourceWorkerId: this.workerId,
       targetWorkerId: target,
-      action: 'PUBLISH',
+      action: CONTROL_ACTION.PUBLISH,
       topic,
       topicKey,
       items: items.map(item => ({
@@ -622,8 +578,8 @@ export class WorkerClusterRuntime {
   ): void {
     void topicKey;
     const meta = publicationMetadata(messageId, timestamp);
-    if (meta) this.handlers.onControl('PUBLISH', topic, data, meta.messageId, meta.timestamp);
-    else this.handlers.onControl('PUBLISH', topic, data);
+    if (meta) this.handlers.onControl(CONTROL_ACTION.PUBLISH, topic, data, meta.messageId, meta.timestamp);
+    else this.handlers.onControl(CONTROL_ACTION.PUBLISH, topic, data);
   }
 
   /** Fan out a publication batch to the local onControl path: one
@@ -656,7 +612,7 @@ export class WorkerClusterRuntime {
     // its source tab across the BroadcastChannel hop without callers having
     // to thread the tabId through every call site.
     const effectiveOriginTabId = originTabId ?? this.tabId;
-    this.send({ type: 'EVENT', sourceWorkerId: this.workerId, eventType, payload, originTabId: effectiveOriginTabId });
+    this.send({ type: CLUSTER_MESSAGE_TYPE.EVENT, sourceWorkerId: this.workerId, eventType, payload, originTabId: effectiveOriginTabId });
   }
 
   isAssigned(topic: string): boolean {
@@ -771,14 +727,14 @@ export class WorkerClusterRuntime {
     const message = event.data;
     if (!message || message.sourceWorkerId === this.workerId) return;
     switch (message.type) {
-      case 'CONTROL':
+      case CLUSTER_MESSAGE_TYPE.CONTROL:
         return this.handleControlMessage(message);
-      case 'ROUTE_RELEASED':
+      case CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED:
         return this.handleRouteReleasedMessage(message);
-      case 'EVENT':
+      case CLUSTER_MESSAGE_TYPE.EVENT:
         this.handlers.onEvent(message.eventType, message.payload, message.sourceWorkerId, message.originTabId);
         return;
-      case 'REGISTRY':
+      case CLUSTER_MESSAGE_TYPE.REGISTRY:
         this.reconcile();
         return;
       default: {
@@ -793,20 +749,20 @@ export class WorkerClusterRuntime {
 
   /** Handle a point-to-point CONTROL message (SUBSCRIBE / UNSUBSCRIBE / PUBLISH). */
   private handleControlMessage(
-    message: Extract<WorkerClusterMessage, { type: 'CONTROL' }>
+    message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.CONTROL }>
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
     this.rememberTopic(message.topic);
     switch (message.action) {
-      case 'SUBSCRIBE':
+      case CONTROL_ACTION.SUBSCRIBE:
         this.assignedTopics.set(message.topicKey, message.topic);
         this.confirmRoute(message.topicKey);
         break;
-      case 'UNSUBSCRIBE':
+      case CONTROL_ACTION.UNSUBSCRIBE:
         // A graceful handoff release short-circuits the generic dispatch.
         if (this.releaseHandoffOnUnsubscribe(message)) return;
         break;
-      case 'PUBLISH':
+      case CONTROL_ACTION.PUBLISH:
         if (message.items && message.items.length > 0) {
           // A batched CONTROL: hand the whole batch to the transport at once
           // when the owner supports it, preserving per-item metadata.
@@ -816,8 +772,8 @@ export class WorkerClusterRuntime {
           }
           for (const item of message.items) {
             const itemMeta = publicationMetadata(item.messageId, item.timestamp);
-            if (itemMeta) this.handlers.onControl('PUBLISH', message.topic, item.data, itemMeta.messageId, itemMeta.timestamp);
-            else this.handlers.onControl('PUBLISH', message.topic, item.data);
+            if (itemMeta) this.handlers.onControl(CONTROL_ACTION.PUBLISH, message.topic, item.data, itemMeta.messageId, itemMeta.timestamp);
+            else this.handlers.onControl(CONTROL_ACTION.PUBLISH, message.topic, item.data);
           }
           return;
         }
@@ -834,7 +790,7 @@ export class WorkerClusterRuntime {
       metadata.timestamp
     );
     else this.handlers.onControl(message.action, message.topic, message.data);
-    if (message.action !== 'PUBLISH') this.updateLoad();
+    if (message.action !== CONTROL_ACTION.PUBLISH) this.updateLoad();
   }
 
   /**
@@ -844,12 +800,12 @@ export class WorkerClusterRuntime {
    * handoff release (the generic CONTROL dispatch must not run as well).
    */
   private releaseHandoffOnUnsubscribe(
-    message: Extract<WorkerClusterMessage, { type: 'CONTROL' }>
+    message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.CONTROL }>
   ): boolean {
     this.assignedTopics.delete(message.topicKey);
     const route = this.readRoute(message.topicKey);
     if (route?.handoffFromWorkerId !== this.workerId) return false;
-    this.handlers.onControl('UNSUBSCRIBE', message.topic, undefined);
+    this.handlers.onControl(CONTROL_ACTION.UNSUBSCRIBE, message.topic, undefined);
     this.sendRouteReleased(route.workerId, message.topic, message.topicKey, route.generation);
     this.updateLoad();
     return true;
@@ -864,7 +820,7 @@ export class WorkerClusterRuntime {
     generation: number
   ): void {
     this.send({
-      type: 'ROUTE_RELEASED',
+      type: CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED,
       sourceWorkerId: this.workerId,
       targetWorkerId,
       topic,
@@ -879,14 +835,14 @@ export class WorkerClusterRuntime {
    * at least as new as ours. Any other ROUTE_RELEASED is stale and dropped.
    */
   private handleRouteReleasedMessage(
-    message: Extract<WorkerClusterMessage, { type: 'ROUTE_RELEASED' }>
+    message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
     const route = this.readRoute(message.topicKey);
     if (!route || this.isStaleRouteRelease(route, message)) return;
     this.assignedTopics.set(message.topicKey, message.topic);
     this.confirmRoute(message.topicKey);
-    this.handlers.onControl('SUBSCRIBE', message.topic, undefined);
+    this.handlers.onControl(CONTROL_ACTION.SUBSCRIBE, message.topic, undefined);
     this.updateLoad();
   }
 
@@ -897,7 +853,7 @@ export class WorkerClusterRuntime {
    * and must not confirm the current round. */
   private isStaleRouteRelease(
     route: WorkerRoute,
-    message: Extract<WorkerClusterMessage, { type: 'ROUTE_RELEASED' }>
+    message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
   ): boolean {
     return (
       route.workerId !== this.workerId ||
@@ -953,7 +909,7 @@ export class WorkerClusterRuntime {
         // recovered immediately. Graceful pagehide uses the strict ACK path in
         // handoffAssignedTopics(), where the departing owner is still known.
         this.writeRoute(topicKey, owner, undefined, (route?.generation ?? 0) + 1);
-        this.sendControl(owner.workerId, 'SUBSCRIBE', topic, topicKey);
+        this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
         this.notifyRegistry();
         continue;
       }
@@ -961,7 +917,7 @@ export class WorkerClusterRuntime {
         // During a handoff, the new owner waits for ROUTE_RELEASED from the
         // previous owner. Retrying SUBSCRIBE here would recreate overlap.
         if (!route.handoffFromWorkerId) {
-          this.sendControl(route.workerId, 'SUBSCRIBE', topic, topicKey);
+          this.sendControl(route.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
         }
       }
     }
@@ -973,7 +929,7 @@ export class WorkerClusterRuntime {
       const route = this.readRoute(topicKey);
       if (route?.workerId === this.workerId) continue;
       this.assignedTopics.delete(topicKey);
-      this.handlers.onControl('UNSUBSCRIBE', topic, undefined);
+      this.handlers.onControl(CONTROL_ACTION.UNSUBSCRIBE, topic, undefined);
       if (route?.handoffFromWorkerId === this.workerId) {
         this.sendRouteReleased(route.workerId, topic, topicKey, route.generation);
       }
@@ -996,14 +952,14 @@ export class WorkerClusterRuntime {
   ): boolean {
     if (targetWorkerId === this.workerId) {
       switch (action) {
-        case 'SUBSCRIBE':
+        case CONTROL_ACTION.SUBSCRIBE:
           this.assignedTopics.set(topicKey, topic);
           this.confirmRoute(topicKey);
           break;
-        case 'UNSUBSCRIBE':
+        case CONTROL_ACTION.UNSUBSCRIBE:
           this.assignedTopics.delete(topicKey);
           break;
-        case 'PUBLISH':
+        case CONTROL_ACTION.PUBLISH:
         default:
           break;
       }
@@ -1015,11 +971,11 @@ export class WorkerClusterRuntime {
         metadata.timestamp
       );
       else this.handlers.onControl(action, topic, data);
-      if (action !== 'PUBLISH') this.updateLoad();
+      if (action !== CONTROL_ACTION.PUBLISH) this.updateLoad();
       return true;
     }
     return this.send({
-      type: 'CONTROL',
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
       sourceWorkerId: this.workerId,
       targetWorkerId,
       action,
@@ -1144,7 +1100,7 @@ export class WorkerClusterRuntime {
       confirmedAt: this.environment.now()
     } satisfies WorkerRoute);
     const topic = this.knownTopics.get(topicKey);
-    if (topic) this.handlers.onDiagnostic?.({ operation: 'route_ack', topic });
+    if (topic) this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_ACK, topic });
   }
 
   /** Remove routes whose topic has no subscribers and whose TTL has expired. */
@@ -1190,12 +1146,12 @@ export class WorkerClusterRuntime {
 
   /** Broadcast a REGISTRY message to trigger reconciliation on other tabs. */
   private notifyRegistry(): void {
-    this.send({ type: 'REGISTRY', sourceWorkerId: this.workerId });
+    this.send({ type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: this.workerId });
   }
 
   /** Recompute whether this worker is active (eligible to own topics) or standby. Returns true when changed. */
   private refreshRole(workers: readonly WorkerRecord[]): boolean {
-    const role: WorkerRole = this.isActiveAmong(workers) ? 'active' : 'standby';
+    const role: WorkerRole = this.isActiveAmong(workers) ? WORKER_ROLE.ACTIVE : WORKER_ROLE.STANDBY;
     if (role === this.currentRecord.role) return false;
     this.currentRecord = { ...this.currentRecord, role };
     return true;

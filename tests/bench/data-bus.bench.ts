@@ -10,6 +10,7 @@ import { CrossTabDataBus } from '../../src/core/data-bus';
 import { DataBusTraceReporter } from '../../src/core/trace';
 import type { DataBusMessage } from '../../src/core/types';
 import { createFakeEnvironment, FakeTransport, MemoryStorage } from '../fakes';
+import { PRUNE_STRATEGY, TRACE_EVENT_TYPE, TRACE_MODE, WORKER_STATUS } from '../../src/utils/constants';
 
 function makeEnvironment(randomId: string) {
   return createFakeEnvironment({
@@ -115,7 +116,7 @@ describe('data bus advanced hot paths', () => {
       environment: environment.environment,
       initialConfig: {},
       transport,
-      replay: { maxPerTopic: 100, pruneStrategy: 'count' }
+      replay: { maxPerTopic: 100, pruneStrategy: PRUNE_STRATEGY.COUNT }
     });
     bus.subscribe('bench.replay', () => {});
     for (let index = 0; index < 1_000; index += 1) {
@@ -147,13 +148,13 @@ describe('data bus advanced hot paths', () => {
     const events: unknown[] = [];
     const trace = new DataBusTraceReporter({
       enabled: true,
-      mode: 'events',
+      mode: TRACE_MODE.EVENTS,
       asyncSink: true,
       sink: event => events.push(event),
       now: () => 1_000
     });
     for (let index = 0; index < 1_000; index += 1) {
-      trace.event({ type: 'status', status: index % 2 === 0 ? 'connected' : 'disconnected' });
+      trace.event({ type: TRACE_EVENT_TYPE.STATUS, status: index % 2 === 0 ? WORKER_STATUS.CONNECTED : WORKER_STATUS.DISCONNECTED });
     }
     await Promise.resolve();
     trace.stop();

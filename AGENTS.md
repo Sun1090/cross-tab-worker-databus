@@ -22,12 +22,20 @@ src/
   core/
     cluster.ts                  # WorkerClusterRuntime — cross-tab coordination
     data-bus.ts                 # CrossTabDataBus — public API, transport lifecycle
+    dedup-manager.ts            # DedupManager — bounded messageId dedup + adaptive TTL
+    replay-manager.ts           # ReplayManager — ring buffers, durable persistence, retention
     environment.ts              # ClusterEnvironment adapter (port/adapter pattern)
     hash.ts                     # createOpaqueKey — 128-bit non-cryptographic hash
     routing.ts                  # Pure functions: owner selection, load balancing
     storage-batch.ts            # BatchingStorageWriter — write coalescing + backoff
     trace.ts                    # DataBusTraceReporter — metrics/latency diagnostics
     types.ts                    # All shared type definitions
+  utils/
+    constants.ts                # Shared string constants; literal types derive from them
+    metadata.ts                 # publicationMetadata — {messageId,timestamp} spreading
+    storage-utils.ts            # readJson/writeJson/listKeys/readAllByPrefix
+    validation.ts               # Option validation asserts (replay/dedup/recovery/centrifuge)
+    error-utils.ts              # serializeError/deserializeWorkerError + SerializedWorkerError
   centrifuge.ts                 # CentrifugeWorkerTransport + createCentrifugeDataBus
   centrifuge-session.ts         # CentrifugeSession wrapper
   centrifuge-protocol.ts        # Worker ↔ main-thread message protocol

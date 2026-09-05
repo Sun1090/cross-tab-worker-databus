@@ -1,4 +1,6 @@
 import type { DataBusMessage } from './types';
+import { DEFAULT_STORAGE_PREFIX, PRUNE_STRATEGY } from '../utils/constants';
+import { assertPositiveFiniteNumber, assertPositiveSafeInteger, assertPruneStrategy } from '../utils/validation';
 
 /** Optional persistence backend for replay history. */
 export interface DataBusReplayPersistence<TData = unknown> {
@@ -17,7 +19,7 @@ export interface DataBusReplayPersistence<TData = unknown> {
 export interface IndexedDbReplayPersistenceOptions {
   dbName?: string;
   maxPerTopic: number;
-  pruneStrategy?: 'count' | 'age' | 'both';
+  pruneStrategy?: (typeof PRUNE_STRATEGY)[keyof typeof PRUNE_STRATEGY];
   retentionMs?: number;
 }
 
@@ -27,16 +29,14 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
 ): DataBusReplayPersistence<TData> {
   const indexedDb = globalThis.indexedDB;
   if (!indexedDb) throw new Error('IndexedDB is unavailable in this environment.');
-  const dbName = options.dbName ?? 'cross-tab-worker-databus';
+  const dbName = options.dbName ?? DEFAULT_STORAGE_PREFIX;
   const storeName = 'replay';
   const maxPerTopic = options.maxPerTopic;
-  const pruneStrategy = options.pruneStrategy ?? 'count';
+  const pruneStrategy = options.pruneStrategy ?? PRUNE_STRATEGY.COUNT;
   const retentionMs = options.retentionMs;
-  if (!['count', 'age', 'both'].includes(pruneStrategy)) throw new TypeError('pruneStrategy must be count, age, or both.');
-  if (retentionMs !== undefined && (!Number.isFinite(retentionMs) || retentionMs <= 0)) throw new TypeError('retentionMs must be a positive finite number.');
-  if (!Number.isSafeInteger(maxPerTopic) || maxPerTopic <= 0) {
-    throw new TypeError(`maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`);
-  }
+  assertPruneStrategy(pruneStrategy);
+  if (retentionMs !== undefined) assertPositiveFiniteNumber(retentionMs, 'retentionMs');
+  assertPositiveSafeInteger(maxPerTopic, 'maxPerTopic');
   let dbPromise: Promise<IDBDatabase> | null = null;
   const invalidate = (db: IDBDatabase): void => {
     if (dbPromise) {
@@ -114,11 +114,11 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         const request = store.get(message.topic);
         request.onsuccess = () => {
           let messages = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(message);
-          if (pruneStrategy !== 'count' && retentionMs !== undefined) {
+          if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
             const cutoff = Date.now() - retentionMs;
             messages = messages.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
           }
-          if (pruneStrategy !== 'age') messages = messages.slice(-maxPerTopic);
+          if (pruneStrategy !== PRUNE_STRATEGY.AGE) messages = messages.slice(-maxPerTopic);
           store.put({ topic: message.topic, messages });
         };
         request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
@@ -142,11 +142,11 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
             const request = store.get(topic);
             request.onsuccess = () => {
               let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
-              if (pruneStrategy !== 'count' && retentionMs !== undefined) {
+              if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
                 const cutoff = Date.now() - retentionMs;
                 history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
               }
-              if (pruneStrategy !== 'age') history = history.slice(-maxPerTopic);
+              if (pruneStrategy !== PRUNE_STRATEGY.AGE) history = history.slice(-maxPerTopic);
               store.put({ topic, messages: history });
             };
             request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };

@@ -16,9 +16,11 @@ import type {
 import type {
   CentrifugeWorkerConfig,
   CentrifugeWorkerInput,
-  CentrifugeWorkerOutput,
-  SerializedWorkerError
+  CentrifugeWorkerOutput
 } from './centrifuge-protocol';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, WORKER_STATUS } from './utils/constants';
+import { publicationMetadata } from './utils/metadata';
+import { serializeError } from './utils/error-utils';
 
 /** Callback interface for posting messages back to the transport layer. */
 export interface CentrifugeSessionSink<TData = unknown> {
@@ -41,22 +43,22 @@ export class CentrifugeSession<TData = unknown> {
    * extension adding a new variant cannot crash an older session. */
   handle(message: CentrifugeWorkerInput): void {
     switch (message.type) {
-      case 'INIT':
+      case CENTRIFUGE_INPUT_TYPE.INIT:
         this.initialize(message.url, message.config, message.transferable === true);
         return;
-      case 'SUBSCRIBE':
+      case CENTRIFUGE_INPUT_TYPE.SUBSCRIBE:
         this.subscribe(message.topic);
         return;
-      case 'UNSUBSCRIBE':
+      case CENTRIFUGE_INPUT_TYPE.UNSUBSCRIBE:
         this.unsubscribe(message.topic);
         return;
-      case 'PUBLISH':
-      case 'PUBLISH_BIN':
+      case CENTRIFUGE_INPUT_TYPE.PUBLISH:
+      case CENTRIFUGE_INPUT_TYPE.PUBLISH_BIN:
         // Binary and JSON publish share the same Centrifuge client call; the
         // transport layer decides whether to transfer the ArrayBuffer.
         this.publish(message.topic, message.data, message.messageId, message.timestamp);
         return;
-      case 'STOP':
+      case CENTRIFUGE_INPUT_TYPE.STOP:
         this.stop();
         return;
       default:
@@ -71,10 +73,10 @@ export class CentrifugeSession<TData = unknown> {
     const client = new Centrifuge(url, config);
     this.client = client;
     client.on('state', (context: StateContext) => {
-      this.post({ type: 'STATUS', status: normalizeStatus(context.newState) });
+      this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: normalizeStatus(context.newState) });
     });
-    client.on('connected', () => this.post({ type: 'STATUS', status: 'connected' }));
-    client.on('disconnected', () => this.post({ type: 'STATUS', status: 'disconnected' }));
+    client.on('connected', () => this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.CONNECTED }));
+    client.on('disconnected', () => this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.DISCONNECTED }));
     client.on('error', context => this.postError(context));
     // Client-level publications are only for server-side subscriptions (where
     // no client Subscription object exists). For topics we have an active
@@ -156,17 +158,16 @@ export class CentrifugeSession<TData = unknown> {
   private postPublication(topic: string, data: unknown): void {
     if (!topic) return;
     if (this.transferable && data instanceof ArrayBuffer) {
-      this.post({ type: 'MESSAGE_BIN', topic, data }, [data]);
+      this.post({ type: CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN, topic, data }, [data]);
       return;
     }
     const publication = parseDataBusPublication<TData>(data, topic);
     if (!publication) return;
     this.post({
-      type: 'MESSAGE',
+      type: CENTRIFUGE_OUTPUT_TYPE.MESSAGE,
       topic: publication.topic,
       data: publication.data,
-      ...(publication.messageId === undefined ? {} : { messageId: publication.messageId }),
-      ...(publication.timestamp === undefined ? {} : { timestamp: publication.timestamp })
+      ...publicationMetadata(publication.messageId, publication.timestamp)
     });
   }
 
@@ -175,7 +176,7 @@ export class CentrifugeSession<TData = unknown> {
     this.client?.disconnect();
     this.subscriptions.clear();
     this.client = null;
-    this.post({ type: 'STATUS', status: 'disconnected' });
+    this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.DISCONNECTED });
   }
 
   /** Forward a message to the sink (the transport layer). */
@@ -189,7 +190,7 @@ export class CentrifugeSession<TData = unknown> {
    * Fatal errors are distinguished by the client eventually emitting
    * `disconnected` without a subsequent `connected`. */
   private postError(error: unknown): void {
-    this.post({ type: 'ERROR', error: serializeError(error) });
+    this.post({ type: CENTRIFUGE_OUTPUT_TYPE.ERROR, error: serializeError(error) });
   }
 }
 
@@ -209,23 +210,8 @@ function getPayloadTopic(data: unknown): string {
 /** Map a Centrifuge state string to the DataBus's status vocabulary.
  * 'connecting' and 'connected' pass through; anything else (e.g. 'reconnecting',
  * 'disconnected') maps to 'disconnected'. */
-const LIVE_STATES = new Set(['connecting', 'connected']);
+const LIVE_STATES = new Set<string>([WORKER_STATUS.CONNECTING, WORKER_STATUS.CONNECTED]);
 function normalizeStatus(status: string): 'connecting' | 'connected' | 'disconnected' {
   return LIVE_STATES.has(status) ? (status as 'connecting' | 'connected') : 'disconnected';
 }
 
-/** Convert an arbitrary error into a structured-cloneable form for postMessage. */
-function serializeError(error: unknown): SerializedWorkerError {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      ...(error.stack ? { stack: error.stack } : {})
-    };
-  }
-  return {
-    name: 'CentrifugeError',
-    message: typeof error === 'string' ? error : 'Centrifuge worker operation failed.',
-    ...(error === undefined ? {} : { context: error })
-  };
-}

@@ -8,6 +8,8 @@ import type {
   DataBusTransportHandlers,
   WorkerClusterMessage
 } from '../src/core/types';
+import { CLUSTER_MESSAGE_TYPE, TAB_VISIBILITY, WORKER_STATUS } from '../src/utils/constants';
+import type { EVENT_TYPE } from '../src/utils/constants';
 
 export class MemoryStorage implements StorageLike {
   private readonly values = new Map<string, string>();
@@ -67,7 +69,7 @@ export class ChannelHub {
       this.shouldFailNextPost = false;
       throw new Error('DataCloneError: value could not be cloned.');
     }
-    if (this.shouldDropNextControl && message.type === 'CONTROL') {
+    if (this.shouldDropNextControl && message.type === CLUSTER_MESSAGE_TYPE.CONTROL) {
       this.shouldDropNextControl = false;
       return;
     }
@@ -92,14 +94,14 @@ class FakeChannel implements ClusterChannel {
   }
 
   addEventListener(
-    _type: 'message',
+    _type: typeof EVENT_TYPE.MESSAGE,
     listener: (event: MessageEvent<WorkerClusterMessage>) => void
   ): void {
     this.listeners.add(listener);
   }
 
   removeEventListener(
-    _type: 'message',
+    _type: typeof EVENT_TYPE.MESSAGE,
     listener: (event: MessageEvent<WorkerClusterMessage>) => void
   ): void {
     this.listeners.delete(listener);
@@ -125,7 +127,7 @@ export interface FakeEnvironmentControl {
   runIntervals: () => void;
   pageHide: () => void;
   pageShow: () => void;
-  setVisibility: (state: 'visible' | 'hidden') => void;
+  setVisibility: (state: (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBILITY]) => void;
 }
 
 export function createFakeEnvironment(options: {
@@ -133,13 +135,13 @@ export function createFakeEnvironment(options: {
   hub?: ChannelHub;
   now: () => number;
   randomId: string;
-  visibilityState?: 'visible' | 'hidden';
+  visibilityState?: (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBILITY];
 }): FakeEnvironmentControl {
   const intervals = new Set<() => void>();
   const pageHideListeners = new Set<() => void>();
   const pageShowListeners = new Set<() => void>();
   const visibilityListeners = new Set<() => void>();
-  let visibilityState = options.visibilityState ?? 'visible';
+  let visibilityState = options.visibilityState ?? TAB_VISIBILITY.VISIBLE;
   return {
     environment: {
       storage: options.storage,
@@ -209,19 +211,19 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     this.startCalls += 1;
     this.handlers = handlers;
     if (this.startShouldFail) {
-      handlers.onStatus('error');
+      handlers.onStatus(WORKER_STATUS.ERROR);
       return;
     }
     if (!this.startGate) {
-      handlers.onStatus('connected');
+      handlers.onStatus(WORKER_STATUS.CONNECTED);
       return;
     }
     return this.startGate.then(() => {
       if (this.startShouldFail) {
-        handlers.onStatus('error');
+        handlers.onStatus(WORKER_STATUS.ERROR);
         return;
       }
-      handlers.onStatus('connected');
+      handlers.onStatus(WORKER_STATUS.CONNECTED);
     });
   }
 
@@ -255,7 +257,7 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     });
   }
 
-  setStatus(status: 'connecting' | 'connected' | 'disconnected' | 'error'): void {
+  setStatus(status: (typeof WORKER_STATUS)[keyof typeof WORKER_STATUS]): void {
     this.handlers?.onStatus(status);
   }
 }

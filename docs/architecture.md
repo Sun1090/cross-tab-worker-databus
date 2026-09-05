@@ -48,9 +48,35 @@ Because `MessagePort` has no `close` event, a tab that crashes before sending `S
 | Layer | Entry | Responsibility |
 |---|---|---|
 | DataBus | `CrossTabDataBus` | Local handler reference counting, message dispatch, state and transport lifecycle |
+| Replay | `ReplayManager` | Bounded per-topic history ring, durable IndexedDB persistence, retention cleanup, retry policy |
+| Dedup  | `DedupManager`  | Opt-in bounded duplicate suppression by `messageId`, adaptive TTL, expiry sweep |
 | Cluster Coordination | `WorkerClusterRuntime` | Worker registration, roles, heartbeat, Topic owner, migration and broadcast protocol |
 | Transport | `DataBusTransport` | Executes subscribe, unsubscribe, publish on the real Worker/connection |
 | Centrifuge | `CentrifugeWorkerTransport` | Protocol adaptation between the main thread and the built-in Centrifuge Worker |
+
+## Source Layout & Shared Utils
+
+The `src/` tree keeps platform adapters and the coordination core beside a small
+`src/utils/` toolbox:
+
+| File | Contents | Consumers |
+|---|---|---|
+| `utils/constants.ts` | Every runtime string literal in one place — statuses, roles, actions, cluster/worker/protocol message types, trace event discriminants, enums, namespace prefixes. All literal-derived types (`WorkerStatus`, message `type` fields, trace `action`/`operation`, …) are derived from these constants with `(typeof X)[keyof typeof X]`, so a value and its type cannot drift apart. | all modules |
+| `utils/metadata.ts` | `publicationMetadata(messageId, timestamp)` — spreads only defined metadata, previously duplicated across four modules. | data-bus, cluster, centrifuge, centrifuge-session |
+| `utils/storage-utils.ts` | `readJson` / `writeJson` / `listKeys` / `readAllByPrefix` — fault-tolerant storage primitives (corrupt JSON → absent; failed write → swallowed). | cluster |
+| `utils/validation.ts` | Constructor/option validation asserts (`assertReplayOptions`, `assertDedupOptions`, `assertRecoveryOptions`, `assertHeartbeatInterval`, …). Optional fields are validated only when explicitly provided; defaults are always valid. | data-bus, replay-persistence, centrifuge |
+| `utils/error-utils.ts` | `serializeError` / `deserializeWorkerError` + `SerializedWorkerError` — Error round-tripping across the Worker boundary. | centrifuge, centrifuge-session |
+
+Extracting these was deliberate: they are side-effect-free, dependency-light
+helpers whose duplicated copies had already started to drift (e.g. four
+near-identical `publicationMetadata` implementations). Stateful cross-cutting
+concerns with their own lifecycle — replay buffering and dedup — live as
+self-contained `DedupManager` / `ReplayManager` classes that the DataBus
+delegates to; they own their maps/timers/stats and expose thin start/stop/
+record/clear surfaces. The DataBus lifecycle state machine (start/stop/
+suspend/resume, promise gates, recovery pacing) was kept inside
+`CrossTabDataBus` on purpose: those flags interlock tightly and extracting
+them would re-introduce the race conditions the gates exist to prevent.
 
 ## Glossary
 

@@ -4,6 +4,7 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue';
 import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
 import type { DataBusMessage, WorkerStatus } from './core/types';
+import { WORKER_STATUS } from './utils/constants';
 
 export function useCrossTabDataBus<TConfig, TData>(
   create: () => CrossTabDataBus<TConfig, TData>,
@@ -57,11 +58,11 @@ export function useCrossTabSubscription<TConfig, TData>(
 export function useCrossTabStatus<TConfig, TData>(
   bus: Ref<CrossTabDataBus<TConfig, TData> | null>
 ): Ref<WorkerStatus> {
-  const status = ref<WorkerStatus>('connecting');
+  const status = ref<WorkerStatus>(WORKER_STATUS.CONNECTING);
   let cleanup: (() => void) | undefined;
   watch(bus, next => {
     cleanup?.(); cleanup = undefined;
-    status.value = next?.getStatus() ?? 'connecting';
+    status.value = next?.getStatus() ?? WORKER_STATUS.CONNECTING;
     if (next) cleanup = next.onStatus(value => { status.value = value; });
   }, { immediate: true });
   onBeforeUnmount(() => cleanup?.());

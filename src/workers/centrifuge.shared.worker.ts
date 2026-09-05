@@ -18,6 +18,7 @@
 import type { CentrifugeWorkerInput } from '../centrifuge-protocol';
 import { CentrifugeSession } from '../centrifuge-session';
 import { PortReaper } from './port-reaper';
+import { CENTRIFUGE_INPUT_TYPE } from '../utils/constants';
 
 const sharedWorkerScope = self as unknown as SharedWorkerGlobalScope;
 // One session per connecting port — each tab gets its own subscription scope.
@@ -36,24 +37,24 @@ sharedWorkerScope.addEventListener('connect', event => {
   });
   reaper.register(port, {
     close: () => port.close(),
-    stop: () => session.handle({ type: 'STOP' })
+    stop: () => session.handle({ type: CENTRIFUGE_INPUT_TYPE.STOP })
   });
   port.addEventListener('message', event => {
     const message = event.data as CentrifugeWorkerInput;
     reaper.touch(port);
-    if (message.type === 'PING') return;
-    if (message.type === 'STOP') {
+    if (message.type === CENTRIFUGE_INPUT_TYPE.PING) return;
+    if (message.type === CENTRIFUGE_INPUT_TYPE.STOP) {
       // Remove from reaper tracking first, then close the port so the
       // session's disconnected status post is discarded, then stop the
       // session to cleanly disconnect its WebSocket.
       reaper.remove(port);
       port.close();
-      session.handle({ type: 'STOP' });
+      session.handle({ type: CENTRIFUGE_INPUT_TYPE.STOP });
       return;
     }
     // Capture the heartbeat config from the first (INIT) message so the
     // reaper uses the correct per-port timeout.
-    if (message.type === 'INIT' && typeof message.heartbeatIntervalMs === 'number') {
+    if (message.type === CENTRIFUGE_INPUT_TYPE.INIT && typeof message.heartbeatIntervalMs === 'number') {
       reaper.setTimeout(port, message.heartbeatIntervalMs);
     }
     session.handle(message);

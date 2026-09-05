@@ -20,11 +20,14 @@ import type { WorkerBackend, WorkerMode } from './worker-mode';
 import type {
   CentrifugeWorkerConfig,
   CentrifugeWorkerInput,
-  CentrifugeWorkerOutput,
-  SerializedWorkerError
+  CentrifugeWorkerOutput
 } from './centrifuge-protocol';
 import type { DataBusPublishOptions } from './core/types';
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, DEFAULT_STORAGE_PREFIX, WORKER_BACKEND, WORKER_MODE, WORKER_STATUS } from './utils/constants';
+import { deserializeWorkerError } from './utils/error-utils';
+import { publicationMetadata } from './utils/metadata';
+import { assertHeartbeatInterval, assertStructuredCloneable } from './utils/validation';
 
 export type { CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
 export type { WorkerBackend, WorkerMode } from './worker-mode';
@@ -103,7 +106,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
   }
 
   constructor(options: CentrifugeWorkerTransportOptions = {}) {
-    this.workerMode = options.workerMode ?? 'dedicated';
+    this.workerMode = options.workerMode ?? WORKER_MODE.DEDICATED;
     this.transferable = options.transferable ?? false;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     assertHeartbeatInterval(this.heartbeatIntervalMs);
@@ -127,27 +130,27 @@ export class CentrifugeWorkerTransport<TData = unknown>
       sharedWorker: this.sharedWorkerFactory !== undefined || typeof SharedWorker !== 'undefined'
     });
     const input = this.buildInitInput(config);
-    if (backend === 'shared') {
+    if (backend === WORKER_BACKEND.SHARED) {
       this.startSharedWorker(input);
-      this.backend = 'shared';
+      this.backend = WORKER_BACKEND.SHARED;
       return;
     }
-    if (backend === 'dedicated') {
+    if (backend === WORKER_BACKEND.DEDICATED) {
       this.startDedicatedWorker(input);
-      this.backend = 'dedicated';
+      this.backend = WORKER_BACKEND.DEDICATED;
       return;
     }
     this.localSession = new CentrifugeSession<TData>({ post: this.handleSessionOutput });
     this.localSession.handle(input);
-    this.backend = 'local';
+    this.backend = WORKER_BACKEND.LOCAL;
   }
 
   subscribe(topic: string): void {
-    this.post({ type: 'SUBSCRIBE', topic });
+    this.post({ type: CENTRIFUGE_INPUT_TYPE.SUBSCRIBE, topic });
   }
 
   unsubscribe(topic: string): void {
-    this.post({ type: 'UNSUBSCRIBE', topic });
+    this.post({ type: CENTRIFUGE_INPUT_TYPE.UNSUBSCRIBE, topic });
   }
 
   /**
@@ -156,10 +159,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
    */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     if (this.transferable && data instanceof ArrayBuffer) {
-      this.post({ type: 'PUBLISH_BIN', topic, data, ...publicationMetadata(options) }, [data]);
+      this.post({ type: CENTRIFUGE_INPUT_TYPE.PUBLISH_BIN, topic, data, ...publicationMetadata(options?.messageId, options?.timestamp) }, [data]);
       return;
     }
-    this.post({ type: 'PUBLISH', topic, data, ...publicationMetadata(options) });
+    this.post({ type: CENTRIFUGE_INPUT_TYPE.PUBLISH, topic, data, ...publicationMetadata(options?.messageId, options?.timestamp) });
   }
 
   /**
@@ -169,7 +172,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
   stop(): void {
     if (!this.backend) return;
     this.generation++;
-    this.post({ type: 'STOP' });
+    this.post({ type: CENTRIFUGE_INPUT_TYPE.STOP });
     this.clearHeartbeat();
     if (this.worker) {
       this.worker.removeEventListener('message', this.handleMessage);
@@ -189,7 +192,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * default-resolution logic kicks in for the common case. */
   private buildInitInput(config: CentrifugeDataBusConfig): CentrifugeWorkerInput {
     return {
-      type: 'INIT',
+      type: CENTRIFUGE_INPUT_TYPE.INIT,
       url: config.url,
       config: config.options ?? {},
       ...(this.transferable ? { transferable: true } : {}),
@@ -238,10 +241,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * Shared by the Worker message listener, the SharedWorker port listener,
    * and the local-session sink — all three feed into this single dispatcher. */
   private handleOutput(message: CentrifugeWorkerOutput<TData>): void {
-    if (message.type === 'STATUS') this.handlers?.onStatus(message.status);
-    if (message.type === 'MESSAGE') this.handlers?.onMessage({ topic: message.topic, data: message.data, ...publicationMetadata(message) });
-    if (message.type === 'MESSAGE_BIN') this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...publicationMetadata(message) });
-    if (message.type === 'ERROR') this.handlers?.onError(deserializeWorkerError(message.error));
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.STATUS) this.handlers?.onStatus(message.status);
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE) this.handlers?.onMessage({ topic: message.topic, data: message.data, ...publicationMetadata(message.messageId, message.timestamp) });
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN) this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...publicationMetadata(message.messageId, message.timestamp) });
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.ERROR) this.handlers?.onError(deserializeWorkerError(message.error));
   }
 
   /** Handle a Worker-level failure (crash, message decode error). Discards the
@@ -261,7 +264,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
     this.clearHeartbeat();
     this.resetBackend();
     this.handlers?.onError(new Error(message));
-    this.handlers?.onStatus('error');
+    this.handlers?.onStatus(WORKER_STATUS.ERROR);
   }
 
   /** Remove every listener attached to the current SharedWorker and its port. */
@@ -278,7 +281,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
     // SharedWorker reaper is not needed).
     if (this.heartbeatIntervalMs === Infinity) return;
     this.heartbeatHandle = setInterval(() => {
-      this.post({ type: 'PING' });
+      this.post({ type: CENTRIFUGE_INPUT_TYPE.PING });
     }, this.heartbeatIntervalMs);
   }
 
@@ -388,7 +391,7 @@ function createDefaultWorker(): Worker {
     );
   }
   return new Worker(workerUrl, {
-    name: 'cross-tab-worker-databus',
+    name: DEFAULT_STORAGE_PREFIX,
     type: 'module'
   });
 }
@@ -409,42 +412,9 @@ function createDefaultSharedWorker(): SharedWorker {
     );
   }
   return new SharedWorker(workerUrl, {
-    name: 'cross-tab-worker-databus-shared',
+    name: `${DEFAULT_STORAGE_PREFIX}-shared`,
     type: 'module'
   });
-}
-
-/** Validate the SharedWorker PING heartbeat interval. A value of `0`, a negative
- * number, or `NaN` would otherwise make `setInterval` degenerate into a 0ms busy
- * loop, driving the reaper and the main-thread PING out of control. `Infinity`
- * is allowed and disables heartbeats entirely (for environments where the
- * SharedWorker reaper is not needed, e.g. a single-tab deployment).
- * @throws {TypeError} when `value` is not a positive finite number or Infinity. */
-function assertHeartbeatInterval(value: number): void {
-  if (value === Infinity) return;
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return;
-  throw new TypeError(
-    `Centrifuge heartbeatIntervalMs must be a positive number or Infinity, got ${String(value)}.`
-  );
-}
-
-/** Validate that `value` is structured-cloneable. Throws early so config errors
- * surface on the main thread rather than silently failing inside the Worker
- * (where a DataCloneError would be reported as a generic Worker error with no
- * actionable message). Skips validation when `structuredClone` is unavailable
- * (older browsers without the API) — the Worker will still throw on its own.
- * @throws {TypeError} when `value` contains non-cloneable members (functions,
- *   Symbols, DOM nodes, etc.). */
-function assertStructuredCloneable(value: unknown): void {
-  if (typeof structuredClone !== 'function') return;
-  try {
-    structuredClone(value);
-  } catch (error) {
-    throw new TypeError(
-      'Centrifuge Worker configuration and published data must be structured-cloneable.',
-      { cause: error }
-    );
-  }
 }
 
 /** Post `message` to a Worker or MessagePort, forwarding `transfer` buffers
@@ -458,26 +428,4 @@ function postToPortLike(
 ): void {
   if (transfer) target.postMessage(message, transfer as Transferable[]);
   else target.postMessage(message);
-}
-
-/** Reconstruct an Error instance from its serialised form. Error objects cannot
- * be structured-cloned across the Worker boundary, so the Worker serialises them
- * into {@link SerializedWorkerError} and the main thread rebuilds the Error here
- * so the caller's `onError` handler receives a real Error with name/stack. */
-function deserializeWorkerError(error: SerializedWorkerError): Error {
-  const result = new Error(error.message);
-  result.name = error.name;
-  if (error.stack) result.stack = error.stack;
-  if (error.context !== undefined) Object.assign(result, { context: error.context });
-  return result;
-}
-
-/** Copy defined publication metadata without adding empty enumerable fields. */
-function publicationMetadata(
-  metadata?: { messageId?: string; timestamp?: number }
-): { messageId?: string; timestamp?: number } {
-  return {
-    ...(metadata?.messageId === undefined ? {} : { messageId: metadata.messageId }),
-    ...(metadata?.timestamp === undefined ? {} : { timestamp: metadata.timestamp })
-  };
 }

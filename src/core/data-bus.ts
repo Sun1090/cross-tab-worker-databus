@@ -7,7 +7,7 @@
  */
 import { WorkerClusterRuntime } from './cluster';
 import type { WorkerClusterOptions, WorkerClusterSnapshot } from './cluster';
-import { isWildcardTopic, topicMatchesPattern } from './routing';
+import { topicMatchesPattern } from './routing';
 import type {
   DataBusErrorHandler,
   DataBusMessage,
@@ -20,25 +20,32 @@ import type {
 import { DataBusTraceReporter } from './trace';
 import type { DataBusTraceOptions } from './trace';
 import type { DataBusReplayPersistence } from './replay-persistence';
+import { PersistenceRetryCancelledError, ReplayManager } from './replay-manager';
+import { DedupManager } from './dedup-manager';
+import type { DataBusDedupOptions, DataBusDedupStats } from './dedup-manager';
 import { SDK_VERSION } from './version';
+import {
+  CONTROL_ACTION,
+  DEFAULT_STORAGE_PREFIX,
+  FAILURE_SOURCE,
+  HEALTH_STATE,
+  INVOKE_LABEL,
+  PRUNE_STRATEGY,
+  PUBLICATION_EVENT,
+  RECOVERY_OUTCOME,
+  RELIABILITY_OPERATION,
+  SUBSCRIPTION_ACTION,
+  TRACE_EVENT_TYPE,
+  TRACE_ERROR_SOURCE,
+  TRACE_LIFECYCLE_ACTION,
+  WORKER_ROLE,
+  WORKER_STATUS
+} from '../utils/constants';
+import { publicationMetadata } from '../utils/metadata';
+import { assertDedupOptions, assertReplayOptions, assertRecoveryOptions } from '../utils/validation';
 
-/**
- * Event type used to broadcast topic publications across tabs via the cluster.
- * The cluster's `onEvent` handler filters on this to distinguish databus
- * publications from other control-plane events.
- */
-/** Event type used to broadcast topic publications across tabs via the cluster.
- * The cluster's `onEvent` handler filters on this to distinguish databus
- * publications from other control-plane events. */
-const PUBLICATION_EVENT = 'DATABUS_PUBLICATION';
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
-class PersistenceRetryCancelledError extends Error {
-  constructor() {
-    super('Persistence retry cancelled by lifecycle transition.');
-    this.name = 'PersistenceRetryCancelledError';
-  }
-}
 
 /** Constructor options for {@link CrossTabDataBus}. Extends WorkerClusterOptions
  * (cluster coordination config) with the transport, initial connection config,
@@ -57,7 +64,7 @@ export interface DataBusReplayOptions<TData = unknown> {
   /** Optional producer-timestamp retention window in milliseconds. */
   retentionMs?: number;
   /** History trimming policy. Defaults to both when both limits are configured. */
-  pruneStrategy?: 'count' | 'age' | 'both';
+  pruneStrategy?: (typeof PRUNE_STRATEGY)[keyof typeof PRUNE_STRATEGY];
   /** Optional periodic sweep interval for durable retention cleanup. */
   retentionSweepMs?: number;
   /** Optional bounded retry policy for transient persistence failures. */
@@ -71,25 +78,7 @@ export interface DataBusPersistenceRetryOptions {
   backoffMs?: number;
 }
 
-/** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
-export interface DataBusDedupOptions {
-  maxEntries?: number;
-  ttlMs?: number;
-  /** Optional periodic sweep interval for quiet-topic expiry. */
-  sweepMs?: number;
-  /** Injectable epoch clock for deterministic tests and non-wall-clock hosts. */
-  now?: () => number;
-  /** Optional adaptive TTL bounds; enabled only when both are provided. */
-  adaptiveTtl?: { minMs: number; maxMs: number };
-}
-
-export interface DataBusDedupStats {
-  enabled: boolean;
-  tracked: number;
-  suppressed: number;
-  accepted: number;
-  ttlMs?: number;
-}
+export type { DataBusDedupOptions, DataBusDedupStats };
 
 export interface DataBusDiagnostics {
   sdkVersion: string;
@@ -106,7 +95,7 @@ export interface DataBusDiagnostics {
 }
 
 /** Where a retained failure originated, as surfaced by {@link DataBusHealthSummary}. */
-export type DataBusFailureSource = 'transport' | 'persistence' | 'dispatch';
+export type DataBusFailureSource = (typeof FAILURE_SOURCE)[keyof typeof FAILURE_SOURCE];
 
 export interface DataBusLastFailure {
   source: DataBusFailureSource;
@@ -130,9 +119,9 @@ export interface DataBusHealthSummary {
   /** True only while the bus is started, not suspended, and the transport is ready. */
   healthy: boolean;
   /** Lifecycle-derived verdict: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded'.
-   * 'degraded' means automatic recovery is exhausted and the transport is still
-   * down — a manual start() (or resume) is required. */
-  state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
+   * 'degraded' means automatic recovery is exhausted and the transport is still down — a manual
+   * start() (or resume) is required. */
+  state: (typeof HEALTH_STATE)[keyof typeof HEALTH_STATE];
   status: WorkerStatus;
   sdkVersion: string;
   started: boolean;
@@ -176,43 +165,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private readonly transportSubscribedTopics = new Set<string>();
   private readonly statusHandlers = new Set<DataBusStatusHandler>();
   private readonly errorHandlers = new Set<DataBusErrorHandler>();
-  // Bounded per-topic ring of recent dispatched publications. Null unless
-  // replay is enabled — buffering is opt-in and must cost nothing otherwise.
-  private readonly replayBuffers: Map<string, DataBusMessage<TData>[]> | null;
-  private readonly replayMaxPerTopic: number;
-  private readonly replayPersistence: DataBusReplayPersistence<TData> | null;
-  private readonly replayRetentionMs: number | undefined;
-  private readonly replayPruneStrategy: 'count' | 'age' | 'both';
-  private readonly replayRetentionSweepMs: number | undefined;
-  private readonly persistenceRetryMaxAttempts: number;
-  private readonly persistenceRetryBackoffMs: number;
-  private persistenceRetryGeneration = 0;
-  private pendingReplayPersistence: DataBusMessage<TData>[] = [];
-  private replayPersistenceFlushScheduled = false;
-  private readonly replayHydration: Promise<void>;
-  // Retention cleanup is coalesced so a burst of publications does not issue
-  // one IndexedDB read/write transaction per message. The newest cutoff wins.
-  private replayRetentionCleanup: Promise<void> | null = null;
-  private replayRetentionCutoff: number | null = null;
-  private replayRetentionTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly replayManager: ReplayManager<TData>;
   private readonly initialConfig: TConfig | undefined;
   private readonly hasInitialConfig: boolean;
   private readonly trace: DataBusTraceReporter;
-  private readonly dedupMaxEntries: number;
-  private readonly dedupTtlMs: number;
-  private readonly dedupAdaptiveBounds: { minMs: number; maxMs: number } | undefined;
-  private dedupWindowStartedAt = 0;
-  private dedupWindowAccepted = 0;
-  private readonly dedupAdaptiveWindowMs = 5_000;
-  private readonly dedupSweepMs: number | undefined;
-  private dedupSweepTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly dedupEnabled: boolean;
+  private readonly dedupManager: DedupManager;
   private readonly now: () => number;
-  private readonly seenMessageIds = new Map<string, number>();
-  private dedupSuppressed = 0;
-  private dedupAccepted = 0;
   private activeConfig: TConfig | undefined;
-  private status: WorkerStatus = 'disconnected';
+  private status: WorkerStatus = WORKER_STATUS.DISCONNECTED;
   private started = false;
   private stopping = false;
   private transportReady = false;
@@ -257,66 +217,40 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   constructor(options: CrossTabDataBusOptions<TConfig, TData>) {
     const replay = options.replay;
-    if (replay) {
-      const maxPerTopic = replay.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
-      if (!Number.isSafeInteger(maxPerTopic) || maxPerTopic <= 0) {
-        throw new TypeError(
-          `replay.maxPerTopic must be a positive safe integer, got ${String(maxPerTopic)}.`
-        );
-      }
-    }
-    this.replayMaxPerTopic = replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC;
-    this.replayBuffers = replay ? new Map() : null;
-    this.replayPersistence = (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null;
-    this.replayRetentionMs = replay?.retentionMs;
-    this.replayPruneStrategy = replay?.pruneStrategy ?? 'count';
-    if (!['count', 'age', 'both'].includes(this.replayPruneStrategy)) throw new TypeError('replay.pruneStrategy must be count, age, or both.');
-    if (this.replayRetentionMs !== undefined && (!Number.isFinite(this.replayRetentionMs) || this.replayRetentionMs <= 0)) {
-      throw new TypeError('replay.retentionMs must be a positive finite number.');
-    }
-    this.replayRetentionSweepMs = replay?.retentionSweepMs;
-    if (this.replayRetentionSweepMs !== undefined && (!Number.isFinite(this.replayRetentionSweepMs) || this.replayRetentionSweepMs <= 0)) {
-      throw new TypeError('replay.retentionSweepMs must be a positive finite number.');
-    }
-    this.persistenceRetryMaxAttempts = replay?.persistenceRetry?.maxAttempts ?? 1;
-    this.persistenceRetryBackoffMs = replay?.persistenceRetry?.backoffMs ?? 50;
-    if (!Number.isSafeInteger(this.persistenceRetryMaxAttempts) || this.persistenceRetryMaxAttempts <= 0) {
-      throw new TypeError('replay.persistenceRetry.maxAttempts must be a positive safe integer.');
-    }
-    if (!Number.isFinite(this.persistenceRetryBackoffMs) || this.persistenceRetryBackoffMs < 0) {
-      throw new TypeError('replay.persistenceRetry.backoffMs must be a non-negative finite number.');
-    }
+    assertReplayOptions(replay);
     const { autoStart, initialConfig, trace, transport, dedup, recovery, ...clusterOptions } = options;
+    assertRecoveryOptions(recovery);
     this.recoveryCooldownMs = recovery?.cooldownMs ?? 1000;
     this.recoveryMaxAttempts = recovery?.maxAttempts ?? Number.POSITIVE_INFINITY;
-    if (!Number.isFinite(this.recoveryCooldownMs) || this.recoveryCooldownMs <= 0) {
-      throw new TypeError('recovery.cooldownMs must be a positive finite number.');
-    }
-    if (!(this.recoveryMaxAttempts === Number.POSITIVE_INFINITY || (Number.isSafeInteger(this.recoveryMaxAttempts) && this.recoveryMaxAttempts > 0))) {
-      throw new TypeError('recovery.maxAttempts must be a positive safe integer.');
-    }
     this.now = dedup?.now ?? Date.now;
-    this.replayHydration = this.hydrateReplay();
     this.transport = transport;
     this.initialConfig = initialConfig;
     this.hasInitialConfig = 'initialConfig' in options;
     this.trace = new DataBusTraceReporter(trace);
-    this.dedupMaxEntries = dedup?.maxEntries ?? 1_000;
-    this.dedupTtlMs = dedup?.ttlMs ?? 60_000;
-    this.dedupAdaptiveBounds = dedup?.adaptiveTtl;
-    if (this.dedupAdaptiveBounds && (this.dedupAdaptiveBounds.minMs <= 0 || this.dedupAdaptiveBounds.maxMs < this.dedupAdaptiveBounds.minMs)) throw new TypeError('dedup.adaptiveTtl bounds are invalid.');
-    this.dedupWindowStartedAt = this.now();
-    this.dedupSweepMs = dedup?.sweepMs;
-    this.dedupEnabled = dedup !== undefined;
-    if (!Number.isSafeInteger(this.dedupMaxEntries) || this.dedupMaxEntries <= 0) {
-      throw new TypeError('dedup.maxEntries must be a positive safe integer.');
-    }
-    if (!Number.isFinite(this.dedupTtlMs) || this.dedupTtlMs <= 0) {
-      throw new TypeError('dedup.ttlMs must be a positive finite number.');
-    }
-    if (this.dedupSweepMs !== undefined && (!Number.isFinite(this.dedupSweepMs) || this.dedupSweepMs <= 0)) {
-      throw new TypeError('dedup.sweepMs must be a positive finite number.');
-    }
+    this.replayManager = new ReplayManager<TData>({
+      enabled: replay !== undefined,
+      maxPerTopic: replay?.maxPerTopic ?? DEFAULT_REPLAY_MAX_PER_TOPIC,
+      persistence: (replay?.persistence as DataBusReplayPersistence<TData> | undefined) ?? null,
+      retentionMs: replay?.retentionMs,
+      pruneStrategy: replay?.pruneStrategy ?? PRUNE_STRATEGY.COUNT,
+      retentionSweepMs: replay?.retentionSweepMs,
+      persistenceRetryMaxAttempts: replay?.persistenceRetry?.maxAttempts ?? 1,
+      persistenceRetryBackoffMs: replay?.persistenceRetry?.backoffMs ?? 50,
+      now: this.now,
+      trace: this.trace,
+      onPersistenceError: error => this.reportPersistenceError(error),
+      onDispatchError: error => this.reportError(error, FAILURE_SOURCE.DISPATCH)
+    });
+    assertDedupOptions(dedup);
+    this.dedupManager = new DedupManager({
+      enabled: dedup !== undefined,
+      maxEntries: dedup?.maxEntries ?? 1_000,
+      ttlMs: dedup?.ttlMs ?? 60_000,
+      adaptiveBounds: dedup?.adaptiveTtl,
+      sweepMs: dedup?.sweepMs,
+      now: this.now,
+      trace: this.trace
+    });
     this.cluster = new WorkerClusterRuntime({
       ...clusterOptions,
       handlers: {
@@ -324,23 +258,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // control message — meaning the owning Worker has delegated the action to us.
         onControl: (action, topic, data, messageId, timestamp) => {
           switch (action) {
-            case 'SUBSCRIBE':
-              if (this.subscribeTransport(topic)) this.traceSubscription('subscribe', topic);
+            case CONTROL_ACTION.SUBSCRIBE:
+              if (this.subscribeTransport(topic)) this.traceSubscription(SUBSCRIPTION_ACTION.SUBSCRIBE, topic);
               break;
-            case 'UNSUBSCRIBE':
-              if (this.unsubscribeTransport(topic)) this.traceSubscription('unsubscribe', topic);
+            case CONTROL_ACTION.UNSUBSCRIBE:
+              if (this.unsubscribeTransport(topic)) this.traceSubscription(SUBSCRIPTION_ACTION.UNSUBSCRIBE, topic);
               break;
-            case 'PUBLISH':
-              this.runTransport(() => this.transport.publish(
-                topic,
-                data,
-                messageId === undefined && timestamp === undefined
-                  ? undefined
-                  : {
-                      ...(messageId === undefined ? {} : { messageId }),
-                      ...(timestamp === undefined ? {} : { timestamp })
-                    }
-              ));
+            case CONTROL_ACTION.PUBLISH:
+              this.runTransport(() => this.transport.publish(topic, data, publicationMetadata(messageId, timestamp)));
               break;
             default:
               break;
@@ -359,12 +284,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
             this.runTransport(() => this.transport.publish(
               topic,
               item.data,
-              item.messageId === undefined && item.timestamp === undefined
-                ? undefined
-                : {
-                    ...(item.messageId === undefined ? {} : { messageId: item.messageId }),
-                    ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp })
-                  }
+              publicationMetadata(item.messageId, item.timestamp)
             ));
           }
         },
@@ -388,22 +308,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         onSuspend: () => {
           // Suppress the suspend trace event during an explicit stop() so
           // the trace log ends on 'stop' rather than 'suspend'→'stop'.
-          if (!this.stopping) this.trace.event({ type: 'lifecycle', action: 'suspend' });
+          if (!this.stopping) this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.SUSPEND });
           this.trace.pause();
-          this.persistenceRetryGeneration += 1;
+          this.replayManager.suspend();
           this.stopDedupSweep();
-          this.stopReplayRetentionSweep();
           this.suspendTransport();
         },
         onResume: () => {
-          this.trace.event({ type: 'lifecycle', action: 'resume' });
+          this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
           this.trace.start();
           this.startDedupSweep();
-          this.startReplayRetentionSweep();
+          this.replayManager.start();
           this.resumeTransport();
         },
         onDiagnostic: event => {
-          this.trace.event({ type: 'reliability', ...event });
+          this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, ...event });
         }
       }
     });
@@ -433,11 +352,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.persistenceFailureCount = 0;
     this.persistenceLastFailureAt = null;
     this.persistenceLastErrorMessage = null;
-    this.trace.event({ type: 'lifecycle', action: 'start' });
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
     this.trace.start();
     this.startDedupSweep();
-    this.startReplayRetentionSweep();
-    this.updateStatus('connecting');
+    this.replayManager.start();
+    this.updateStatus(WORKER_STATUS.CONNECTING);
     this.cluster.start();
     // Establish the opening before replaying topicHandlers: cluster.subscribe()
     // can synchronously invoke onControl for self-owned topics, and those
@@ -454,9 +373,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     const snapshot = this.cluster.getSnapshot();
     this.trace.event({
-      type: 'coordination',
+      type: TRACE_EVENT_TYPE.COORDINATION,
       coordinated: snapshot.coordinated,
-      activeWorkers: snapshot.workers.filter(worker => worker.role === 'active').length,
+      activeWorkers: snapshot.workers.filter(worker => worker.role === WORKER_ROLE.ACTIVE).length,
       workers: snapshot.workers.map(formatWorkerTrace),
       routes: snapshot.routes.map(formatRouteTrace)
     });
@@ -510,7 +429,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           // as a startup failure instead of marking the transport ready, so a
           // later subscribe/unsubscribe triggers a reopen rather than being
           // silently dropped on a dead transport.
-          if (this.status === 'error') {
+          if (this.status === WORKER_STATUS.ERROR) {
             throw new Error('Transport failed during startup.');
           }
           if (!this.suspended && !this.stopping) {
@@ -531,7 +450,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (!this.pendingStop) {
           this.pendingStop = this.createStopPromise();
         }
-        this.updateStatus('error');
+        this.updateStatus(WORKER_STATUS.ERROR);
         this.reportError(error);
         this.lastError = error;
         this.lastErrorAt = this.now();
@@ -590,17 +509,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // construction. The matching n→0 gate is in the unsubscribe path below.
     if (wasUnused) this.cluster.subscribe(topic);
     if (options?.replay) {
-      const limit = Math.min(
-        typeof options.replay === 'number' ? Math.floor(options.replay) : this.replayMaxPerTopic,
-        this.replayMaxPerTopic
+      this.replayManager.deliverReplay(topic, options.replay, handler, () =>
+        Boolean(this.topicHandlers.get(topic)?.has(handler))
       );
-      if (this.replayPersistence) {
-        void this.replayHydration.then(() => {
-          if (this.topicHandlers.get(topic)?.has(handler)) this.deliverReplay(topic, limit, handler);
-        });
-      } else {
-        this.deliverReplay(topic, limit, handler);
-      }
     }
     return () => this.unsubscribe(topic, handler);
   }
@@ -616,86 +527,33 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     else handlers.clear();
     if (handlers.size > 0) return;
     this.topicHandlers.delete(topic);
-    this.replayBuffers?.delete(topic);
-    // A batched persistence flush may still be queued behind this task; drop
-    // the topic's pending entries so clearTopic is not undone by the append.
-    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
-    if (this.replayPersistence?.clearTopic) {
-      void this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic))
-        .catch(error => this.reportPersistenceError(error));
-    }
+    this.replayManager.onTopicUnsubscribed(topic);
     this.cluster.unsubscribe(topic);
   }
 
   /** Clear all in-memory replay buffers and, when supported, durable history. */
   async clearReplay(): Promise<void> {
-    this.replayBuffers?.clear();
-    // Cancel any queued batch flush so cleared history is not re-appended.
-    this.pendingReplayPersistence = [];
-    if (this.replayPersistence?.clear) {
-      try {
-        await this.withPersistenceRetry('clear', () => this.replayPersistence!.clear!());
-      } catch (error) {
-        this.reportPersistenceError(error);
-        throw error;
-      }
-    }
+    await this.replayManager.clearAll();
   }
 
   /** Clear replay history for one exact topic, including durable storage. */
   async clearReplayTopic(topic: string): Promise<void> {
-    this.replayBuffers?.delete(topic);
-    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
-    if (this.replayPersistence?.clearTopic) {
-      try {
-        await this.withPersistenceRetry('clearTopic', () => this.replayPersistence!.clearTopic!(topic));
-      } catch (error) {
-        this.reportPersistenceError(error);
-        throw error;
-      }
-    }
+    await this.replayManager.clearTopic(topic);
   }
 
   /** Remove replay entries older than an epoch-millisecond cutoff. */
   async clearReplayBefore(timestamp: number): Promise<void> {
-    if (!Number.isFinite(timestamp)) throw new TypeError('timestamp must be finite.');
-    if (this.replayBuffers) {
-      for (const [topic, messages] of this.replayBuffers) {
-        const kept = messages.filter(message => message.timestamp === undefined || message.timestamp >= timestamp);
-        if (kept.length) this.replayBuffers.set(topic, kept);
-        else this.replayBuffers.delete(topic);
-      }
-    }
-    // A queued batch flush must not resurrect pruned entries.
-    this.pendingReplayPersistence = this.pendingReplayPersistence.filter(
-      message => message.timestamp === undefined || message.timestamp >= timestamp
-    );
-    if (this.replayPersistence?.clearBefore) {
-      try {
-        await this.withPersistenceRetry('clearBefore', () => this.replayPersistence!.clearBefore!(timestamp));
-      } catch (error) {
-        this.reportPersistenceError(error);
-        throw error;
-      }
-    }
+    await this.replayManager.clearBefore(timestamp);
   }
 
   /** Return bounded deduplication counters for diagnostics and health checks. */
   getDedupStats(): DataBusDedupStats {
-    return {
-      enabled: this.dedupEnabled,
-      tracked: this.seenMessageIds.size,
-      suppressed: this.dedupSuppressed,
-      accepted: this.dedupAccepted,
-      ...(this.dedupAdaptiveBounds ? { ttlMs: this.currentDedupTtl() } : {})
-    };
+    return this.dedupManager.getStats();
   }
 
   /** Drop all remembered IDs and reset dedup counters. */
   resetDedup(): void {
-    this.seenMessageIds.clear();
-    this.dedupSuppressed = 0;
-    this.dedupAccepted = 0;
+    this.dedupManager.reset();
   }
 
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
@@ -728,8 +586,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     const mapped = items.map(item => ({
       data: item.data,
-      ...(item.options?.messageId !== undefined ? { messageId: item.options.messageId } : {}),
-      ...(item.options?.timestamp !== undefined ? { timestamp: item.options.timestamp } : {})
+      ...publicationMetadata(item.options?.messageId, item.options?.timestamp)
     }));
     if (!this.cluster.publishBatch(topic, mapped)) {
       this.reportError(
@@ -805,21 +662,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // A transport can report 'error'/'disconnected' while transportReady is
     // still set (the flag only resets via the open/failure paths), so the
     // live status must participate in the verdict.
-    const transportDown = !this.transportReady || this.status === 'error' || this.status === 'disconnected';
+    const transportDown = !this.transportReady || this.status === WORKER_STATUS.ERROR || this.status === WORKER_STATUS.DISCONNECTED;
     const state: DataBusHealthSummary['state'] =
       !this.started
-        ? 'stopped'
+        ? HEALTH_STATE.STOPPED
         : this.suspended
-          ? 'suspended'
+          ? HEALTH_STATE.SUSPENDED
           : transportDown
             ? this.recoveryExhausted
-              ? 'degraded'
-              : this.status === 'connecting' && this.recoveryAttempt === 0
-                ? 'starting'
-                : 'recovering'
-            : 'healthy';
+              ? HEALTH_STATE.DEGRADED
+              : this.status === WORKER_STATUS.CONNECTING && this.recoveryAttempt === 0
+                ? HEALTH_STATE.STARTING
+                : HEALTH_STATE.RECOVERING
+            : HEALTH_STATE.HEALTHY;
     return {
-      healthy: state === 'healthy',
+      healthy: state === HEALTH_STATE.HEALTHY,
       state,
       status: this.status,
       sdkVersion: SDK_VERSION,
@@ -846,8 +703,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /** Return a single health snapshot combining lifecycle, recovery, dedup, replay, and cluster state. */
   getDiagnostics(): DataBusDiagnostics {
-    let messages = 0;
-    if (this.replayBuffers) for (const buffer of this.replayBuffers.values()) messages += buffer.length;
+    const replay = this.replayManager.getStats();
     const cluster = this.cluster.getSnapshot();
     const unknownMessages = this.cluster.getUnknownMessageStats();
     const transport = this.transport;
@@ -858,7 +714,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       transportReady: this.transportReady,
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
-      replay: { enabled: Boolean(this.replayBuffers), topics: this.replayBuffers?.size ?? 0, messages },
+      replay: { enabled: replay.enabled, topics: replay.topics, messages: replay.messages },
       persistence: this.getPersistenceStats(),
       protocol: { version: cluster.protocolVersion, unknownMessages: unknownMessages.count, lastUnknownMessageType: unknownMessages.lastType, peers: cluster.peerProtocolVersions },
       transport: {
@@ -878,13 +734,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.stopping = true;
-    this.persistenceRetryGeneration += 1;
-    this.trace.event({ type: 'lifecycle', action: 'stop' });
+    this.replayManager.suspend();
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.STOP });
     this.trace.stop();
     this.stopDedupSweep();
-    this.stopReplayRetentionSweep();
     this.topicHandlers.clear();
-    this.replayBuffers?.clear();
+    this.replayManager.resetBuffers();
     this.cluster.stop();
     try {
       await this.startPromise?.catch(() => undefined);
@@ -907,7 +762,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.activeConfig = undefined;
       this.recoveryAttempt = 0;
       this.recoveryExhausted = false;
-      this.updateStatus('disconnected');
+      this.updateStatus(WORKER_STATUS.DISCONNECTED);
     }
   }
 
@@ -917,7 +772,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * and dispatches locally.
    */
   private handleTransportMessage(message: DataBusMessage<TData>): void {
-    if (this.isDuplicate(message)) return;
+    if (this.dedupManager.isDuplicate(message.messageId ?? '', message.topic)) return;
     this.trace.recordReceived(message.topic);
     // Drop messages for topics we do not own — the owning Worker fans out.
     if (!this.cluster.isAssigned(message.topic)) {
@@ -939,59 +794,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.trace.recordDiscarded(message.topic);
   }
 
-  private isDuplicate(message: DataBusMessage<TData>): boolean {
-    if (!this.dedupEnabled || !message.messageId) return false;
-    const now = this.now();
-    for (const [id, timestamp] of this.seenMessageIds) {
-      if (now - timestamp > this.dedupTtlMs) this.seenMessageIds.delete(id);
-    }
-    if (this.seenMessageIds.has(message.messageId)) {
-      this.trace.event({ type: 'reliability', operation: 'dedup_suppressed', topic: message.topic });
-      this.dedupSuppressed += 1;
-      this.trace.recordDedupSuppressed();
-      return true;
-    }
-    this.seenMessageIds.set(message.messageId, now);
-    this.dedupAccepted += 1;
-    this.dedupWindowAccepted += 1;
-    this.trace.recordDedupAccepted();
-    while (this.seenMessageIds.size > this.dedupMaxEntries) {
-      const oldest = this.seenMessageIds.keys().next().value;
-      if (oldest === undefined) break;
-      this.seenMessageIds.delete(oldest);
-    }
-    return false;
-  }
-
+  /** Start enqueuing the dedup expiry sweep (delegated to {@link DedupManager}). */
   private startDedupSweep(): void {
-    if (this.dedupSweepTimer || !this.dedupEnabled || !this.dedupSweepMs) return;
-    this.dedupSweepTimer = setInterval(() => this.pruneExpiredDedup(), this.dedupSweepMs);
+    this.dedupManager.start();
   }
 
+  /** Stop enqueuing the dedup expiry sweep. */
   private stopDedupSweep(): void {
-    if (this.dedupSweepTimer) clearInterval(this.dedupSweepTimer);
-    this.dedupSweepTimer = null;
-  }
-
-  private pruneExpiredDedup(): void {
-    const cutoff = this.now() - this.currentDedupTtl();
-    for (const [id, timestamp] of this.seenMessageIds) {
-      if (timestamp < cutoff) this.seenMessageIds.delete(id);
-    }
-  }
-
-  private currentDedupTtl(): number {
-    if (!this.dedupAdaptiveBounds) return this.dedupTtlMs;
-    const now = this.now();
-    const elapsed = now - this.dedupWindowStartedAt;
-    if (elapsed >= this.dedupAdaptiveWindowMs) {
-      this.dedupWindowStartedAt = now;
-      this.dedupWindowAccepted = 0;
-      return this.dedupAdaptiveBounds.maxMs;
-    }
-    const rate = this.dedupWindowAccepted / Math.max(1, elapsed);
-    const factor = Math.min(1, rate / 0.01);
-    return this.dedupAdaptiveBounds.maxMs - (this.dedupAdaptiveBounds.maxMs - this.dedupAdaptiveBounds.minMs) * factor;
+    this.dedupManager.stop();
   }
 
   /** Deliver a message to every local handler registered for its topic,
@@ -1005,169 +815,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.invokeHandlers(handlers, handler => handler(message));
       }
     }
-    this.recordReplay(message);
-  }
-
-  /** Append a dispatched publication to the topic's replay ring buffer.
-   * No-op when replay is disabled. */
-  private recordReplay(message: DataBusMessage<TData>): void {
-    if (!this.replayBuffers) return;
-    let buffer = this.replayBuffers.get(message.topic);
-    if (!buffer) {
-      buffer = [];
-      this.replayBuffers.set(message.topic, buffer);
-    }
-    // Preserve the public message shape for legacy adapters. Retention pruning
-    // applies to messages that carry an explicit producer timestamp.
-    const storedMessage = message;
-    buffer.push(storedMessage);
-    if (this.replayPruneStrategy !== 'age') {
-      while (buffer.length > this.replayMaxPerTopic) buffer.shift();
-    }
-    if (this.replayPruneStrategy !== 'count' && this.replayRetentionMs !== undefined) {
-      const cutoff = this.now() - this.replayRetentionMs;
-      while (buffer.length > 0) { const first = buffer[0]; if (!first || first.timestamp === undefined || first.timestamp >= cutoff) break; buffer.shift(); }
-    }
-    if (this.replayPersistence) {
-      if (this.replayPersistence.appendBatch) {
-        this.pendingReplayPersistence.push(storedMessage);
-        this.scheduleReplayPersistenceFlush();
-      } else {
-        void this.withPersistenceRetry('append', () => this.replayPersistence!.append(storedMessage))
-          .catch(error => this.reportPersistenceError(error));
-      }
-      if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs);
-      }
-    }
-  }
-
-  private scheduleReplayPersistenceFlush(): void {
-    if (this.replayPersistenceFlushScheduled) return;
-    this.replayPersistenceFlushScheduled = true;
-    queueMicrotask(() => {
-      this.replayPersistenceFlushScheduled = false;
-      const batch = this.pendingReplayPersistence.splice(0);
-      if (batch.length === 0 || !this.replayPersistence) return;
-      const operation = this.replayPersistence.appendBatch
-        ? () => this.replayPersistence!.appendBatch!(batch)
-        : () => Promise.all(batch.map(message => this.replayPersistence!.append(message))).then(() => undefined);
-      void this.withPersistenceRetry('append', operation).catch(error => this.reportPersistenceError(error));
-    });
-  }
-
-  private async hydrateReplay(): Promise<void> {
-    if (!this.replayBuffers || !this.replayPersistence) {
-      return;
-    }
-    try {
-      if (this.replayRetentionMs !== undefined && this.replayPersistence.clearBefore) {
-        await this.withPersistenceRetry('clearBefore', () => this.replayPersistence!.clearBefore!(this.now() - this.replayRetentionMs!));
-      }
-      for (const message of await this.withPersistenceRetry('load', () => this.replayPersistence!.load())) {
-        let buffer = this.replayBuffers.get(message.topic);
-        if (!buffer) {
-          buffer = [];
-          this.replayBuffers.set(message.topic, buffer);
-        }
-        buffer.push(message);
-        if (buffer.length > this.replayMaxPerTopic) buffer.shift();
-      }
-    } catch (error) {
-      this.reportPersistenceError(error);
-    }
-  }
-
-  private scheduleReplayRetentionCleanup(cutoff: number): void {
-    if (!this.replayPersistence?.clearBefore) return;
-    if (this.replayRetentionCutoff === null || cutoff > this.replayRetentionCutoff) {
-      this.replayRetentionCutoff = cutoff;
-    }
-    if (this.replayRetentionCleanup) return;
-    this.replayRetentionCleanup = (async () => {
-      while (this.replayRetentionCutoff !== null) {
-        const nextCutoff = this.replayRetentionCutoff;
-        this.replayRetentionCutoff = null;
-        try {
-          await this.replayPersistence!.clearBefore!(nextCutoff);
-        } catch (error) {
-          this.reportPersistenceError(error);
-        }
-      }
-    })().finally(() => {
-      this.replayRetentionCleanup = null;
-      if (this.replayRetentionCutoff !== null) {
-        this.scheduleReplayRetentionCleanup(this.replayRetentionCutoff);
-      }
-    });
-  }
-
-  private startReplayRetentionSweep(): void {
-    if (this.replayRetentionTimer || !this.replayRetentionMs || !this.replayRetentionSweepMs || !this.replayPersistence?.clearBefore) return;
-    this.replayRetentionTimer = setInterval(() => {
-      this.scheduleReplayRetentionCleanup(this.now() - this.replayRetentionMs!);
-    }, this.replayRetentionSweepMs);
-  }
-
-  private stopReplayRetentionSweep(): void {
-    if (this.replayRetentionTimer) clearInterval(this.replayRetentionTimer);
-    this.replayRetentionTimer = null;
-  }
-
-  private async withPersistenceRetry<T>(
-    persistenceOperation: 'load' | 'append' | 'clear' | 'clearTopic' | 'clearBefore',
-    operation: () => Promise<T>
-  ): Promise<T> {
-    const generation = this.persistenceRetryGeneration;
-    let attempt = 0;
-    let delay = this.persistenceRetryBackoffMs;
-    while (true) {
-      attempt += 1;
-      try {
-        if (generation !== this.persistenceRetryGeneration) throw new PersistenceRetryCancelledError();
-        return await operation();
-      } catch (error) {
-        if (error instanceof PersistenceRetryCancelledError || generation !== this.persistenceRetryGeneration) {
-          throw new PersistenceRetryCancelledError();
-        }
-        if (attempt >= this.persistenceRetryMaxAttempts) throw error;
-        this.trace.event({
-          type: 'reliability',
-          operation: 'persistence_retry',
-          persistenceOperation,
-          attempt,
-        });
-        if (delay > 0) await new Promise<void>(resolve => setTimeout(resolve, delay));
-        if (generation !== this.persistenceRetryGeneration) throw new PersistenceRetryCancelledError();
-        delay = Math.min(delay * 2, 1_600);
-      }
-    }
-  }
-
-  /** Deliver buffered history to a newly-registered handler. For an exact
-   * topic this is that topic's ring; for a wildcard subscription every
-   * buffered topic matching the pattern contributes (in buffer insertion
-   * order). Replay deliveries are marked `replayed: true` and are not
-   * counted into trace metrics. */
-  private deliverReplay(
-    topic: string,
-    limit: number,
-    handler: DataBusMessageHandler<TData>
-  ): void {
-    if (!this.replayBuffers || limit <= 0) return;
-    const deliver = (buffer: DataBusMessage<TData>[]) => {
-      for (const message of buffer.slice(-limit)) {
-        this.invokeHandlers([handler], h => h({ ...message, replayed: true }));
-      }
-    };
-    if (isWildcardTopic(topic)) {
-      for (const [bufferedTopic, buffer] of this.replayBuffers) {
-        if (topicMatchesPattern(topic, bufferedTopic)) deliver(buffer);
-      }
-      return;
-    }
-    const buffer = this.replayBuffers.get(topic);
-    if (buffer) deliver(buffer);
+    this.replayManager.record(message);
   }
 
   /**
@@ -1177,12 +825,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private updateStatus(status: WorkerStatus): void {
     const previousStatus = this.status;
     this.status = status;
-    if (previousStatus !== status) this.trace.event({ type: 'status', status });
+    if (previousStatus !== status) this.trace.event({ type: TRACE_EVENT_TYPE.STATUS, status });
     this.cluster.setStatus(status);
     // Clear transport subscriptions on disconnect; the transport is gone.
-    if (status === 'disconnected' || status === 'error') this.transportSubscribedTopics.clear();
+    if (status === WORKER_STATUS.DISCONNECTED || status === WORKER_STATUS.ERROR) this.transportSubscribedTopics.clear();
     // Re-subscribe assigned topics when the transport reconnects.
-    if (status === 'connected' && previousStatus !== 'connected') {
+    if (status === WORKER_STATUS.CONNECTED && previousStatus !== WORKER_STATUS.CONNECTED) {
       for (const topic of this.cluster.getSnapshot().assignedTopics) this.subscribeTransport(topic);
     }
     // Auto-recover from a runtime transport failure (e.g. a crashed Worker)
@@ -1190,7 +838,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // avoid a tight retry loop when the transport fails immediately.
     // Uses setTimeout so the recovery does not run re-entrantly inside the
     // callback that produced this status (e.g. openTransport's catch).
-    if (status === 'error' && this.started && !this.stopping) {
+    if (status === WORKER_STATUS.ERROR && this.started && !this.stopping) {
       const now = this.now();
       if (now - this.lastRecoveryAt >= this.recoveryCooldownMs) {
         this.lastRecoveryAt = now;
@@ -1198,16 +846,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (attempt > this.recoveryMaxAttempts) {
           if (!this.recoveryExhausted) {
             this.recoveryExhausted = true;
-            this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: this.recoveryMaxAttempts, outcome: 'exhausted' });
+            this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: this.recoveryMaxAttempts, outcome: RECOVERY_OUTCOME.EXHAUSTED });
           }
           return;
         }
-        this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt, outcome: 'scheduled' });
+        this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt, outcome: RECOVERY_OUTCOME.SCHEDULED });
         setTimeout(() => {
           if (this.stopping || !this.started || this.suspended) return;
           // An explicit resume or subscribe already recovered the transport
           // (or is in flight), so this stale timer must not open it again.
-          if (this.status !== 'error') return;
+          if (this.status !== WORKER_STATUS.ERROR) return;
           void this.reopenTransport(attempt);
         }, this.recoveryCooldownMs);
       }
@@ -1215,30 +863,36 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.invokeHandlers(this.statusHandlers, handler => handler(status));
   }
 
-  private reportError(error: unknown, source: DataBusFailureSource = 'transport'): void {
+  private reportError(error: unknown, source: DataBusFailureSource = FAILURE_SOURCE.TRANSPORT): void {
     this.lastFailure = {
       source,
       message: error instanceof Error ? error.message : String(error),
       at: this.now()
     };
-    if (source === 'persistence') {
+    if (source === FAILURE_SOURCE.PERSISTENCE) {
       this.persistenceFailureCount += 1;
       this.persistenceLastFailureAt = this.lastFailure.at;
       this.persistenceLastErrorMessage = this.lastFailure.message;
     }
-    this.trace.event({ type: 'error', source: source === 'transport' ? 'transport' : 'operation' });
-    this.invokeHandlers(this.errorHandlers, handler => handler(error), 'error handler');
+    this.trace.event({
+      type: TRACE_EVENT_TYPE.ERROR,
+      source: source === FAILURE_SOURCE.TRANSPORT ? TRACE_ERROR_SOURCE.TRANSPORT : TRACE_ERROR_SOURCE.OPERATION
+    });
+    this.invokeHandlers(this.errorHandlers, handler => handler(error), INVOKE_LABEL.ERROR_HANDLER);
   }
 
+  /** Report a persistence failure to the trace and the unified failure ledger,
+   * unless it is a {@link PersistenceRetryCancelledError} cancellation from a
+   * lifecycle transition (teardown should stay quiet). */
   private reportPersistenceError(error: unknown): void {
     if (error instanceof PersistenceRetryCancelledError) return;
-    this.trace.event({ type: 'reliability', operation: 'persistence_cleanup' });
-    this.reportError(error, 'persistence');
+    this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.PERSISTENCE_CLEANUP });
+    this.reportError(error, FAILURE_SOURCE.PERSISTENCE);
   }
 
-  private traceSubscription(action: 'subscribe' | 'unsubscribe', topic: string): void {
+  private traceSubscription(action: (typeof SUBSCRIPTION_ACTION)[keyof typeof SUBSCRIPTION_ACTION], topic: string): void {
     this.trace.event({
-      type: 'subscription',
+      type: TRACE_EVENT_TYPE.SUBSCRIPTION,
       action,
       topic,
       activeTopics: this.transportSubscribedTopics.size
@@ -1267,18 +921,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private invokeHandlers<T>(
     handlers: Iterable<T>,
     callback: (handler: T) => void,
-    label: 'dispatch' | 'status' | 'error handler' = 'dispatch'
+    label: (typeof INVOKE_LABEL)[keyof typeof INVOKE_LABEL] = INVOKE_LABEL.DISPATCH
   ): void {
     for (const handler of handlers) {
       try {
         callback(handler);
       } catch (error) {
-        if (label === 'error handler') {
+        if (label === INVOKE_LABEL.ERROR_HANDLER) {
           if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-            console.warn('[cross-tab-worker-databus] error handler threw:', error);
+            console.warn(`[${DEFAULT_STORAGE_PREFIX}] error handler threw:`, error);
           }
         } else {
-          this.reportError(error, 'dispatch');
+          this.reportError(error, FAILURE_SOURCE.DISPATCH);
         }
       }
     }
@@ -1293,7 +947,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.suspended = true;
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
-    this.updateStatus('disconnected');
+    this.updateStatus(WORKER_STATUS.DISCONNECTED);
     // A failed open already owns a stop cleanup; reuse it so the suspend does
     // not stop an already-stopped transport. Resume/reopen chain after the
     // same pendingStop gate. Without this guard, suspendTransport would issue
@@ -1352,7 +1006,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // later stop() would be a no-op and leave the reopened transport running.
     this.started = true;
     this.suspended = false;
-    this.updateStatus('connecting');
+    this.updateStatus(WORKER_STATUS.CONNECTING);
     const pending = this.startPromise ?? this.pendingStop ?? Promise.resolve();
     const opening = pending
       .catch(() => undefined)
@@ -1363,7 +1017,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     void opening.then(
       () => {
         if (traceAttempt !== undefined) {
-          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: traceAttempt, outcome: 'succeeded' });
+          this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: traceAttempt, outcome: RECOVERY_OUTCOME.SUCCEEDED });
           this.recoveryAttempt = 0;
           this.recoveryExhausted = false;
         }
@@ -1371,7 +1025,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       },
       () => {
         if (traceAttempt !== undefined) {
-          this.trace.event({ type: 'reliability', operation: 'transport_recovery', attempt: traceAttempt, outcome: 'failed' });
+          this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: traceAttempt, outcome: RECOVERY_OUTCOME.FAILED });
         }
       }
     );
