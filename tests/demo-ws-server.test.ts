@@ -158,8 +158,28 @@ describe('DemoWsBusHub protocol', () => {
     ]);
     expect(receiver.messages).toEqual(sender.messages);
     // Frame accounting: the burst travelled as exactly one publishBatch wire
-    // frame and added no individual publish frames.
+    // frame and added no individual publish frames — globally and per-topic.
     expect(hub.publishFrames).toBe(0);
+    expect(hub.publishBatchFrames).toBe(1);
+    expect(hub.topicFrames.get('feed.bulk')).toEqual({ publish: 0, publishBatch: 1 });
+  });
+
+  it('attributes frames per topic so concurrent sessions do not pollute each other', () => {
+    const hub = new DemoWsBusHub({ now: () => 42 });
+    const client = new FakeConnection();
+    hub.attach(client);
+    client.sendFrame({ op: 'subscribe', topic: 'feed.a' });
+    client.sendFrame({ op: 'subscribe', topic: 'feed.b' });
+
+    client.sendFrame({ op: 'publish', topic: 'feed.a', data: 1 });
+    client.sendFrame({ op: 'publish', topic: 'feed.a', data: 2 });
+    client.sendFrame({ op: 'publishBatch', topic: 'feed.b', items: [{ data: 1 }] });
+
+    // feed.b's batch must not show up as extra individual publishes on feed.a.
+    expect(hub.topicFrames.get('feed.a')).toEqual({ publish: 2, publishBatch: 0 });
+    expect(hub.topicFrames.get('feed.b')).toEqual({ publish: 0, publishBatch: 1 });
+    // Globals still count everything.
+    expect(hub.publishFrames).toBe(2);
     expect(hub.publishBatchFrames).toBe(1);
   });
 

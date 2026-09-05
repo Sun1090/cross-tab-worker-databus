@@ -43,12 +43,15 @@ const server = createServer(async (request, response) => {
     }
     // Frame-count observability for the WebSocket-bus hub: lets the e2e suite
     // assert that `publishBatch` travelled as one wire frame and did not
-    // decompose into per-item `publish` frames.
+    // decompose into per-item `publish` frames. The per-topic breakdown lets a
+    // test assert its own session's frames without racing concurrent tests
+    // that share this hub on a parallel local run.
     if (pathname === '/debug/wsstats') {
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       response.end(JSON.stringify({
         publish: wsHub?.publishFrames ?? 0,
-        publishBatch: wsHub?.publishBatchFrames ?? 0
+        publishBatch: wsHub?.publishBatchFrames ?? 0,
+        topics: Object.fromEntries(wsHub?.topicFrames ?? new Map())
       }));
       return;
     }

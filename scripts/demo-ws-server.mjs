@@ -64,6 +64,18 @@ export class DemoWsBusHub {
      * individual `publish` frames. */
     this.publishFrames = 0;
     this.publishBatchFrames = 0;
+    /** Frames seen split by op AND by topic. Kept alongside the global
+     * counters so a test can assert its own single-frame batch without racing
+     * concurrent tests that share this hub on a parallel local run. */
+    this.topicFrames = new Map();
+  }
+
+  /** Account one inbound frame of `op` under `topic` (global + per-topic). */
+  countTopicFrame(topic, op) {
+    this[op === 'publishBatch' ? 'publishBatchFrames' : 'publishFrames'] += 1;
+    const entry = this.topicFrames.get(topic) ?? { publish: 0, publishBatch: 0 };
+    entry[op] += 1;
+    this.topicFrames.set(topic, entry);
   }
 
   attach(connection) {
@@ -79,6 +91,7 @@ export class DemoWsBusHub {
     const topicLength = payload.readUInt16BE(1);
     if (payload.length < 3 + topicLength) return false;
     const topic = payload.subarray(3, 3 + topicLength).toString('utf8');
+    this.countTopicFrame(topic, 'publish');
     this.publish(topic, payload.subarray(3 + topicLength), true);
     return true;
   }
@@ -107,14 +120,14 @@ export class DemoWsBusHub {
         topics.delete(frame.topic);
         return true;
       case 'publish':
-        this.publishFrames += 1;
+        this.countTopicFrame(frame.topic, 'publish');
         this.publish(frame.topic, frame.data, false, {
           ...(typeof frame.messageId === 'string' ? { messageId: frame.messageId } : {}),
           timestamp: typeof frame.timestamp === 'number' ? frame.timestamp : this.now()
         });
         return true;
       case 'publishBatch':
-        this.publishBatchFrames += 1;
+        this.countTopicFrame(frame.topic, 'publishBatch');
         for (const item of Array.isArray(frame.items) ? frame.items : []) {
           if (!item || typeof item !== 'object') continue;
           this.publish(frame.topic, item.data, false, {
