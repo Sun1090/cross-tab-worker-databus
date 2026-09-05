@@ -221,4 +221,76 @@ describe('React hooks adapter', () => {
     await waitFor(() => expect(states.at(-1)).toBe('recovering'));
     view.unmount();
   });
+
+describe('useCrossTabHealth edge cases', () => {
+  interface FakeHealthBus {
+    getHealthSummary: () => { healthy: boolean; state: string; seq: number };
+    onStatus: (handler: (value: string) => void) => () => void;
+    onError: (handler: (error: unknown) => void) => () => void;
+    calls: () => number;
+    emitStatus: (value: string) => void;
+  }
+
+  function makeFakeHealthBus(): FakeHealthBus {
+    let seq = 0;
+    let calls = 0;
+    const statusHandlers = new Set<(value: string) => void>();
+    return {
+      getHealthSummary: () => {
+        calls += 1;
+        seq += 1;
+        return { healthy: true, state: 'healthy', seq };
+      },
+      onStatus: handler => {
+        statusHandlers.add(handler);
+        return () => statusHandlers.delete(handler);
+      },
+      onError: () => () => {},
+      calls: () => calls,
+      emitStatus: value => {
+        for (const handler of [...statusHandlers]) handler(value);
+      }
+    };
+  }
+
+  function HealthDemo({ bus }: { bus: FakeHealthBus | null }) {
+    const health = useCrossTabHealth(bus as never, { intervalMs: 1_000 });
+    const seq = health ? (health as unknown as { seq: number }).seq : 0;
+    return <span data-testid="health">{health ? `healthy:${seq}` : 'none'}</span>;
+  }
+
+  it('polls on the interval, resets to null on detach, and stops polling on unmount', async () => {
+    vi.useFakeTimers();
+    const bus = makeFakeHealthBus();
+    const view = render(<HealthDemo bus={bus} />);
+    expect(view.getByTestId('health').textContent).toBe('healthy:1');
+
+    // The interval refreshes the snapshot.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    expect(bus.calls()).toBeGreaterThanOrEqual(2);
+
+    // Detaching the bus resets to null and unsubscribes event listeners.
+    await act(async () => {
+      view.rerender(<HealthDemo bus={null} />);
+    });
+    expect(view.getByTestId('health').textContent).toBe('none');
+    const callsAtDetach = bus.calls();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(bus.calls()).toBe(callsAtDetach);
+
+    // Unmounting stops the polling timer for good.
+    bus.emitStatus('connected');
+    view.unmount();
+    const callsAtUnmount = bus.calls();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(bus.calls()).toBe(callsAtUnmount);
+    vi.useRealTimers();
+  });
+});
 });
