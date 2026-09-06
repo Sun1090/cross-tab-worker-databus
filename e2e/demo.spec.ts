@@ -20,6 +20,7 @@ declare global {
     __bus?: {
       getHealthSummary: () => { healthy: boolean; state: string };
       getClusterSnapshot: () => { assignedTopics: string[] };
+      publishBatch: (topic: string, items: ReadonlyArray<{ data: unknown; options?: { messageId?: string; timestamp?: number } }>) => void;
     };
     __replayBus?: { stop: () => Promise<void> };
     __replayEmit?: (data: unknown) => void;
@@ -553,6 +554,39 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
     await tabA.click('#publishBatch');
     await expect.poll(() => receivedCount(tabB)).toBe(10);
     await expect.poll(() => receivedCount(tabA)).toBe(10);
+  });
+
+  test('large publishBatch (100 items × 3 tabs) fans out exactly-once per tab', async ({ context }) => {
+    const topic = `e2e.batch3tab.${Date.now()}`;
+    const setupWsTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      await page.click('#modeSwitch [data-mode="websocket"]');
+      await page.fill('#topicInput', topic);
+      await page.click('#applyConnection');
+      await expect(page.locator('#statusBadge')).toHaveText('已连接');
+      return page;
+    };
+
+    const tabs = [await setupWsTab(), await setupWsTab(), await setupWsTab()];
+    // Converge before publishing: exactly one tab owns the transport
+    // subscription and the other two receive only through the EVENT fan-out.
+    await waitForSingleOwner(tabs, { timeout: 30_000 });
+
+    // 100 items from one tab; each carries a messageId so the batch metadata
+    // rides the CONTROL → transport → server echo → EVENT fan-out path end to
+    // end. Every tab must land on exactly 100 — no double-delivery from the
+    // owner's echo racing the EVENT broadcast, no per-item frame decomposition.
+    await tabs[0]!.evaluate((replayTopic) => {
+      const items = Array.from({ length: 100 }, (_, index) => ({
+        data: { value: index },
+        options: { messageId: `large-batch-${index}` }
+      }));
+      window.__bus?.publishBatch(replayTopic, items);
+    }, topic);
+
+    await expect.poll(() => receivedCount(tabs[0]!), { timeout: 30_000 }).toBe(100);
+    await expect.poll(() => receivedCount(tabs[1]!), { timeout: 30_000 }).toBe(100);
+    await expect.poll(() => receivedCount(tabs[2]!), { timeout: 30_000 }).toBe(100);
   });
 });
 
