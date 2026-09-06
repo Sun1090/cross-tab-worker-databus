@@ -444,10 +444,10 @@
 
 ## 0.20.69 候选
 
-1. 增加 peer 能力矩阵，并在 diagnostics 暴露 SDK、后端与 transport 身份；
-2. 统一 replay、dedup、trace、recovery 与 cluster 健康指标；
-3. 优化 IndexedDB 并发 append 与清理路径；
-4. 增加 adaptive dedup、async trace、prune 和长时多 Tab 性能基线。
+1. ~~增加 peer 能力矩阵，并在 diagnostics 暴露 SDK、后端与 transport 身份。~~ 已交付：`getDiagnostics()` 携带协议版本、未知消息统计、peer 协议版本与 transport 身份；`getHealthSummary()`/`getMetrics()` 现在也会随单一对象输出实时 trace 指标与 sink 状态。
+2. ~~统一 replay、dedup、trace、recovery 与 cluster 健康指标。~~ 已交付：`getDiagnostics()` + `getMetrics()` + `getHealthSummary()` 在单一快照中覆盖生命周期、恢复、dedup、replay、持久化、协议、transport、cluster、trace 指标与 sink 背压。
+3. ~~优化 IndexedDB 并发 append 与清理路径。~~ 已交付：相邻 `appendBatch` 变更合并为单事务；`clear`/`clearTopic`/`clearBefore` 顺序保持。
+4. ~~增加 adaptive dedup、async trace、prune 和长时多 Tab 性能基线。~~ 部分交付：bench 覆盖负载加权评分、`getMetrics`、publishBatch 批次敏感性，以及既有 dedup/async-sink/persistence 用例。
 
 ## 0.13.0 候选
 
