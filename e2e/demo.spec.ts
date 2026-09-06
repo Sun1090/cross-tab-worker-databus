@@ -70,6 +70,25 @@ async function receivedCount(page: Page): Promise<number> {
   return Number(await page.locator('#metricReceived').textContent());
 }
 
+/** Open a demo tab with BroadcastChannel removed and the storage-event
+ * coordination fallback opted in, then connect it to the topic. The
+ * auto-connect settles first so the fallback checkbox is read by the re-apply
+ * that actually creates the coordinated bus. */
+async function openStorageEventTab(context: BrowserContext, topic: string): Promise<Page> {
+  const page = await context.newPage();
+  // Remove BroadcastChannel before any page script runs so the demo's
+  // cluster coordination degrades through the storage-event fallback
+  // instead of staying on the in-memory channel.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
+  });
+  await page.goto(DEMO_URL);
+  await expect(page.locator('#statusBadge')).toHaveText('已连接');
+  await page.check('#channelFallback');
+  await connectDemo(page, 'dedicated', topic);
+  return page;
+}
+
 /** Number of topics this tab's Worker is assigned as owner, read from the live
  * cluster snapshot (the demo re-renders `#assignedCount` on a 1s interval, so
  * the DOM is a stale view; the snapshot is the authoritative state). */
@@ -619,26 +638,8 @@ test.describe('cross-tab databus demo — binary publish', () => {
 test.describe('cross-tab databus demo — storage-event coordination fallback', () => {
   test('two BroadcastChannel-less tabs coordinate over localStorage storage events', async ({ context }) => {
     const topic = `e2e.storage.${Date.now()}`;
-
-    const openFallbackTab = async (): Promise<Page> => {
-      const page = await context.newPage();
-      // Remove BroadcastChannel before any page script runs so the demo's
-      // cluster coordination degrades through the storage-event fallback
-      // instead of staying on the in-memory channel.
-      await page.addInitScript(() => {
-        Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
-      });
-      await page.goto(DEMO_URL);
-      // Let the auto-connect settle first, then opt into the fallback and
-      // re-apply so the new bus is created with the storage-event channel.
-      await expect(page.locator('#statusBadge')).toHaveText('已连接');
-      await page.check('#channelFallback');
-      await connectDemo(page, 'dedicated', topic);
-      return page;
-    };
-
-    const tabA = await openFallbackTab();
-    const tabB = await openFallbackTab();
+    const tabA = await openStorageEventTab(context, topic);
+    const tabB = await openStorageEventTab(context, topic);
 
     // Both tabs must report the storage-event coordination channel — a silent
     // return to BroadcastChannel (or a drop to local mode) is the regression
@@ -656,6 +657,36 @@ test.describe('cross-tab databus demo — storage-event coordination fallback', 
     await publishJson(tabB);
     await expect.poll(() => receivedCount(tabA)).toBe(2);
     await expect.poll(() => receivedCount(tabB)).toBe(2);
+  });
+
+  test('pagehide handoff migrates the owner over the storage-event channel', async ({ context }) => {
+    const topic = `e2e.storage.migrate.${Date.now()}`;
+    const tabA = await openStorageEventTab(context, topic);
+    const tabB = await openStorageEventTab(context, topic);
+
+    const ownerIndex = await waitForSingleOwner([tabA, tabB], { timeout: 45_000 });
+    const owner = ownerIndex === 0 ? tabA : tabB;
+    const standby = ownerIndex === 0 ? tabB : tabA;
+
+    // A graceful pagehide hands ownership off. Over the storage-event channel
+    // the handoff writes the replacement route and the REGISTRY nudge to
+    // localStorage; the standby must observe it via a storage event.
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    await expect.poll(() => ownerCount(standby), { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
+
+    // Restore the cached owner: the standby keeps the sticky route, and
+    // cross-tab delivery resumes through the migrated owner (the standby's
+    // transport) over the storage-event plane.
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
+    await publishJson(owner);
+    await expect.poll(() => receivedCount(standby)).toBe(1);
+
+    // Ownership stays unique (routes are sticky) and both tabs keep the
+    // storage-event channel — no drift back to local mode or BroadcastChannel.
+    await expect.poll(async () => (await ownerCount(owner)) + (await ownerCount(standby))).toBe(1);
+    await expect.poll(() => owner.locator('#configChannelInfo').textContent()).toContain('storage-event 降级');
+    await expect.poll(() => standby.locator('#configChannelInfo').textContent()).toContain('storage-event 降级');
   });
 });
 
