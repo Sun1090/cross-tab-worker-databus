@@ -33,17 +33,38 @@ for (const dependency of ['react', 'vue', 'centrifuge']) {
 }
 
 const consumer = `
-  import { CrossTabDataBus, createWebSocketDataBus } from 'cross-tab-worker-databus';
+  import {
+    CrossTabDataBus,
+    WebSocketTransport,
+    WorkerClusterRuntime,
+    approximatePayloadBytes,
+    createBrowserEnvironment,
+    createIndexedDbReplayPersistence,
+    createOpaqueKey,
+    createStorageEventChannel,
+    createWebSocketDataBus,
+    effectiveWorkerLoad,
+    selectWorkerBackend,
+    topicMatchesPattern
+  } from 'cross-tab-worker-databus';
   import { useCrossTabDataBus } from 'cross-tab-worker-databus/hooks';
   import { useCrossTabDataBus as useVueBus } from 'cross-tab-worker-databus/vue';
-  import { createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
+  import { CentrifugeWorkerTransport, createCentrifugeDataBus } from 'cross-tab-worker-databus/centrifuge';
   import { createRequire } from 'node:module';
   const require = createRequire(import.meta.url);
   const cjs = require('cross-tab-worker-databus');
   const cjsHooks = require('cross-tab-worker-databus/hooks');
   const cjsVue = require('cross-tab-worker-databus/vue');
   const cjsCentrifuge = require('cross-tab-worker-databus/centrifuge');
-  for (const value of [CrossTabDataBus, createWebSocketDataBus, useCrossTabDataBus, useVueBus, createCentrifugeDataBus, cjs.CrossTabDataBus, cjsHooks.useCrossTabDataBus, cjsVue.useCrossTabDataBus, cjsCentrifuge.createCentrifugeDataBus]) {
+  for (const value of [
+    CrossTabDataBus, WebSocketTransport, WorkerClusterRuntime, approximatePayloadBytes,
+    createBrowserEnvironment, createIndexedDbReplayPersistence, createOpaqueKey,
+    createStorageEventChannel, createWebSocketDataBus, effectiveWorkerLoad,
+    selectWorkerBackend, topicMatchesPattern,
+    useCrossTabDataBus, useVueBus, CentrifugeWorkerTransport, createCentrifugeDataBus,
+    cjs.CrossTabDataBus, cjs.createWebSocketDataBus, cjs.effectiveWorkerLoad,
+    cjsHooks.useCrossTabDataBus, cjsVue.useCrossTabDataBus, cjsCentrifuge.createCentrifugeDataBus
+  ]) {
     if (typeof value !== 'function') throw new Error('packed consumer export is not callable');
   }
 `;
