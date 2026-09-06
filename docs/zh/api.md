@@ -205,6 +205,8 @@ getMetrics(): DataBusMetricsSnapshot | null
 
 对当前 trace 指标窗口的**同步、非破坏性**快照——与周期性 `message_metrics` 事件相同的派生计数（received、dispatched、topics，分发延迟 avg/p50/p95/max，dedup accepted/suppressed），无需 sink 或间隔 flush 即可按需读取。trace 指标未启用（禁用或 events-only 模式）时返回 `null`。
 
+`getDiagnostics().replay` 输出 `{ enabled, topics, messages, bytes }` —— `bytes` 是缓冲 replay 环的近似内存 payload 占用（与自适应负载加权相同的 string/binary/number 尺寸启发式），按需计算，热路径 append 不为此付任何成本。
+
 ### `getRecoveryStats()` / `getPersistenceStats()`
 
 ```ts
