@@ -71,6 +71,24 @@ describe('data bus hot paths', () => {
       bus.publishBatch('bench.topic', items);
     }
   });
+
+  bench('publishBatch / 1000 messages / 50 per call', () => {
+    for (let batch = 0; batch < 20; batch += 1) {
+      const items = Array.from({ length: 50 }, (_, index) => ({
+        data: { value: batch * 50 + index }
+      }));
+      bus.publishBatch('bench.topic', items);
+    }
+  });
+
+  bench('publishBatch / 1000 messages / 100 per call', () => {
+    for (let batch = 0; batch < 10; batch += 1) {
+      const items = Array.from({ length: 100 }, (_, index) => ({
+        data: { value: batch * 100 + index }
+      }));
+      bus.publishBatch('bench.topic', items);
+    }
+  });
 });
 
 describe('data bus advanced hot paths', () => {
