@@ -8,7 +8,7 @@
 - A 100-item × 3-tab `publishBatch` E2E asserts exactly-once fan-out per tab, guarding against the owner echo racing the EVENT broadcast and per-item frame decomposition on a larger burst.
 - Getting-started guides (English and Chinese) gained an "Upgrading & Deprecation" section, the migration-guide payload behind the pre-1.0 deprecation policy in the release checklist.
 - `getDiagnostics().replay` now reports `bytes`, the approximate in-memory footprint of the buffered replay rings (computed on demand, same sizing heuristic as adaptive load weighting).
-- The demo's overview gains a live diagnostics row: the current trace-window throughput/dispatch P50 (`getMetrics()`) and the replay buffer footprint (`getDiagnostics().replay`), refreshed with the existing 1s render loop.
+- The demo's overview gains a live diagnostics row: the current trace-window throughput/dispatch P50 (`getMetrics()`) and the replay buffer footprint (`getDiagnostics().replay`), refreshed with the existing 1s render loop. A "负载加权" toggle (off by default) enables adaptive weighting in the demo and the workers table shows each worker's throughput sample (`msg/s` + scheduling-lag %) in a new 吞吐 column.
 - IndexedDB replay persistence coalesces concurrent `appendBatch` calls into a single read-modify-write transaction (regression: ten concurrent batches = one readwrite transaction) while preserving order against `clear`/`clearTopic`/`clearBefore`.
 - The root export surface is pinned by a regression test, making pre-1.0 API additions/removals deliberate.
 - Benchmarks: load-weighting scoring, `getMetrics` snapshot, and `publishBatch` batch-size sensitivity (10/50/100 per call) baselines.
