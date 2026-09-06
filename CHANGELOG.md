@@ -12,6 +12,8 @@
 - QA: `verify:pack` now smoke-imports the full root public surface (12 functions incl. `effectiveWorkerLoad`, `approximatePayloadBytes`, `createIndexedDbReplayPersistence`) plus every subpath in ESM and CJS; a cluster integration test proves `scheduleLagWeight` steers a new route away from a scheduling-lagging worker; the `getMetrics()` test asserts full field parity with a flushed `message_metrics` event; README and Chinese roadmap feature lists were brought up to date with the recent additions.
 - Packaging: the published tarball now enumerates the exact docs files (both languages) instead of the whole `docs/` directory, dropping the internal `docs/progress.md` tracking artifact from `npm pack` output.
 - Security/CI infrastructure: a CodeQL workflow (javascript-typescript, push/PR/weekly) and a Dependabot config (weekly npm + GitHub Actions updates) were added; `verify:compat` now auto-derives its export-contract baseline from the latest release tag (with `COMPAT_BASE_TAG` override) instead of a hard-coded version.
+- Dependency security: `pnpm audit` found two high dev-chain advisories (`glob <10.5.0`, `nanoid <3.3.18` via vitest/vite); pinned via `pnpm-workspace.yaml` overrides (the pnpm-v10 home for that setting) and the audit is clean.
+- `verify:published` now smoke-imports the same full root public surface as `verify:pack`, so the release gate exercises the routing/observability exports end to end.
 
 ### Changed
 - The demo's config panel shows the load-weighting toggle state (启用 消息/字节/滞后 vs 禁用 纯 Topic 数), and the routing benchmark suite gains a `weighted + lag` owner-selection baseline.

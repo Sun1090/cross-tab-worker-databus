@@ -42,17 +42,38 @@ for (const dependency of ['react', 'vue', 'centrifuge']) {
 }
 
 const consumer = `
-  import { CrossTabDataBus, createWebSocketDataBus } from '${packageName}';
+  import {
+    CrossTabDataBus,
+    WebSocketTransport,
+    WorkerClusterRuntime,
+    approximatePayloadBytes,
+    createBrowserEnvironment,
+    createIndexedDbReplayPersistence,
+    createOpaqueKey,
+    createStorageEventChannel,
+    createWebSocketDataBus,
+    effectiveWorkerLoad,
+    selectWorkerBackend,
+    topicMatchesPattern
+  } from '${packageName}';
   import { useCrossTabDataBus } from '${packageName}/hooks';
   import { useCrossTabDataBus as useVueBus } from '${packageName}/vue';
-  import { createCentrifugeDataBus } from '${packageName}/centrifuge';
+  import { CentrifugeWorkerTransport, createCentrifugeDataBus } from '${packageName}/centrifuge';
   import { createRequire } from 'node:module';
   const require = createRequire(import.meta.url);
   const cjs = require('${packageName}');
   const cjsHooks = require('${packageName}/hooks');
   const cjsVue = require('${packageName}/vue');
   const cjsCentrifuge = require('${packageName}/centrifuge');
-  for (const value of [CrossTabDataBus, createWebSocketDataBus, useCrossTabDataBus, useVueBus, createCentrifugeDataBus, cjs.CrossTabDataBus, cjsHooks.useCrossTabDataBus, cjsVue.useCrossTabDataBus, cjsCentrifuge.createCentrifugeDataBus]) {
+  for (const value of [
+    CrossTabDataBus, WebSocketTransport, WorkerClusterRuntime, approximatePayloadBytes,
+    createBrowserEnvironment, createIndexedDbReplayPersistence, createOpaqueKey,
+    createStorageEventChannel, createWebSocketDataBus, effectiveWorkerLoad,
+    selectWorkerBackend, topicMatchesPattern,
+    useCrossTabDataBus, useVueBus, CentrifugeWorkerTransport, createCentrifugeDataBus,
+    cjs.CrossTabDataBus, cjs.createWebSocketDataBus, cjs.effectiveWorkerLoad,
+    cjsHooks.useCrossTabDataBus, cjsVue.useCrossTabDataBus, cjsCentrifuge.createCentrifugeDataBus
+  ]) {
     if (typeof value !== 'function') throw new Error('published consumer export is not callable');
   }
 `;
