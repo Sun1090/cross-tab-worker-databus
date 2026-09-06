@@ -51,12 +51,118 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
   // IndexedDB transactions are atomic, but a read-modify-write append can
   // still lose updates when callers start several appends concurrently.
   // Serialize all mutations per adapter instance while keeping reads free.
-  let mutationQueue: Promise<void> = Promise.resolve();
-  const serializeMutation = (mutation: () => Promise<void>): Promise<void> => {
-    const next = mutationQueue.then(mutation, mutation);
-    mutationQueue = next.catch(() => undefined);
-    return next;
+  // Consecutive append/appendBatch entries are coalesced into a single
+  // transaction at the head of the queue, so a burst spanning many microtask
+  // flushes issues one transaction instead of one per flush. Ordering against
+  // clears is preserved: coalescing only merges adjacent batch entries and
+  // never reorders them relative to a clear.
+  type QueuedMutation =
+    | { kind: 'batch'; messages: ReadonlyArray<DataBusMessage<TData>> }
+    | { kind: 'run'; run: () => Promise<void> };
+  const pending: Array<{
+    mutation: QueuedMutation;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  let draining = false;
+
+  const drain = async (): Promise<void> => {
+    if (draining) return;
+    draining = true;
+    try {
+      // Let a burst of synchronous enqueues accumulate into `pending` before
+      // the first coalescing pass, so a single flush cycle's batches merge
+      // into one transaction instead of two.
+      await Promise.resolve();
+      while (pending.length > 0) {
+        const head = pending[0]!.mutation;
+        if (head.kind === 'batch') {
+          // Merge every adjacent batch entry into one transaction.
+          const merged: DataBusMessage<TData>[] = [];
+          const entries: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+          while (pending.length > 0) {
+            const next = pending[0]!.mutation;
+            if (next.kind !== 'batch') break;
+            merged.push(...next.messages);
+            entries.push({ resolve: pending[0]!.resolve, reject: pending[0]!.reject });
+            pending.shift();
+          }
+          try {
+            await appendTransaction(merged);
+            for (const entry of entries) entry.resolve();
+          } catch (error) {
+            for (const entry of entries) entry.reject(error);
+          }
+        } else {
+          const entry = pending.shift()!;
+          try {
+            await head.run();
+            entry.resolve();
+          } catch (error) {
+            entry.reject(error);
+          }
+        }
+      }
+    } finally {
+      draining = false;
+    }
   };
+
+  const enqueue = (mutation: QueuedMutation): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      pending.push({ mutation, resolve, reject });
+      void drain();
+    });
+
+  /** Read-modify-write one topic-batched append inside a single transaction. */
+  const appendTransaction = (messages: ReadonlyArray<DataBusMessage<TData>>): Promise<void> =>
+    (async () => {
+      const db = await open();
+      return new Promise<void>((resolve, reject) => {
+        let transaction: IDBTransaction;
+        try {
+          transaction = db.transaction(storeName, 'readwrite');
+        } catch (error) {
+          invalidate(db);
+          reject(error);
+          return;
+        }
+        const store = transaction.objectStore(storeName);
+        const grouped = new Map<string, DataBusMessage<TData>[]>();
+        for (const message of messages) {
+          grouped.set(message.topic, [...(grouped.get(message.topic) ?? []), message]);
+        }
+        let hasError = false;
+        for (const [topic, topicMessages] of grouped) {
+          const request = store.get(topic);
+          request.onsuccess = () => {
+            if (hasError) return;
+            let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
+            if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
+              const cutoff = Date.now() - retentionMs;
+              history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
+            }
+            if (pruneStrategy !== PRUNE_STRATEGY.AGE) history = history.slice(-maxPerTopic);
+            store.put({ topic, messages: history });
+          };
+          request.onerror = () => {
+            if (hasError) return;
+            hasError = true;
+            invalidate(db);
+            reject(request.error ?? new Error('Failed to read replay history.'));
+          };
+        }
+        transaction.oncomplete = () => {
+          if (!hasError) resolve();
+        };
+        transaction.onerror = () => {
+          if (hasError) return;
+          hasError = true;
+          invalidate(db);
+          reject(transaction.error ?? new Error('Failed to persist replay history.'));
+        };
+      });
+    })();
   const open = (): Promise<IDBDatabase> => {
     if (dbPromise) return dbPromise;
     const pending = new Promise<IDBDatabase>((resolve, reject) => {
@@ -104,62 +210,18 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       });
     },
     append(message) {
-      return serializeMutation(async () => {
-        const db = await open();
-        await new Promise<void>((resolve, reject) => {
-        let transaction: IDBTransaction;
-        try { transaction = db.transaction(storeName, 'readwrite'); }
-        catch (error) { invalidate(db); reject(error); return; }
-        const store = transaction.objectStore(storeName);
-        const request = store.get(message.topic);
-        request.onsuccess = () => {
-          let messages = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(message);
-          if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
-            const cutoff = Date.now() - retentionMs;
-            messages = messages.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
-          }
-          if (pruneStrategy !== PRUNE_STRATEGY.AGE) messages = messages.slice(-maxPerTopic);
-          store.put({ topic: message.topic, messages });
-        };
-        request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to persist replay history.')); };
-        });
-      });
+      return enqueue({ kind: 'batch', messages: [message] });
     },
     appendBatch(messages) {
       if (messages.length === 0) return Promise.resolve();
-      return serializeMutation(async () => {
-        const db = await open();
-        await new Promise<void>((resolve, reject) => {
-          let transaction: IDBTransaction;
-          try { transaction = db.transaction(storeName, 'readwrite'); }
-          catch (error) { invalidate(db); reject(error); return; }
-          const store = transaction.objectStore(storeName);
-          const grouped = new Map<string, DataBusMessage<TData>[]>();
-          for (const message of messages) grouped.set(message.topic, [...(grouped.get(message.topic) ?? []), message]);
-          for (const [topic, topicMessages] of grouped) {
-            const request = store.get(topic);
-            request.onsuccess = () => {
-              let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
-              if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
-                const cutoff = Date.now() - retentionMs;
-                history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
-              }
-              if (pruneStrategy !== PRUNE_STRATEGY.AGE) history = history.slice(-maxPerTopic);
-              store.put({ topic, messages: history });
-            };
-            request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
-          }
-          transaction.oncomplete = () => resolve();
-          transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to persist replay history batch.')); };
-        });
-      });
+      return enqueue({ kind: 'batch', messages });
     },
     clear() {
-      return serializeMutation(async () => {
+      return enqueue({
+        kind: 'run',
+        run: () => (async () => {
         const db = await open();
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
@@ -167,12 +229,15 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear replay history.')); };
         });
+        })()
       });
     },
     clearTopic(topic) {
-      return serializeMutation(async () => {
+      return enqueue({
+        kind: 'run',
+        run: () => (async () => {
         const db = await open();
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
@@ -180,12 +245,15 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear topic replay history.')); };
         });
+        })()
       });
     },
     clearBefore(timestamp) {
-      return serializeMutation(async () => {
+      return enqueue({
+        kind: 'run',
+        run: () => (async () => {
         const db = await open();
-        await new Promise<void>((resolve, reject) => {
+        return new Promise<void>((resolve, reject) => {
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
@@ -202,6 +270,7 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to prune replay history.')); };
         });
+        })()
       });
     }
   };

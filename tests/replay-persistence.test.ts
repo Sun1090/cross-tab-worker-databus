@@ -5,7 +5,7 @@
  * strategies, and transient-open-failure recovery are covered in unit tests
  * without a real browser.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createIndexedDbReplayPersistence } from '../src/core/replay-persistence';
 import type { DataBusMessage } from '../src/core/types';
@@ -85,6 +85,33 @@ describe('createIndexedDbReplayPersistence', () => {
     const loaded = await persistence.load();
     expect(loaded).toHaveLength(20);
     expect(new Set(loaded.map(item => item.data.value)).size).toBe(20);
+  });
+
+  it('coalesces concurrent appendBatch calls into one transaction', async () => {
+    const { IDBDatabase } = await import('fake-indexeddb');
+    const transactionSpy = vi.spyOn(IDBDatabase.prototype, 'transaction');
+    try {
+      const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 100 });
+      // All ten batches enqueue before the first transaction runs; the queue
+      // merges the adjacent batch entries into a single read-modify-write.
+      await Promise.all(
+        Array.from({ length: 10 }, (_, index) =>
+          persistence.appendBatch!([message('t', index), message('t', index + 100)])
+        )
+      );
+      const readwrite = transactionSpy.mock.calls.filter(call => call[1] === 'readwrite').length;
+      expect(readwrite).toBe(1);
+
+      const loaded = await persistence.load();
+      expect(loaded).toHaveLength(20);
+      // Per-topic order is preserved across the merged batches (each batch i
+      // contributed [i, i+100]).
+      expect(loaded.map(item => item.data.value)).toEqual([
+        0, 100, 1, 101, 2, 102, 3, 103, 4, 104, 5, 105, 6, 106, 7, 107, 8, 108, 9, 109
+      ]);
+    } finally {
+      transactionSpy.mockRestore();
+    }
   });
 
   it('clears all history, one topic, and prunes by cutoff', async () => {
