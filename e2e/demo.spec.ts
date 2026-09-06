@@ -29,6 +29,11 @@ declare global {
 
 const DEMO_URL = 'http://localhost:4173/examples/demo/';
 const LOCAL_WS_URL = 'ws://localhost:4173/centrifuge/demo/connection/websocket';
+// Graceful pagehide handoff is fast locally, but heartbeat-TTL fallback alone
+// is heartbeatInterval + workerTtl (~13s), and shared CI runners can delay the
+// standby's reconcile loop far beyond that. Give the takeover a generous
+// ceiling so runner contention shows up as slowness, not as a spurious fail.
+const HANDOFF_TIMEOUT_MS = 60_000;
 
 /** Open a fresh demo tab and wait for its auto-connect to settle. */
 async function openDemoTab(context: BrowserContext): Promise<Page> {
@@ -136,6 +141,7 @@ test.describe('cross-tab databus demo', () => {
   });
 
   test('owner migration: closing the owning tab hands the topic to a survivor', async ({ context }) => {
+    test.setTimeout(90_000);
     const topic = `e2e.migrate.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
@@ -155,7 +161,7 @@ test.describe('cross-tab databus demo', () => {
     // One of the survivors takes ownership and continues receiving.
     const survivors = owners.filter((_, index) => index !== ownerIndex);
     const [survivorA, survivorB] = survivors as [Page, Page];
-    await waitForSingleOwner(survivors, { timeout: 30_000 });
+    await waitForSingleOwner(survivors, { timeout: HANDOFF_TIMEOUT_MS });
 
     await publishJson(survivorA);
     await expect.poll(() => receivedCount(survivorB)).toBe(1);
@@ -287,6 +293,7 @@ test.describe('cross-tab databus demo', () => {
   });
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
+    test.setTimeout(90_000);
     const topic = `e2e.soak.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
@@ -319,7 +326,7 @@ test.describe('cross-tab databus demo', () => {
     const survivors = tabs.filter(tab => tab !== owner);
     // Heartbeat-TTL fallback is heartbeatInterval + workerTtl (~13s);
     // leave generous headroom for shared CI runners.
-    const survivorIndex = await waitForSingleOwner(survivors, { timeout: 45_000 });
+    const survivorIndex = await waitForSingleOwner(survivors, { timeout: HANDOFF_TIMEOUT_MS });
     const survivor = survivors[survivorIndex]!;
 
     const receiver = survivors.find(tab => tab !== survivor)!;
@@ -341,6 +348,7 @@ test.describe('cross-tab databus demo', () => {
   });
 
   test('repeated BFCache round trips and reload keep delivery exactly-once', async ({ context }) => {
+    test.setTimeout(120_000);
     const topic = `e2e.longsoak.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
@@ -360,7 +368,7 @@ test.describe('cross-tab databus demo', () => {
       await expect.poll(() => receivedCount(standby)).toBe(before + 1);
 
       await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
-      await expect.poll(() => ownerCount(standby), { timeout: 30_000 }).toBe(1);
+      await expect.poll(() => ownerCount(standby), { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
       await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
       await expect(owner.locator('#statusBadge')).toHaveText('已连接', { timeout: 30_000 });
 
@@ -377,6 +385,7 @@ test.describe('cross-tab databus demo', () => {
 
 test.describe('cross-tab databus demo — BFCache round trip', () => {
   test('pagehide hands ownership off and pageshow restores a standby receiver', async ({ context }) => {
+    test.setTimeout(90_000);
     const topic = `e2e.bfcache.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
@@ -405,7 +414,7 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
 
     // The survivor takes over ownership and keeps receiving.
-    await expect.poll(() => ownerCount(standby), { timeout: 30_000 }).toBe(1);
+    await expect.poll(() => ownerCount(standby), { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
 
     // Returning from the page cache: pageshow re-subscribes the returning tab.
     await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
