@@ -100,6 +100,33 @@ The active set is used only when a Topic needs a new owner. An existing live own
 - `2-3`: Balances resource reuse and fault recovery.
 - Larger values: Suitable for scenarios with many Topics and where a single connection faces server-side limits.
 
+### Adaptive Owner Weighting
+
+By default a new Topic is assigned to the owner with the fewest owned Topics. The
+opt-in `loadWeighting` option adds traffic and scheduling signals so new routes
+favor quieter, healthier Workers — existing routes stay sticky and never migrate.
+
+```ts
+const bus = createCentrifugeDataBus({
+  connection: { url: getConnectionUrl() },
+  loadWeighting: {
+    messageRateWeight: 0.5,   // weight per message-per-second
+    byteRateWeight: 0.001,    // weight per byte-per-second
+    scheduleLagWeight: 2      // weight for heartbeat scheduling-lag ratio
+  }
+});
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `messageRateWeight` | `0` | Each Worker samples its own fan-out message rate per heartbeat window; the normalized rate is added to the effective load. |
+| `byteRateWeight` | `0` | Same, for approximate payload bytes per second. |
+| `scheduleLagWeight` | `0` | Weights the scheduling-lag ratio (`overrunMs ÷ windowMs`). A starved event loop lands heartbeats late, so this steers new routes away from a throttled Worker. |
+
+All weights default to `0`, keeping the legacy pure topic-count behavior byte-identical.
+The per-Worker sample (`WorkerThroughputSample`) is published with the heartbeat and
+carries `windowMs`, `messageCount`, `byteCount`, `overrunMs`, and `sampledAt`.
+
 ## Centrifuge Configuration
 
 Main configuration for `createCentrifugeDataBus<TData>(options)`:
@@ -114,6 +141,7 @@ Main configuration for `createCentrifugeDataBus<TData>(options)`:
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING heartbeat interval (see SharedWorker Session Reaper below); `Infinity` disables heartbeats entirely. Distinct from the Core cluster heartbeat (default 3000 ms) which tracks worker liveness via localStorage |
 | `workerFactory` | `() => Worker` | Built-in Worker | For testing or custom Worker loading |
 | `sharedWorkerFactory` | `() => SharedWorker` | Built-in SharedWorker | For testing or custom SharedWorker loading |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | Async credential refresh bridge: the Worker asks the main thread for each fresh token (`getToken` / `getChannelToken`) and this provider supplies it from application context. Required because function-valued Centrifuge options cannot be structured-cloned into the Worker |
 | Other Core config | Corresponding type | Core defaults | `storagePrefix`, heartbeat, TTL, etc. |
 
 ```ts
