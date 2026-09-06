@@ -32,8 +32,10 @@ fake tasks; each item is verified locally before being marked done.
       -> README.md (EN) + README.zh.md updated with the three new bullets
       (adaptive weighting, credential bridge, synchronous diagnostics);
       capabilities link already accurate.
-3. [ ] Docs EN/ZH parity sweep: diff every public API change against docs/zh;
-      fix any missing zh mirror.
+3. [x] Docs EN/ZH parity sweep: diff every public API change against docs/zh;
+      fix any missing zh mirror. -> Keyword + content sweep across api/config/
+      capabilities/release-checklist/getting-started all matched; the one gap was
+      zh/roadmap.md (0.20.69 candidates not marked delivered) — now mirrored.
 4. [ ] verify:compat / version-compat script: confirm it type-checks new exports
       (effectiveWorkerLoad, approximatePayloadBytes, getMetrics, WorkerThroughputSample)
       or extend its export manifest.
