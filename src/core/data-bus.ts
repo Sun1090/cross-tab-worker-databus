@@ -94,6 +94,8 @@ export interface DataBusDiagnostics {
   cluster: WorkerClusterSnapshot;
   /** Current trace metrics window counters, or null when metrics are inactive. */
   metrics: DataBusMetricsSnapshot | null;
+  /** Trace sink delivery mode and queued-event depth (asyncSink back-pressure). */
+  trace: { asyncSink: boolean; pendingEvents: number };
 }
 
 /** Where a retained failure originated, as surfaced by {@link DataBusHealthSummary}. */
@@ -726,7 +728,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         suspended: this.suspended
       },
       cluster,
-      metrics: this.trace.getMetrics()
+      metrics: this.trace.getMetrics(),
+      trace: this.trace.getSinkState()
     };
   }
 

@@ -2130,6 +2130,7 @@ describe('CrossTabDataBus diagnostics', () => {
     expect(metrics).toMatchObject({ received: 1, dispatched: 1, topics: 1 });
     // The same counters ride inside the unified diagnostics snapshot.
     expect(bus.getDiagnostics().metrics).toMatchObject({ received: 1, dispatched: 1 });
+    expect(bus.getDiagnostics().trace).toEqual({ asyncSink: false, pendingEvents: 0 });
     await bus.stop();
   });
 

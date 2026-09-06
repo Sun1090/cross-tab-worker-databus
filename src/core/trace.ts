@@ -234,6 +234,13 @@ export class DataBusTraceReporter {
     this.pause();
   }
 
+  /** Synchronous sink state for diagnostics: whether delivery is async and how
+   * many events are queued behind the microtask flush. A growing queue under
+   * `asyncSink: true` is the first sign of sink back-pressure. */
+  getSinkState(): { asyncSink: boolean; pendingEvents: number } {
+    return { asyncSink: this.asyncSink, pendingEvents: this.pendingEvents.length };
+  }
+
   /** Record an instantaneous trace event (lifecycle, status, error, etc.). */
   event(event: DataBusTraceEventInput): void {
     if (!this.enabled || this.mode === TRACE_MODE.METRICS) return;

@@ -310,6 +310,19 @@ describe('DataBusTraceReporter', () => {
     eventsOnly.stop();
   });
 
+  it('getSinkState reports async mode and the queued event depth', async () => {
+    const sync = new DataBusTraceReporter({ enabled: true, sink: () => {} });
+    expect(sync.getSinkState()).toEqual({ asyncSink: false, pendingEvents: 0 });
+
+    const async = new DataBusTraceReporter({ enabled: true, asyncSink: true, sink: () => {} });
+    async.event({ type: 'lifecycle', action: 'start' });
+    expect(async.getSinkState()).toMatchObject({ asyncSink: true, pendingEvents: 1 });
+    // The microtask flush drains the queue before the next getSinkState read.
+    await Promise.resolve();
+    expect(async.getSinkState()).toMatchObject({ pendingEvents: 0 });
+    async.stop();
+  });
+
   it('starts a fresh metrics window after pause and resume, and stop prevents later flushes', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({
