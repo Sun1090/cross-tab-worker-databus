@@ -18,6 +18,7 @@ import { CentrifugeSession } from './centrifuge-session';
 import { selectWorkerBackend } from './worker-mode';
 import type { WorkerBackend, WorkerMode } from './worker-mode';
 import type {
+  CentrifugeCredentialProvider,
   CentrifugeWorkerConfig,
   CentrifugeWorkerInput,
   CentrifugeWorkerOutput
@@ -25,11 +26,11 @@ import type {
 import type { DataBusPublishOptions } from './core/types';
 import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol';
 import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, DEFAULT_STORAGE_PREFIX, WORKER_BACKEND, WORKER_MODE, WORKER_STATUS } from './utils/constants';
-import { deserializeWorkerError } from './utils/error-utils';
+import { deserializeWorkerError, serializeError } from './utils/error-utils';
 import { publicationMetadata } from './utils/metadata';
 import { assertHeartbeatInterval, assertStructuredCloneable } from './utils/validation';
 
-export type { CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
+export type { CentrifugeCredentialProvider, CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
 export type { WorkerBackend, WorkerMode } from './worker-mode';
 
 /** WebSocket connection parameters passed to the Centrifuge Worker. */
@@ -55,6 +56,11 @@ export interface CentrifugeWorkerTransportOptions {
    * × this interval. Pass `Infinity` to disable heartbeats entirely. Defaults
    * to `DEFAULT_HEARTBEAT_INTERVAL_MS`. */
   heartbeatIntervalMs?: number;
+  /** Async credential provider. Runs on the main thread: the Worker cannot
+   * hold function-valued Centrifuge options (they are not structured-cloneable),
+   * so when a provider is set the Worker asks for each fresh token over a
+   * TOKEN_REQUEST / TOKEN_RESPONSE bridge and this provider supplies it. */
+  credentialProvider?: CentrifugeCredentialProvider;
 }
 
 /** Options for creating a fully-configured CrossTabDataBus with a Centrifuge transport. */
@@ -87,6 +93,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
   private readonly heartbeatIntervalMs: number;
   private readonly workerFactory: (() => Worker) | undefined;
   private readonly sharedWorkerFactory: (() => SharedWorker) | undefined;
+  private readonly credentialProvider: CentrifugeCredentialProvider | undefined;
   private backend: WorkerBackend | null = null;
   private worker: Worker | null = null;
   private sharedWorker: SharedWorker | null = null;
@@ -112,6 +119,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
     assertHeartbeatInterval(this.heartbeatIntervalMs);
     this.workerFactory = options.workerFactory;
     this.sharedWorkerFactory = options.sharedWorkerFactory;
+    this.credentialProvider = options.credentialProvider;
   }
 
   /**
@@ -196,6 +204,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
       url: config.url,
       config: config.options ?? {},
       ...(this.transferable ? { transferable: true } : {}),
+      ...(this.credentialProvider ? { tokenBridge: true } : {}),
       ...(this.heartbeatIntervalMs !== DEFAULT_HEARTBEAT_INTERVAL_MS
         ? { heartbeatIntervalMs: this.heartbeatIntervalMs }
         : {})
@@ -245,6 +254,33 @@ export class CentrifugeWorkerTransport<TData = unknown>
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE) this.handlers?.onMessage({ topic: message.topic, data: message.data, ...publicationMetadata(message.messageId, message.timestamp) });
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN) this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...publicationMetadata(message.messageId, message.timestamp) });
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.ERROR) this.handlers?.onError(deserializeWorkerError(message.error));
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST) this.resolveTokenRequest(message.requestId, message.kind, message.channel);
+  }
+
+  /** Resolve a Worker credential request from the main thread: call the
+   * credentialProvider, then post the fresh token (or a serialized failure)
+   * back to the session that issued the request. */
+  private resolveTokenRequest(requestId: number, kind: 'token' | 'channelToken', channel: string | undefined): void {
+    const provider = this.credentialProvider;
+    const value = kind === 'channelToken' && provider?.getChannelToken
+      ? provider.getChannelToken(channel ?? '')
+      : provider?.getToken?.();
+    Promise.resolve(value).then(
+      token => {
+        if (typeof token !== 'string' || token.length === 0) {
+          this.post({
+            type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR,
+            requestId,
+            error: serializeError(new Error(`The credential provider returned no ${kind}.`))
+          });
+          return;
+        }
+        this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_RESPONSE, requestId, token });
+      },
+      error => {
+        this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
+      }
+    );
   }
 
   /** Handle a Worker-level failure (crash, message decode error). Discards the
@@ -354,6 +390,7 @@ export function createCentrifugeDataBus<TData = unknown>(
   const {
     clusterKey,
     connection,
+    credentialProvider,
     heartbeatIntervalMs,
     sharedWorkerFactory,
     transferable,
@@ -371,7 +408,8 @@ export function createCentrifugeDataBus<TData = unknown>(
       ...(sharedWorkerFactory ? { sharedWorkerFactory } : {}),
       ...(transferable === undefined ? {} : { transferable }),
       ...(workerMode ? { workerMode } : {}),
-      ...(heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs })
+      ...(heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs }),
+      ...(credentialProvider ? { credentialProvider } : {})
     })
   });
 }

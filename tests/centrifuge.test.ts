@@ -1078,3 +1078,84 @@ describe('CentrifugeWorkerTransport edge paths', () => {
     transport.stop();
   });
 });
+
+describe('CentrifugeWorkerTransport credential bridge', () => {
+  it('enables the token bridge in INIT only when a provider is configured', () => {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => 'fresh-token' }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+    const init = worker.messages[0] as CentrifugeWorkerInput;
+    expect(init).toMatchObject({ type: 'INIT', tokenBridge: true });
+
+    const plain = new WorkerDouble();
+    const legacy = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => plain as unknown as Worker
+    });
+    legacy.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+    expect(plain.messages[0]).not.toHaveProperty('tokenBridge');
+  });
+
+  it('resolves a token request through the provider', async () => {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => 'fresh-token' }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 7, kind: 'token' });
+    await Promise.resolve();
+    expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 7, token: 'fresh-token' });
+  });
+
+  it('supports async providers and channel tokens', async () => {
+    const worker = new WorkerDouble();
+    const getToken = vi.fn(async () => 'async-token');
+    const getChannelToken = vi.fn(async channel => `channel-token-${channel}`);
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken, getChannelToken }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' });
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 2, kind: 'channelToken', channel: 'chat.room.1' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getToken).toHaveBeenCalledTimes(1);
+    expect(getChannelToken).toHaveBeenCalledWith('chat.room.1');
+    expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 1, token: 'async-token' });
+    expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 2, token: 'channel-token-chat.room.1' });
+  });
+
+  it('surfaces provider rejection and empty tokens as TOKEN_ERROR', async () => {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => Promise.reject(new Error('token expired')) }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 3, kind: 'token' });
+    await Promise.resolve();
+    const error = worker.messages.find(message => message.type === 'TOKEN_ERROR') as
+      | { type: 'TOKEN_ERROR'; requestId: number; error: { message?: string } }
+      | undefined;
+    expect(error).toBeDefined();
+    expect(error!.requestId).toBe(3);
+    expect(error!.error.message).toContain('token expired');
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 4, kind: 'token' });
+    await Promise.resolve();
+    const empty = worker.messages.filter(message => message.type === 'TOKEN_ERROR');
+    expect(empty[empty.length - 1]).toMatchObject({ requestId: 4 });
+  });
+});

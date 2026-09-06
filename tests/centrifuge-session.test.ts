@@ -32,9 +32,11 @@ const { FakeCentrifuge } = vi.hoisted(() => {
 
     readonly listeners = new Map<string, Set<AnyListener>>();
     readonly subscriptions = new Map<string, FakeSubscription>();
+    readonly options: { getToken?: () => Promise<string>; getChannelToken?: (channel: string) => Promise<string> } = {};
     publish: (topic: string, data: unknown) => Promise<unknown> = vi.fn();
 
-    constructor(_endpoint: string, _options?: unknown) {
+    constructor(_endpoint: string, options?: unknown) {
+      this.options = (options ?? {}) as FakeCentrifuge['options'];
       instances.push(this);
     }
 
@@ -427,5 +429,81 @@ describe('CentrifugeSession protocol coverage', () => {
         context: expect.objectContaining({ type: 'subscribe:error' })
       })
     });
+  });
+});
+
+describe('CentrifugeSession token bridge', () => {
+  function makeSession() {
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({
+      post: (message: CentrifugeWorkerOutput) => sink(message)
+    });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {},
+      tokenBridge: true
+    });
+    return { sink, session, client: FakeCentrifuge.instances[FakeCentrifuge.instances.length - 1]! };
+  }
+
+  it('injects getToken/getChannelToken only when the bridge is enabled', () => {
+    FakeCentrifuge.instances.length = 0;
+    makeSession();
+    const bridged = FakeCentrifuge.instances[FakeCentrifuge.instances.length - 1]!;
+    expect(typeof bridged.options.getToken).toBe('function');
+    expect(typeof bridged.options.getChannelToken).toBe('function');
+
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession({ post: message => sink(message) });
+    session.handle({ type: 'INIT', url: 'wss://example.test/connection/websocket', config: {} });
+    const legacy = FakeCentrifuge.instances[0]!;
+    expect(legacy.options.getToken).toBeUndefined();
+    expect(legacy.options.getChannelToken).toBeUndefined();
+  });
+
+  it('round-trips a connection token request through the bridge', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client } = makeSession();
+    const tokenPromise = client.options.getToken!();
+    expect(sink).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' })
+    );
+    const request = sink.mock.calls[0]![0] as { requestId: number };
+    session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'fresh-token' });
+    await expect(tokenPromise).resolves.toBe('fresh-token');
+  });
+
+  it('round-trips a channel token request with the channel attached', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client } = makeSession();
+    const tokenPromise = client.options.getChannelToken!('chat.room.1');
+    expect(sink).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'channelToken', channel: 'chat.room.1' })
+    );
+    const request = sink.mock.calls[0]![0] as { requestId: number };
+    session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'channel-token' });
+    await expect(tokenPromise).resolves.toBe('channel-token');
+  });
+
+  it('rejects a pending token request on TOKEN_ERROR', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client } = makeSession();
+    const tokenPromise = client.options.getToken!();
+    const request = sink.mock.calls[0]![0] as { requestId: number };
+    session.handle({ type: 'TOKEN_ERROR', requestId: request.requestId, error: { name: 'Error', message: 'provider refused', stack: '' } });
+    await expect(tokenPromise).rejects.toThrow('provider refused');
+  });
+
+  it('rejects all in-flight token requests on stop', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client } = makeSession();
+    const first = client.options.getToken!();
+    const second = client.options.getToken!();
+    expect(sink).toHaveBeenCalledTimes(2);
+    session.handle({ type: 'STOP' });
+    await expect(first).rejects.toThrow('stopped');
+    await expect(second).rejects.toThrow('stopped');
   });
 });
