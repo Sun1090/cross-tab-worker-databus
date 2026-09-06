@@ -22,52 +22,34 @@ fake tasks; each item is verified locally before being marked done.
 
 ## Task pool (this phase)
 
-1. [x] Audit React (tests/hooks.test.tsx) vs Vue (tests/vue.test.ts) adapter parity;
-      port any missing React coverage (health hook edge cases, topic rebinding)
-      to Vue or justify the gap. -> Parity complete: Vue covers lifecycle+status+subscribe,
-      bus-ref rebind, reactive-topic rebind, stale-bus-after-rapid-changes, health refresh,
-      interval polling + detach nulling. StrictMode double-mount is React-only. No gap.
-2. [x] README feature list: add loadWeighting / credentialProvider / getMetrics /
-      replay bytes / bench gate bullets; keep the capabilities link accurate.
-      -> README.md (EN) + README.zh.md updated with the three new bullets
-      (adaptive weighting, credential bridge, synchronous diagnostics);
-      capabilities link already accurate.
-3. [x] Docs EN/ZH parity sweep: diff every public API change against docs/zh;
-      fix any missing zh mirror. -> Keyword + content sweep across api/config/
-      capabilities/release-checklist/getting-started all matched; the one gap was
-      zh/roadmap.md (0.20.69 candidates not marked delivered) — now mirrored.
-4. [x] verify:compat / version-compat script: confirm it type-checks new exports
-      (effectiveWorkerLoad, approximatePayloadBytes, getMetrics, WorkerThroughputSample)
-      or extend its export manifest. -> verify-packed-consumer.mjs now smoke-imports
-      the full root public surface (12 ESM + subpath + CJS) incl. the new routing/
-      observability functions; `pnpm verify:pack` passes locally. verify:compat's
-      subpath-contract check unchanged (still valid).
-5. [x] Demo: surface getDiagnostics().replay.bytes already done; add throughput
-      sample coverage assertion already done via e2e (adaptive-weighting).
-      -> Already shipped: overview live-diagnostics row (getMetrics + replay
-      bytes) and the adaptive-weighting e2e asserting msg/s in the workers table.
-6. [x] Unit coverage: cluster integration test that scheduleLagWeight actually
-      steers a route on a sampling peer (end-to-end, not just pure fn).
-      -> tests/cluster.test.ts 'steers a new route away from a scheduling-lagging
-      worker despite fewer topics': A=1 topic starved (overrun 0.667 ratio), B=2
-      topics healthy; with scheduleLagWeight:3 the new route lands on B, and the
-      SUBSCRIBE control is asserted.
-7. [x] Unit coverage: DataBusTraceReporter.getMetrics() consistency vs a flushed
-      message_metrics event (same window values).
-      -> Strengthened tests/trace.test.ts 'getMetrics snapshots...' to assert full
-      field parity: the flushed message_metrics event (minus type) equals the
-      on-demand snapshot exactly for the same window.
-8. [x] Release checklist: record the verify:pack command output + bench gate in
-      the checklist validation run. -> Already present (Before tagging #2
-      includes verify:pack, #3 the bench gate); confirmed unchanged.
-9. [x] Add `pnpm verify:published` (offline/local) note + `verify:compat` to the
-      release checklist documented commands. -> Added pnpm verify:compat to the
-      Before-tagging run list with a parenthetical on what it asserts;
-      verify:published offline note was already present.
-10. [x] CHANGELOG: fold the phase changes into [Unreleased] (after local verify).
-      -> QA bullet added: verify:pack full-surface smoke-import, scheduleLag
-      steering integration test, getMetrics full-parity test, README + zh roadmap
-      updates.
+1. [x] Adapter parity audit (React vs Vue) — parity confirmed, StrictMode React-only.
+2. [x] README feature list (EN+ZH) — added weighting/bridge/diagnostics bullets.
+3. [x] Docs EN/ZH parity sweep — zh roadmap gap fixed.
+4. [x] verify:pack covers new exports — packed-consumer now smoke-imports full surface.
+5. [x] Demo observability — already shipped (diagnostics row + adaptive-weighting e2e).
+6. [x] scheduleLagWeight cluster steering test — added (A starved/B healthy, weight 3 → B).
+7. [x] getMetrics vs flushed event full-field parity — strengthened trace.test.ts.
+8. [x] Release checklist verify:pack/bench gate — already present, confirmed.
+9. [x] verify:compat documented in checklist Before-tagging run.
+10. [x] CHANGELOG [Unreleased] QA bullet.
+
+## Phase 1 result (pushed 06dcc25..362adef, CI green on first try)
+
+- verify 49s + browser 3m13s (incl. new Bench smoke step). Repo has only ci.yml +
+  release.yml (no CodeQL/dependabot/deploy workflows to scan for this push).
+- Local verification before push: pnpm check (438 tests), lint, test:e2e (20/20),
+  bench, verify:pack all green.
+
+## Phase 2 pool (packaging hygiene + observability polish)
+
+1. [ ] Exclude docs/progress.md (internal tracking doc) from the published tarball.
+2. [ ] Demo renderConfig shows the loadWeighting active state in the config panel.
+3. [ ] Routing bench: add a scheduleLagWeight variant to the weighted scoring baseline.
+4. [ ] approximatePayloadBytes test: explicit DataView (and Uint8Array view) coverage.
+5. [ ] npm pack --dry-run --json audit: confirm only intended files ship.
+6. [ ] README/Getting-Started: link docs/configuration.md adaptive-weighting anchor
+      from the README feature bullet (navigation polish).
+7. [ ] Progress-pad: fold phase-2 changes into CHANGELOG [Unreleased] + this file.
 
 ## Recovery entry
 
