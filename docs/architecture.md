@@ -333,6 +333,46 @@ The owning Worker filters every publication it receives with `isAssigned(topic)`
 6. Only a Topic without a route, or a route whose owner has departed or expired by heartbeat TTL, is assigned to the least-loaded candidate Worker.
 7. A new route is considered unconfirmed until the owner writes `confirmedAt`; the subscriber will automatically resend the control message.
 
+### Adaptive owner weighting (`loadWeighting`)
+
+By default "least-loaded" means the fewest owned Topics. The opt-in `loadWeighting`
+option adds traffic and scheduling signals, still only for NEW or orphaned routes —
+existing routes stay sticky and are never migrated:
+
+- Each Worker samples its own fan-out activity between heartbeats and publishes a
+  `WorkerThroughputSample` (`windowMs`, `messageCount`, `byteCount`, `overrunMs`,
+  `sampledAt`) with the worker record.
+- `overrunMs` is the positive excess of the sample window over the nominal heartbeat
+  interval. A starved event loop (the browser-observable proxy for CPU saturation)
+  lands heartbeats late and stretches the window, so this is a cheap native signal.
+- `effectiveWorkerLoad` (a pure function in `routing.ts`) scores a Worker as
+  `load + messageRateWeight × msg/s + byteRateWeight × B/s + scheduleLagWeight × (overrunMs ÷ windowMs)`.
+  All weights default to `0`, keeping the legacy pure topic-count score byte-identical.
+- The scorer is deterministic and reads the same persisted records on every tab, so
+  routing agrees cluster-wide; a scheduling-laggy Worker becomes less attractive for
+  new routes even when it carries fewer topics.
+
+### Async credential refresh bridge (`credentialProvider`)
+
+Centrifuge client options are structured-cloned into the Worker, so function-valued
+`getToken` / `getChannelToken` cannot travel with the config. The opt-in
+`credentialProvider` (`{ getToken, getChannelToken }`) on `createCentrifugeDataBus`
+runs on the main thread instead:
+
+1. When a provider is configured, INIT carries `tokenBridge: true` and the Worker's
+   `CentrifugeSession` wires `getToken` / `getChannelToken` to issue a
+   `TOKEN_REQUEST` output (`requestId`, `kind`, optional `channel`).
+2. The transport resolves it on the main thread: `resolveTokenRequest` calls the
+   provider and posts `TOKEN_RESPONSE` (or `TOKEN_ERROR` on rejection / empty token)
+   back with the matching `requestId`.
+3. The session settles the pending promise by `requestId`; a `STOP` rejects all
+   in-flight requests so a stopped worker never awaits a response forever.
+4. Without a provider, INIT omits `tokenBridge` and the config stays byte-identical
+   to legacy — a server that never asks for a token triggers no requests.
+5. Dedicated, SharedWorker, and local backends share `CentrifugeSession`, so the
+   bridge works across all three; the token never crosses the Worker boundary as a
+   function, only as a resolved string.
+
 ## Subscription Flow
 
 ```mermaid
