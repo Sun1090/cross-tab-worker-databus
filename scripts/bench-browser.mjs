@@ -91,6 +91,16 @@ async function runDatabusMatrix(browser) {
 
     const timings = {};
 
+    // Auto-start defers transport.start to a microtask and the cluster assigns
+    // the route over a BroadcastChannel round-trip. ready() covers the first;
+    // this bounded poll covers the second so the emit-based cases measure real
+    // dispatch instead of the not-assigned discard path (or hanging forever).
+    async function ensureAssigned(bus, topicOrPattern) {
+      for (let attempt = 0; attempt < 200 && !bus.getClusterSnapshot().assignedTopics.includes(topicOrPattern); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    }
+
     {
       const transport = makeStubTransport();
       const bus = new CrossTabDataBus({
@@ -100,6 +110,8 @@ async function runDatabusMatrix(browser) {
         transport
       });
       bus.subscribe('bench.rooms.*', () => {});
+      await bus.ready();
+      await ensureAssigned(bus, 'bench.rooms.*');
       const start = performance.now();
       for (let index = 0; index < 1000; index += 1) {
         transport.emit(`bench.rooms.room-${index % 100}`, { value: index });
@@ -117,6 +129,7 @@ async function runDatabusMatrix(browser) {
         transport
       });
       bus.subscribe('bench.batch', () => {});
+      await bus.ready();
       const start = performance.now();
       for (let round = 0; round < 10; round += 1) {
         bus.publishBatch('bench.batch', Array.from({ length: 100 }, (_, index) => ({ data: { value: round * 100 + index } })));
@@ -135,6 +148,8 @@ async function runDatabusMatrix(browser) {
         dedup: { maxEntries: 2000, ttlMs: 60_000, now: () => 1000 }
       });
       bus.subscribe('bench.dedup', () => {});
+      await bus.ready();
+      await ensureAssigned(bus, 'bench.dedup');
       const start = performance.now();
       for (let index = 0; index < 1000; index += 1) {
         transport.emit('bench.dedup', { value: index }, `message-${index % 500}`);
@@ -165,6 +180,9 @@ async function runDatabusMatrix(browser) {
     {
       // First-packet latency floor: subscribe → first transport emission →
       // handler invocation, including any lazy dispatch setup on the cold path.
+      // The cluster assigns the route asynchronously (localStorage + channel
+      // round-trip), so wait for the local assignment before emitting — the
+      // emission itself is the measured cold dispatch.
       const transport = makeStubTransport();
       let markFirst = null;
       const first = new Promise(resolve => {
@@ -177,6 +195,10 @@ async function runDatabusMatrix(browser) {
         transport
       });
       bus.subscribe('bench.first', () => markFirst(performance.now()));
+      // ready() ensures the transport is live; ensureAssigned covers the
+      // async cluster route before the cold dispatch is measured.
+      await bus.ready();
+      await ensureAssigned(bus, 'bench.first');
       const start = performance.now();
       transport.emit('bench.first', { value: 1 });
       await first;
