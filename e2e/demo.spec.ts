@@ -582,6 +582,49 @@ test.describe('cross-tab databus demo — binary publish', () => {
   });
 });
 
+test.describe('cross-tab databus demo — storage-event coordination fallback', () => {
+  test('two BroadcastChannel-less tabs coordinate over localStorage storage events', async ({ context }) => {
+    const topic = `e2e.storage.${Date.now()}`;
+
+    const openFallbackTab = async (): Promise<Page> => {
+      const page = await context.newPage();
+      // Remove BroadcastChannel before any page script runs so the demo's
+      // cluster coordination degrades through the storage-event fallback
+      // instead of staying on the in-memory channel.
+      await page.addInitScript(() => {
+        Object.defineProperty(window, 'BroadcastChannel', { value: undefined, configurable: true });
+      });
+      await page.goto(DEMO_URL);
+      // Let the auto-connect settle first, then opt into the fallback and
+      // re-apply so the new bus is created with the storage-event channel.
+      await expect(page.locator('#statusBadge')).toHaveText('已连接');
+      await page.check('#channelFallback');
+      await connectDemo(page, 'dedicated', topic);
+      return page;
+    };
+
+    const tabA = await openFallbackTab();
+    const tabB = await openFallbackTab();
+
+    // Both tabs must report the storage-event coordination channel — a silent
+    // return to BroadcastChannel (or a drop to local mode) is the regression
+    // this scenario guards against.
+    await expect.poll(() => tabA.locator('#configChannelInfo').textContent()).toContain('storage-event 降级');
+    await expect.poll(() => tabB.locator('#configChannelInfo').textContent()).toContain('storage-event 降级');
+
+    // Exactly one tab owns the transport subscription over the fallback.
+    await waitForSingleOwner([tabA, tabB], { timeout: 45_000 });
+
+    // Cross-tab delivery rides the storage-event coordination plane. Each tab
+    // echoes its own publish, so both end up with both messages.
+    await publishJson(tabA);
+    await expect.poll(() => receivedCount(tabB)).toBe(1);
+    await publishJson(tabB);
+    await expect.poll(() => receivedCount(tabA)).toBe(2);
+    await expect.poll(() => receivedCount(tabB)).toBe(2);
+  });
+});
+
 test.describe('cross-tab databus replay persistence', () => {
   test('hydrates IndexedDB replay history after a reload', async ({ context }) => {
     const page = await context.newPage();
