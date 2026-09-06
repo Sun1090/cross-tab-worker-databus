@@ -162,6 +162,28 @@ async function runDatabusMatrix(browser) {
       await bus.stop();
     }
 
+    {
+      // First-packet latency floor: subscribe → first transport emission →
+      // handler invocation, including any lazy dispatch setup on the cold path.
+      const transport = makeStubTransport();
+      let markFirst = null;
+      const first = new Promise(resolve => {
+        markFirst = resolve;
+      });
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-browser-firstpacket',
+        environment: createBrowserEnvironment(),
+        initialConfig: {},
+        transport
+      });
+      bus.subscribe('bench.first', () => markFirst(performance.now()));
+      const start = performance.now();
+      transport.emit('bench.first', { value: 1 });
+      await first;
+      timings.firstPacketMs = Number((performance.now() - start).toFixed(2));
+      await bus.stop();
+    }
+
     const userAgent = navigator.userAgent;
     return { userAgent, timings };
   });

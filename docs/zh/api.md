@@ -190,10 +190,20 @@ interface DataBusHealthSummary {
   recovery: { attempt; exhausted; maxAttempts; generation; lastSuccessAt; hasError; errorMessage; errorAt };
   lastFailure: { source: 'transport' | 'persistence' | 'dispatch'; message: string; at: number } | null;
   persistence: { failures: number; lastFailureAt: number | null; lastErrorMessage: string | null };
+  metrics: DataBusMetricsSnapshot | null;   // 实时 trace 窗口；trace 指标未启用时为 null
+  trace: { asyncSink: boolean; pendingEvents: number };  // sink 背压可见性
 }
 ```
 
 `state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。
+
+### `getMetrics()`
+
+```ts
+getMetrics(): DataBusMetricsSnapshot | null
+```
+
+对当前 trace 指标窗口的**同步、非破坏性**快照——与周期性 `message_metrics` 事件相同的派生计数（received、dispatched、topics，分发延迟 avg/p50/p95/max，dedup accepted/suppressed），无需 sink 或间隔 flush 即可按需读取。trace 指标未启用（禁用或 events-only 模式）时返回 `null`。
 
 ### `getRecoveryStats()` / `getPersistenceStats()`
 
@@ -210,7 +220,12 @@ getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
 getDiagnostics(): DataBusDiagnostics
 ```
 
-完整诊断快照，合并生命周期、transport 身份（`name`、`backend`、实时 `status`、`suspended`）、恢复、dedup、replay、持久化、协议（`version`、`unknownMessages`、`peers`）与集群快照。`sdkVersion` 构建时从 `package.json` 注入。只需要就绪结论的调用方应优先使用 `getHealthSummary()`。
+完整诊断快照，合并生命周期、transport 身份（`name`、`backend`、实时 `status`、`suspended`）、恢复、dedup、replay、持久化、协议（`version`、`unknownMessages`、`peers`）与集群快照，外加两个仅用于诊断的字段：
+
+- `metrics: DataBusMetricsSnapshot | null` — 当前 trace 指标窗口（吞吐、分发延迟百分位、dedup 结果）；trace 指标未启用（禁用或 events-only 模式）时为 `null`。
+- `trace: { asyncSink: boolean; pendingEvents: number }` — sink 投递模式与排队事件深度；`asyncSink: true` 下 `pendingEvents` 持续增长是 sink 背压的第一个信号。
+
+`sdkVersion` 构建时从 `package.json` 注入。只需要就绪结论的调用方应优先使用 `getHealthSummary()`。
 
 ### `getClusterSnapshot()`
 

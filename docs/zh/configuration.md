@@ -98,6 +98,29 @@ active 集合只在 Topic 需要选择新 owner 时使用。已有 owner Worker 
 - `2-3`：在资源复用和故障恢复之间取得平衡。
 - 更大值：适合 Topic 很多且单连接存在服务端限制的场景。
 
+### 自适应 owner 加权
+
+默认情况下新 Topic 分配给拥有最少 Topic 的 owner。可选的 `loadWeighting` 加入流量与调度信号，使新 route 偏向更空闲、更健康的 Worker——已有 route 保持 sticky，永不被迁移。
+
+```ts
+const bus = createCentrifugeDataBus({
+  connection: { url: getConnectionUrl() },
+  loadWeighting: {
+    messageRateWeight: 0.5,   // 每条消息/秒的权重
+    byteRateWeight: 0.001,    // 每字节/秒的权重
+    scheduleLagWeight: 2      // 心跳调度滞后比率的权重
+  }
+});
+```
+
+| 选项 | 默认值 | 作用 |
+|---|---|---|
+| `messageRateWeight` | `0` | 每个 Worker 按心跳窗口采样自身的 fan-out 消息速率，归一化速率计入有效负载。 |
+| `byteRateWeight` | `0` | 同上，针对近似 payload 字节数/秒。 |
+| `scheduleLagWeight` | `0` | 加权调度滞后比率（`overrunMs ÷ windowMs`）。事件循环饥饿会让心跳延迟，从而引导新 route 远离被节流的 Worker。 |
+
+所有权重默认 `0`，保持纯按 Topic 数的 legacy 行为字节级不变。每个 Worker 的采样（`WorkerThroughputSample`）随心跳发布，含 `windowMs`、`messageCount`、`byteCount`、`overrunMs`、`sampledAt`。
+
 ## Centrifuge 配置
 
 `createCentrifugeDataBus<TData>(options)` 的主要配置：
@@ -112,6 +135,7 @@ active 集合只在 Topic 需要选择新 owner 时使用。已有 owner Worker 
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING 心跳间隔（见下方 SharedWorker 会话回收）；传 `Infinity` 完全禁用心跳。与 Core 集群心跳（默认 3000 ms，通过 localStorage 跟踪 worker 存活）相互独立 |
 | `workerFactory` | `() => Worker` | 内置 Worker | 测试或自定义 Worker 加载方式 |
 | `sharedWorkerFactory` | `() => SharedWorker` | 内置 SharedWorker | 测试或自定义 SharedWorker 加载方式 |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token（`getToken` / `getChannelToken`），由该 provider 从应用上下文提供。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
 | 其他 Core 配置 | 对应类型 | Core 默认值 | `storagePrefix`、心跳、TTL 等 |
 
 ```ts
