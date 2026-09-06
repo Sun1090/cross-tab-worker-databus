@@ -2148,7 +2148,7 @@ describe('CrossTabDataBus diagnostics', () => {
   it('reports a healthy summary while started, visible, and connected', async () => {
     const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'health-ok' });
     const transport = new FakeTransport<number>();
-    const bus = new CrossTabDataBus({ clusterKey: 'health-ok', environment: env.environment, transport });
+      const bus = new CrossTabDataBus({ clusterKey: 'health-ok', environment: env.environment, transport, trace: { enabled: true, sink: () => {} } });
     await bus.start({});
     await bus.ready();
     const health = bus.getHealthSummary();
@@ -2161,6 +2161,8 @@ describe('CrossTabDataBus diagnostics', () => {
     });
     expect(health.transport).toMatchObject({ name: 'FakeTransport', backend: null, ready: true });
     expect(health.lastFailure).toBeNull();
+    expect(health.metrics).toMatchObject({ received: 0, dispatched: 0 });
+    expect(health.trace).toEqual({ asyncSink: false, pendingEvents: 0 });
     expect(health.persistence).toEqual({ failures: 0, lastFailureAt: null, lastErrorMessage: null });
     expect(health.recovery.generation).toBeGreaterThanOrEqual(1);
     await bus.stop();
