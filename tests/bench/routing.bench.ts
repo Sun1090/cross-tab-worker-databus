@@ -36,6 +36,7 @@ describe('routing', () => {
   const workers = makeWorkers(50);
   const weightedWorkers = makeWorkers(50).filter(worker => worker.throughput);
   const weightingOptions = { messageRateWeight: 1, byteRateWeight: 0.001 };
+  const weightingPlusLagOptions = { messageRateWeight: 1, byteRateWeight: 0.001, scheduleLagWeight: 1 };
   const structuredPayload = {
     kind: 'flow',
     seq: 42,
@@ -49,6 +50,10 @@ describe('routing', () => {
 
   bench('selectLeastLoadedWorker / 50 workers / weighted', () => {
     selectLeastLoadedWorker(workers, undefined, weightingOptions);
+  });
+
+  bench('selectLeastLoadedWorker / 50 workers / weighted + lag', () => {
+    selectLeastLoadedWorker(workers, undefined, weightingPlusLagOptions);
   });
 
   bench('effectiveWorkerLoad / 50 weighted workers', () => {

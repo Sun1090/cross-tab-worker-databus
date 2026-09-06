@@ -10,6 +10,10 @@
 - `getDiagnostics().replay` now reports `bytes`, the approximate in-memory footprint of the buffered replay rings (computed on demand, same sizing heuristic as adaptive load weighting).
 - The demo's overview gains a live diagnostics row: the current trace-window throughput/dispatch P50 (`getMetrics()`) and the replay buffer footprint (`getDiagnostics().replay`), refreshed with the existing 1s render loop. A "负载加权" toggle (off by default) enables adaptive weighting in the demo and the workers table shows each worker's throughput sample (`msg/s` + scheduling-lag %) in a new 吞吐 column.
 - QA: `verify:pack` now smoke-imports the full root public surface (12 functions incl. `effectiveWorkerLoad`, `approximatePayloadBytes`, `createIndexedDbReplayPersistence`) plus every subpath in ESM and CJS; a cluster integration test proves `scheduleLagWeight` steers a new route away from a scheduling-lagging worker; the `getMetrics()` test asserts full field parity with a flushed `message_metrics` event; README and Chinese roadmap feature lists were brought up to date with the recent additions.
+- Packaging: the published tarball now enumerates the exact docs files (both languages) instead of the whole `docs/` directory, dropping the internal `docs/progress.md` tracking artifact from `npm pack` output.
+
+### Changed
+- The demo's config panel shows the load-weighting toggle state (启用 消息/字节/滞后 vs 禁用 纯 Topic 数), and the routing benchmark suite gains a `weighted + lag` owner-selection baseline.
 - IndexedDB replay persistence coalesces concurrent `appendBatch` calls into a single read-modify-write transaction (regression: ten concurrent batches = one readwrite transaction) while preserving order against `clear`/`clearTopic`/`clearBefore`.
 - The root export surface is pinned by a regression test, making pre-1.0 API additions/removals deliberate.
 - Benchmarks: load-weighting scoring, `getMetrics` snapshot, and `publishBatch` batch-size sensitivity (10/50/100 per call) baselines.

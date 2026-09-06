@@ -46,14 +46,22 @@ fake tasks; each item is verified locally before being marked done.
       -> npm ignores do NOT apply to files-allowlisted paths in this npm version
       (verified empirically), so package.json files now enumerates docs files
       explicitly; pack --dry-run: 105 files, hasProgress=false, 18 docs ship.
-2. [ ] Demo renderConfig shows the loadWeighting active state in the config panel.
-3. [ ] Routing bench: add a scheduleLagWeight variant to the weighted scoring baseline.
-4. [ ] approximatePayloadBytes test: explicit DataView (and Uint8Array view) coverage.
+2. [x] Demo renderConfig shows the loadWeighting active state in the config panel.
+      -> New config row: '负载加权' shows 启用（消息/字节/滞后） or 禁用（纯 Topic 数）
+      based on the toggle; e2e single-owner + adaptive-weighting still pass.
+3. [x] Routing bench: add a scheduleLagWeight variant to the weighted scoring baseline.
+      -> tests/bench/routing.bench.ts adds 'selectLeastLoadedWorker / 50 workers /
+      weighted + lag' (1.7M ops/s), validating the third score term's cost.
+4. [x] approximatePayloadBytes test: explicit DataView (and Uint8Array view) coverage.
+      -> tests/routing.test.ts 'binary payloads and views': Uint8Array view,
+      DataView over a buffer, Float64Array(4) report their own byteLength.
 5. [x] npm pack --dry-run --json audit: confirm only intended files ship.
       -> Done as part of task 1 (105 files, no progress.md, all docs/dist ship).
-6. [ ] README/Getting-Started: link docs/configuration.md adaptive-weighting anchor
+6. [x] README/Getting-Started: link docs/configuration.md adaptive-weighting anchor
       from the README feature bullet (navigation polish).
-7. [ ] Progress-pad: fold phase-2 changes into CHANGELOG [Unreleased] + this file.
+      -> README loadWeighting bullet links ./docs/configuration.md#adaptive-owner-weighting.
+7. [x] Progress-pad: fold phase-2 changes into CHANGELOG [Unreleased] + this file.
+      -> CHANGELOG [Unreleased]: Packaging + Changed bullets added.
 
 ## Recovery entry
 
