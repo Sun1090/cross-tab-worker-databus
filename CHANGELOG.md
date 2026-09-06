@@ -13,6 +13,7 @@
 - GitHub Actions bumped to current majors (checkout/setup-node/upload-artifact v4 → v7, pnpm/action-setup v4 → v6), dropping the Node 20 deprecation warning on the forced Node 24 action runtime.
 - Browser E2E handoff tests (owner migration, multi-tab soak, BFCache) wait up to 60 s for a pagehide owner takeover, absorbing shared-runner scheduling jitter.
 - The demo WebSocket hub attributes wire-frame counters per topic (`/debug/wsstats.topics`) so the single-frame `publishBatch` assertion is immune to concurrent tests on a parallel local run.
+- Browser benchmark databus matrix now measures real dispatch work: auto-start defers `transport.start` to a microtask, so the emit/publish cases previously ran before the transport was live (messages dropped, publishes queued) and reported sub-millisecond no-ops. Cases now `await ready()` plus a bounded assignment poll and assert exact delivery counts; the `publishBatch` case uses an echo stub to measure the full route → publish → dispatch round-trip, and a `firstPacketMs` cold-dispatch baseline was added.
 
 ## [0.20.83] - 2026-09-05
 
