@@ -326,6 +326,25 @@ owner Worker 对 transport 收到的每条 publication 都先用 `isAssigned(top
 6. 只有 Topic 尚无 route，或者原 owner 已退出、心跳 TTL 过期时，才把 Topic 分配给负载最低的候选 Worker。
 7. 新路由在 owner 写入 `confirmedAt` 前视为未确认；subscriber 会自动重发控制消息。
 
+### 自适应 owner 加权（`loadWeighting`）
+
+默认"负载最低"指拥有最少的 Topic。可选的 `loadWeighting` 增加流量与调度信号，同样只作用于新路由或孤儿路由——已有 route 保持 sticky，绝不迁移：
+
+- 每个 Worker 在心跳之间采样自身的 fan-out 活动，并把 `WorkerThroughputSample`（`windowMs`、`messageCount`、`byteCount`、`overrunMs`、`sampledAt`）随 worker 记录发布。
+- `overrunMs` 是采样窗口超出名义心跳间隔的正向余量。事件循环饥饿（浏览器可观测的 CPU 饱和代理）会让心跳延迟、窗口拉长，因此这是一个廉价的原生信号。
+- `effectiveWorkerLoad`（`routing.ts` 中的纯函数）把 Worker 打分记为 `load + messageRateWeight × 条/秒 + byteRateWeight × 字节/秒 + scheduleLagWeight × (overrunMs ÷ windowMs)`。所有权重默认 `0`，保持 legacy 纯 Topic 数打分字节级不变。
+- 评分确定性且读取所有 Tab 相同的持久化记录，因此集群各处路由一致；调度滞后的 Worker 即使携带更少的 Topic，对新路由的吸引力也会下降。
+
+### 异步凭证刷新桥（`credentialProvider`）
+
+Centrifuge 客户端选项会 structured-clone 进 Worker，因此函数型 `getToken` / `getChannelToken` 无法随配置传输。`createCentrifugeDataBus` 的可选 `credentialProvider`（`{ getToken, getChannelToken }`）改为在主线程运行：
+
+1. 配置了 provider 时，INIT 携带 `tokenBridge: true`，Worker 内 `CentrifugeSession` 把 `getToken` / `getChannelToken` 接到一次 `TOKEN_REQUEST` 输出（`requestId`、`kind`、可选 `channel`）。
+2. transport 在主线程解析：`resolveTokenRequest` 调用 provider，并把 `TOKEN_RESPONSE`（拒绝或空 token 时为 `TOKEN_ERROR`）按 `requestId` 回发。
+3. session 按 `requestId` 结算挂起的 promise；`STOP` 会拒绝所有在途请求，已停止的 Worker 不会永远等待响应。
+4. 未配置 provider 时 INIT 不带 `tokenBridge`，配置保持与 legacy 字节级一致——服务端从不请求 token 就永远不会触发请求。
+5. Dedicated、SharedWorker 与本地后端共用 `CentrifugeSession`，因此桥对三者都生效；token 从不以函数形式跨越 Worker 边界，只作为已解析的字符串返回。
+
 ## 订阅流程
 
 ```mermaid
