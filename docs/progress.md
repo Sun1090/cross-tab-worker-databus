@@ -42,11 +42,15 @@ fake tasks; each item is verified locally before being marked done.
 
 ## Phase 2 pool (packaging hygiene + observability polish)
 
-1. [ ] Exclude docs/progress.md (internal tracking doc) from the published tarball.
+1. [x] Exclude docs/progress.md (internal tracking doc) from the published tarball.
+      -> npm ignores do NOT apply to files-allowlisted paths in this npm version
+      (verified empirically), so package.json files now enumerates docs files
+      explicitly; pack --dry-run: 105 files, hasProgress=false, 18 docs ship.
 2. [ ] Demo renderConfig shows the loadWeighting active state in the config panel.
 3. [ ] Routing bench: add a scheduleLagWeight variant to the weighted scoring baseline.
 4. [ ] approximatePayloadBytes test: explicit DataView (and Uint8Array view) coverage.
-5. [ ] npm pack --dry-run --json audit: confirm only intended files ship.
+5. [x] npm pack --dry-run --json audit: confirm only intended files ship.
+      -> Done as part of task 1 (105 files, no progress.md, all docs/dist ship).
 6. [ ] README/Getting-Started: link docs/configuration.md adaptive-weighting anchor
       from the README feature bullet (navigation polish).
 7. [ ] Progress-pad: fold phase-2 changes into CHANGELOG [Unreleased] + this file.
