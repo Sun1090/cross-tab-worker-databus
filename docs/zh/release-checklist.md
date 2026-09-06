@@ -2,6 +2,13 @@
 
 每个 1.0.0 之前的版本都按此清单执行。仓库不由助手执行发布；完成打包验证并人工审阅后，再手动运行 npm 命令。
 
+## 公共 API 稳定性与弃用策略（1.0 之前）
+
+- 根导出面由 `tests/dual-format.test.ts`（冻结测试）与 `scripts/verify-version-compat.mjs`（tag 间兼容门禁）钉住。新增或删除导出是经过评审的刻意变更；同一提交中必须同步更新 `docs/api.md` 与 CHANGELOG。
+- 1.0 前的破坏性变更仅在走完弃用周期后才允许：legacy 别名至少保留一个小版本，首次使用时 `console.warn` 提示，且只在 CHANGELOG 明确标注移除的小版本中删除。
+- 协议别名（worker/cluster/transport 消息形态）遵循同一规则：弃用后至少一个小版本继续解析 legacy 帧，保证混版本 peer 兼容（见 `getDiagnostics().protocol` 的协议版本诊断）。
+- 晋升 `1.0.0` 要求公共 API 与协议弃用策略正式冻结，并发布迁移指南（见 `docs/roadmap.md` 的 0.13.0 candidates）。
+
 ## 打 tag 前
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
