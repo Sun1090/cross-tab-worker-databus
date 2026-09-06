@@ -1481,6 +1481,71 @@ describe('WorkerClusterRuntime adaptive load weighting', () => {
     runtimeB.stop();
   });
 
+  it('steers a new route away from a scheduling-lagging worker despite fewer topics', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const scheduleLagOptions = { scheduleLagWeight: 3 };
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'weighting-lag-steer',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      loadWeighting: scheduleLagOptions,
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'weighting-lag-steer',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      loadWeighting: scheduleLagOptions,
+      handlers: { onControl: controlB, onEvent: vi.fn() }
+    });
+
+    // B owns two topics, A owns one — legacy would place a new route on A.
+    runtimeB.start();
+    runtimeB.subscribe('topic-2');
+    runtimeB.subscribe('topic-3');
+    await Promise.resolve();
+    runtimeA.start();
+    runtimeA.subscribe('topic-1');
+    await Promise.resolve();
+    expect(runtimeB.isAssigned('topic-2')).toBe(true);
+    expect(runtimeB.isAssigned('topic-3')).toBe(true);
+    expect(runtimeA.isAssigned('topic-1')).toBe(true);
+
+    // One healthy heartbeat: both records carry a lag-free sample.
+    now += 3_000;
+    envA.runIntervals();
+    envB.runIntervals();
+    await Promise.resolve();
+
+    // Starve A only: its next heartbeat lands far past the interval, so its
+    // record publishes a sample with positive scheduling overrun.
+    now += 9_000;
+    envA.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A's effective load (1 topic + 3 × 0.667 lag) now exceeds B's (2 topics
+    // + 3 × 0), so the route with fewer topics still lands on the healthier B.
+    runtimeA.subscribe('steer-lag');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(runtimeB.isAssigned('steer-lag')).toBe(true);
+    expect(runtimeA.isAssigned('steer-lag')).toBe(false);
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'steer-lag', undefined);
+    expect(controlA).not.toHaveBeenCalledWith('SUBSCRIBE', 'steer-lag', undefined);
+
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
   it('falls back to the legacy fewest-topics rule when weighting is unset', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

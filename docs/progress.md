@@ -42,17 +42,32 @@ fake tasks; each item is verified locally before being marked done.
       the full root public surface (12 ESM + subpath + CJS) incl. the new routing/
       observability functions; `pnpm verify:pack` passes locally. verify:compat's
       subpath-contract check unchanged (still valid).
-5. [ ] Demo: surface getDiagnostics().replay.bytes already done; add throughput
+5. [x] Demo: surface getDiagnostics().replay.bytes already done; add throughput
       sample coverage assertion already done via e2e (adaptive-weighting).
-6. [ ] Unit coverage: cluster integration test that scheduleLagWeight actually
+      -> Already shipped: overview live-diagnostics row (getMetrics + replay
+      bytes) and the adaptive-weighting e2e asserting msg/s in the workers table.
+6. [x] Unit coverage: cluster integration test that scheduleLagWeight actually
       steers a route on a sampling peer (end-to-end, not just pure fn).
-7. [ ] Unit coverage: DataBusTraceReporter.getMetrics() consistency vs a flushed
+      -> tests/cluster.test.ts 'steers a new route away from a scheduling-lagging
+      worker despite fewer topics': A=1 topic starved (overrun 0.667 ratio), B=2
+      topics healthy; with scheduleLagWeight:3 the new route lands on B, and the
+      SUBSCRIBE control is asserted.
+7. [x] Unit coverage: DataBusTraceReporter.getMetrics() consistency vs a flushed
       message_metrics event (same window values).
-8. [ ] Release checklist: record the verify:pack command output + bench gate in
-      the checklist validation run.
-9. [ ] Add `pnpm verify:published` (offline/local) note + `verify:compat` to the
-      release checklist documented commands.
-10. [ ] CHANGELOG: fold the phase changes into [Unreleased].
+      -> Strengthened tests/trace.test.ts 'getMetrics snapshots...' to assert full
+      field parity: the flushed message_metrics event (minus type) equals the
+      on-demand snapshot exactly for the same window.
+8. [x] Release checklist: record the verify:pack command output + bench gate in
+      the checklist validation run. -> Already present (Before tagging #2
+      includes verify:pack, #3 the bench gate); confirmed unchanged.
+9. [x] Add `pnpm verify:published` (offline/local) note + `verify:compat` to the
+      release checklist documented commands. -> Added pnpm verify:compat to the
+      Before-tagging run list with a parenthetical on what it asserts;
+      verify:published offline note was already present.
+10. [x] CHANGELOG: fold the phase changes into [Unreleased] (after local verify).
+      -> QA bullet added: verify:pack full-surface smoke-import, scheduleLag
+      steering integration test, getMetrics full-parity test, README + zh roadmap
+      updates.
 
 ## Recovery entry
 
