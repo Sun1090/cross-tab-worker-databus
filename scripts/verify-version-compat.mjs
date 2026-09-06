@@ -2,7 +2,27 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const current = JSON.parse(readFileSync('package.json', 'utf8'));
-const baseTag = process.env.COMPAT_BASE_TAG ?? 'v0.20.31';
+
+// The export contract is checked against the most recent release tag, so a
+// removal is caught the moment a later version ships rather than only against
+// the hard-coded baseline. COMPAT_BASE_TAG still overrides (e.g. for an
+// emergency check against a specific release). When HEAD is already tagged at
+// the current version, skip that tag and compare against the previous release.
+let baseTag = process.env.COMPAT_BASE_TAG;
+if (!baseTag) {
+  const tags = execFileSync('git', ['tag', '--sort=-v:refname', '--list', 'v*'], { encoding: 'utf8' })
+    .split('\n')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+  if (tags.length === 0) {
+    throw new Error('no version tag found to use as compatibility baseline; set COMPAT_BASE_TAG');
+  }
+  const headTag = execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' })
+    .split('\n')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+  baseTag = tags.find(tag => !headTag.includes(tag)) ?? tags[0];
+}
 let baseline;
 try {
   baseline = JSON.parse(execFileSync('git', ['show', `${baseTag}:package.json`], { encoding: 'utf8' }));
