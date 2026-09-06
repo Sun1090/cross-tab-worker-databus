@@ -89,6 +89,24 @@ async function runDatabusMatrix(browser) {
       };
     }
 
+    // A stub whose publish() echoes the message back as if the server
+    // delivered it — mirrors the demo server's echo, so the publishBatch case
+    // measures the full round-trip (route → publish → dispatch) rather than
+    // the publish call being a no-op.
+    function makeEchoTransport() {
+      const transport = makeStubTransport();
+      const originalStart = transport.start;
+      let busStarted = false;
+      transport.start = (_config, h) => {
+        originalStart(_config, h);
+        busStarted = true;
+      };
+      transport.publish = (topic, data) => {
+        if (busStarted) transport.emit(topic, data);
+      };
+      return transport;
+    }
+
     const timings = {};
 
     // Auto-start defers transport.start to a microtask and the cluster assigns
@@ -127,20 +145,27 @@ async function runDatabusMatrix(browser) {
     }
 
     {
-      const transport = makeStubTransport();
+      const transport = makeEchoTransport();
       const bus = new CrossTabDataBus({
         clusterKey: 'bench-browser-batch',
         environment: createBrowserEnvironment(),
         initialConfig: {},
         transport
       });
-      bus.subscribe('bench.batch', () => {});
+      let dispatched = 0;
+      bus.subscribe('bench.batch', () => {
+        dispatched += 1;
+      });
       await bus.ready();
+      await ensureAssigned(bus, 'bench.batch');
       const start = performance.now();
       for (let round = 0; round < 10; round += 1) {
         bus.publishBatch('bench.batch', Array.from({ length: 100 }, (_, index) => ({ data: { value: round * 100 + index } })));
       }
       timings.publishBatch1000Ms = Number((performance.now() - start).toFixed(2));
+      // The echo stub round-trips each item back into the bus, so exactly 1000
+      // items must reach the handler for the measurement to be meaningful.
+      if (dispatched !== 1000) throw new Error(`publishBatch mis-measured: ${dispatched}/1000 dispatched`);
       await bus.stop();
     }
 
