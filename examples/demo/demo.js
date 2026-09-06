@@ -14,6 +14,7 @@ const elements = {
   backendBadge: document.querySelector('#backendBadge'),
   statusBadge: document.querySelector('#statusBadge'),
   overviewHealthInfo: document.querySelector('#overviewHealthInfo'),
+  overviewDiagnosticsInfo: document.querySelector('#overviewDiagnosticsInfo'),
   flowSvg: document.querySelector('#flowSvg'),
   nodeThisSub: document.querySelector('#nodeThisSub'),
   nodeWorkerSub: document.querySelector('#nodeWorkerSub'),
@@ -748,10 +749,38 @@ function renderHealth() {
   el.textContent = `${stateLabel} · transport ${health.transport.ready ? '就绪' : '未就绪'} · ${recovery} · ${failure}`;
 }
 
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** 实时诊断行：当前 trace 窗口的吞吐/延迟与 replay 缓冲字节占用。 */
+function renderDiagnostics() {
+  const el = elements.overviewDiagnosticsInfo;
+  const bus = state.bus;
+  if (!el) return;
+  if (!bus) {
+    el.textContent = '连接后显示 getMetrics() 吞吐/延迟 与 replay 缓冲字节占用';
+    return;
+  }
+  const metrics = bus.getMetrics();
+  const metricsText = metrics
+    ? `近窗口 收 ${metrics.received} / 发 ${metrics.dispatched} · 延迟 P50 ${metrics.dispatchP50Ms} ms`
+    : 'metrics 未启用';
+  const replay = bus.getDiagnostics().replay;
+  const replayText =
+    replay.enabled && replay.topics > 0
+      ? `replay ${replay.topics} topic / ${replay.messages} 条 / 约 ${formatBytes(replay.bytes)}`
+      : 'replay 未启用';
+  el.textContent = `${metricsText} · ${replayText}`;
+}
+
 setInterval(() => {
   renderCluster(state.bus?.getClusterSnapshot());
   renderConfig();
   renderHealth();
+  renderDiagnostics();
   renderChannelDiagnostics();
   renderTransportBackend();
 }, 1000);
