@@ -2,6 +2,13 @@
 
 Use this checklist for each pre-1.0 release. The repository does not publish from the assistant; run the final npm command manually after reviewing the packed artifact.
 
+## Public API stability and deprecation policy (pre-1.0)
+
+- The root export surface is pinned by `tests/dual-format.test.ts` (freeze test) and `scripts/verify-version-compat.mjs` (tag-to-tag compatibility gate). Adding or removing an export is a deliberate, reviewed change; add it to `docs/api.md` and the CHANGELOG in the same commit.
+- Pre-1.0 breaking changes are allowed only with a deprecation cycle: keep the legacy alias for at least one minor version, emit a `console.warn` at first use, and remove it only in a minor whose CHANGELOG calls the removal out explicitly.
+- Protocol aliases (worker/cluster/transport message shapes) follow the same rule: keep parsing legacy frames for one minor after deprecation so mixed-version peers stay compatible (see the protocol-version diagnostics in `getDiagnostics().protocol`).
+- Advancing to `1.0.0` requires the public API and protocol deprecation policy to be frozen and a migration guide published (see `docs/roadmap.md`, 0.13.0 candidates).
+
 ## Before tagging
 
 1. Update `package.json`, `CHANGELOG.md`, and both roadmap files.
