@@ -2160,6 +2160,7 @@ describe('CrossTabDataBus diagnostics', () => {
     await bus.ready();
     expect(bus.getMetrics()).toBeNull();
     expect(bus.getDiagnostics().metrics).toBeNull();
+    expect(bus.getHealthSummary().metrics).toBeNull();
     await bus.stop();
   });
 

@@ -309,6 +309,7 @@ describe('approximatePayloadBytes', () => {
     expect(approximatePayloadBytes(undefined)).toBe(0);
     expect(approximatePayloadBytes(true)).toBe(4);
     expect(approximatePayloadBytes(42)).toBe(8);
+    expect(approximatePayloadBytes(42n)).toBe(8);
     expect(approximatePayloadBytes('hello')).toBe(5);
     expect(approximatePayloadBytes(() => undefined)).toBe(0);
     expect(approximatePayloadBytes(Symbol('x'))).toBe(0);
