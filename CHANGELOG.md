@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### Added
+- Opt-in `loadWeighting` adaptive owner weighting (`messageRateWeight`, `byteRateWeight`, `scheduleLagWeight`): workers sample their own fan-out traffic and heartbeat scheduling overrun per window and publish it with the worker record; new-route owner selection adds the normalized rates and lag ratio to the topic count. Default (unset) keeps pure topic-count routing and existing routes stay sticky. `WorkerThroughputSample` gains `overrunMs`, a browser-native proxy for a starved event loop.
+- Async credential refresh bridge for the Centrifuge worker: opt-in `credentialProvider` (`getToken` / `getChannelToken`) runs on the main thread, with the Worker requesting each fresh token over a `TOKEN_REQUEST` / `TOKEN_RESPONSE` / `TOKEN_ERROR` exchange. Function-valued Centrifuge options stay out of the structured-clone boundary; legacy configs keep byte-identical behavior; pending requests are settled on STOP.
+- Synchronous trace visibility: `DataBusTraceReporter.getMetrics()` snapshots the current aggregation window without a sink or flush; `CrossTabDataBus.getMetrics()` and `getDiagnostics().metrics` expose it, and `getDiagnostics().trace` / `getHealthSummary().trace` report `asyncSink` mode and queued-event depth (back-pressure visibility).
+- E2E: a real-Chromium scenario disables `window.BroadcastChannel` and verifies two tabs coordinate and deliver cross-tab over the localStorage storage-event channel; a Playwright `waitForSingleOwner` convergence helper replaces one-shot owner reads across the suite.
+- IndexedDB replay persistence coalesces concurrent `appendBatch` calls into a single read-modify-write transaction (regression: ten concurrent batches = one readwrite transaction) while preserving order against `clear`/`clearTopic`/`clearBefore`.
+- The root export surface is pinned by a regression test, making pre-1.0 API additions/removals deliberate.
+- Benchmarks: load-weighting scoring, `getMetrics` snapshot, and `publishBatch` batch-size sensitivity (10/50/100 per call) baselines.
+
+### Changed
+- GitHub Actions bumped to current majors (checkout/setup-node/upload-artifact v4 → v7, pnpm/action-setup v4 → v6), dropping the Node 20 deprecation warning on the forced Node 24 action runtime.
+- Browser E2E handoff tests (owner migration, multi-tab soak, BFCache) wait up to 60 s for a pagehide owner takeover, absorbing shared-runner scheduling jitter.
+- The demo WebSocket hub attributes wire-frame counters per topic (`/debug/wsstats.topics`) so the single-frame `publishBatch` assertion is immune to concurrent tests on a parallel local run.
+
 ## [0.20.83] - 2026-09-05
 
 ### Added
