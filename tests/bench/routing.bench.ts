@@ -6,6 +6,8 @@
  */
 import { bench, describe } from 'vitest';
 import {
+  approximatePayloadBytes,
+  effectiveWorkerLoad,
   selectActiveWorkers,
   selectLeastLoadedWorker,
   selectRebalanceTarget,
@@ -23,15 +25,38 @@ function makeWorkers(count: number): WorkerRecord[] {
     status: WORKER_STATUS.CONNECTED,
     visibilityState: index % 3 === 0 ? TAB_VISIBILITY.HIDDEN : TAB_VISIBILITY.VISIBLE,
     heartbeatAt: 1_000,
-    registeredAt: index
+    registeredAt: index,
+    ...(index % 2 === 0
+      ? { throughput: { windowMs: 3_000, messageCount: (index * 13) % 500, byteCount: (index * 7) % 20_000, sampledAt: 1_000 } }
+      : {})
   }));
 }
 
 describe('routing', () => {
   const workers = makeWorkers(50);
+  const weightedWorkers = makeWorkers(50).filter(worker => worker.throughput);
+  const weightingOptions = { messageRateWeight: 1, byteRateWeight: 0.001 };
+  const structuredPayload = {
+    kind: 'flow',
+    seq: 42,
+    tags: ['a', 'b', 'c'],
+    nested: { value: 1, items: [1, 2, 3] }
+  };
 
   bench('selectLeastLoadedWorker / 50 workers', () => {
     selectLeastLoadedWorker(workers);
+  });
+
+  bench('selectLeastLoadedWorker / 50 workers / weighted', () => {
+    selectLeastLoadedWorker(workers, undefined, weightingOptions);
+  });
+
+  bench('effectiveWorkerLoad / 50 weighted workers', () => {
+    for (const worker of weightedWorkers) effectiveWorkerLoad(worker, weightingOptions);
+  });
+
+  bench('approximatePayloadBytes / structured payload', () => {
+    approximatePayloadBytes(structuredPayload);
   });
 
   bench('selectActiveWorkers / 50 workers', () => {

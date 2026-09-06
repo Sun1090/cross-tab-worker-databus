@@ -159,4 +159,21 @@ describe('data bus advanced hot paths', () => {
     await Promise.resolve();
     trace.stop();
   });
+
+  bench('getMetrics snapshot / populated window / 1000 calls', () => {
+    const trace = new DataBusTraceReporter({
+      enabled: true,
+      mode: TRACE_MODE.ALL,
+      sink: () => {},
+      now: () => 1_000
+    });
+    for (let index = 0; index < 500; index += 1) {
+      trace.recordReceived('bench.metrics');
+      trace.recordDispatched('bench.metrics');
+    }
+    for (let index = 0; index < 1_000; index += 1) {
+      trace.getMetrics();
+    }
+    trace.stop();
+  });
 });
