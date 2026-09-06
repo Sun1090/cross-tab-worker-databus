@@ -2105,13 +2105,31 @@ describe('CrossTabDataBus diagnostics', () => {
     expect(['connected', 'ready']).toContain(diagnostics.status);
     expect(diagnostics.started).toBe(true);
     expect(diagnostics.transportReady).toBe(true);
-    expect(diagnostics.replay).toMatchObject({ enabled: true, topics: 1, messages: 1 });
+    expect(diagnostics.replay).toMatchObject({ enabled: true, topics: 1, messages: 1, bytes: 8 });
     expect(diagnostics.dedup.enabled).toBe(true);
     expect(diagnostics.cluster.currentWorker.workerId).toBe('worker-diag');
     expect(diagnostics.protocol).toMatchObject({ version: 1, peers: { 'worker-diag': 1 } });
     expect(diagnostics.sdkVersion).toBe(SDK_VERSION);
     expect(diagnostics.transport).toMatchObject({ name: 'FakeTransport' });
     expect(diagnostics.recovery.generation).toBeGreaterThanOrEqual(1);
+    await bus.stop();
+  });
+
+  it('replay diagnostics expose the approximate buffer byte footprint', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'replay-bytes' });
+    const transport = new FakeTransport<unknown>();
+    const bus = new CrossTabDataBus({ clusterKey: 'replay-bytes', environment: env.environment, transport, replay: { maxPerTopic: 4 } });
+    await bus.start({});
+    await bus.ready();
+    bus.subscribe('bytes.topic', () => {});
+    transport.emit('bytes.topic', 'abcd');
+    transport.emit('bytes.topic', 'xyz');
+    await Promise.resolve();
+
+    const replay = bus.getDiagnostics().replay;
+    expect(replay.messages).toBe(2);
+    // Strings size as their length: 'abcd' (4) + 'xyz' (3) = 7.
+    expect(replay.bytes).toBe(7);
     await bus.stop();
   });
 

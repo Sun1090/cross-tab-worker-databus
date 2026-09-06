@@ -23,6 +23,7 @@ import { isWildcardTopic, topicMatchesPattern } from './routing';
 import type { DataBusReplayPersistence } from './replay-persistence';
 import type { DataBusTraceReporter } from './trace';
 import type { DataBusMessage, DataBusMessageHandler } from './types';
+import { approximatePayloadBytes } from './routing';
 import { PERSISTENCE_OPERATION, PRUNE_STRATEGY, RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';
 
 /** Thrown when a lifecycle transition cancels an in-flight persistence retry. */
@@ -272,11 +273,19 @@ export class ReplayManager<TData = unknown> {
     this.buffers?.clear();
   }
 
-  /** Buffer occupancy for diagnostics. */
-  getStats(): { enabled: boolean; topics: number; messages: number } {
+  /** Buffer occupancy for diagnostics. `bytes` is an approximate in-memory
+   * payload footprint (same heuristic as adaptive load weighting), computed on
+   * demand so the hot append path never pays for it. */
+  getStats(): { enabled: boolean; topics: number; messages: number; bytes: number } {
     let messages = 0;
-    if (this.buffers) for (const buffer of this.buffers.values()) messages += buffer.length;
-    return { enabled: this.enabled, topics: this.buffers?.size ?? 0, messages };
+    let bytes = 0;
+    if (this.buffers) {
+      for (const buffer of this.buffers.values()) {
+        messages += buffer.length;
+        for (const message of buffer) bytes += approximatePayloadBytes(message.data);
+      }
+    }
+    return { enabled: this.enabled, topics: this.buffers?.size ?? 0, messages, bytes };
   }
 
   /** Deliver history from one topic's ring to a handler, isolating a throwing
