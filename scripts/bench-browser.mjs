@@ -109,7 +109,10 @@ async function runDatabusMatrix(browser) {
         initialConfig: {},
         transport
       });
-      bus.subscribe('bench.rooms.*', () => {});
+      let dispatched = 0;
+      bus.subscribe('bench.rooms.*', () => {
+        dispatched += 1;
+      });
       await bus.ready();
       await ensureAssigned(bus, 'bench.rooms.*');
       const start = performance.now();
@@ -117,6 +120,9 @@ async function runDatabusMatrix(browser) {
         transport.emit(`bench.rooms.room-${index % 100}`, { value: index });
       }
       timings.wildcardDispatch1000Ms = Number((performance.now() - start).toFixed(2));
+      // Guard: the measurement is only meaningful if every emission actually
+      // reached the handler (otherwise the bus was measuring a no-op path).
+      if (dispatched !== 1000) throw new Error(`wildcard dispatch mis-measured: ${dispatched}/1000`);
       await bus.stop();
     }
 
@@ -147,14 +153,19 @@ async function runDatabusMatrix(browser) {
         transport,
         dedup: { maxEntries: 2000, ttlMs: 60_000, now: () => 1000 }
       });
-      bus.subscribe('bench.dedup', () => {});
       await bus.ready();
       await ensureAssigned(bus, 'bench.dedup');
+      let dispatched = 0;
+      bus.subscribe('bench.dedup', () => {
+        dispatched += 1;
+      });
       const start = performance.now();
       for (let index = 0; index < 1000; index += 1) {
         transport.emit('bench.dedup', { value: index }, `message-${index % 500}`);
       }
       timings.dedup1000Ms = Number((performance.now() - start).toFixed(2));
+      // 500 unique IDs each emitted twice: dedup must deliver exactly 500.
+      if (dispatched !== 500) throw new Error(`dedup mis-measured: ${dispatched}/500 delivered`);
       await bus.stop();
     }
 
