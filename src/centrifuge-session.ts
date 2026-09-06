@@ -20,12 +20,26 @@ import type {
 } from './centrifuge-protocol';
 import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, WORKER_STATUS } from './utils/constants';
 import { publicationMetadata } from './utils/metadata';
-import { serializeError } from './utils/error-utils';
+import { deserializeWorkerError, serializeError } from './utils/error-utils';
 
 /** Callback interface for posting messages back to the transport layer. */
 export interface CentrifugeSessionSink<TData = unknown> {
   post(message: CentrifugeWorkerOutput<TData>, transfer?: ArrayBuffer[]): void;
 }
+
+/** A pending getToken/getChannelToken request awaiting a main-thread response. */
+interface PendingTokenRequest {
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+}
+
+/** Centrifuge client options for token-bridge mode: the structured-clone-safe
+ * subset plus the two function-valued hooks that Centrifuge invokes for fresh
+ * credentials. Used only inside the session, never across the Worker boundary. */
+type CentrifugeBridgedOptions = Omit<CentrifugeWorkerConfig, 'getToken' | 'getChannelToken'> & {
+  getToken: () => Promise<string>;
+  getChannelToken: (channel: string) => Promise<string>;
+};
 
 /**
  * Stateful Centrifuge client wrapper shared by Dedicated Worker, SharedWorker
@@ -35,6 +49,9 @@ export class CentrifugeSession<TData = unknown> {
   private client: Centrifuge | null = null;
   private readonly subscriptions = new Map<string, Subscription>();
   private transferable = false;
+  private tokenBridge = false;
+  private nextRequestId = 1;
+  private readonly pendingTokenRequests = new Map<number, PendingTokenRequest>();
 
   constructor(private readonly sink: CentrifugeSessionSink<TData>) {}
 
@@ -44,7 +61,7 @@ export class CentrifugeSession<TData = unknown> {
   handle(message: CentrifugeWorkerInput): void {
     switch (message.type) {
       case CENTRIFUGE_INPUT_TYPE.INIT:
-        this.initialize(message.url, message.config, message.transferable === true);
+        this.initialize(message.url, message.config, message.transferable === true, message.tokenBridge === true);
         return;
       case CENTRIFUGE_INPUT_TYPE.SUBSCRIBE:
         this.subscribe(message.topic);
@@ -61,16 +78,33 @@ export class CentrifugeSession<TData = unknown> {
       case CENTRIFUGE_INPUT_TYPE.STOP:
         this.stop();
         return;
+      case CENTRIFUGE_INPUT_TYPE.TOKEN_RESPONSE:
+        this.resolveToken(message.requestId, message.token);
+        return;
+      case CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR:
+        this.rejectToken(message.requestId, deserializeWorkerError(message.error));
+        return;
       default:
         return;
     }
   }
 
   /** Create the Centrifuge client, wire up lifecycle listeners, and connect. */
-  private initialize(url: string, config: CentrifugeWorkerConfig, transferable: boolean): void {
+  private initialize(url: string, config: CentrifugeWorkerConfig, transferable: boolean, tokenBridge: boolean): void {
     if (this.client) return;
     this.transferable = transferable;
-    const client = new Centrifuge(url, config);
+    this.tokenBridge = tokenBridge;
+    const clientOptions: CentrifugeWorkerConfig | CentrifugeBridgedOptions = tokenBridge
+      ? {
+          ...config,
+          // Route credential fetches back to the main thread, where the
+          // application's credentialProvider lives (config must stay
+          // structured-cloneable, so functions cannot cross the boundary).
+          getToken: () => this.requestToken('token'),
+          getChannelToken: (channel: string) => this.requestToken('channelToken', channel)
+        }
+      : config;
+    const client = new Centrifuge(url, clientOptions);
     this.client = client;
     client.on('state', (context: StateContext) => {
       this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: normalizeStatus(context.newState) });
@@ -173,10 +207,47 @@ export class CentrifugeSession<TData = unknown> {
 
   /** Disconnect the client and clear all subscriptions. */
   private stop(): void {
+    // Settle every in-flight credential request so a stop cannot leave the
+    // Worker awaiting a main-thread response forever.
+    for (const [, pending] of this.pendingTokenRequests) {
+      pending.reject(new Error('Centrifuge session stopped before the credential was resolved.'));
+    }
+    this.pendingTokenRequests.clear();
     this.client?.disconnect();
     this.subscriptions.clear();
     this.client = null;
     this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.DISCONNECTED });
+  }
+
+  /** Issue a credential request to the main thread and await the response.
+   * Used as Centrifuge's `getToken` / `getChannelToken` when token bridging is
+   * enabled; resolved or rejected by a matching TOKEN_RESPONSE / TOKEN_ERROR. */
+  private requestToken(kind: 'token' | 'channelToken', channel?: string): Promise<string> {
+    const requestId = this.nextRequestId;
+    this.nextRequestId += 1;
+    return new Promise<string>((resolve, reject) => {
+      this.pendingTokenRequests.set(requestId, { resolve, reject });
+      this.post({
+        type: CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST,
+        requestId,
+        kind,
+        ...(channel === undefined ? {} : { channel })
+      });
+    });
+  }
+
+  private resolveToken(requestId: number, token: string): void {
+    const pending = this.pendingTokenRequests.get(requestId);
+    if (!pending) return;
+    this.pendingTokenRequests.delete(requestId);
+    pending.resolve(token);
+  }
+
+  private rejectToken(requestId: number, error: unknown): void {
+    const pending = this.pendingTokenRequests.get(requestId);
+    if (!pending) return;
+    this.pendingTokenRequests.delete(requestId);
+    pending.reject(error);
   }
 
   /** Forward a message to the sink (the transport layer). */

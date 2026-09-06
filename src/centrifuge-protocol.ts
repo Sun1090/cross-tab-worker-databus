@@ -54,13 +54,34 @@ export type CentrifugeWorkerConfig = Omit<Partial<Options>, WorkerUnsafeOption> 
   [Key in WorkerUnsafeOption]?: never;
 };
 
+/**
+ * Async credential provider run on the main thread. Centrifuge client options
+ * are structured-cloned into the Worker, so function-valued `getToken` /
+ * `getChannelToken` cannot travel with the config. When a provider is set, the
+ * Worker asks the main thread for each fresh token over a TOKEN_REQUEST /
+ * TOKEN_RESPONSE exchange and this provider supplies it from application
+ * context (async token endpoints, SecureStorage, etc.).
+ */
+export interface CentrifugeCredentialProvider {
+  /** Return a fresh top-level connection token. Called on connect and refresh. */
+  getToken: () => MaybePromise<string | null | undefined>;
+  /** Return a channel token for a channel. Centrifuge falls back to `getToken`
+   * when channel tokens are not configured by the server. */
+  getChannelToken?: (channel: string) => MaybePromise<string | null | undefined>;
+}
+
+/** A value or a promise of a value. */
+export type MaybePromise<T> = T | Promise<T>;
+
 /** Messages sent from the main thread to the Worker. All variants are
  * structured-cloneable; `PUBLISH_BIN` carries an ArrayBuffer (transferable). */
 export type CentrifugeWorkerInput =
   /** Initial connection: URL + config. Sent once per backend creation.
    * `transferable` enables ArrayBuffer zero-copy for subsequent PUBLISH_BIN.
-   * `heartbeatIntervalMs` overrides the SharedWorker PING cadence. */
-  | { type: typeof CENTRIFUGE_INPUT_TYPE.INIT; url: string; config: CentrifugeWorkerConfig; transferable?: boolean; heartbeatIntervalMs?: number }
+   * `heartbeatIntervalMs` overrides the SharedWorker PING cadence.
+   * `tokenBridge` asks the Worker to route getToken/getChannelToken back to
+   * the main thread instead of holding function-valued config. */
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.INIT; url: string; config: CentrifugeWorkerConfig; transferable?: boolean; heartbeatIntervalMs?: number; tokenBridge?: boolean }
   /** Subscribe to a channel. Idempotent — re-subscribing is a no-op. */
   | { type: typeof CENTRIFUGE_INPUT_TYPE.SUBSCRIBE; topic: string }
   /** Unsubscribe from a channel. Idempotent. */
@@ -72,7 +93,11 @@ export type CentrifugeWorkerInput =
   /** Heartbeat from the main thread; the SharedWorker reaps silent ports. */
   | { type: typeof CENTRIFUGE_INPUT_TYPE.PING }
   /** Disconnect the client and clear all subscriptions. */
-  | { type: typeof CENTRIFUGE_INPUT_TYPE.STOP };
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.STOP }
+  /** Fresh credential for an earlier TOKEN_REQUEST, resolved by requestId. */
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.TOKEN_RESPONSE; requestId: number; token: string }
+  /** A credential request failed (provider rejected or returned no token). */
+  | { type: typeof CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR; requestId: number; error: SerializedWorkerError };
 
 /** Messages sent from the Worker back to the main thread. The main thread
  * routes these to the DataBusTransportHandlers via handleOutput(). */
@@ -84,4 +109,7 @@ export type CentrifugeWorkerOutput<TData = unknown> =
   /** A binary publication arrived (Transferable). Routed to onMessage with the ArrayBuffer. */
   | { type: typeof CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN; topic: string; data: ArrayBuffer; messageId?: string; timestamp?: number }
   /** A non-fatal error occurred. Does not imply disconnection (the client retries internally). */
-  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.ERROR; error: SerializedWorkerError };
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.ERROR; error: SerializedWorkerError }
+  /** The Worker needs a fresh credential. The main thread resolves it via a
+   * matching TOKEN_RESPONSE / TOKEN_ERROR carrying the same `requestId`. */
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST; requestId: number; kind: 'token' | 'channelToken'; channel?: string };

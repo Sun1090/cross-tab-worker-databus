@@ -205,6 +205,8 @@ export const CENTRIFUGE_INPUT_TYPE = {
   PUBLISH_BIN: 'PUBLISH_BIN',
   PING: 'PING',
   STOP: 'STOP',
+  TOKEN_RESPONSE: 'TOKEN_RESPONSE',
+  TOKEN_ERROR: 'TOKEN_ERROR',
 } as const;
 
 // ---- Centrifuge Worker 输出消息类型 ----
@@ -213,4 +215,5 @@ export const CENTRIFUGE_OUTPUT_TYPE = {
   MESSAGE: 'MESSAGE',
   MESSAGE_BIN: 'MESSAGE_BIN',
   ERROR: 'ERROR',
+  TOKEN_REQUEST: 'TOKEN_REQUEST',
 } as const;
