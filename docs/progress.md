@@ -120,13 +120,23 @@ fake tasks; each item is verified locally before being marked done.
   8.69. All merges verified locally (check 439 / lint / e2e-in-isolation green; the
   full-suite e2e handoff failures pass in isolation — known shared-runner + local-load
   flake). #4 codeql-action 3→4 closed (workflow already on v4).
-- All dependabot PRs resolved; remaining open PRs: none.
+- All dependabot PRs resolved; no open PRs remain.
 - Release gates under the major toolchain bumps re-verified: pnpm bench,
   verify:pack, verify:compat (baseline v0.20.71) all green.
-- CI note: racing merge pushes cancelled each other's runs via concurrency; a fresh
-  clean run is triggered on the final HEAD after the dependabot batch settled.
+- CI: pnpm audit added to the verify job (dependency scan institutionalized);
+  release checklists (en+zh) document the audit gate. Final HEAD CI green
+  (verify + browser + CodeQL), audit step passes.
 - Doc parity: architecture.md + zh gained the adaptive-owner-weighting and
   credential-bridge subsections (committed 2e064a9, documentation test green).
+- centrifuge default-factory SSR guards confirmed already covered (stub tests).
+
+## Next candidates (project is feature-complete; future work is verification/deepening)
+
+- Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
+  handoff suite to a dedicated workflow if the shared-runner failure rate stays high.
+- Add a browser benchmark trend doc or CI gate for bench:browser drift.
+- Release-readiness: run the full release checklist dry (verify:published needs a
+  published version; everything else verified locally).
 
 ## Recovery entry
 
