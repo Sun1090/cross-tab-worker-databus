@@ -19,6 +19,9 @@ const forbiddenPatterns = [
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
+    // docs/progress.md is an internal, non-shipped tracking artifact (excluded
+    // from the package files); the public-docs guard does not apply to it.
+    if (name === 'progress.md') return [];
     return statSync(child).isDirectory() ? listDocumentationFiles(child) : [child];
   });
 }
