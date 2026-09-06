@@ -212,7 +212,20 @@ getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
 getDiagnostics(): DataBusDiagnostics
 ```
 
-Full diagnostics snapshot combining lifecycle, transport identity (`name`, `backend`, live `status`, `suspended`), recovery, dedup, replay, persistence, protocol (`version`, `unknownMessages`, `peers`), and the cluster snapshot. `sdkVersion` is injected from `package.json` at build time. Prefer `getHealthSummary()` when a consumer only needs the readiness verdict.
+Full diagnostics snapshot combining lifecycle, transport identity (`name`, `backend`, live `status`, `suspended`), recovery, dedup, replay, persistence, protocol (`version`, `unknownMessages`, `peers`), the cluster snapshot, plus two diagnostics-only additions:
+
+- `metrics: DataBusMetricsSnapshot | null` — the current trace metrics window (throughput, dispatch latency percentiles, dedup outcomes), or `null` when trace metrics are inactive (disabled or events-only mode).
+- `trace: { asyncSink: boolean; pendingEvents: number }` — sink delivery mode and queued-event depth; a growing `pendingEvents` under `asyncSink: true` is the first sign of sink back-pressure.
+
+`sdkVersion` is injected from `package.json` at build time. Prefer `getHealthSummary()` when a consumer only needs the readiness verdict.
+
+### `getMetrics()`
+
+```ts
+getMetrics(): DataBusMetricsSnapshot | null
+```
+
+Synchronous, non-destructive snapshot of the current trace metrics window — the same derived counters a periodic `message_metrics` event carries (received, dispatched, topics, dispatch latency avg/p50/p95/max, dedup accepted/suppressed), readable on demand without a sink or an interval flush. Returns `null` when trace metrics are inactive.
 
 ### `getClusterSnapshot()`
 
