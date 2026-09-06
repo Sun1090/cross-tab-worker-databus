@@ -72,6 +72,7 @@ const elements = {
   configTransportBackend: document.querySelector('#configTransportBackend'),
   configChannelInfo: document.querySelector('#configChannelInfo'),
   channelFallback: document.querySelector('#channelFallback'),
+  loadWeighting: document.querySelector('#loadWeighting'),
   configClusterKey: document.querySelector('#configClusterKey'),
   configTabId: document.querySelector('#configTabId'),
   configTopic: document.querySelector('#configTopic'),
@@ -188,6 +189,11 @@ function createBus(mode) {
       ? { channelFallback: 'storage-event' }
       : {})
   });
+  // Opt-in adaptive owner weighting; the worker-record throughput sample it
+  // produces is shown in the workers table's new 吞吐 column.
+  const loadWeighting = elements.loadWeighting?.checked
+    ? { messageRateWeight: 0.01, byteRateWeight: 0.0001, scheduleLagWeight: 1 }
+    : undefined;
   if (mode === 'centrifugo') {
     const url = elements.urlInput.value.trim();
     const workerMode = elements.workerMode.value;
@@ -198,7 +204,8 @@ function createBus(mode) {
       workerMode,
       transferable: elements.transferable.checked,
       environment,
-      trace
+      trace,
+      ...(loadWeighting ? { loadWeighting } : {})
     });
   }
   if (mode === 'websocket') {
@@ -208,7 +215,8 @@ function createBus(mode) {
     return createWebSocketDataBus({
       connection: { url },
       environment,
-      trace
+      trace,
+      ...(loadWeighting ? { loadWeighting } : {})
     });
   }
   state.backend = 'local';
@@ -218,7 +226,8 @@ function createBus(mode) {
     initialConfig: { mode: 'local' },
     clusterKey: 'demo.local',
     environment,
-    trace
+    trace,
+    ...(loadWeighting ? { loadWeighting } : {})
   });
 }
 
@@ -590,10 +599,21 @@ function renderWorkers(snapshot) {
       shortId(worker.tabId),
       worker.role === 'active' ? 'active' : 'standby',
       worker.visibilityState === 'visible' ? '可见' : '隐藏',
-      String(worker.load)
+      String(worker.load),
+      formatThroughput(worker.throughput)
     ]);
     elements.workersBody.append(row);
   }
+}
+
+/** Format a WorkerThroughputSample as "msg/s · 滞后 X%", or "-" when the
+ * worker is not sampling (adaptive weighting not configured). */
+function formatThroughput(throttled) {
+  if (!throttled || throttled.windowMs <= 0) return '-';
+  const windowSeconds = throttled.windowMs / 1000;
+  const msgRate = throttled.messageCount / windowSeconds;
+  const lagPct = Math.round((throttled.overrunMs / throttled.windowMs) * 100);
+  return `${msgRate.toFixed(0)} msg/s · 滞后 ${lagPct}%`;
 }
 
 function renderRoutes(routes) {
