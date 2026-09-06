@@ -98,9 +98,12 @@ fake tasks; each item is verified locally before being marked done.
       field is ignored); pnpm audit now clean; pnpm check still 438 green.
 2. [x] Decide react/react-dom/codeql-action dependabot PRs: verify locally, merge or
       close with reason.
-      -> #4 codeql-action 3→4 CLOSED (workflow already on v4). #3 @types/node
-      MERGED (all checks green). #5 react, #2 typescript 5→6, #1 jsdom 25→30:
-      verify+CodeQL green, browser = known runner flake; browser reruns issued.
+      -> Resolved: #4 codeql-action 3→4 CLOSED (workflow already on v4). Merged:
+      #3 @types/node, #1 jsdom 25→30, #6 globals, #5 react — each after verify+CodeQL
+      green (browser handoff flake rerun where needed; main CI green after each merge).
+      #2 typescript 5.9→6.0 still OPEN: verify passes (TS6 compiles/tests fine), browser
+      has failed on the documented shared-runner handoff flake across reruns; a fresh
+      dependabot rebase run is in flight. Deferred until green rather than merged red.
 3. [x] `verify:published` release-gate parity: confirm the published-consumer path
       exercises the same full-surface smoke import as verify:pack.
       -> verify-published-consumer.mjs now imports the same 12 root functions +
