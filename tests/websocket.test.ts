@@ -78,6 +78,27 @@ describe('WebSocketTransport', () => {
     expect(onStatus).toHaveBeenCalledWith('disconnected');
   });
 
+  it('reports the SSR guard through onStatus(error) when no WebSocket implementation exists', () => {
+    vi.stubGlobal('WebSocket', undefined);
+    try {
+      const transport = new WebSocketTransport({ url: 'wss://example.test/ws' });
+      const onStatus = vi.fn();
+      const onError = vi.fn();
+      expect(() =>
+        transport.start(
+          { url: 'wss://example.test/ws' },
+          { onMessage: () => {}, onStatus, onError }
+        )
+      ).not.toThrow();
+      expect(onStatus).toHaveBeenCalledWith('error');
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'WebSocketTransport requires a WebSocket implementation.' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('publishes a multi-item batch as one publishBatch frame', () => {
     const { sockets, transport } = makeTransport();
     const socket = sockets[0]!;
