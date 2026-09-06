@@ -20,9 +20,12 @@
 - localStorage 协调写入合并批量 flush；心跳和路由确认使用指数退避
 - 已有 Topic 的 owner 存活时保持稳定，前后台切换不迁移已有订阅
 - 新 Topic 分配给负载最低的候选 Worker
+- 可选自适应 owner 加权（`loadWeighting`）：流量消息/字节速率与心跳调度滞后引导新 route 偏向更空闲、更健康的 Worker；已有 route 保持 sticky，默认仍为纯 Topic 数路由
+- 面向 Centrifuge Worker 的异步凭证刷新桥（`credentialProvider`）：Worker 通过 TOKEN_REQUEST/RESPONSE 交换向主线程请求每个新 `getToken` / `getChannelToken`，函数型选项不跨 structured-clone 边界
 - 通配符订阅：`chat.*` 与 `*` pattern 在分发侧匹配具体 Topic
 - 传输无关的 publication 元数据（`messageId`、`timestamp`），支持标准 WebSocket/Centrifuge envelope，并兼容旧帧格式
 - 可选的 durable replay retention（`replay.retentionMs`），以及 trace snapshot 中的去重结果指标
+- 同步诊断：`getMetrics()` 快照当前 trace 窗口（吞吐、分发延迟百分位、去重结果），`getDiagnostics().metrics/trace` 随诊断对象输出，`getDiagnostics().replay` 报告缓冲回放占用（`messages` + 近似 `bytes`）
 - 内置零依赖的原生 WebSocket 传输（`createWebSocketDataBus`），适配普通 WebSocket 服务器
 - 可选的 React hooks 适配层（`cross-tab-worker-databus/hooks`）：StrictMode 安全的 bus 生命周期与自动清理订阅
 - 可选的 Vue 3 composables 适配层（`cross-tab-worker-databus/vue`）：安全管理 bus 生命周期、订阅和状态
