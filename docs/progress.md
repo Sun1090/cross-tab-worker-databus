@@ -116,13 +116,15 @@ fake tasks; each item is verified locally before being marked done.
 
 - Merged dependabot PRs (each after verify+CodeQL green; browser handoff flake
   rerun where needed): #1 jsdom 25→30, #3 @types/node, #5 react/react-dom, #6 globals,
-  #9 eslint 9→10. Main CI green after each (latest: eslint merge verify 1m + browser
-  5m20s + CodeQL 1m12s). All merges verified locally (check/lint/e2e green; the one
-  e2e handoff failure under full-suite load passed in isolation).
-- #8 typescript-eslint minor and #7 esbuild 0.25→0.28 major: rebase conflicts from
-  lockfile churn (other merged bumps); waiting on Dependabot auto-rebase to re-run CI.
-- #2 typescript 5.9→6.0: verify+CodeQL green, browser fails on the documented shared-
-  runner handoff flake across reruns — deferred (dev-only) until green; not merged red.
+  #9 eslint 9→10, #7 esbuild 0.25→0.28, #2 typescript 5.9→6.0, #8 typescript-eslint
+  8.69. All merges verified locally (check 439 / lint / e2e-in-isolation green; the
+  full-suite e2e handoff failures pass in isolation — known shared-runner + local-load
+  flake). #4 codeql-action 3→4 closed (workflow already on v4).
+- All dependabot PRs resolved; remaining open PRs: none.
+- Release gates under the major toolchain bumps re-verified: pnpm bench,
+  verify:pack, verify:compat (baseline v0.20.71) all green.
+- CI note: racing merge pushes cancelled each other's runs via concurrency; a fresh
+  clean run is triggered on the final HEAD after the dependabot batch settled.
 - Doc parity: architecture.md + zh gained the adaptive-owner-weighting and
   credential-bridge subsections (committed 2e064a9, documentation test green).
 
