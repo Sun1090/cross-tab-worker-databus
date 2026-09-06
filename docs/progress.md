@@ -112,6 +112,20 @@ fake tasks; each item is verified locally before being marked done.
 5. [x] CHANGELOG [Unreleased] fold for phase-4 + this file.
       -> Dependency-security + verify:published bullets added.
 
+## Phase 5 (in progress — Dependabot influx + doc parity finishing)
+
+- Merged dependabot PRs (each after verify+CodeQL green; browser handoff flake
+  rerun where needed): #1 jsdom 25→30, #3 @types/node, #5 react/react-dom, #6 globals,
+  #9 eslint 9→10. Main CI green after each (latest: eslint merge verify 1m + browser
+  5m20s + CodeQL 1m12s). All merges verified locally (check/lint/e2e green; the one
+  e2e handoff failure under full-suite load passed in isolation).
+- #8 typescript-eslint minor and #7 esbuild 0.25→0.28 major: rebase conflicts from
+  lockfile churn (other merged bumps); waiting on Dependabot auto-rebase to re-run CI.
+- #2 typescript 5.9→6.0: verify+CodeQL green, browser fails on the documented shared-
+  runner handoff flake across reruns — deferred (dev-only) until green; not merged red.
+- Doc parity: architecture.md + zh gained the adaptive-owner-weighting and
+  credential-bridge subsections (committed 2e064a9, documentation test green).
+
 ## Recovery entry
 
 If interrupted: working tree state, current commit, and any in-flight test
