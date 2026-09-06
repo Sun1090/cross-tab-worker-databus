@@ -286,10 +286,13 @@ describe('DataBusTraceReporter', () => {
       durationMs: 100
     });
 
-    // The window is NOT reset by getMetrics: a flush still emits the same data.
+    // The window is NOT reset by getMetrics: a flush emits exactly the same
+    // derived values — full field parity between the on-demand snapshot and
+    // the periodic message_metrics event for the same window.
     reporter.flush();
     const metrics = events.find(e => e.type === 'message_metrics') as DataBusMetricsTraceEvent;
-    expect(metrics.received).toBe(1);
+    const { type: _type, ...eventFields } = metrics;
+    expect(snapshot).toEqual(eventFields);
     // A later flush sees a fresh window (counters were reset by flushNow).
     reporter.recordReceived('t');
     now += 200;
