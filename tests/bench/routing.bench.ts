@@ -27,7 +27,7 @@ function makeWorkers(count: number): WorkerRecord[] {
     heartbeatAt: 1_000,
     registeredAt: index,
     ...(index % 2 === 0
-      ? { throughput: { windowMs: 3_000, messageCount: (index * 13) % 500, byteCount: (index * 7) % 20_000, sampledAt: 1_000 } }
+      ? { throughput: { windowMs: 3_000, messageCount: (index * 13) % 500, byteCount: (index * 7) % 20_000, overrunMs: (index * 3) % 900, sampledAt: 1_000 } }
       : {})
   }));
 }

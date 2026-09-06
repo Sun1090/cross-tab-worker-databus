@@ -220,6 +220,7 @@ describe('adaptive load weighting', () => {
     windowMs: 1_000,
     messageCount: 100,
     byteCount: 10_000,
+    overrunMs: 0,
     sampledAt: 5_000
   };
 
@@ -241,7 +242,7 @@ describe('adaptive load weighting', () => {
     const degenerate = makeWorker({
       workerId: 'w',
       load: 2,
-      throughput: { windowMs: 0, messageCount: 10, byteCount: 0, sampledAt: 0 }
+      throughput: { windowMs: 0, messageCount: 10, byteCount: 0, overrunMs: 0, sampledAt: 0 }
     });
     expect(effectiveWorkerLoad(degenerate, { messageRateWeight: 1 })).toBe(2);
   });
@@ -269,6 +270,36 @@ describe('adaptive load weighting', () => {
     const standby = makeWorker({ workerId: 'standby', load: 1 });
     const options = { messageRateWeight: 1 };
     expect(selectLeastLoadedWorker([owner, standby], 'owner', options)?.workerId).toBe('owner');
+  });
+
+  it('effectiveWorkerLoad folds scheduling lag into the score', () => {
+    // overrunMs 500 over windowMs 1000 → lagRatio 0.5 → +0.5 per weight unit.
+    const laggy = makeWorker({
+      workerId: 'laggy',
+      load: 2,
+      throughput: { windowMs: 1_000, messageCount: 0, byteCount: 0, overrunMs: 500, sampledAt: 0 }
+    });
+    expect(effectiveWorkerLoad(laggy, { scheduleLagWeight: 1 })).toBeCloseTo(2.5, 10);
+    // Without the weight, lag contributes nothing.
+    expect(effectiveWorkerLoad(laggy)).toBe(2);
+    expect(effectiveWorkerLoad(laggy, {})).toBe(2);
+  });
+
+  it('selectLeastLoadedWorker steers away from a scheduling-laggy worker', () => {
+    const laggy = makeWorker({
+      workerId: 'laggy',
+      load: 1,
+      throughput: { windowMs: 1_000, messageCount: 0, byteCount: 0, overrunMs: 800, sampledAt: 0 }
+    });
+    const healthy = makeWorker({
+      workerId: 'healthy',
+      load: 2,
+      throughput: { windowMs: 1_000, messageCount: 0, byteCount: 0, overrunMs: 0, sampledAt: 0 }
+    });
+    const options = { scheduleLagWeight: 2 };
+    // Legacy (no weight) picks the fewer-topics worker; weighted picks healthy.
+    expect(selectLeastLoadedWorker([laggy, healthy])?.workerId).toBe('laggy');
+    expect(selectLeastLoadedWorker([laggy, healthy], undefined, options)?.workerId).toBe('healthy');
   });
 });
 

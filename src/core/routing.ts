@@ -29,13 +29,28 @@ export function effectiveWorkerLoad(
   const sample = worker.throughput;
   const messageRateWeight = options?.messageRateWeight ?? 0;
   const byteRateWeight = options?.byteRateWeight ?? 0;
+  const scheduleLagWeight = options?.scheduleLagWeight ?? 0;
   // A missing sample, unset weights, or a non-positive window (no elapsed
   // time to derive a rate from) all fall back to the raw topic count.
-  if (!sample || sample.windowMs <= 0 || (messageRateWeight === 0 && byteRateWeight === 0)) return worker.load;
+  if (
+    !sample ||
+    sample.windowMs <= 0 ||
+    (messageRateWeight === 0 && byteRateWeight === 0 && scheduleLagWeight === 0)
+  ) {
+    return worker.load;
+  }
   const windowSeconds = sample.windowMs / 1000;
   const messageRate = sample.messageCount / windowSeconds;
   const byteRate = sample.byteCount / windowSeconds;
-  return worker.load + messageRateWeight * messageRate + byteRateWeight * byteRate;
+  // Scheduling lag is the ratio of heartbeat overrun to wall time: a Worker
+  // whose timers land late (starved event loop) contributes ~overrun/window.
+  const scheduleLagRatio = sample.overrunMs / sample.windowMs;
+  return (
+    worker.load +
+    messageRateWeight * messageRate +
+    byteRateWeight * byteRate +
+    scheduleLagWeight * scheduleLagRatio
+  );
 }
 
 /**

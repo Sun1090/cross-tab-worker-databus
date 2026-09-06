@@ -657,6 +657,11 @@ export class WorkerClusterRuntime {
       windowMs,
       messageCount: this.throughputWindow.messageCount,
       byteCount: this.throughputWindow.byteCount,
+      // How much later the heartbeat landed than its nominal interval. This
+      // window is anchored at the previous writeRecord (one heartbeat tick),
+      // so a starved event loop stretches windowMs past the interval and the
+      // positive excess is the scheduling-overrun signal.
+      overrunMs: Math.max(0, windowMs - this.heartbeatIntervalMs),
       sampledAt: now
     };
     this.throughputWindow = { startedAt: now, messageCount: 0, byteCount: 0 };
