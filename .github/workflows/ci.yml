@@ -29,6 +29,11 @@ jobs:
         run: pnpm check
       - name: Lint
         run: pnpm lint
+      - name: Bench smoke (Node, no thresholds)
+        # Keep the bench files runnable in CI without timing thresholds —
+        # shared-runner noise makes numeric gates unreliable here; the
+        # bench-compare gate is the local trend check instead.
+        run: pnpm bench
 
   browser:
     runs-on: ubuntu-latest
