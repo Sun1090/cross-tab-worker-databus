@@ -58,6 +58,35 @@ describe('dual-format build artifacts', () => {
     }
   });
 
+  it('freezes the root export surface so additions/removals are deliberate', async () => {
+    // Pinning the exact runtime export set: pre-1.0 the public API is
+    // intentionally growing, but every change must be a conscious decision
+    // (documented in docs/api.md and release notes), not an incidental one.
+    const expected = [
+      'CrossTabDataBus',
+      'DEFAULT_MAX_ACTIVE_WORKERS',
+      'WebSocketTransport',
+      'WorkerClusterRuntime',
+      'approximatePayloadBytes',
+      'createBrowserEnvironment',
+      'createIndexedDbReplayPersistence',
+      'createOpaqueKey',
+      'createStorageEventChannel',
+      'createWebSocketDataBus',
+      'effectiveWorkerLoad',
+      'getOrCreateTabId',
+      'hasActiveOwner',
+      'isWildcardTopic',
+      'selectActiveWorkers',
+      'selectLeastLoadedWorker',
+      'selectRebalanceTarget',
+      'selectWorkerBackend',
+      'topicMatchesPattern'
+    ];
+    const lib = (await import(/* @vite-ignore */ `../dist/${'index.js'}`)) as Record<string, unknown>;
+    expect(Object.keys(lib).sort()).toEqual(expected);
+  });
+
   it('publishes declarations for every public subpath and key option type', () => {
     const declarations = ['index.d.ts', 'hooks.d.ts', 'vue.d.ts', 'centrifuge.d.ts'];
     for (const file of declarations) {
