@@ -1392,7 +1392,35 @@ describe('WorkerClusterRuntime adaptive load weighting', () => {
       windowMs: 3_000,
       messageCount: 1,
       byteCount: approximatePayloadBytes(payload),
+      overrunMs: 0,
       sampledAt: now
+    });
+    runtime.stop();
+  });
+
+  it('reports positive scheduling overrun when the heartbeat lands late', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'overrun' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'weighting-overrun',
+      environment: env.environment,
+      tabId: 'tab-overrun',
+      workerId: 'worker-overrun',
+      heartbeatIntervalMs: 3_000,
+      loadWeighting,
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    // A starved event loop delays the heartbeat far past its nominal interval.
+    now += 9_000;
+    env.runIntervals();
+    await Promise.resolve();
+
+    expect(workerRecordOf(storage, 'worker-overrun').throughput).toMatchObject({
+      windowMs: 9_000,
+      overrunMs: 6_000
     });
     runtime.stop();
   });

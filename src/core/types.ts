@@ -74,11 +74,16 @@ export interface WorkerThroughputSample {
   messageCount: number;
   /** Approximate payload bytes shipped by this Worker within the window. */
   byteCount: number;
+  /** Cumulative positive scheduling overrun in ms: how much later the
+   * heartbeat ticks landed than their nominal interval. A starved event loop
+   * (the browser-observable equivalent of CPU saturation) pushes this up, so
+   * peers can steer new routes away from a throttled Worker. */
+  overrunMs: number;
   /** Timestamp (ms) when the sample was captured. */
   sampledAt: number;
 }
 
-/** Optional adaptive weighting for owner selection. Both weights default to 0,
+/** Optional adaptive weighting for owner selection. All weights default to 0,
  * which keeps scoring equal to the legacy pure topic-count load. When set, the
  * per-second rates are added to the topic count, so the caller controls how
  * much traffic activity (vs ownership breadth) should steer new routes. */
@@ -87,6 +92,10 @@ export interface LoadWeightingOptions {
   messageRateWeight?: number;
   /** Weight applied to bytes-per-second in the effective load score. */
   byteRateWeight?: number;
+  /** Weight applied to the scheduling-lag ratio (heartbeat overrun ÷ window).
+   * A starved event loop produces a positive ratio, steering new routes away
+   * from a Worker whose timers fire late. */
+  scheduleLagWeight?: number;
 }
 
 /**
