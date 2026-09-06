@@ -82,6 +82,33 @@ fake tasks; each item is verified locally before being marked done.
       -> CHANGELOG: Security/CI infrastructure bullet (CodeQL + Dependabot +
       verify:compat auto-baseline).
 
+## Phase 3 result (pushed dd89853..d9c8296, CI + CodeQL green)
+
+- CI verify 47s + browser 3m18s; CodeQL run SUCCESS on push (1m35s).
+- Dependabot config became active immediately: auto-PRs opened for react/react-dom
+  (npm) and github/codeql-action 3→4 (actions). Not merged by this agent; they run
+  their own CI on dependabot branches.
+- codeql.yml bumped to github/codeql-action@v4 (current major).
+
+## Phase 4 pool (frontier — audit first, then pick verifiable items)
+
+1. [x] Audit npm deps for known vulnerabilities (npm audit) and record result.
+      -> 2 high via dev chain (glob<10.5.0, nanoid<3.3.18); fixed with pnpm
+      overrides in pnpm-workspace.yaml (pnpm v10 home — the package.json pnpm
+      field is ignored); pnpm audit now clean; pnpm check still 438 green.
+2. [x] Decide react/react-dom/codeql-action dependabot PRs: verify locally, merge or
+      close with reason.
+      -> #4 codeql-action 3→4 CLOSED (workflow already on v4). #3 @types/node
+      MERGED (all checks green). #5 react, #2 typescript 5→6, #1 jsdom 25→30:
+      verify+CodeQL green, browser = known runner flake; browser reruns issued.
+3. [x] `verify:published` release-gate parity: confirm the published-consumer path
+      exercises the same full-surface smoke import as verify:pack.
+      -> verify-published-consumer.mjs now imports the same 12 root functions +
+      3 subpaths in ESM/CJS (node --check ok; full run needs a published version).
+4. [x] docs/zh release-checklist: mirror the verify:compat + CodeQL/Dependabot notes.
+5. [x] CHANGELOG [Unreleased] fold for phase-4 + this file.
+      -> Dependency-security + verify:published bullets added.
+
 ## Recovery entry
 
 If interrupted: working tree state, current commit, and any in-flight test

@@ -12,9 +12,13 @@
 ## 打 tag 前
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
-2. 运行 `pnpm check`、`pnpm lint`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack` 以及 `git diff --check`。
+2. 运行 `pnpm check`、`pnpm lint`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS）。
 3. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。
 4. 提交、给精确版本打 tag，并推送 `main --tags`。
+
+## 安全与依赖扫描
+
+仓库配置了 CodeQL（`javascript-typescript`，push/PR/每周）与 Dependabot（npm + GitHub Actions 每周更新）。CodeQL 告警会作为 PR check 暴露；Dependabot PR 在合并前必须通过其 verify（全量 check）与 CodeQL 检查，浏览器 E2E 的已知共享 runner 抖动按既有处理方式重跑确认。
 
 ## 打 tag 的发布工作流
 
