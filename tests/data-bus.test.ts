@@ -1754,6 +1754,20 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('evicts the oldest tracked ID when the bounded dedup set overflows', async () => {
+    const { bus, transport } = makeReplayBus(undefined, { maxEntries: 2 });
+    const seen: unknown[] = [];
+    bus.subscribe('t', message => seen.push(message.data));
+    await bus.ready();
+    transport.emit('t', { value: 1 }, 'a');
+    transport.emit('t', { value: 2 }, 'b');
+    transport.emit('t', { value: 3 }, 'b'); // still tracked → suppressed
+    transport.emit('t', { value: 4 }, 'c'); // set would exceed 2 → evicts 'a'
+    transport.emit('t', { value: 5 }, 'a'); // evicted → delivered again
+    expect(seen).toEqual([{ value: 1 }, { value: 2 }, { value: 4 }, { value: 5 }]);
+    await bus.stop();
+  });
+
   it('does not add dedup-suppressed publications to replay history or persistence', async () => {
     const persistence = {
       load: vi.fn(async () => []),
