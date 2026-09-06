@@ -192,6 +192,8 @@ interface DataBusHealthSummary {
   recovery: { attempt; exhausted; maxAttempts; generation; lastSuccessAt; hasError; errorMessage; errorAt };
   lastFailure: { source: 'transport' | 'persistence' | 'dispatch'; message: string; at: number } | null;
   persistence: { failures: number; lastFailureAt: number | null; lastErrorMessage: string | null };
+  metrics: DataBusMetricsSnapshot | null;   // live trace window, or null when trace metrics are inactive
+  trace: { asyncSink: boolean; pendingEvents: number };  // sink back-pressure visibility
 }
 ```
 

@@ -135,6 +135,10 @@ export interface DataBusHealthSummary {
   /** Most recent failure of any source since the last explicit start(). */
   lastFailure: DataBusLastFailure | null;
   persistence: DataBusPersistenceHealth;
+  /** Current trace metrics window, or null when trace metrics are inactive. */
+  metrics: DataBusMetricsSnapshot | null;
+  /** Trace sink delivery mode and queued-event depth (asyncSink back-pressure). */
+  trace: { asyncSink: boolean; pendingEvents: number };
 }
 
 export interface CrossTabDataBusOptions<TConfig, TData>
@@ -694,7 +698,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       },
       recovery: this.getRecoveryStats(),
       lastFailure: this.lastFailure,
-      persistence: this.getPersistenceStats()
+      persistence: this.getPersistenceStats(),
+      metrics: this.trace.getMetrics(),
+      trace: this.trace.getSinkState()
     };
   }
 
