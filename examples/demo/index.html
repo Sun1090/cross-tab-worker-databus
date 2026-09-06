@@ -249,6 +249,15 @@
               </span>
             </div>
             <div class="config-row">
+              <span class="config-label">负载加权</span>
+              <span class="config-value">
+                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="checkbox" id="loadWeighting" />
+                  启用自适应负载加权（吞吐采样）
+                </label>
+              </span>
+            </div>
+            <div class="config-row">
               <span class="config-label">集群 Key</span>
               <span class="config-value config-key" id="configClusterKey">-</span>
             </div>
@@ -342,7 +351,7 @@
           <div class="table-wrap compact">
             <table class="state-table">
               <thead>
-                <tr><th>Tab</th><th>角色</th><th>状态</th><th>负载</th></tr>
+                <tr><th>Tab</th><th>角色</th><th>状态</th><th>负载</th><th>吞吐</th></tr>
               </thead>
               <tbody id="workersBody"></tbody>
             </table>
