@@ -87,7 +87,7 @@ export interface DataBusDiagnostics {
   transportReady: boolean;
   recovery: { attempt: number; exhausted: boolean; maxAttempts: number; hasError: boolean; errorMessage: string | null; errorAt: number | null; generation: number; lastSuccessAt: number | null };
   dedup: DataBusDedupStats;
-  replay: { enabled: boolean; topics: number; messages: number };
+  replay: { enabled: boolean; topics: number; messages: number; bytes: number };
   persistence: DataBusPersistenceHealth;
   protocol: { version: number; unknownMessages: number; lastUnknownMessageType: string | null; peers: Record<string, number | null> };
   transport: { name: string; backend: string | null; status: WorkerStatus; suspended: boolean };
@@ -724,7 +724,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       transportReady: this.transportReady,
       recovery: this.getRecoveryStats(),
       dedup: this.getDedupStats(),
-      replay: { enabled: replay.enabled, topics: replay.topics, messages: replay.messages },
+      replay: { enabled: replay.enabled, topics: replay.topics, messages: replay.messages, bytes: replay.bytes },
       persistence: this.getPersistenceStats(),
       protocol: { version: cluster.protocolVersion, unknownMessages: unknownMessages.count, lastUnknownMessageType: unknownMessages.lastType, peers: cluster.peerProtocolVersions },
       transport: {

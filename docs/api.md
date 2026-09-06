@@ -229,6 +229,8 @@ getMetrics(): DataBusMetricsSnapshot | null
 
 Synchronous, non-destructive snapshot of the current trace metrics window — the same derived counters a periodic `message_metrics` event carries (received, dispatched, topics, dispatch latency avg/p50/p95/max, dedup accepted/suppressed), readable on demand without a sink or an interval flush. Returns `null` when trace metrics are inactive.
 
+`getDiagnostics().replay` ships `{ enabled, topics, messages, bytes }` — `bytes` is the approximate in-memory payload footprint of the buffered replay rings (same string/binary/number sizing heuristic as adaptive load weighting), computed on demand so the hot append path never pays for it.
+
 ### `getClusterSnapshot()`
 
 Returns a diagnostic snapshot:
