@@ -13,8 +13,9 @@
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
 2. 运行 `pnpm check`、`pnpm lint`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS）。
-3. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。
-4. 提交、给精确版本打 tag，并推送 `main --tags`。
+3. 依赖安全门禁：`pnpm audit --registry=https://registry.npmjs.org`（配置的镜像 registry 缺少 audit 端点；CI 在 verify job 中于公共 registry 运行）。任一已知漏洞公告即视为发布失败；`pnpm-workspace.yaml` overrides 钉住补丁版本。
+4. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。
+5. 提交、给精确版本打 tag，并推送 `main --tags`。
 
 ## 安全与依赖扫描
 
