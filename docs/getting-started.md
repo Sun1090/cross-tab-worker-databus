@@ -192,3 +192,14 @@ const bus = new CrossTabDataBus({
 ```
 
 The fallback is opt-in because coordination payloads (plaintext topic names) then persist to localStorage — see [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
+
+## 11. Upgrading & Deprecation
+
+Before `1.0.0` the SDK is allowed to grow additively and, behind an explicit deprecation cycle, remove APIs. The root export surface is pinned by the regression suite and a tag-to-tag compatibility gate, so an unintended removal fails CI rather than silently breaking consumers.
+
+When you upgrade:
+
+- Read the CHANGELOG for each version between your current and target version. Every removal is called out there, and the deprecation cycle itself only forwards through minor versions.
+- If a runtime `console.warn` mentions a deprecated alias, migrate off it before the next minor — the alias survives for at least one minor after the warning first appears.
+- Mixed-version tabs keep coordinating: the cluster carries a protocol version in diagnostics (`getDiagnostics().protocol`), and legacy message frames continue to be parsed for one minor after the protocol change.
+- Pre-1.0, prefer the documented entry points in [api.md](./api.md) and the capabilities matrix in [capabilities.md](./capabilities.md). The published package is verified against both ESM and CommonJS consumers for every release.

@@ -192,3 +192,14 @@ const bus = new CrossTabDataBus({
 ```
 
 该能力为 opt-in：启用后协调载荷（明文 Topic 名称）会写入 localStorage，详见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
+
+## 11. 升级与弃用
+
+在 `1.0.0` 之前，SDK 允许增量新增，并在明确的弃用周期后才移除 API。根导出面由回归套件与 tag 间兼容性门禁钉住，意外删除会令 CI 失败，而不是静默破坏既有消费者。
+
+升级时请注意：
+
+- 逐版阅读当前版本到目标版本之间每个版本的 CHANGELOG。每次移除都会在其中明确指出，且弃用周期只在小版本间顺延。
+- 若运行时 `console.warn` 提到某弃用别名，请在下一个小版本前迁移——该别名在告警首次出现后至少再存活一个小版本。
+- 混版本 Tab 仍可协调：集群在诊断中携带协议版本（`getDiagnostics().protocol`），协议变更后 legacy 消息帧至少再解析一个小版本。
+- 1.0 前，请优先使用 [api.md](./api.md) 中的文档化入口与 [capabilities.md](./capabilities.md) 的能力矩阵。每次发布都会对 ESM 与 CommonJS 消费者做打包验证。
