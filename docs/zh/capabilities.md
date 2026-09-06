@@ -23,15 +23,15 @@
 | 降级 | BroadcastChannel 不可用时 opt-in 启用 localStorage storage-event 协调通道 | ✅ 已实现 | `createBrowserEnvironment({ channelFallback: 'storage-event' })`；协调载荷（明文 Topic 名称）会写入 localStorage，已在文档中标注权衡 |
 | Centrifuge | 内置 Dedicated / Shared Worker transport | ✅ 已实现 | 支持 subscribe、unsubscribe、publish、连接状态和错误上报；`auto` 从 SharedWorker → Dedicated Worker → 主线程 WebSocket 降级 |
 | 安全边界 | localStorage 使用连接和 Topic 派生不透明 key；BroadcastChannel 协调消息以明文传输 Topic 名称 | ✅ 已实现 | 不持久化 URL、原始 Topic 名称、凭证或 publication payload。BroadcastChannel 协调消息仅存在于内存中，以明文传输 Topic 名称——不会被持久化。 |
-| 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调 |
+| 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调。按需 `getMetrics()` / `getDiagnostics().metrics` 无需 sink 即可同步暴露当前窗口 |
 | 诊断 | `getHealthSummary()` 单对象健康判定与统一失败账本 | ✅ 已实现 | `healthy`/`state` 覆盖未启动、启动中、恢复中、BFCache 挂起与恢复耗尽降级；`lastFailure` 统一 transport/persistence/dispatch 来源，`start()` 时重置 |
 | 性能 | 协调元数据批量写入 + 退避重试 | ✅ 已实现 | 心跳、路由和 subscriber 写入合并后在微任务中 flush；失败时指数退避；`pagehide` / `stop()` 同步 flush |
 | 性能 | 可选 ArrayBuffer Transferable 传输 | ✅ 已实现 |
 | 性能 | 可选 `DataBusTransport.publishBatch` 单帧突发发布 | ✅ 已实现 | 内置 WebSocket transport 将多条消息合并为一帧（`publishBatch` op，demo server 已支持）；无批量能力的 transport 回退逐条 `publish` | 开启 `transferable: true` 后，二进制 publish/receive 跳过 structured clone 复制；对象消息 API 不变 |
 | 消息语义 | exactly-once 投递 | 未实现 | 正常交接会避免重叠，但异常恢复和 transport/服务端行为仍不提供 exactly-once 保证 |
 | 消息语义 | 可插拔的 publication 去重 | ✅ 已实现 | 按 `DataBusMessage.messageId` 做可选有界入站抑制；默认关闭，ID 仍由调用方/服务端控制 |
-| 认证 | Worker 内异步凭证刷新桥接 | 规划中 | 当前 Worker 配置必须可结构化克隆，不能传递函数 |
-| 负载策略 | 按消息速率、字节数或 CPU 自适应加权 | 规划中 | 当前负载仅按 owner Topic 数量计算 |
+| 认证 | Worker 内异步凭证刷新桥接 | ✅ 已实现 | `createCentrifugeDataBus` 的可选 `credentialProvider`（`getToken` / `getChannelToken`）。Worker 配置保持结构化可克隆；Worker 通过 TOKEN_REQUEST / TOKEN_RESPONSE 交换向主线程请求每个新凭证，由 provider 从应用上下文提供 |
+| 负载策略 | 按消息速率、字节数或调度滞后自适应加权 | ✅ 已实现 | 可选的 `loadWeighting`（`messageRateWeight`、`byteRateWeight`、`scheduleLagWeight`）：Workers 按窗口采样自身 fan-out 流量与心跳调度超时并随记录发布；新 route 的 owner 选择在 Topic 数之上加入归一化速率与滞后比率。默认（未设置）保持纯按 Topic 数；已有 route 保持 sticky |
 | 可观测性 | owner 确认、迁移和恢复尝试的指标/事件 | ✅ 已实现 | `DataBusReliabilityTraceEvent` 记录有界的 route ack/migration 与 transport recovery；服务端最终确认仍由 transport 决定 |
 | 运行时模型 | SharedWorker / Dedicated Worker transport | ✅ 已实现 | `workerMode` 支持 `dedicated`、`shared` 和 `auto`，默认 `dedicated` |
 | 运行时模型 | Service Worker transport | 未实现 | 刻意延后；生命周期与长连接约束见 `docs/zh/architecture.md` |
