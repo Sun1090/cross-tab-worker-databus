@@ -13,8 +13,9 @@ Use this checklist for each pre-1.0 release. The repository does not publish fro
 
 1. Update `package.json`, `CHANGELOG.md`, and both roadmap files.
 2. Run `pnpm check`, `pnpm lint`, `pnpm bench`, `pnpm test:e2e`, `pnpm bench:browser`, `pnpm verify:pack`, and `git diff --check`.
-3. Confirm the package contains only intended files with `npm pack --dry-run --json`.
-4. Commit, tag the exact version, and push `main --tags`.
+3. Gate browser benchmark regressions: `pnpm bench:compare --fail-above-pct 50` after two `pnpm bench:browser` runs, using a 50% ceiling so unrelated runner noise (see the known shared-runner jitter note) cannot fail the gate; a baseline shift (e.g. a metric becoming real instead of a no-op) is an expected one-time failure.
+4. Confirm the package contains only intended files with `npm pack --dry-run --json`.
+5. Commit, tag the exact version, and push `main --tags`.
 
 ## Tagged-release workflow
 
