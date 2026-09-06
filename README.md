@@ -20,7 +20,7 @@ By default each tab holds its own Dedicated Worker; when configured with `worker
 - localStorage coordination writes are merged and flushed in batches; heartbeat and route confirmation use exponential backoff
 - Existing Topic owners remain stable while alive; visibility changes do not move established subscriptions
 - New Topics are assigned to the least-loaded eligible Worker
-- Opt-in adaptive owner weighting (`loadWeighting`): traffic message/byte rates and heartbeat scheduling-lag steer NEW routes toward quieter, healthier Workers; existing routes stay sticky and the default remains pure topic-count routing
+- Opt-in adaptive owner weighting (`loadWeighting`): traffic message/byte rates and heartbeat scheduling-lag steer NEW routes toward quieter, healthier Workers; existing routes stay sticky and the default remains pure topic-count routing ([configuration](./docs/configuration.md#adaptive-owner-weighting))
 - Async credential refresh bridge for the Centrifuge worker (`credentialProvider`): the Worker requests each fresh `getToken`/`getChannelToken` from the main thread over a TOKEN_REQUEST/RESPONSE exchange, keeping function-valued options out of the structured-clone boundary
 - Wildcard subscriptions: `chat.*` and `*` patterns match concrete topics at dispatch
 - Transport-neutral publication metadata (`messageId`, `timestamp`) with canonical WebSocket/Centrifuge envelopes and legacy frame compatibility

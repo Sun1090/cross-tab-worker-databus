@@ -69,6 +69,7 @@ const elements = {
   configWorkerMode: document.querySelector('#configWorkerMode'),
   configBackend: document.querySelector('#configBackend'),
   configTransferable: document.querySelector('#configTransferable'),
+  configLoadWeighting: document.querySelector('#configLoadWeighting'),
   configTransportBackend: document.querySelector('#configTransportBackend'),
   configChannelInfo: document.querySelector('#configChannelInfo'),
   channelFallback: document.querySelector('#channelFallback'),
@@ -584,6 +585,9 @@ function renderConfig() {
   elements.configWorkerMode.textContent = mode;
   elements.configBackend.textContent = backendLabel(backend);
   elements.configTransferable.textContent = transferable ? '启用' : '禁用';
+  elements.configLoadWeighting.textContent = elements.loadWeighting?.checked
+    ? '启用（消息/字节/滞后）'
+    : '禁用（纯 Topic 数）';
   elements.configClusterKey.textContent = state.clusterKey || '-';
   elements.configTabId.textContent = state.tabId || '-';
   elements.configTopic.textContent = state.topic || '-';

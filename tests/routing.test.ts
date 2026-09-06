@@ -314,9 +314,14 @@ describe('approximatePayloadBytes', () => {
     expect(approximatePayloadBytes(Symbol('x'))).toBe(0);
   });
 
-  it('uses the byte length of binary payloads', () => {
+  it('uses the byte length of binary payloads and views', () => {
     expect(approximatePayloadBytes(new ArrayBuffer(16))).toBe(16);
     expect(approximatePayloadBytes(new Uint8Array(8).buffer)).toBe(8);
+    // Typed-array / DataView views report their own byteLength, not the
+    // underlying buffer's.
+    expect(approximatePayloadBytes(new Uint8Array(8))).toBe(8);
+    expect(approximatePayloadBytes(new DataView(new ArrayBuffer(12)))).toBe(12);
+    expect(approximatePayloadBytes(new Float64Array(4))).toBe(4 * 8);
   });
 
   it('adds an array header plus elements', () => {
