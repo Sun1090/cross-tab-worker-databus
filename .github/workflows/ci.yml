@@ -34,6 +34,13 @@ jobs:
         # shared-runner noise makes numeric gates unreliable here; the
         # bench-compare gate is the local trend check instead.
         run: pnpm bench
+      - name: Dependency audit
+        # pnpm audit against the public registry; CI runners use npmjs.org so
+        # the audit endpoint is available (locally the mirror registry lacks
+        # it — use --registry=https://registry.npmjs.org). Fails the build on
+        # known-vulnerability advisories; pnpm-workspace.yaml overrides pin the
+        # patched ranges.
+        run: pnpm audit
 
   browser:
     runs-on: ubuntu-latest
