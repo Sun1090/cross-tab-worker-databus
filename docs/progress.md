@@ -63,6 +63,25 @@ fake tasks; each item is verified locally before being marked done.
 7. [x] Progress-pad: fold phase-2 changes into CHANGELOG [Unreleased] + this file.
       -> CHANGELOG [Unreleased]: Packaging + Changed bullets added.
 
+## Phase 2 result (pushed 362adef..dd89853, CI green on first try)
+
+- verify 52s + browser 2m33s. Local: check (438), lint, e2e (20/20), bench, verify:pack.
+- Shipped: packaging (enumerated docs files, progress.md excluded), demo config-panel
+  weighting state, +lag bench baseline, DataView sizing coverage, README weighting link.
+
+## Phase 3 pool (security & release infrastructure)
+
+1. [x] Add .github/workflows/codeql.yml (static analysis on push/PR; javascript-typescript).
+2. [x] Add .github/dependabot.yml (weekly npm + GitHub Actions).
+3. [x] verify-version-compat: auto-derive baseline from the latest git tag (keep
+      COMPAT_BASE_TAG override), so the export contract is checked against the last
+      release instead of a fixed v0.20.31. -> [compat] 0.20.83 ... from v0.20.71.
+4. [x] Validate new workflow YAMLs (basic structural check) and verify:compat locally.
+      -> python yaml.safe_load parses codeql.yml + dependabot.yml; verify:compat green.
+5. [x] Fold phase-3 into CHANGELOG [Unreleased] + this file.
+      -> CHANGELOG: Security/CI infrastructure bullet (CodeQL + Dependabot +
+      verify:compat auto-baseline).
+
 ## Recovery entry
 
 If interrupted: working tree state, current commit, and any in-flight test
