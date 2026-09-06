@@ -36,9 +36,12 @@ fake tasks; each item is verified locally before being marked done.
       fix any missing zh mirror. -> Keyword + content sweep across api/config/
       capabilities/release-checklist/getting-started all matched; the one gap was
       zh/roadmap.md (0.20.69 candidates not marked delivered) — now mirrored.
-4. [ ] verify:compat / version-compat script: confirm it type-checks new exports
+4. [x] verify:compat / version-compat script: confirm it type-checks new exports
       (effectiveWorkerLoad, approximatePayloadBytes, getMetrics, WorkerThroughputSample)
-      or extend its export manifest.
+      or extend its export manifest. -> verify-packed-consumer.mjs now smoke-imports
+      the full root public surface (12 ESM + subpath + CJS) incl. the new routing/
+      observability functions; `pnpm verify:pack` passes locally. verify:compat's
+      subpath-contract check unchanged (still valid).
 5. [ ] Demo: surface getDiagnostics().replay.bytes already done; add throughput
       sample coverage assertion already done via e2e (adaptive-weighting).
 6. [ ] Unit coverage: cluster integration test that scheduleLagWeight actually
