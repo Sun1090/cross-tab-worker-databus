@@ -160,6 +160,33 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(ownerIsA ? tabB : tabA)).toBe(1);
   });
 
+  test('adaptive-weighting toggle samples throughput and keeps routing stable', async ({ context }) => {
+    const topic = `e2e.weighting.${Date.now()}`;
+    const openWeightedTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      // Opt into adaptive weighting BEFORE the re-apply that creates the bus,
+      // so the worker records start sampling traffic.
+      await page.check('#loadWeighting');
+      await connectDemo(page, 'dedicated', topic);
+      return page;
+    };
+
+    const tabA = await openWeightedTab();
+    const tabB = await openWeightedTab();
+    await waitForSingleOwner([tabA, tabB], { timeout: 30_000 });
+
+    // The toggle must not break exactly-one-owner routing or cross-tab delivery.
+    await publishJson(tabA);
+    await expect.poll(() => receivedCount(tabB)).toBe(1);
+    await expect.poll(async () => (await ownerCount(tabA)) + (await ownerCount(tabB))).toBe(1);
+
+    // With weighting enabled, the workers table's 吞吐 column renders each
+    // worker's throughput sample once the first heartbeat windows land.
+    await expect
+      .poll(async () => ((await tabA.locator('#workersBody').textContent()) ?? '').includes('msg/s'), { timeout: 30_000 })
+      .toBe(true);
+  });
+
   test('owner migration: closing the owning tab hands the topic to a survivor', async ({ context }) => {
     test.setTimeout(90_000);
     const topic = `e2e.migrate.${Date.now()}`;
