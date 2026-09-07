@@ -5,7 +5,7 @@ import type {
   CentrifugeWorkerInput,
   CentrifugeWorkerOutput
 } from '../src/centrifuge-protocol';
-import { createFakeEnvironment, MemoryStorage } from './fakes';
+import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 import { EVENT_TYPE } from '../src/utils/constants';
 
 const { FakeCentrifuge } = vi.hoisted(() => {
@@ -198,6 +198,65 @@ describe('createCentrifugeDataBus', () => {
       },
       { type: 'SUBSCRIBE', topic: 'market.tick' }
     ]);
+  });
+
+  it('forwards loadWeighting to the cluster so worker records start sampling throughput', async () => {
+    const storage = new MemoryStorage();
+    let now = 1_000;
+    const environment = createFakeEnvironment({
+      storage,
+      hub: new ChannelHub(),
+      now: () => now,
+      randomId: 'weighting-factory'
+    });
+    const worker = new WorkerDouble();
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      workerFactory: () => worker as unknown as Worker,
+      loadWeighting: { messageRateWeight: 1 }
+    });
+
+    bus.subscribe('market.tick', () => undefined);
+    // One healthy heartbeat: with weighting configured, the worker record
+    // carries a throughput sample (window 3000ms, no overrun).
+    now += 3_000;
+    environment.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const workerRecord = storage.entries().find(([key]) => key.includes(':worker:'));
+    expect(workerRecord).toBeDefined();
+    expect(JSON.parse(workerRecord![1]).throughput).toMatchObject({ windowMs: 3_000, overrunMs: 0 });
+    await bus.stop();
+  });
+
+  it('keeps the worker record throughput-free when loadWeighting is unset', async () => {
+    const storage = new MemoryStorage();
+    let now = 1_000;
+    const environment = createFakeEnvironment({
+      storage,
+      hub: new ChannelHub(),
+      now: () => now,
+      randomId: 'weighting-off'
+    });
+    const worker = new WorkerDouble();
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      workerFactory: () => worker as unknown as Worker
+    });
+
+    bus.subscribe('market.tick', () => undefined);
+    now += 3_000;
+    environment.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const workerRecord = storage.entries().find(([key]) => key.includes(':worker:'));
+    expect(workerRecord).toBeDefined();
+    expect(JSON.parse(workerRecord![1]).throughput).toBeUndefined();
+    await bus.stop();
   });
 
   it('transfers ArrayBuffer payloads when transferable is enabled', async () => {
