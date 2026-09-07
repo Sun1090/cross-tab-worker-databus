@@ -146,6 +146,16 @@ fake tasks; each item is verified locally before being marked done.
 - docs: CHANGELOG + api.md (en+zh) document the coordination-event fix and its
   settled route list.
 
+## Definitive verification record (2026-09-07, main @ 8b56ebe)
+
+- pnpm audit (public registry): no known vulnerabilities.
+- verify:compat: 0.20.83 preserves exports/types from v0.20.71.
+- bench (Node smoke) + bench:browser + bench:compare gate: green, no >50% regression.
+- pnpm check (441), lint, e2e (20/20), verify:pack (full-surface), npm pack
+  (105 files, no progress.md), git diff --check: all green.
+- CI + CodeQL green on the final HEAD (after one documented handoff-flake rerun).
+- No open PRs; working tree clean.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
