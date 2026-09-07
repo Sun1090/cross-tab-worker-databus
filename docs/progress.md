@@ -130,6 +130,17 @@ fake tasks; each item is verified locally before being marked done.
   credential-bridge subsections (committed 2e064a9, documentation test green).
 - centrifuge default-factory SSR guards confirmed already covered (stub tests).
 
+## Post-phase-5 genuine fixes (coverage-driven)
+
+- test: bounded dedup eviction path (data-bus.test.ts) — the existing maxEntries:2
+  test only tracked two IDs so the FIFO eviction loop never ran; new test overflows
+  the set and pins "evicted ID re-delivered, in-set ID still suppressed".
+- fix: COORDINATION trace event carried an always-empty routes list (emitted
+  synchronously before subscription writes flushed through the batching writer).
+  Now emitted after the transport open resolves so routes/roles are settled;
+  new test asserts the formatted topicKey@workerId|confirmed=… entries.
+- Local verification: 441 unit tests, lint, e2e-in-isolation green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
