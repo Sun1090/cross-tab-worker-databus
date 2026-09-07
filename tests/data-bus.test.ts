@@ -696,6 +696,31 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('emits a coordination trace event with formatted workers and routes', async () => {
+    const events: unknown[] = [];
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), hub: new ChannelHub(), now: () => Date.now(), randomId: 'coord-trace' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'coord-trace',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      trace: { enabled: true, mode: 'events', sink: event => events.push(event) }
+    });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+
+    const coords = events.filter(event => (event as { type?: string }).type === 'coordination') as Array<Record<string, unknown>>;
+    const withRoute = coords.find(coord => (coord.routes as unknown[]).length > 0);
+    expect(withRoute).toBeTruthy();
+    expect(typeof withRoute!.coordinated).toBe('boolean');
+    expect((withRoute!.workers as unknown[]).length).toBeGreaterThan(0);
+    // Routes are formatted by formatRouteTrace as topicKey@workerId|confirmed=…
+    const routes = withRoute!.routes as string[];
+    expect(routes[0]).toMatch(/^[0-9a-f]{32}@worker-.+\|confirmed=(true|false)$/);
+    await bus.stop();
+  });
+
   it('numbers consecutive failed recovery attempts and resets after success', async () => {
     vi.useFakeTimers();
     const events: unknown[] = [];

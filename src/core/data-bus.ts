@@ -379,19 +379,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     for (const topic of this.topicHandlers.keys()) {
       this.cluster.subscribe(topic);
     }
-    const snapshot = this.cluster.getSnapshot();
-    this.trace.event({
-      type: TRACE_EVENT_TYPE.COORDINATION,
-      coordinated: snapshot.coordinated,
-      activeWorkers: snapshot.workers.filter(worker => worker.role === WORKER_ROLE.ACTIVE).length,
-      workers: snapshot.workers.map(formatWorkerTrace),
-      routes: snapshot.routes.map(formatRouteTrace)
-    });
     // Once startup settles (success or failure), clear the pending gate so a
     // later start()/resumeTransport() can open a fresh operation. Guard against
     // clobbering a promise that suspend/resume may have already swapped in.
     void opening.then(
       () => {
+        // Emit the coordination snapshot only after the transport has opened
+        // and the just-issued subscriptions have flushed, so the routes list
+        // (and the role/assignment picture) is populated rather than always
+        // empty — the synchronous pre-open snapshot would see no routes.
+        this.emitCoordinationTrace();
         if (this.startPromise === opening) this.startPromise = null;
       },
       () => {
@@ -915,6 +912,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       action,
       topic,
       activeTopics: this.transportSubscribedTopics.size
+    });
+  }
+
+  /** Emit the coordination trace snapshot from the current cluster state.
+   * Called after a transport opens (start and recovery), when the role and
+   * route picture has settled — the synchronous pre-open snapshot would see no
+   * routes because their writes are still coalesced in the batch writer. */
+  private emitCoordinationTrace(): void {
+    const snapshot = this.cluster.getSnapshot();
+    this.trace.event({
+      type: TRACE_EVENT_TYPE.COORDINATION,
+      coordinated: snapshot.coordinated,
+      activeWorkers: snapshot.workers.filter(worker => worker.role === WORKER_ROLE.ACTIVE).length,
+      workers: snapshot.workers.map(formatWorkerTrace),
+      routes: snapshot.routes.map(formatRouteTrace)
     });
   }
 
