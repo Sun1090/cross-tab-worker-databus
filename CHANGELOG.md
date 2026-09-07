@@ -17,6 +17,8 @@
 
 ### Changed
 - The demo's config panel shows the load-weighting toggle state (启用 消息/字节/滞后 vs 禁用 纯 Topic 数), and the routing benchmark suite gains a `weighted + lag` owner-selection baseline.
+- The COORDINATION trace event is now emitted after each transport open (start and recovery) with the settled route list; previously it fired synchronously at the top of `start()` where subscription writes were still coalesced, so its `routes` field was always empty.
+- The CI verify job now runs `pnpm audit` (dependency security gate) and the release checklists document the audit step.
 - IndexedDB replay persistence coalesces concurrent `appendBatch` calls into a single read-modify-write transaction (regression: ten concurrent batches = one readwrite transaction) while preserving order against `clear`/`clearTopic`/`clearBefore`.
 - The root export surface is pinned by a regression test, making pre-1.0 API additions/removals deliberate.
 - Benchmarks: load-weighting scoring, `getMetrics` snapshot, and `publishBatch` batch-size sensitivity (10/50/100 per call) baselines.
