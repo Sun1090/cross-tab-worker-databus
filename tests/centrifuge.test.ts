@@ -1159,6 +1159,19 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(plain.messages[0]).not.toHaveProperty('tokenBridge');
   });
 
+  it('forwards credentialProvider through createCentrifugeDataBus (tokenBridge in INIT)', async () => {
+    const worker = new WorkerDouble();
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => 'fresh-token' }
+    });
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    const init = worker.messages.find(message => message.type === 'INIT') as CentrifugeWorkerInput;
+    expect(init).toMatchObject({ type: 'INIT', tokenBridge: true });
+  });
+
   it('resolves a token request through the provider', async () => {
     const worker = new WorkerDouble();
     const transport = new CentrifugeWorkerTransport({
