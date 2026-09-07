@@ -51,7 +51,8 @@ export interface DataBusSubscriptionTraceEvent {
   timestamp: number;
 }
 
-/** Emitted on each reconciliation round to record whether the cluster coordinated. */
+/** Emitted after each transport open (initial start and recovery) to record
+ * the coordinated cluster state, including the settled route list. */
 export interface DataBusCoordinationTraceEvent {
   type: typeof TRACE_EVENT_TYPE.COORDINATION;
   coordinated: boolean;
