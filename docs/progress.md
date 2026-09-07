@@ -140,6 +140,11 @@ fake tasks; each item is verified locally before being marked done.
   Now emitted after the transport open resolves so routes/roles are settled;
   new test asserts the formatted topicKey@workerId|confirmed=… entries.
 - Local verification: 441 unit tests, lint, e2e-in-isolation green.
+- bench:browser + bench:compare gate re-verified on the final toolchain (TS6 /
+  esbuild 0.28 / eslint 10): databus matrix numbers realistic, no regression
+  over 50%. Full e2e 20/20 green.
+- docs: CHANGELOG + api.md (en+zh) document the coordination-event fix and its
+  settled route list.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
