@@ -4,6 +4,7 @@ import {
   createWebSocketDataBus
 } from '../src/websocket';
 import type { WebSocketLike } from '../src/websocket';
+import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 /** Controllable WebSocket double: records sent frames, lets tests fire
  * lifecycle events and inject server frames. */
@@ -509,5 +510,33 @@ describe('createWebSocketDataBus', () => {
 
     await bus.stop();
     expect(socket.readyState).toBe(3);
+  });
+});
+
+describe('createWebSocketDataBus factory', () => {
+  it('forwards loadWeighting so the worker record starts sampling throughput', async () => {
+    const storage = new MemoryStorage();
+    let now = 1_000;
+    const environment = createFakeEnvironment({ storage, hub: new ChannelHub(), now: () => now, randomId: 'ws-weighting' });
+    const socket = new FakeWebSocket('wss://example.test/ws');
+    const bus = createWebSocketDataBus({
+      connection: {
+        url: 'wss://example.test/ws',
+        webSocketFactory: () => socket as unknown as WebSocketLike
+      },
+      environment: environment.environment,
+      loadWeighting: { messageRateWeight: 1 }
+    });
+    bus.subscribe('demo.topic', () => undefined);
+    await bus.ready();
+    now += 3_000;
+    environment.runIntervals();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const workerRecord = storage.entries().find(([key]) => key.includes(':worker:'));
+    expect(workerRecord).toBeDefined();
+    expect(JSON.parse(workerRecord![1]).throughput).toMatchObject({ windowMs: 3_000, overrunMs: 0 });
+    await bus.stop();
   });
 });
