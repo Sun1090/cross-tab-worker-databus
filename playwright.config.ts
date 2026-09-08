@@ -23,7 +23,11 @@ export default defineConfig({
   // Multi-tab lifecycle tests are timing-sensitive; serialized workers trade
   // a little CI time for stable scheduling on shared runners.
   ...(process.env.CI ? { workers: 1 } : {}),
-  timeout: 60_000,
+  // 90s test ceiling: convergence waits (30–45s) legitimately stack with
+  // HANDOFF_TIMEOUT_MS (60s) polls inside one test, so the old 60s ceiling
+  // failed slow-runner runs whose polls were still healthy. Individual soak
+  // tests raise this further via test.setTimeout.
+  timeout: 90_000,
   // 20s default assertion ceiling: generous for slow shared runners; polls that
   // need more carry explicit timeouts.
   expect: { timeout: 20_000 },

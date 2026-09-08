@@ -687,6 +687,11 @@ test.describe('cross-tab databus demo — storage-event coordination fallback', 
   });
 
   test('pagehide handoff migrates the owner over the storage-event channel', async ({ context }) => {
+    // Storage-event coordination is slower than BroadcastChannel (poll-based
+    // reads + storage-event latency), and the 45s convergence wait before the
+    // handoff shares this test's budget: without the raised ceiling, a healthy
+    // but slow HANDOFF_TIMEOUT_MS poll dies on the default 60s test timeout.
+    test.setTimeout(120_000);
     const topic = `e2e.storage.migrate.${Date.now()}`;
     const tabA = await openStorageEventTab(context, topic);
     const tabB = await openStorageEventTab(context, topic);
