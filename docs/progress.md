@@ -173,6 +173,22 @@ fake tasks; each item is verified locally before being marked done.
   browser-benchmark gate bullet (EN/ZH parity).
 - bench:compare --fail-above-pct 50 gate green on the current archive.
 
+## Phase 6 result (pushed 0f94c41..fa10235..27c3af6, CI green on first try)
+
+- fa10235: storage-event handoff timeout-budget fix (90s global + 120s test),
+  bench:trend generator + docs/benchmarks.md (en+zh) shipped in the tarball,
+  release checklists document the benchmark gate (zh gained the missing bullet).
+- 27c3af6: systematic per-test budget audit (scripted) — eight more tests
+  stacked explicit 30–45s waits above the ceiling without their own
+  test.setTimeout; each now has a worst-case budget. Full e2e 20/20 green.
+- CI green on both pushes with zero reruns — first push since the flake was
+  documented that needed no handoff-flake rerun, which is itself evidence the
+  diagnosis (budget stacking, not runner flake) was correct.
+- Local verification at fa10235: 445 unit tests, lint, e2e 20/20, bench,
+  verify:compat (v0.20.71 baseline), verify:pack, audit (public registry),
+  npm pack dry-run (107 files, benchmarks ship, progress.md excluded),
+  git diff --check — all green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
