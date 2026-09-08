@@ -345,7 +345,6 @@ test.describe('cross-tab databus demo', () => {
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
     test.setTimeout(120_000);
-    test.setTimeout(90_000);
     const topic = `e2e.soak.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
@@ -438,7 +437,6 @@ test.describe('cross-tab databus demo', () => {
 test.describe('cross-tab databus demo — BFCache round trip', () => {
   test('pagehide hands ownership off and pageshow restores a standby receiver', async ({ context }) => {
     test.setTimeout(120_000);
-    test.setTimeout(90_000);
     const topic = `e2e.bfcache.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
