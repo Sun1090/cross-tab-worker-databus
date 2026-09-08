@@ -14,7 +14,7 @@ Use this checklist for each pre-1.0 release. The repository does not publish fro
 1. Update `package.json`, `CHANGELOG.md`, and both roadmap files.
 2. Run `pnpm check`, `pnpm lint`, `pnpm bench`, `pnpm test:e2e`, `pnpm bench:browser`, `pnpm verify:pack`, `pnpm verify:compat`, and `git diff --check`. (`verify:compat` asserts the package `exports` subpaths and type fields present in the `COMPAT_BASE_TAG` baseline still exist; `verify:pack` steam-imports the full root public surface plus every subpath in ESM and CJS from the packed tarball.)
 3. Gate dependency security: `pnpm audit --registry=https://registry.npmjs.org` (the configured mirror registry lacks the audit endpoint; CI runs it on the public registry in the verify job). Fail the release on any known-vulnerability advisory; `pnpm-workspace.yaml` overrides pin patched ranges.
-4. Gate browser benchmark regressions: `pnpm bench:compare --fail-above-pct 50` after two `pnpm bench:browser` runs, using a 50% ceiling so unrelated runner noise (see the known shared-runner jitter note) cannot fail the gate; a baseline shift (e.g. a metric becoming real instead of a no-op) is an expected one-time failure.
+4. Gate browser benchmark regressions: `pnpm bench:compare --fail-above-pct 50` after two `pnpm bench:browser` runs, using a 50% ceiling so unrelated runner noise (see the known shared-runner jitter note) cannot fail the gate; a baseline shift (e.g. a metric becoming real instead of a no-op) is an expected one-time failure. Refresh the long-run trend doc with `pnpm bench:trend` and commit it when the tables change.
 5. Confirm the package contains only intended files with `npm pack --dry-run --json`.
 6. Commit, tag the exact version, and push `main --tags`.
 

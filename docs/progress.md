@@ -156,11 +156,35 @@ fake tasks; each item is verified locally before being marked done.
 - CI + CodeQL green on the final HEAD (after one documented handoff-flake rerun).
 - No open PRs; working tree clean.
 
+## Phase 6 (in progress — flake-class fix + bench trend doc)
+
+- Real flake defect found and fixed: the storage-event pagehide-handoff E2E
+  polled with HANDOFF_TIMEOUT_MS (60 s) under the default 60 s test timeout —
+  its 45 s convergence wait stacked with the handoff poll, so a healthy-but-
+  slow run died on the test-level ceiling. Playwright default timeout raised
+  to 90 s (covers all stacked budgets) and the test now sets 120 s explicitly.
+  Full e2e 20/20 green locally after the fix.
+- Bench drift: new `pnpm bench:trend` (scripts/bench-trend.mjs) generates
+  docs/benchmarks.md + zh mirror from the archived bench-results/ reports
+  (latest/previous/delta + all-time best per metric). Both docs registered in
+  the docs indexes and the package files allowlist (npm pack: 107 files, both
+  ship; progress.md still excluded). Release checklist (en+zh) gained the
+  benchmark-gate step; zh checklist additionally gained the previously missing
+  browser-benchmark gate bullet (EN/ZH parity).
+- bench:compare --fail-above-pct 50 gate green on the current archive.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
   handoff suite to a dedicated workflow if the shared-runner failure rate stays high.
+  -> RESOLVED in phase 6: the storage-event handoff test's budgets stacked past
+  the 60s test timeout; global timeout now 90s + explicit 120s there. Remaining
+  shared-runner slowness shows up as slower passes, not failures.
 - Add a browser benchmark trend doc or CI gate for bench:browser drift.
+  -> DONE in phase 6: pnpm bench:trend generates docs/benchmarks.md (en+zh)
+  from the bench-results archive; bench:compare gate documented in both
+  release checklists. (A CI regression-threshold gate stays deliberately
+  local-only: shared-runner timing noise makes numeric CI gates unreliable.)
 - Release-readiness: run the full release checklist dry (verify:published needs a
   published version; everything else verified locally).
 

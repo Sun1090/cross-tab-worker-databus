@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Added
+- `pnpm bench:trend` (`scripts/bench-trend.mjs`) generates a long-run browser benchmark trend doc (`docs/benchmarks.md` + Chinese mirror) from the archived `bench-results/` reports: per-metric latest/previous/delta plus an all-time best per latency. Both docs ship in the tarball and are indexed in the documentation READMEs; the release checklist (both languages) now includes the benchmark-regression gate step, and the Chinese checklist gained the previously missing browser-benchmark gate bullet (EN/ZH parity).
 - Opt-in `loadWeighting` adaptive owner weighting (`messageRateWeight`, `byteRateWeight`, `scheduleLagWeight`): workers sample their own fan-out traffic and heartbeat scheduling overrun per window and publish it with the worker record; new-route owner selection adds the normalized rates and lag ratio to the topic count. Default (unset) keeps pure topic-count routing and existing routes stay sticky. `WorkerThroughputSample` gains `overrunMs`, a browser-native proxy for a starved event loop.
 - Async credential refresh bridge for the Centrifuge worker: opt-in `credentialProvider` (`getToken` / `getChannelToken`) runs on the main thread, with the Worker requesting each fresh token over a `TOKEN_REQUEST` / `TOKEN_RESPONSE` / `TOKEN_ERROR` exchange. Function-valued Centrifuge options stay out of the structured-clone boundary; legacy configs keep byte-identical behavior; pending requests are settled on STOP.
 - Synchronous trace visibility: `DataBusTraceReporter.getMetrics()` snapshots the current aggregation window without a sink or flush; `CrossTabDataBus.getMetrics()` and `getDiagnostics().metrics` expose it, and `getDiagnostics().trace` / `getHealthSummary().trace` report `asyncSink` mode and queued-event depth (back-pressure visibility).
@@ -16,6 +17,7 @@
 - `verify:published` now smoke-imports the same full root public surface as `verify:pack`, so the release gate exercises the routing/observability exports end to end.
 
 ### Changed
+- Playwright E2E default timeout raised 60 s → 90 s so convergence waits (30–45 s) can legitimately stack with `HANDOFF_TIMEOUT_MS` (60 s) polls inside one test; the storage-event handoff test — the one suite whose 45 s convergence + 60 s handoff previously exceeded the old ceiling — now carries an explicit 120 s budget. This removes the documented flake class where a healthy but slow handoff poll died on the test-level timeout rather than its own.
 - The demo's config panel shows the load-weighting toggle state (启用 消息/字节/滞后 vs 禁用 纯 Topic 数), and the routing benchmark suite gains a `weighted + lag` owner-selection baseline.
 - The COORDINATION trace event is now emitted after each transport open (start and recovery) with the settled route list; previously it fired synchronously at the top of `start()` where subscription writes were still coalesced, so its `routes` field was always empty.
 - The CI verify job now runs `pnpm audit` (dependency security gate) and the release checklists document the audit step.
