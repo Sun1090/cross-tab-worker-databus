@@ -263,6 +263,18 @@ fake tasks; each item is verified locally before being marked done.
   Not chased further; the behavior is pinned.
 - CI green on 8661f28 (verify + browser + CodeQL).
 
+## Phase 10 (vue composable edge paths)
+
+- Three new vue.test.ts cases (470 → 473): superseded-start cycle stops the
+  abandoned bus without mounting it; identical bus+topic sync re-run takes
+  the no-op early return (no resubscribe churn); reactive handler swap
+  updates latestHandler in place without resubscribing.
+- Remaining vue.ts uncovered lines (20: generation-guard continuation that
+  only fires when stop() is still pending across a supersede; 45/54:
+  defensive watches unreachable through the public API) are documented
+  defensive paths — behavior already pinned by the new tests.
+- CI green on 0523123 (verify + browser + CodeQL).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
