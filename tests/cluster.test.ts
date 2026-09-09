@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkerClusterRuntime } from '../src/core/cluster';
 import { approximatePayloadBytes } from '../src/core/routing';
-import type { WorkerRecord } from '../src/core/types';
+import type { WorkerControlAction, WorkerRecord } from '../src/core/types';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -896,8 +896,8 @@ describe('WorkerClusterRuntime publishBatch', () => {
     clusterKey: string;
     tabId: string;
     workerId: string;
-    onControl: ReturnType<typeof vi.fn>;
-    onEvent?: ReturnType<typeof vi.fn>;
+    onControl: (action: WorkerControlAction, topic: string, data?: unknown, messageId?: string, timestamp?: number) => void;
+    onEvent?: (eventType: string, payload: unknown, sourceWorkerId: string, originTabId?: string) => void;
   }): { runtime: WorkerClusterRuntime; env: ReturnType<typeof createFakeEnvironment> } {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

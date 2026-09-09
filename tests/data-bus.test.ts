@@ -1498,7 +1498,7 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
-  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; sweepMs?: number; now?: () => number }, trace?: (event: Parameters<NonNullable<ConstructorParameters<typeof CrossTabDataBus>[0]['trace']>['sink']>[0]) => void) {
+  function makeReplayBus(replay?: { maxPerTopic?: number; retentionMs?: number; retentionSweepMs?: number; persistenceRetry?: { maxAttempts?: number; backoffMs?: number }; persistence?: { load: () => Promise<ReadonlyArray<{ topic: string; data: unknown; timestamp?: number }>>; append: (message: { topic: string; data: unknown; timestamp?: number }) => Promise<void>; clearTopic?: () => Promise<void>; clearBefore?: (timestamp: number) => Promise<void>; clear?: () => Promise<void> } }, dedup?: { maxEntries?: number; ttlMs?: number; sweepMs?: number; adaptiveTtl?: { minMs: number; maxMs: number }; now?: () => number }, trace?: (event: Parameters<NonNullable<ConstructorParameters<typeof CrossTabDataBus>[0]['trace']>['sink']>[0]) => void) {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'replay' });
     const transport = new FakeTransport<unknown>();
@@ -1755,6 +1755,75 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     await bus.stop();
   });
 
+  it('reports a failing retention cleanup through onError and still completes later flushes', async () => {
+    const persistenceErrors: unknown[] = [];
+    const failures = new Set<number>();
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(async () => {
+        if (failures.has(persistence.clearBefore.mock.calls.length)) throw new Error('retention flush failed');
+      })
+    };
+    const { bus, transport } = makeReplayBus({ retentionMs: 60_000, persistence });
+    bus.onError(error => persistenceErrors.push(error));
+    await bus.ready();
+    // Hydration issues its own pre-load retention pass at construction; wait it
+    // out so the baseline below counts only it.
+    await vi.waitFor(() => expect(persistence.clearBefore.mock.calls.length).toBeGreaterThanOrEqual(1));
+    const baseline = persistence.clearBefore.mock.calls.length;
+    failures.add(baseline + 1); // the next cleanup pass fails exactly once
+
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1, undefined, 1_700_000_000_000);
+    await vi.waitFor(() => expect(persistence.clearBefore.mock.calls.length).toBe(baseline + 1));
+    await vi.waitFor(() => expect(persistenceErrors).toHaveLength(1));
+    expect((persistenceErrors[0] as Error).message).toBe('retention flush failed');
+
+    // A later publication still gets a working cleanup — one failure does not
+    // wedge the retention pipeline.
+    failures.clear();
+    transport.emit('t', 2, undefined, 1_700_000_000_100);
+    await vi.waitFor(() => expect(persistence.clearBefore.mock.calls.length).toBe(baseline + 2));
+    expect(persistenceErrors).toHaveLength(1);
+    await bus.stop();
+  });
+
+  it('keeps draining retention cleanups queued while one pass was in flight', async () => {
+    // The second publication lands while the first clearBefore is still
+    // pending; the cleanup loop must drain the newer cutoff afterwards with a
+    // strictly greater cutoff (the coalesced queue, not a lost update).
+    const resolvers: Array<() => void> = [];
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(
+        () => new Promise<void>(resolve => resolvers.push(resolve))
+      )
+    };
+    const { bus, transport } = makeReplayBus({ retentionMs: 60_000, persistence });
+    await bus.ready();
+    // Let the hydration pass (construction-time) resolve first.
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1));
+    resolvers[0]!();
+    // The pre-load cleanup has no queued successor, so the drain ends here.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(persistence.clearBefore).toHaveBeenCalledOnce();
+
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1, undefined, 1_700_000_000_000);
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2));
+    transport.emit('t', 2, undefined, 1_700_000_000_100);
+    // Still one pass in flight — the newer cutoff is coalesced.
+    expect(persistence.clearBefore).toHaveBeenCalledTimes(2);
+    resolvers[1]!();
+    // Microtask drain: the loop picks up the queued newer cutoff and issues
+    // the second pass instead of dropping the coalesced update.
+    await vi.waitFor(() => expect(persistence.clearBefore).toHaveBeenCalledTimes(3));
+    resolvers[2]!();
+    await bus.stop();
+  });
+
   it('rejects invalid replay retention windows', () => {
     for (const retentionMs of [0, -1, NaN, Infinity]) {
       expect(() => makeReplayBus({ retentionMs })).toThrow(TypeError);
@@ -1791,6 +1860,25 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     transport.emit('t', { value: 5 }, 'a'); // evicted → delivered again
     expect(seen).toEqual([{ value: 1 }, { value: 2 }, { value: 4 }, { value: 5 }]);
     await bus.stop();
+  });
+
+  it('rejects invalid dedup options before the bus is constructed', () => {
+    for (const maxEntries of [0, -1, 1.5, NaN, Infinity]) {
+      expect(() => makeReplayBus(undefined, { maxEntries })).toThrow(TypeError);
+    }
+    for (const ttlMs of [0, -1, NaN, Infinity]) {
+      expect(() => makeReplayBus(undefined, { ttlMs })).toThrow(TypeError);
+    }
+    expect(() => makeReplayBus(undefined, { sweepMs: 0 })).toThrow(TypeError);
+    expect(() => makeReplayBus(undefined, { maxEntries: 1, ttlMs: 1_000, sweepMs: 1_000 })).not.toThrow();
+  });
+
+  it('rejects invalid adaptive dedup TTL bounds with a distinct message', () => {
+    expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 0, maxMs: 1_000 } })).toThrow(TypeError);
+    expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 2_000, maxMs: 1_000 } })).toThrow(
+      'dedup.adaptiveTtl bounds are invalid.'
+    );
+    expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 100, maxMs: 1_000 } })).not.toThrow();
   });
 
   it('does not add dedup-suppressed publications to replay history or persistence', async () => {

@@ -189,6 +189,38 @@ fake tasks; each item is verified locally before being marked done.
   npm pack dry-run (107 files, benchmarks ship, progress.md excluded),
   git diff --check — all green.
 
+## Phase 7 (coverage-driven gap hunt — in progress)
+
+- Coverage run (445 tests) identified real untested error paths: storage-utils
+  82% (all four swallow branches), websocket binary error paths, dedup option
+  validation branches, retention-cleanup failure/draining, IndexedDB
+  read-request failures.
+- New tests (15 added, 445 → 460):
+  - tests/storage-utils.test.ts — new fault-injection file (BrokenStorage/
+    CorruptStorage doubles); storage-utils now 100% stmts+branches.
+  - websocket.test.ts — poisoned-Blob conversion isolation + 16-bit topic-
+    length boundary (0x10000 errors with zero sends; exactly 0xffff frames).
+  - centrifuge.test.ts — factory-less SSR degradation resolves `local` with
+    no error; throwing injected factory surfaces instead of silent degrade.
+  - data-bus.test.ts — invalid dedup options (maxEntries/ttlMs/sweepMs/
+    adaptiveTtl bounds) throw before construction; failing durable retention
+    pass reports once and later flushes still work; queued cutoff drained by
+    the cleanup loop. (Discovery: hydration issues its own pre-load
+    clearBefore pass at construction — tests now baseline it.)
+  - replay-persistence.test.ts — load/clearBefore request-failure paths
+    reject + invalidate; fault-proxy tx wrapper now forwards oncomplete/
+    onerror (was structurally impossible to drive the clear path before).
+- Coverage after: storage-utils 100/100, validation 100/96.55, websocket
+  97.19/85 (remaining: SSR guard + default-factory branches unreachable in
+  Node), overall 96.31 → 96.79 stmts (vitest-4 accounting includes barrel
+  files; raw source numbers improved across the board).
+- Security: new GHSA-82fw-gwwq-j7x9 advisory (vitest/@vitest/mocker path
+  traversal) failed the audit gate → vitest upgraded 3.2 → 4.1.11 with
+  matching @vitest/coverage-v8. Full suite re-verified on the new major:
+  typecheck (one explicit-callback typing fix in cluster.test.ts), 460 unit,
+  coverage, bench, e2e 20/20, verify:pack, verify:compat, audit clean.
+- Full verification: typecheck, 460 unit, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
