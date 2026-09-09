@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkerClusterRuntime } from '../src/core/cluster';
 import { approximatePayloadBytes } from '../src/core/routing';
 import type { WorkerControlAction, WorkerRecord } from '../src/core/types';
+import type { WorkerClusterMessage } from '../src/core/types';
+import { CLUSTER_MESSAGE_TYPE } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -1383,6 +1385,64 @@ describe('WorkerClusterRuntime resilience', () => {
     await Promise.resolve();
     expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-recovery');
     expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
+  });
+
+  it('recovers a real pagehide handoff whose ROUTE_RELEASED is lost on the wire', async () => {
+    // End-to-end version of the stranded-handoff regression: a genuine
+    // pageHide() writes the handoff route, but the ACK itself is dropped in
+    // transit (the CI soak failure mode) — no hand-crafted storage. The new
+    // owner must still converge once the handoff goes stale.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-handoff-wire-loss');
+    await Promise.resolve();
+    b.runtime.subscribe('topic-handoff-wire-loss');
+    await Promise.resolve();
+    expect(a.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-wire-loss');
+
+    // Drop exactly one ROUTE_RELEASED: the handoff route lands, the ACK does not.
+    const originalSend = hub.send.bind(hub);
+    let ackDropped = false;
+    hub.send = (source: { name: string }, message: WorkerClusterMessage) => {
+      if (!ackDropped && message.type === CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED) {
+        ackDropped = true;
+        return;
+      }
+      originalSend(source as never, message);
+    };
+    a.env.pageHide();
+    await Promise.resolve();
+    expect(ackDropped).toBe(true);
+
+    // The route really did move to worker-b, unconfirmed, with the handoff
+    // marker — written by the actual handoff code, not the test.
+    const stranded = b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b');
+    expect(stranded).toMatchObject({ handoffFromWorkerId: 'worker-a' });
+    expect(stranded?.confirmedAt).toBeUndefined();
+    // Fresh handoff: the new owner waits, no premature recovery.
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('topic-handoff-wire-loss');
+
+    now += 10_001;
+    b.env.runIntervals();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-wire-loss');
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-wire-loss', undefined);
+    expect(
+      b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b')?.confirmedAt
+    ).toBe(now);
   });
 
   it('has the old owner release and re-ACK when it still holds a handed-off assignment', async () => {

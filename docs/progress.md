@@ -370,6 +370,17 @@ fake tasks; each item is verified locally before being marked done.
 - CI green: verify + browser + CodeQL. Docs-only follow-ups not needed
   (no shipped-doc changes this round).
 
+## Phase 15 (in progress — wire-loss end-to-end regression + soak repetition)
+
+- New cluster regression drives a REAL pageHide() with the ROUTE_RELEASED
+  dropped in transit (hub.send monkey-patch): asserts the handoff route
+  genuinely moves to the survivor unconfirmed, the fresh handoff waits, and
+  post-TTL reconcile converges with confirmation. Mutation-checked (branch
+  disabled → fails; enabled → passes).
+- Soak E2E repeated 3x locally green (2.4–7.4 s each) on top of the earlier
+  full 20/20 + CI green.
+- 477 unit tests green; typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
