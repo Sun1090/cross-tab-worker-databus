@@ -501,6 +501,10 @@ fake tasks; each item is verified locally before being marked done.
 - Docs: API reference trace section (EN+ZH) + CHANGELOG Added entry.
 - 482 unit green; typecheck, lint, verify:compat, diff-check green.
 
+## Phase 24 result (pushed 7e2db21..a203094, CI green on first try)
+
+- CI green: verify + browser + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
