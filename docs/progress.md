@@ -394,6 +394,23 @@ fake tasks; each item is verified locally before being marked done.
   evidence: 4 consecutive local full-suite greens + soak isolation 3/3 +
   green CI browser jobs on every push since the fix, zero retries.
 
+## Phase 17 (in progress — multi-round stranded-handoff soak)
+
+- New cluster soak: 3 consecutive owners each pageHide() with the ACK
+  dropped; every round converges on exactly one confirmed holder with the
+  marker cleared and a monotonically increasing generation, and a pageshowed
+  owner reuses the replacement route instead of taking it back.
+- Two test-harness findings fixed in the test (not src): time must advance
+  in 1 s heartbeat steps (a single +11 s jump strands peer heartbeats in
+  writer pending queues, making live peers look TTL-dead — fake-clock
+  artifact), and rounds must pageshow the suspended owner (last-subscriber
+  -out legitimately deletes the route by design).
+- Noted dynamics (pre-existing class, also present in the crash-recovery
+  path): two survivors may re-elect on the same stale view with
+  last-writer-wins; the holder's next reconcile self-heals confirmation via
+  the normal unconfirmed-route retry — covered by the settle round.
+- 478 unit tests green; typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
