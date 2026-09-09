@@ -102,6 +102,86 @@ describe('Vue composables adapter', () => {
     app.unmount();
   });
 
+  it('superseded start cycles stop the abandoned bus and never mount it', async () => {
+    // Change deps while the first stop() promise is still pending: the first
+    // start's continuation must see a stale generation and return before
+    // creating a second instance.
+    const first = fakeBus();
+    const second = fakeBus();
+    const source = ref(0);
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      useCrossTabDataBus(() => (source.value === 0 ? first : second) as never, [source]);
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    source.value = 1;
+    await nextTick();
+    await Promise.resolve();
+    await Promise.resolve();
+    // The abandoned instance was stopped by the superseding cycle and the
+    // surviving bus is the second one.
+    expect(first.stop).toHaveBeenCalled();
+    expect(second.ready).toHaveBeenCalled();
+    app.unmount();
+    expect(second.stop).toHaveBeenCalled();
+  });
+
+  it('re-running the subscription with identical bus and topic is a no-op', async () => {
+    const bus = fakeBus();
+    const received: unknown[] = [];
+    const topic = ref('stable.topic');
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      useCrossTabSubscription(active, topic, message => received.push(message.data));
+      return () => h('span', active.value ? 'up' : 'down');
+    }}));
+    app.mount(host);
+    await nextTick();
+    expect(bus.subscribe).toHaveBeenCalledTimes(1);
+    bus.emit('stable.topic', 1);
+    expect(received).toEqual([1]);
+
+    // Writing the same topic value re-runs sync, which must take the identical
+    // bus+topic early return — no unsubscribe/resubscribe churn.
+    topic.value = 'stable.topic';
+    await nextTick();
+    expect(bus.subscribe).toHaveBeenCalledTimes(1);
+    bus.emit('stable.topic', 2);
+    expect(received).toEqual([1, 2]);
+    app.unmount();
+    expect(bus.stop).not.toHaveBeenCalled(); // subscription composable does not own the bus
+  });
+
+  it('swaps the message handler reactively without resubscribing', async () => {
+    const bus = fakeBus();
+    const handlerA = vi.fn();
+    const handlerB = vi.fn();
+    const pick = ref(handlerA);
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      useCrossTabSubscription(active, 'topic', message => pick.value(message));
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    bus.emit('topic', 1);
+    expect(handlerA).toHaveBeenCalledTimes(1);
+    expect(handlerB).not.toHaveBeenCalled();
+
+    pick.value = handlerB;
+    await nextTick();
+    // The handler watch updates latestHandler in place — same subscription.
+    expect(bus.subscribe).toHaveBeenCalledTimes(1);
+    bus.emit('topic', 2);
+    expect(handlerA).toHaveBeenCalledTimes(1);
+    expect(handlerB).toHaveBeenCalledTimes(1);
+    app.unmount();
+  });
+
   it('mirrors the health summary and refreshes on status changes', async () => {
     const bus = fakeBus();
     const host = document.createElement('div');
@@ -137,7 +217,7 @@ describe('useCrossTabHealth edge cases', () => {
       },
       onError: () => () => {}
     } as unknown as CrossTabDataBus<unknown, unknown>;
-    const active = ref(bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
+    const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
     const host = document.createElement('div');
     const app = createApp(defineComponent({ setup() {
       const health = useCrossTabHealth(active, { intervalMs: 20 });
