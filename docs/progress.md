@@ -433,6 +433,20 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 19 (in progress — cluster defensive-branch coverage)
+
+- pause()-path orphan prune (`readSubscriberTabIds` duplicate branch):
+  new test crafts a ghost subscriber with no worker record and drives a
+  real pageHide — the ghost is ignored/removed in pause() itself and the
+  route is deleted (no live subscribers) rather than handed off.
+  Mutation-checked (branch removed → fails; restored → passes). This also
+  documents why the duplicate prune must stay despite reconcile's cleanup
+  running first (pause never runs that cleanup).
+- Unknown CONTROL action wire-compat: a future-protocol action falls
+  through to the generic metadata + onControl dispatch without throwing.
+  Mutation-checked (default returns early → fails; restored → passes).
+- 482 unit tests green (480 + 2); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
