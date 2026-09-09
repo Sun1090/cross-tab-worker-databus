@@ -1229,6 +1229,78 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(storage.entries().some(([key]) => key.includes(':subscriber:'))).toBe(false);
   });
 
+  it('prunes a dead-tab subscriber inside pause() without a prior reconcile', async () => {
+    // readSubscriberTabIds carries its own orphan-prune branch even though
+    // reconcile's cleanupOrphanedSubscribers normally runs first: pause()
+    // never runs that cleanup, so a subscriber record whose tab has no
+    // worker record must be ignored (and removed) right there — otherwise
+    // the dead tab would count as a remaining subscriber and the route
+    // would be handed off instead of deleted.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    // A ghost subscriber with no worker record anywhere in storage.
+    const ownEntry = storage.entries().find(([key]) => key.includes(':subscriber:'))!;
+    const ghostKey = ownEntry[0].replace(':tab-a', ':tab-ghost');
+    storage.setItem(ghostKey, JSON.stringify({ tabId: 'tab-ghost', updatedAt: now }));
+    await Promise.resolve();
+
+    a.env.pageHide();
+    await Promise.resolve();
+
+    // Both the owner's own record and the ghost are gone, and with no live
+    // subscribers left the route is deleted rather than handed off.
+    expect(storage.entries().some(([key]) => key.includes(':subscriber:'))).toBe(false);
+    expect(storage.entries().some(([key]) => key.includes(':route:'))).toBe(false);
+  });
+
+  it('forwards an unknown CONTROL action through the generic dispatch without crashing', async () => {
+    // A future-protocol CONTROL action must not break the receiver: the
+    // switch falls through to the generic metadata + onControl dispatch.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const channelNames: string[] = [];
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    b.env.environment.createChannel = name => {
+      channelNames.push(name);
+      return hub.create(name);
+    };
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    const topicKey = JSON.parse(storage.entries().find(([key]) => key.includes(':route:'))![1]).topicKey as string;
+
+    expect(() =>
+      hub.create(channelNames[0]!).postMessage({
+        type: 'CONTROL',
+        sourceWorkerId: 'worker-a',
+        targetWorkerId: 'worker-b',
+        // A future protocol version's action: not part of the local union,
+        // exactly what the wire-compat path must tolerate.
+        action: 'FUTURE-ACTION' as WorkerControlAction,
+        topic: 'topic-a',
+        topicKey
+      })
+    ).not.toThrow();
+    expect(controlB).toHaveBeenCalledWith('FUTURE-ACTION', 'topic-a', undefined);
+  });
+
   it('cleans up an orphaned route once no subscriber tab remains alive', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
