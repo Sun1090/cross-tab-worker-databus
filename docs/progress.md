@@ -301,6 +301,36 @@ fake tasks; each item is verified locally before being marked done.
   data-bus/replay-persistence/vue, vitest 4.1.11 security upgrade,
   dev-dependency minor/patch batch, demo a11y (live regions + labels).
 
+## Phase 12 (in progress — stranded-handoff root-cause fix)
+
+- CI failure on docs-only HEAD 07d1cf9: multi-tab soak stuck 60 s x3 at
+  `demo.spec.ts:380` (`waitForSingleOwner(survivors)` returns 0 holders).
+  Trace forensics: the suspended owner shows `lifecycle:suspend` + `已断开`
+  (pause() ran), the storage route still names the dead owner's worker, both
+  survivors report 0 assigned topics.
+- Root cause (real product bug, not runner noise): if the previous owner's
+  `ROUTE_RELEASED` never reaches the new owner, the route sits unconfirmed
+  with `handoffFromWorkerId` set and a live new owner — and reconcile
+  deliberately never retries SUBSCRIBE in that state (strict-handoff
+  no-overlap rule), with no deadline. Permanent stall; the 60 s poll and the
+  120 s test budget only masked it.
+- Fix (`src/core/cluster.ts` reconcileSubscriptions + `isStaleHandoff`
+  helper): once the previous owner is gone AND the handoff is older than a
+  worker TTL, re-elect a live owner with a fresh generation and a cleared
+  handoff marker. The age gate was load-bearing during development: the first
+  cut without it broke the four-tab handoff test, because a peer observing a
+  just-written (confirmation not yet flushed) route mistook it for stranded.
+- Tests (`tests/cluster.test.ts`, +2): stranded-route + dead owner recovers
+  after the TTL (gen 3, confirmed, marker cleared, single SUBSCRIBE, stable
+  on re-reconcile); same state with the previous owner alive keeps waiting
+  (no re-elect, no SUBSCRIBE). Mutation-checked: recovery test fails with
+  the src fix reverted. 475 unit tests green.
+- Docs: architecture.md + zh rewritten handoff-recovery invariants
+  (stranded-handoff subsection; loss-matrix bullet now describes the
+  TTL-gated re-election instead of "re-elect when the owner resumes");
+  CHANGELOG [Unreleased] gains a Fixed entry (no scoped package names —
+  docs-guard safe).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

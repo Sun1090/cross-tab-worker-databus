@@ -1303,6 +1303,136 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(b.runtime.getSnapshot().routes[0]?.confirmedAt).toBe(now);
   });
 
+  it('recovers a stranded unconfirmed handoff once the previous owner is dead', async () => {
+    // Regression: if the previous owner's ROUTE_RELEASED never arrives
+    // (dropped channel message under load, or a crash between the route
+    // write and the ACK), the route sat unconfirmed forever — the new owner
+    // kept waiting for the ACK while peers treated the live new owner as
+    // authoritative and stayed out. Reconcile must re-elect a live owner
+    // once the previous owner is gone AND the handoff has been stuck longer
+    // than a worker TTL (the age gate keeps a fresh handoff — whose
+    // confirmation may simply not have flushed yet — from being mistaken
+    // for a stranded one).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-handoff-recovery');
+    await Promise.resolve();
+    b.runtime.subscribe('topic-handoff-recovery');
+    await Promise.resolve();
+    expect(a.runtime.isAssigned('topic-handoff-recovery')).toBe(true);
+
+    // Strand the handoff mid-flight: the route names worker-b with worker-a
+    // as the previous owner, but the ACK is never delivered. The original
+    // route was confirmed by worker-a, so confirmedAt must be stripped —
+    // otherwise the crafted record is not actually unconfirmed.
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const { confirmedAt: _dropped, ...route } = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    void _dropped;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    // Kill the previous owner. Its pause() sees the route no longer points
+    // at itself, so it sends no ACK — exactly the stranded state. The
+    // immediate reconcile (driven by the REGISTRY nudge) must NOT recover
+    // yet: the handoff is brand new and the ACK could still be in flight.
+    // (Assertions use the snapshot's in-memory assignment list — the same
+    // signal the e2e owner poll reads — because isAssigned() also returns
+    // true for a storage route that merely points at this worker.)
+    a.runtime.stop();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('topic-handoff-recovery');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
+
+    // Past the worker TTL with no confirmation, the next reconcile re-elects.
+    now += 10_001;
+    b.env.runIntervals();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-recovery');
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
+    const recovered = b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b');
+    expect(recovered).toMatchObject({ generation: 3, confirmedAt: now });
+    expect(recovered).not.toHaveProperty('handoffFromWorkerId');
+
+    // A further reconcile round stays converged on the single owner.
+    controlB.mockClear();
+    b.env.runIntervals();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-recovery');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
+  });
+
+  it('keeps waiting for ROUTE_RELEASED while the previous owner is still alive', async () => {
+    // The recovery above must not fire while the previous owner is live:
+    // retrying SUBSCRIBE then would recreate the overlap the strict handoff
+    // exists to prevent.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-handoff-wait');
+    await Promise.resolve();
+    b.runtime.subscribe('topic-handoff-wait');
+    await Promise.resolve();
+
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const { confirmedAt: _kept, ...route } = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    void _kept;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    // Previous owner alive: reconcile must not re-elect and must not
+    // re-send SUBSCRIBE for the unconfirmed route.
+    b.env.runIntervals();
+    await Promise.resolve();
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('topic-handoff-wait');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-wait', undefined);
+    const waiting = b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b');
+    expect(waiting).toMatchObject({ generation: 2, handoffFromWorkerId: 'worker-a' });
+    expect(waiting?.confirmedAt).toBeUndefined();
+  });
+
   it('drops a locally assigned topic when the route no longer points at this worker', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

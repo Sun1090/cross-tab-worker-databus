@@ -915,6 +915,15 @@ export class WorkerClusterRuntime {
     );
   }
 
+  /** True when an unconfirmed handoff route has been stuck longer than a
+   * worker TTL. The ACK for a live handoff is posted synchronously with the
+   * route write, so anything older than the TTL with a dead previous owner
+   * will never complete — while a fresh unconfirmed route may simply be
+   * waiting out its confirmation flush and must be left alone. */
+  private isStaleHandoff(route: WorkerRoute): boolean {
+    return this.environment.now() - route.updatedAt > this.workerTtlMs;
+  }
+
   /** Full reconciliation cycle: workers, subscriptions, and assigned topics. */
   private reconcile(): void {
     if (!this.started) return;
@@ -971,6 +980,26 @@ export class WorkerClusterRuntime {
         // previous owner. Retrying SUBSCRIBE here would recreate overlap.
         if (!route.handoffFromWorkerId) {
           this.sendControl(route.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
+        } else if (!liveWorkerIds.has(route.handoffFromWorkerId) && this.isStaleHandoff(route)) {
+          // The previous owner is gone, its ROUTE_RELEASED never arrived
+          // (dropped channel message under load, or a crash between the route
+          // write and the ACK), AND the handoff has been stuck longer than a
+          // worker TTL. Waiting longer cannot help — nobody remains who could
+          // send the ACK — and the route would strand unconfirmed forever:
+          // the new owner keeps waiting while peers treat the live new owner
+          // as authoritative and stay out. Re-elect a live owner and clear
+          // the handoff marker so the normal confirmation path can complete.
+          // The age gate matters: a fresh handoff route may simply not have
+          // its confirmation flushed through the batching writer yet, and a
+          // peer reconciling in that window must not mistake it for a
+          // stranded one. While the previous owner is still alive this branch
+          // is unreachable, so the strict handoff keeps its no-overlap
+          // guarantee.
+          const owner = selectLeastLoadedWorker(activeWorkers, undefined, this.loadWeighting) ?? this.currentRecord;
+          this.writeRoute(topicKey, owner, undefined, route.generation + 1);
+          this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
+          this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION, topic });
+          this.notifyRegistry();
         }
       }
     }
