@@ -5,7 +5,7 @@
  * receive, routing, deduplication, replay, persistence, and trace costs
  * without involving a real browser or network server.
  */
-import { bench, describe } from 'vitest';
+import { describe, test } from 'vitest';
 import { CrossTabDataBus } from '../../src/core/data-bus';
 import { DataBusTraceReporter } from '../../src/core/trace';
 import type { DataBusMessage } from '../../src/core/types';
@@ -51,147 +51,169 @@ describe('data bus hot paths', () => {
   });
   bus.subscribe('bench.topic', () => {});
 
-  bench('publish / 1000 messages', () => {
-    for (let index = 0; index < 1_000; index += 1) {
-      bus.publish('bench.topic', { value: index });
-    }
+  test('publish / 1000 messages', async ({ bench }) => {
+    await bench('publish / 1000 messages', () => {
+      for (let index = 0; index < 1_000; index += 1) {
+        bus.publish('bench.topic', { value: index });
+      }
+    }).run();
   });
 
-  bench('receive and dispatch / 1000 messages', () => {
-    for (let index = 0; index < 1_000; index += 1) {
-      transport.emit('bench.topic', { value: index });
-    }
+  test('receive and dispatch / 1000 messages', async ({ bench }) => {
+    await bench('receive and dispatch / 1000 messages', () => {
+      for (let index = 0; index < 1_000; index += 1) {
+        transport.emit('bench.topic', { value: index });
+      }
+    }).run();
   });
 
-  bench('publishBatch / 1000 messages / 10 per call', () => {
-    for (let batch = 0; batch < 100; batch += 1) {
-      const items = Array.from({ length: 10 }, (_, index) => ({
-        data: { value: batch * 10 + index }
-      }));
-      bus.publishBatch('bench.topic', items);
-    }
+  test('publishBatch / 1000 messages / 10 per call', async ({ bench }) => {
+    await bench('publishBatch / 1000 messages / 10 per call', () => {
+      for (let batch = 0; batch < 100; batch += 1) {
+        const items = Array.from({ length: 10 }, (_, index) => ({
+          data: { value: batch * 10 + index }
+        }));
+        bus.publishBatch('bench.topic', items);
+      }
+    }).run();
   });
 
-  bench('publishBatch / 1000 messages / 50 per call', () => {
-    for (let batch = 0; batch < 20; batch += 1) {
-      const items = Array.from({ length: 50 }, (_, index) => ({
-        data: { value: batch * 50 + index }
-      }));
-      bus.publishBatch('bench.topic', items);
-    }
+  test('publishBatch / 1000 messages / 50 per call', async ({ bench }) => {
+    await bench('publishBatch / 1000 messages / 50 per call', () => {
+      for (let batch = 0; batch < 20; batch += 1) {
+        const items = Array.from({ length: 50 }, (_, index) => ({
+          data: { value: batch * 50 + index }
+        }));
+        bus.publishBatch('bench.topic', items);
+      }
+    }).run();
   });
 
-  bench('publishBatch / 1000 messages / 100 per call', () => {
-    for (let batch = 0; batch < 10; batch += 1) {
-      const items = Array.from({ length: 100 }, (_, index) => ({
-        data: { value: batch * 100 + index }
-      }));
-      bus.publishBatch('bench.topic', items);
-    }
+  test('publishBatch / 1000 messages / 100 per call', async ({ bench }) => {
+    await bench('publishBatch / 1000 messages / 100 per call', () => {
+      for (let batch = 0; batch < 10; batch += 1) {
+        const items = Array.from({ length: 100 }, (_, index) => ({
+          data: { value: batch * 100 + index }
+        }));
+        bus.publishBatch('bench.topic', items);
+      }
+    }).run();
   });
 });
 
 describe('data bus advanced hot paths', () => {
-  bench('wildcard routing / 1000 concrete publications', () => {
-    const environment = makeEnvironment('bench-wildcard');
-    const transport = new FakeTransport<{ value: number }>();
-    const bus = new CrossTabDataBus({
-      clusterKey: 'bench-wildcard',
-      environment: environment.environment,
-      initialConfig: {},
-      transport
-    });
-    bus.subscribe('bench.rooms.*', () => {});
-    for (let index = 0; index < 1_000; index += 1) {
-      transport.emit(`bench.rooms.room-${index % 100}`, { value: index });
-    }
-    bus.stop();
+  test('wildcard routing / 1000 concrete publications', async ({ bench }) => {
+    await bench('wildcard routing / 1000 concrete publications', () => {
+      const environment = makeEnvironment('bench-wildcard');
+      const transport = new FakeTransport<{ value: number }>();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-wildcard',
+        environment: environment.environment,
+        initialConfig: {},
+        transport
+      });
+      bus.subscribe('bench.rooms.*', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        transport.emit(`bench.rooms.room-${index % 100}`, { value: index });
+      }
+      bus.stop();
+    }).run();
   });
 
-  bench('dedup / 1000 publications with 50% duplicates', () => {
-    const environment = makeEnvironment('bench-dedup');
-    const transport = new FakeTransport<{ value: number }>();
-    const bus = new CrossTabDataBus({
-      clusterKey: 'bench-dedup',
-      environment: environment.environment,
-      initialConfig: {},
-      transport,
-      dedup: { maxEntries: 2_000, ttlMs: 60_000, now: () => 1_000 }
-    });
-    bus.subscribe('bench.dedup', () => {});
-    for (let index = 0; index < 1_000; index += 1) {
-      const messageId = `message-${index % 500}`;
-      transport.emit('bench.dedup', { value: index }, messageId);
-    }
-    bus.stop();
+  test('dedup / 1000 publications with 50% duplicates', async ({ bench }) => {
+    await bench('dedup / 1000 publications with 50% duplicates', () => {
+      const environment = makeEnvironment('bench-dedup');
+      const transport = new FakeTransport<{ value: number }>();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-dedup',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        dedup: { maxEntries: 2_000, ttlMs: 60_000, now: () => 1_000 }
+      });
+      bus.subscribe('bench.dedup', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        const messageId = `message-${index % 500}`;
+        transport.emit('bench.dedup', { value: index }, messageId);
+      }
+      bus.stop();
+    }).run();
   });
 
-  bench('replay prune / 1000 retained publications', () => {
-    const environment = makeEnvironment('bench-replay-prune');
-    const transport = new FakeTransport<{ value: number }>();
-    const bus = new CrossTabDataBus({
-      clusterKey: 'bench-replay-prune',
-      environment: environment.environment,
-      initialConfig: {},
-      transport,
-      replay: { maxPerTopic: 100, pruneStrategy: PRUNE_STRATEGY.COUNT }
-    });
-    bus.subscribe('bench.replay', () => {});
-    for (let index = 0; index < 1_000; index += 1) {
-      transport.emit('bench.replay', { value: index });
-    }
-    bus.stop();
+  test('replay prune / 1000 retained publications', async ({ bench }) => {
+    await bench('replay prune / 1000 retained publications', () => {
+      const environment = makeEnvironment('bench-replay-prune');
+      const transport = new FakeTransport<{ value: number }>();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-replay-prune',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        replay: { maxPerTopic: 100, pruneStrategy: PRUNE_STRATEGY.COUNT }
+      });
+      bus.subscribe('bench.replay', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        transport.emit('bench.replay', { value: index });
+      }
+      bus.stop();
+    }).run();
   });
 
-  bench('persistence appendBatch / 1000 publications', async () => {
-    const environment = makeEnvironment('bench-persistence');
-    const transport = new FakeTransport<{ value: number }>();
-    const persistence = makePersistence();
-    const bus = new CrossTabDataBus({
-      clusterKey: 'bench-persistence',
-      environment: environment.environment,
-      initialConfig: {},
-      transport,
-      replay: { maxPerTopic: 1_000, persistence }
-    });
-    bus.subscribe('bench.persist', () => {});
-    for (let index = 0; index < 1_000; index += 1) {
-      transport.emit('bench.persist', { value: index }, undefined, index);
-    }
-    await Promise.resolve();
-    bus.stop();
+  test('persistence appendBatch / 1000 publications', async ({ bench }) => {
+    await bench('persistence appendBatch / 1000 publications', async () => {
+      const environment = makeEnvironment('bench-persistence');
+      const transport = new FakeTransport<{ value: number }>();
+      const persistence = makePersistence();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-persistence',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        replay: { maxPerTopic: 1_000, persistence }
+      });
+      bus.subscribe('bench.persist', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        transport.emit('bench.persist', { value: index }, undefined, index);
+      }
+      await Promise.resolve();
+      bus.stop();
+    }).run();
   });
 
-  bench('trace async sink / 1000 events', async () => {
-    const events: unknown[] = [];
-    const trace = new DataBusTraceReporter({
-      enabled: true,
-      mode: TRACE_MODE.EVENTS,
-      asyncSink: true,
-      sink: event => events.push(event),
-      now: () => 1_000
-    });
-    for (let index = 0; index < 1_000; index += 1) {
-      trace.event({ type: TRACE_EVENT_TYPE.STATUS, status: index % 2 === 0 ? WORKER_STATUS.CONNECTED : WORKER_STATUS.DISCONNECTED });
-    }
-    await Promise.resolve();
-    trace.stop();
+  test('trace async sink / 1000 events', async ({ bench }) => {
+    await bench('trace async sink / 1000 events', async () => {
+      const events: unknown[] = [];
+      const trace = new DataBusTraceReporter({
+        enabled: true,
+        mode: TRACE_MODE.EVENTS,
+        asyncSink: true,
+        sink: event => events.push(event),
+        now: () => 1_000
+      });
+      for (let index = 0; index < 1_000; index += 1) {
+        trace.event({ type: TRACE_EVENT_TYPE.STATUS, status: index % 2 === 0 ? WORKER_STATUS.CONNECTED : WORKER_STATUS.DISCONNECTED });
+      }
+      await Promise.resolve();
+      trace.stop();
+    }).run();
   });
 
-  bench('getMetrics snapshot / populated window / 1000 calls', () => {
-    const trace = new DataBusTraceReporter({
-      enabled: true,
-      mode: TRACE_MODE.ALL,
-      sink: () => {},
-      now: () => 1_000
-    });
-    for (let index = 0; index < 500; index += 1) {
-      trace.recordReceived('bench.metrics');
-      trace.recordDispatched('bench.metrics');
-    }
-    for (let index = 0; index < 1_000; index += 1) {
-      trace.getMetrics();
-    }
-    trace.stop();
+  test('getMetrics snapshot / populated window / 1000 calls', async ({ bench }) => {
+    await bench('getMetrics snapshot / populated window / 1000 calls', () => {
+      const trace = new DataBusTraceReporter({
+        enabled: true,
+        mode: TRACE_MODE.ALL,
+        sink: () => {},
+        now: () => 1_000
+      });
+      for (let index = 0; index < 500; index += 1) {
+        trace.recordReceived('bench.metrics');
+        trace.recordDispatched('bench.metrics');
+      }
+      for (let index = 0; index < 1_000; index += 1) {
+        trace.getMetrics();
+      }
+      trace.stop();
+    }).run();
   });
 });
