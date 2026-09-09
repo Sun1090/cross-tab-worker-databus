@@ -450,6 +450,13 @@ fake tasks; each item is verified locally before being marked done.
 ## Phase 19 result (pushed a31f7da..0a8a76c, CI green on first try)
 
 - CI green: verify + browser + CodeQL.
+- Final-tree browser proof: full e2e 20/20 locally (21.8 s) on the closing
+  tree (unit-test-only changes since the post-fix 20/20, re-confirmed).
+- Coverage residuals triaged to defensive-only: trace.ts:445 unreachable
+  (rank ≤ count always for the 0.5/0.95/1 callers), env.ts:131 esbuild
+  artifact (behaviorally pinned), hooks/vue/websocket/centrifuge guards
+  unreachable through public API in Node, `?? currentRecord` twins
+  unreachable (self always present when started).
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
