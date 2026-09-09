@@ -480,6 +480,27 @@ fake tasks; each item is verified locally before being marked done.
 - Full battery on the vitest-5 tree: typecheck, lint, e2e 20/20,
   verify:pack, verify:compat (v0.20.71), audit clean, diff-check.
 
+## Phase 23 (TypeScript 7 evaluation — reverted with evidence)
+
+- Installed TS 7.0.2: `tsc` clean and 482 unit green, but `pnpm lint`
+  hard-fails — typescript-eslint 8.70 does not support TS 7.0 (upstream
+  tracks TS >= 7.1, suggests side-by-side TS 6 API). No available fix
+  without dropping the lint gate, so reverted to TS 6; tree clean.
+  Deferral is now evidence-based: retry when typescript-eslint supports
+  the TS 7 line.
+
+## Phase 24 (in progress — handoff-recovery trace observability)
+
+- Feature: stranded-handoff re-elections now emit `reliability` trace
+  events with `operation: 'route_migration_recovery'`, distinct from the
+  routine graceful-handoff `route_migration` (new
+  `RELIABILITY_OPERATION` key; internal trace payload only, zero public
+  export-surface impact — verify:compat green).
+- Tests: recovery path pins the new op (and absence of the old one);
+  graceful four-tab handoff pins the old op (and absence of the new one).
+- Docs: API reference trace section (EN+ZH) + CHANGELOG Added entry.
+- 482 unit green; typecheck, lint, verify:compat, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

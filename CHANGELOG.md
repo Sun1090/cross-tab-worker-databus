@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Added
+- Trace observability for handoff recovery: a re-election that recovers a stranded unconfirmed handoff now emits `reliability` trace events with `operation: 'route_migration_recovery'`, distinct from the routine graceful-handoff `route_migration`, so operators can tell recoveries apart from normal churn in the trace sink. Covered by unit tests on both paths; documented in the API reference (English and Chinese).
 - Coverage-driven fault-injection suite for the storage utility layer (`tests/storage-utils.test.ts`): a fully-throwing storage backend and a corrupt-record backend pin every error-swallow branch of `readJson`/`writeJson`/`listKeys`/`readAllByPrefix` (storage-utils now 100% statements+branches).
 - WebSocket transport regression coverage for two error paths: a Blob binary frame whose conversion rejects is isolated through `onError` (no crash, no delivery), and a binary publish whose encoded topic exceeds the 16-bit frame prefix reports "topic is too long" and sends nothing, with the exactly-0xffff boundary still framing successfully.
 - Centrifuge transport coverage for factory-less degradation: with both Worker globals absent the transport resolves to the `local` backend without error (the documented SSR behavior), while an injected factory that throws surfaces the failure instead of degrading silently.

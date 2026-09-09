@@ -73,9 +73,9 @@ export interface WorkerClusterHandlers {
   onSuspend?: () => void;
   /** The cluster resumed (tab visible / pageshow). */
   onResume?: () => void;
-  /** Bounded diagnostics for route confirmation and graceful migration. */
+  /** Bounded diagnostics for route confirmation, graceful migration, and stranded-handoff recovery. */
   onDiagnostic?: (event: {
-    operation: (typeof RELIABILITY_OPERATION.ROUTE_ACK | typeof RELIABILITY_OPERATION.ROUTE_MIGRATION);
+    operation: (typeof RELIABILITY_OPERATION.ROUTE_ACK | typeof RELIABILITY_OPERATION.ROUTE_MIGRATION | typeof RELIABILITY_OPERATION.ROUTE_MIGRATION_RECOVERY);
     topic: string;
   }) => void;
 }
@@ -998,7 +998,7 @@ export class WorkerClusterRuntime {
           const owner = selectLeastLoadedWorker(activeWorkers, undefined, this.loadWeighting) ?? this.currentRecord;
           this.writeRoute(topicKey, owner, undefined, route.generation + 1);
           this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
-          this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION, topic });
+          this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION_RECOVERY, topic });
           this.notifyRegistry();
         }
       }

@@ -136,6 +136,10 @@ export const RELIABILITY_OPERATION = {
   TRANSPORT_RECOVERY: 'transport_recovery',
   ROUTE_ACK: 'route_ack',
   ROUTE_MIGRATION: 'route_migration',
+  // A re-election that recovered a stranded unconfirmed handoff (previous
+  // owner gone, ACK never arrived). Distinct from ROUTE_MIGRATION so trace
+  // consumers can tell recoveries apart from routine graceful handoffs.
+  ROUTE_MIGRATION_RECOVERY: 'route_migration_recovery',
   PERSISTENCE_CLEANUP: 'persistence_cleanup',
   PERSISTENCE_RETRY: 'persistence_retry',
   DEDUP_SUPPRESSED: 'dedup_suppressed',

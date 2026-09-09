@@ -265,7 +265,7 @@ trace: {
 }
 ```
 
-低频事件类型包括 `lifecycle`、`status`、`subscription`、`coordination` 和 `error`；高频数据按窗口输出 `message_metrics`，包含接收/分发计数、活跃 Topic 数量和分发延迟聚合（`dispatchSamples`、`dispatchAvgMs`、`dispatchP50Ms`、`dispatchP95Ms`、`dispatchMaxMs`），以及去重结果（`dedupAccepted`、`dedupSuppressed`）。`coordination` 事件在每次 transport 打开后发出，携带 `coordinated`、`activeWorkers`、`workers`（格式化后的 worker 记录）与 `routes`（`topicKey@workerId|confirmed=…`，反映已收敛的路由列表）。所有公开事件都使用固定结构，不包含原始 Topic、消息 payload、连接地址或错误正文。sink 抛错会被隔离，不会中断消息分发，但会向 `console.warn` 输出错误，便于定位诊断配置问题。sink 应尽量避免抛出异常——预期中的错误条件应通过事件数据表达，而不是通过异常上报。
+低频事件类型包括 `lifecycle`、`status`、`subscription`、`coordination`、`reliability` 和 `error`；高频数据按窗口输出 `message_metrics`，包含接收/分发计数、活跃 Topic 数量和分发延迟聚合（`dispatchSamples`、`dispatchAvgMs`、`dispatchP50Ms`、`dispatchP95Ms`、`dispatchMaxMs`），以及去重结果（`dedupAccepted`、`dedupSuppressed`）。路由归属变化通过 `reliability` 事件呈现：优雅交接上报 `operation: 'route_migration'`，而恢复悬挂未确认交接的重选上报 `operation: 'route_migration_recovery'`（前任 owner 已消失且 ACK 始终未到达），便于 trace 消费者区分恢复与常规交接。`coordination` 事件在每次 transport 打开后发出，携带 `coordinated`、`activeWorkers`、`workers`（格式化后的 worker 记录）与 `routes`（`topicKey@workerId|confirmed=…`，反映已收敛的路由列表）。所有公开事件都使用固定结构，不包含原始 Topic、消息 payload、连接地址或错误正文。sink 抛错会被隔离，不会中断消息分发，但会向 `console.warn` 输出错误，便于定位诊断配置问题。sink 应尽量避免抛出异常——预期中的错误条件应通过事件数据表达，而不是通过异常上报。
 
 **`asyncSink: true` 的投递语义。** 默认（`false`）下，每条事件同步调用 sink。开启 `asyncSink: true` 后，事件先入内存队列，在**一个微任务批次**中统一投递：任务的第一条事件调度 `queueMicrotask`，在该微任务运行前产生的所有事件（含周期性 `message_metrics` 快照）按 FIFO 顺序一次性送往 sink。这样热路径永远不会因 sink 工作而阻塞。错误隔离与同步模式一致——sink 抛错被捕获并记入 `console.warn`，既不会中断分发，也不会中断批次内其余事件。顺序保证边界：**批次内**顺序是确定的，但投递被推迟到下一个微任务，因此事件不再保证在你的下一行语句执行前可见；批次 flush 之后新产生的事件会落入后续批次。当需要"每条事件在下一行代码前可见"时，请使用默认的同步 sink（或自行合并计数）。
 

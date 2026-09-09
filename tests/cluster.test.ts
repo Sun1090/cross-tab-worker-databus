@@ -247,6 +247,7 @@ describe('WorkerClusterRuntime', () => {
     const hub = new ChannelHub();
     let now = 1_000;
     const controls = [vi.fn(), vi.fn(), vi.fn(), vi.fn()];
+    const diagnostics: Array<Array<{ operation: string; topic: string }>> = [[], [], [], []];
     const environments = ['a', 'b', 'c', 'd'].map(randomId =>
       createFakeEnvironment({ storage, hub, now: () => now, randomId })
     );
@@ -257,7 +258,11 @@ describe('WorkerClusterRuntime', () => {
         tabId: `tab-${index}`,
         workerId: `worker-${index}`,
         maxActiveWorkers: 3,
-        handlers: { onControl: controls[index]!, onEvent: vi.fn() }
+        handlers: {
+          onControl: controls[index]!,
+          onEvent: vi.fn(),
+          onDiagnostic: event => diagnostics[index]!.push(event)
+        }
       })
     );
 
@@ -281,6 +286,13 @@ describe('WorkerClusterRuntime', () => {
         expect.objectContaining({ workerId: 'worker-1', confirmedAt: expect.any(Number) })
       ])
     );
+    // A graceful handoff reports the plain migration operation — the
+    // recovery variant is reserved for TTL-gated stranded re-elections.
+    expect(diagnostics.flat()).toContainEqual({ operation: 'route_migration', topic: 'notice-token-topic' });
+    expect(diagnostics.flat()).not.toContainEqual({
+      operation: 'route_migration_recovery',
+      topic: 'notice-token-topic'
+    });
   });
 
   it('does not unsubscribe the owner when a non-owner tab reloads', async () => {
@@ -1127,6 +1139,7 @@ describe('WorkerClusterRuntime resilience', () => {
     workerId: string;
     workerTtlMs?: number;
     onControl?: (action: string, topic: string, data?: unknown) => void;
+    onDiagnostic?: (event: { operation: string; topic: string }) => void;
   }) {
     const env = createFakeEnvironment({
       storage: options.storage,
@@ -1140,7 +1153,11 @@ describe('WorkerClusterRuntime resilience', () => {
       tabId: options.tabId,
       workerId: options.workerId,
       ...(options.workerTtlMs !== undefined ? { workerTtlMs: options.workerTtlMs } : {}),
-      handlers: { onControl: options.onControl ?? vi.fn(), onEvent: vi.fn() }
+      handlers: {
+        onControl: options.onControl ?? vi.fn(),
+        onEvent: vi.fn(),
+        ...(options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {})
+      }
     });
     return { env, runtime };
   }
@@ -1391,6 +1408,7 @@ describe('WorkerClusterRuntime resilience', () => {
     const hub = new ChannelHub();
     let now = 1_000;
     const controlB = vi.fn();
+    const diagnosticsB: Array<{ operation: string; topic: string }> = [];
     const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
     const b = makeRuntime({
       storage,
@@ -1398,7 +1416,8 @@ describe('WorkerClusterRuntime resilience', () => {
       now: () => now,
       tabId: 'tab-b',
       workerId: 'worker-b',
-      onControl: controlB
+      onControl: controlB,
+      onDiagnostic: event => diagnosticsB.push(event)
     });
     a.runtime.start();
     b.runtime.start();
@@ -1450,6 +1469,10 @@ describe('WorkerClusterRuntime resilience', () => {
     const recovered = b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b');
     expect(recovered).toMatchObject({ generation: 3, confirmedAt: now });
     expect(recovered).not.toHaveProperty('handoffFromWorkerId');
+    // The recovery is observable as its own diagnostic operation, distinct
+    // from a routine graceful migration.
+    expect(diagnosticsB).toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-handoff-recovery' });
+    expect(diagnosticsB).not.toContainEqual({ operation: 'route_migration', topic: 'topic-handoff-recovery' });
 
     // A further reconcile round stays converged on the single owner.
     controlB.mockClear();
