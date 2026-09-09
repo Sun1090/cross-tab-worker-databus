@@ -29,7 +29,7 @@
       <div class="badges">
         <span class="badge" id="tabBadge">Tab -</span>
         <span class="badge" id="backendBadge">后端 -</span>
-        <span class="badge status" id="statusBadge">未连接</span>
+        <span class="badge status" id="statusBadge" role="status" aria-live="polite">未连接</span>
       </div>
     </header>
 
@@ -139,27 +139,28 @@
             <h2>事件流</h2>
             <div class="panel-actions">
               <span class="counter" id="eventCounter">0 条</span>
-              <button class="btn ghost" id="clearLog" type="button">
-                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <button class="btn ghost" id="clearLog" type="button" aria-label="清空事件流">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 清空
               </button>
             </div>
           </div>
-          <div class="table-wrap">
-            <table class="event-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>方向</th>
-                  <th>类型</th>
-                  <th>Topic</th>
-                  <th>载荷</th>
-                  <th>来源</th>
-                </tr>
-              </thead>
-              <tbody id="eventBody"></tbody>
-            </table>
-          </div>
+            <div class="table-wrap">
+              <table class="event-table">
+                <caption class="visually-hidden">实时事件流：每行一条跨 Tab 消息，新事件插入在顶部</caption>
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>方向</th>
+                    <th>类型</th>
+                    <th>Topic</th>
+                    <th>载荷</th>
+                    <th>来源</th>
+                  </tr>
+                </thead>
+                <tbody id="eventBody" aria-live="off"></tbody>
+              </table>
+            </div>
         </div>
       </section>
 
