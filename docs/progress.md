@@ -250,6 +250,19 @@ fake tasks; each item is verified locally before being marked done.
   20/20, verify:pack. CI green (verify + browser + CodeQL) on 549cfe8.
 - No open dependabot PRs; working tree clean at 549cfe8 + this doc.
 
+## Phase 9 (coverage residuals — error-utils direct unit file)
+
+- tests/error-utils.test.ts (new, 10 tests): stack preservation/omission,
+  non-Error shapes (string/object/undefined/number/boolean), context
+  reconstruction, round-trip identity. error-utils now 100% stmts+branches;
+  470 unit tests.
+- environment.ts residual line 131 (storage-event JSON.parse catch) is
+  behaviorally exercised by storage-channel.test.ts's malformed-payload test;
+  the v8 statement map does not credit the full-suite run (esbuild try/catch
+  statement-map artifact) — direct-hit probe confirmed the statement executes.
+  Not chased further; the behavior is pinned.
+- CI green on 8661f28 (verify + browser + CodeQL).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
