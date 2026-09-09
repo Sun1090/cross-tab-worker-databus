@@ -505,6 +505,17 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 25 (in progress — demo renders reliability trace events)
+
+- Real gap: the demo trace sink dropped `reliability` events, so the new
+  recovery diagnostics (and all migration/retry observability) were
+  invisible in the product demo. `handleTraceEvent` now renders them into
+  the event feed with Chinese operation labels
+  (`reliability:<operation>` + label + bounded details).
+- E2E: new test pins the initial route-acknowledgment row (op + label).
+  Isolation green (2.1 s); full suite 21/21 green.
+- 482 unit green; typecheck, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
