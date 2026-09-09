@@ -331,6 +331,18 @@ fake tasks; each item is verified locally before being marked done.
   CHANGELOG [Unreleased] gains a Fixed entry (no scoped package names —
   docs-guard safe).
 
+## Phase 12 result (pushed 07d1cf9..548aee8, CI green on first try)
+
+- Local battery before push: check (475 unit), lint, e2e 20/20, bench,
+  verify:pack, verify:compat (v0.20.71), audit clean, diff-check.
+- CI green: verify + browser + CodeQL on the fix commit — the multi-tab
+  soak that failed 60 s x3 on the docs-only HEAD now passes in CI, which
+  corroborates the stranded-handoff diagnosis (a pure runner-noise failure
+  would not be fixed by a reconcile change).
+- Shipped: reconcile TTL-gated re-election of stranded unconfirmed handoffs
+  (+2 unit regressions, mutation-checked), architecture EN+ZH invariant
+  rewrite, CHANGELOG Fixed entry.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
