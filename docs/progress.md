@@ -516,6 +516,10 @@ fake tasks; each item is verified locally before being marked done.
   Isolation green (2.1 s); full suite 21/21 green.
 - 482 unit green; typecheck, lint green.
 
+## Phase 25 result (pushed 12add67..ba96c63, CI green on first try)
+
+- CI green: verify + browser (21 e2e incl. the new reliability-feed test) + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
