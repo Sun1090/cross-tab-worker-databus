@@ -212,6 +212,9 @@ describe('createIndexedDbReplayPersistence', () => {
                       queueMicrotask(() => requestStub.onerror?.({ target: requestStub }));
                       return requestStub;
                     };
+                    // The adapter attaches oncomplete/onerror on the
+                    // transaction it got from db.transaction(); forward those
+                    // to the real transaction so completion actually fires.
                     return {
                       objectStore: () => ({
                         get: failingRequest,
@@ -219,7 +222,11 @@ describe('createIndexedDbReplayPersistence', () => {
                         put: originalStore.put.bind(originalStore),
                         delete: originalStore.delete.bind(originalStore),
                         clear: originalStore.clear.bind(originalStore)
-                      })
+                      }),
+                      get oncomplete() { return tx.oncomplete; },
+                      set oncomplete(value) { tx.oncomplete = value; },
+                      get onerror() { return tx.onerror; },
+                      set onerror(value) { tx.onerror = value; }
                     };
                   }
                   return tx;
@@ -260,5 +267,25 @@ describe('createIndexedDbReplayPersistence', () => {
     broken.disable();
     await persistence.append(message('t', 2));
     expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
+  });
+
+  it('rejects and invalidates when a store request fails during load or clearBefore', async () => {
+    const broken = makeBrokenFactory('request-fails');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    // Load path: the getAll request errors and must propagate.
+    await expect(persistence.load()).rejects.toThrow('request failed');
+
+    // clearBefore reads records via getAll before pruning — the failed read
+    // must reject the whole operation, not silently resolve.
+    await expect(persistence.clearBefore!(1_000)).rejects.toThrow('request failed');
+
+    // After the faults are disabled, the invalidated connection reopens and
+    // the recovered adapter works again end to end.
+    broken.disable();
+    await persistence.append(message('t', 3));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([3]);
+    (globalThis as { indexedDB?: unknown }).indexedDB = undefined;
   });
 });

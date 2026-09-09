@@ -218,6 +218,39 @@ describe('WebSocketTransport', () => {
     expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([6, 7]);
   });
 
+  it('isolates a conversion failure inside a Blob binary frame through onError', async () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    // A malformed Blob still resolves arrayBuffer() in practice; force the
+    // conversion path to throw by making arrayBuffer() itself reject, then
+    // verify the transport reports the error instead of crashing.
+    const poisoned = new Blob([new Uint8Array([1])]);
+    Object.defineProperty(poisoned, 'arrayBuffer', {
+      value: () => Promise.reject(new Error('blob conversion failed'))
+    });
+    socket.onmessage?.({ data: poisoned });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'blob conversion failed' }));
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a binary publish whose topic exceeds the 16-bit frame prefix', () => {
+    const { sockets, transport, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    // 0xffff = 65535 bytes is the frame's topic-length ceiling; one more byte
+    // cannot be encoded, so publish must report the error and send nothing.
+    transport.publish('x'.repeat(0x1_0000), new Uint8Array([1]).buffer);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'WebSocket topic is too long for a binary frame.' }));
+    expect(socket.sent).toHaveLength(0);
+
+    // Boundary: exactly 65535 bytes still fits and produces one frame.
+    transport.publish('x'.repeat(0xffff), new Uint8Array([1]).buffer);
+    expect(socket.sent).toHaveLength(1);
+    expect(socket.sent.at(-1)).toBeInstanceOf(ArrayBuffer);
+  });
+
   it('ignores truncated or invalid binary frames without crashing the transport', () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;

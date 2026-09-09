@@ -1021,6 +1021,48 @@ describe('CentrifugeWorkerTransport default backends', () => {
     expect(ports[0]!.posted[0]).toMatchObject({ type: 'INIT', url: 'wss://example.test/connection/websocket' });
     transport.stop();
   });
+
+  it('falls back to the local session when the platform lacks both Worker APIs', () => {
+    // Factory-less SSR / non-browser runtimes: selectWorkerBackend sees both
+    // globals undefined and picks 'local' — the documented degradation (the
+    // bundled default factories are only reachable in a real browser).
+    vi.stubGlobal('Worker', undefined);
+    vi.stubGlobal('SharedWorker', undefined);
+
+    const dedicated = new CentrifugeWorkerTransport({ workerMode: 'dedicated' });
+    const dedicatedErrors: unknown[] = [];
+    dedicated.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: error => dedicatedErrors.push(error) }
+    );
+    expect(dedicated.diagnosticsBackend).toBe('local');
+    expect(dedicatedErrors).toHaveLength(0);
+    dedicated.stop();
+
+    const shared = new CentrifugeWorkerTransport({ workerMode: 'shared' });
+    const sharedErrors: unknown[] = [];
+    shared.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: error => sharedErrors.push(error) }
+    );
+    expect(shared.diagnosticsBackend).toBe('local');
+    expect(sharedErrors).toHaveLength(0);
+    shared.stop();
+  });
+
+  it('surfaces a throwing injected factory through onError instead of degrading silently', () => {
+    // An injected factory proves the caller expected a Worker backend, so a
+    // factory failure is an error (not a capability miss) — it must surface.
+    const dedicated = new CentrifugeWorkerTransport({ workerMode: 'dedicated', workerFactory: () => { throw new Error('factory exploded'); } });
+    const errors: unknown[] = [];
+    expect(() =>
+      dedicated.start(
+        { url: 'wss://example.test/connection/websocket', options: {} },
+        { onStatus: () => {}, onMessage: () => {}, onError: error => errors.push(error) }
+      )
+    ).toThrow('factory exploded');
+    dedicated.stop();
+  });
 });
 
 describe('CentrifugeWorkerTransport edge paths', () => {
