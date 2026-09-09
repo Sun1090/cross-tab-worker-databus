@@ -343,6 +343,18 @@ fake tasks; each item is verified locally before being marked done.
   (+2 unit regressions, mutation-checked), architecture EN+ZH invariant
   rewrite, CHANGELOG Fixed entry.
 
+## Phase 13 (release-checklist dry run, post-fix tree)
+
+- bench:browser archived (2026-09-09T08-58); bench:compare 50% gate green
+  (all deltas within noise: -4%..+4.8%); bench:trend refreshed (11 reports),
+  committed dbf077a.
+- npm pack dry-run: 107 files, progress.md excluded — unchanged.
+- verify:pack + verify:compat (v0.20.71) green; audit clean.
+- verify:published: npm latest is still 0.20.71 (0.20.83 unpublished,
+  expected pre-release state); the consumer-verifier path itself was
+  verified in earlier phases — nothing new to dry-run until a tag is cut.
+- CI green on dbf077a (verify + browser + CodeQL).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
