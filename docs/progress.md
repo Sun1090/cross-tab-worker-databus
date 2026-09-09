@@ -221,6 +221,19 @@ fake tasks; each item is verified locally before being marked done.
   coverage, bench, e2e 20/20, verify:pack, verify:compat, audit clean.
 - Full verification: typecheck, 460 unit, lint green.
 
+## Phase 7 result (pushed 6d3e89d..ca05cd6..786812e, CI green on second push)
+
+- ca05cd6: 15 new tests (445 → 460) across storage-utils (new file, 100%
+  stmts+branches), websocket binary error paths, centrifuge factory
+  degradation, dedup option validation, retention-cleanup failure/draining,
+  IndexedDB read-request failures. Plus the GHSA-82fw-gwwq-j7x9 fix: vitest
+  3.2 → 4.1.11 (+coverage provider), one mock-typing fix; audit clean.
+- First push failed only on the public-docs guard: the CHANGELOG security
+  note named two scoped dev packages (@scope/ references are forbidden in
+  shipped docs). 786812e rewrote the note without scoped names. The guard
+  doing its job — caught it in CI before any release path saw it.
+- CI green on 786812e (verify 47s + browser 6m21s + CodeQL).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
