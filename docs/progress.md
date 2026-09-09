@@ -285,6 +285,22 @@ fake tasks; each item is verified locally before being marked done.
 - All 20 e2e green (caption is display-concealed, selectors untouched).
 - CI green on 8cdfa33.
 
+## Definitive verification record (2026-09-09, main @ 4c9679c + phase-12 battery)
+
+- pnpm check: typecheck + build + 473 unit tests green (26 files).
+- lint, e2e 20/20, bench (Node), bench:browser + bench:compare 50% gate,
+  verify:pack (full-surface ESM/CJS), verify:compat (v0.20.71 baseline),
+  pnpm audit (public registry): no known vulnerabilities, git diff --check.
+- npm pack dry-run: 107 files (benchmark docs ship; progress.md excluded).
+- CI + CodeQL green on every pushed commit this session (no reruns needed
+  since the phase-6 timeout-budget fix).
+- Cumulative session output: E2E timeout-budget unstacking (the documented
+  flake class eliminated — evidence: three consecutive green browser jobs
+  with zero retries), bench trend doc + generator, 28 new unit tests
+  (445 → 473) across storage-utils/error-utils/websocket/centrifuge/
+  data-bus/replay-persistence/vue, vitest 4.1.11 security upgrade,
+  dev-dependency minor/patch batch, demo a11y (live regions + labels).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
