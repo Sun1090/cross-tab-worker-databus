@@ -45,6 +45,32 @@ describe('BatchingStorageWriter', () => {
     expect(writerB.getItem('route')).toBe('{"owner":"worker-a"}');
   });
 
+  it('falls back to setTimeout when queueMicrotask is unavailable', async () => {
+    // Older runtimes and non-browser environments lack queueMicrotask; the
+    // coalescing window must still flush exactly once on a macrotask. Draining
+    // microtasks first proves the microtask path was not taken.
+    const original = globalThis.queueMicrotask;
+    vi.stubGlobal('queueMicrotask', undefined);
+    try {
+      const storage = new MemoryStorage();
+      const writer = new BatchingStorageWriter(storage);
+      writer.setItem('heartbeat', '1');
+      writer.setItem('route', '2');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(storage.entries()).toEqual([]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(storage.entries()).toEqual([
+        ['heartbeat', '1'],
+        ['route', '2']
+      ]);
+      expect(writer.pendingSize).toBe(0);
+    } finally {
+      vi.stubGlobal('queueMicrotask', original);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('merges removals with pending writes and flushes them together', async () => {
     const storage = new MemoryStorage();
     storage.setItem('stale', 'x');

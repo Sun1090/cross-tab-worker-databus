@@ -62,6 +62,55 @@ describe('PortReaper', () => {
     vi.useRealTimers();
   });
 
+  it('isolates a throwing reap target so the remaining ports are still reaped', () => {
+    vi.useFakeTimers();
+    try {
+      const reaper = new PortReaper();
+      const badPort = new PortDouble();
+      const goodPort = new PortDouble();
+      const goodSession = new SessionDouble();
+      let badStops = 0;
+      reaper.register(badPort as unknown as MessagePort, {
+        close: () => {
+          throw new Error('port already neutered');
+        },
+        stop: () => {
+          badStops += 1;
+        }
+      });
+      reaper.register(goodPort as unknown as MessagePort, {
+        close: () => goodPort.close(),
+        stop: () => goodSession.stop()
+      });
+
+      // Both ports time out on the same tick: the throwing close must not
+      // prevent the healthy port from being reaped in the same pass.
+      // (31 s is not enough: reap needs age strictly greater than the 30 s
+      // timeout, and ticks land every 10 s.)
+      vi.advanceTimersByTime(41_000);
+      expect(goodPort.closed).toBe(true);
+      expect(goodSession.stopped).toBe(1);
+
+      // The reaper is not wedged: a later tick is a no-op for the removed
+      // ports, and a newly connected port lives and dies on schedule.
+      vi.advanceTimersByTime(31_000);
+      expect(goodSession.stopped).toBe(1);
+      expect(badStops).toBe(0);
+      const late = new PortDouble();
+      const lateSession = new SessionDouble();
+      reaper.register(late as unknown as MessagePort, {
+        close: () => late.close(),
+        stop: () => lateSession.stop()
+      });
+      // Same strict-greater-than-timeout arithmetic for the fresh interval.
+      vi.advanceTimersByTime(41_000);
+      expect(late.closed).toBe(true);
+      expect(lateSession.stopped).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a port alive while it sends messages within the timeout', () => {
     vi.useFakeTimers();
     const { reaper, register } = makeReaper();
