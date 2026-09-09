@@ -355,6 +355,16 @@ fake tasks; each item is verified locally before being marked done.
   verified in earlier phases — nothing new to dry-run until a tag is cut.
 - CI green on dbf077a (verify + browser + CodeQL).
 
+## Phase 14 (in progress — handoff-cooperation coverage + test hygiene)
+
+- New cluster regression: old owner still holding a handed-off assignment
+  drops it and re-sends ROUTE_RELEASED on reconcile, letting the new owner
+  confirm with no re-election churn (generation stays 2). Mutation-checked
+  both ways (probe removing the resend fails the test; restore passes).
+- Hygiene: crafted stranded-route fixtures now strip `confirmedAt` with
+  `delete` instead of rest-spread + `void`.
+- 476 unit tests green (475 + 1); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

@@ -1339,8 +1339,10 @@ describe('WorkerClusterRuntime resilience', () => {
     // route was confirmed by worker-a, so confirmedAt must be stripped —
     // otherwise the crafted record is not actually unconfirmed.
     const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
-    const { confirmedAt: _dropped, ...route } = JSON.parse(routeEntry[1]) as Record<string, unknown>;
-    void _dropped;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    // The original route was confirmed by worker-a; drop the stamp so the
+    // crafted record is genuinely unconfirmed.
+    delete route.confirmedAt;
     storage.setItem(
       routeEntry[0],
       JSON.stringify({
@@ -1383,6 +1385,73 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
   });
 
+  it('has the old owner release and re-ACK when it still holds a handed-off assignment', async () => {
+    // Covers reconcileAssignedTopics' cooperative path: an old owner that
+    // still lists the topic as assigned while the route already names a new
+    // owner with itself as handoff source drops the assignment and re-sends
+    // ROUTE_RELEASED, letting the new owner confirm.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const a = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: controlA
+    });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('topic-handoff-coop');
+    await Promise.resolve();
+    b.runtime.subscribe('topic-handoff-coop');
+    await Promise.resolve();
+    expect(a.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-coop');
+
+    // A handoff record naming worker-b is visible, but worker-a never
+    // processed the release (e.g. it missed its own pause): it still holds
+    // the in-memory assignment while the route already moved on.
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    a.env.runIntervals();
+    await Promise.resolve();
+    // The old owner drops its stale assignment and the re-sent ACK lets the
+    // new owner confirm: exactly one holder, confirmed route, no re-election
+    // churn (generation stays 2 — no new write happened).
+    expect(a.runtime.getSnapshot().assignedTopics).not.toContain('topic-handoff-coop');
+    expect(controlA).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic-handoff-coop', undefined);
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-handoff-coop');
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-coop', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.workerId === 'worker-b')).toMatchObject({
+      generation: 2,
+      confirmedAt: now
+    });
+  });
+
   it('keeps waiting for ROUTE_RELEASED while the previous owner is still alive', async () => {
     // The recovery above must not fire while the previous owner is live:
     // retrying SUBSCRIBE then would recreate the overlap the strict handoff
@@ -1408,8 +1477,8 @@ describe('WorkerClusterRuntime resilience', () => {
     await Promise.resolve();
 
     const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
-    const { confirmedAt: _kept, ...route } = JSON.parse(routeEntry[1]) as Record<string, unknown>;
-    void _kept;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    delete route.confirmedAt;
     storage.setItem(
       routeEntry[0],
       JSON.stringify({
