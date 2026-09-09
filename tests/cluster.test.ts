@@ -1445,6 +1445,88 @@ describe('WorkerClusterRuntime resilience', () => {
     ).toBe(now);
   });
 
+  it('converges repeated pagehides with every handoff ACK lost', async () => {
+    // Soak over the stranded-handoff recovery: three consecutive owners each
+    // go through pageHide() with the ACK dropped, and every round must still
+    // converge on exactly one confirmed holder with no handoff marker left
+    // behind and a monotonically increasing generation (no reset/duplication
+    // across recovery cycles).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const topic = 'topic-handoff-soak';
+    const tabs = (['a', 'b', 'c'] as const).map(id =>
+      makeRuntime({ storage, hub, now: () => now, tabId: `tab-${id}`, workerId: `worker-${id}` })
+    );
+    for (const tab of tabs) tab.runtime.start();
+    for (const tab of tabs) {
+      tab.runtime.subscribe(topic);
+      await Promise.resolve();
+    }
+    const holders = () => tabs.filter(tab => tab.runtime.getSnapshot().assignedTopics.includes(topic));
+    expect(holders()).toHaveLength(1);
+
+    const originalSend = hub.send.bind(hub);
+    let lastGeneration = 1;
+    // Advance time in 1 s steps with a heartbeat round and a microtask flush
+    // per step: heartbeats must keep propagating (as they do in a real
+    // browser every 3 s) so live peers never look TTL-dead to each other. A
+    // single +11 s jump would strand every peer's heartbeat write in its own
+    // writer's pending queue while the others reconcile — an artifact of the
+    // shared fake clock, not of the recovery logic.
+    const stepTime = async (ms: number) => {
+      const steps = Math.ceil(ms / 1000);
+      for (let step = 0; step < steps; step += 1) {
+        now += 1000;
+        for (const tab of tabs) tab.env.runIntervals();
+        await Promise.resolve();
+      }
+    };
+    for (let round = 0; round < 3; round += 1) {
+      const owners = holders();
+      expect(owners).toHaveLength(1);
+      // Drop this round's ACK; the handoff route still lands.
+      let ackDropped = false;
+      hub.send = (source: { name: string }, message: WorkerClusterMessage) => {
+        if (!ackDropped && message.type === CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED) {
+          ackDropped = true;
+          return;
+        }
+        originalSend(source as never, message);
+      };
+      const suspended = owners[0]!;
+      suspended.env.pageHide();
+      await Promise.resolve();
+      expect(ackDropped).toBe(true);
+
+      await stepTime(11_000);
+      // One settle round: if two survivors re-elected on the same stale view
+      // (last-writer-wins, mirroring the pre-existing crash-recovery race),
+      // the holder's next reconcile completes confirmation through the normal
+      // unconfirmed-route retry path.
+      for (const tab of tabs) tab.env.runIntervals();
+      await Promise.resolve();
+      const converged = holders();
+      expect(converged).toHaveLength(1);
+      const route = converged[0]!.runtime
+        .getSnapshot()
+        .routes.find(entry => entry.topic === topic);
+      expect(route?.confirmedAt).toBeDefined();
+      expect(route).not.toHaveProperty('handoffFromWorkerId');
+      expect(route!.generation).toBeGreaterThan(lastGeneration);
+      lastGeneration = route!.generation;
+
+      // The suspended owner rejoins as a subscriber (mirroring the e2e
+      // pageshow step): the sticky route must stay with the survivor — the
+      // returning tab reuses the replacement owner instead of taking back.
+      suspended.env.pageShow();
+      await Promise.resolve();
+      const afterRejoin = holders();
+      expect(afterRejoin).toHaveLength(1);
+      expect(afterRejoin[0]).toBe(converged[0]);
+    }
+  });
+
   it('has the old owner release and re-ACK when it still holds a handed-off assignment', async () => {
     // Covers reconcileAssignedTopics' cooperative path: an old owner that
     // still lists the topic as assigned while the route already names a new
