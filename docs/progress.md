@@ -415,6 +415,20 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 18 (in progress — coverage residuals round 2)
+
+- port-reaper.test.ts: throwing reap target is isolated — a port whose
+  close() throws does not prevent the remaining ports from being reaped on
+  the same tick, and the reaper keeps working afterwards (new port lifecycle
+  normal). Mutation-checked (catch rethrows → fails; restored → passes).
+  (Boundary learned: reap needs age strictly greater than the timeout with
+  10 s ticks, so probes use 41 s windows like the existing tests.)
+- storage-batch.test.ts: setTimeout fallback when queueMicrotask is absent —
+  microtask drain first proves the microtask path was not taken, then the
+  macrotask flush lands exactly once. Mutation-checked (forced microtask
+  path → fails; restored → passes).
+- 480 unit tests green (478 + 2); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
