@@ -275,6 +275,16 @@ fake tasks; each item is verified locally before being marked done.
   defensive paths — behavior already pinned by the new tests.
 - CI green on 0523123 (verify + browser + CodeQL).
 
+## Phase 11 (demo accessibility)
+
+- Status badge is now `role="status" aria-live="polite"` — connection
+  transitions are announced to assistive tech.
+- The event table gained a visually-hidden caption describing its behavior
+  (newest rows on top); the `.visually-hidden` utility joined styles.css.
+- The icon-only clear button got an explicit `aria-label`.
+- All 20 e2e green (caption is display-concealed, selectors untouched).
+- CI green on 8cdfa33.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
