@@ -385,6 +385,15 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 16 (in progress — post-fix stability evidence)
+
+- Baseline sweep: zero TODO/FIXME/XXX/HACK; audit clean; no secrets;
+  no open PRs; outdated = deferred majors only (eslint 10, vitest 5,
+  TS 7) + auto-installed centrifuge peer (no package.json entry to bump).
+- Full e2e 20/20 locally x2 more (16.5 s, 13.8 s). Cumulative post-fix
+  evidence: 4 consecutive local full-suite greens + soak isolation 3/3 +
+  green CI browser jobs on every push since the fix, zero retries.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
