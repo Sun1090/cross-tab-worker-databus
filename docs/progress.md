@@ -234,6 +234,22 @@ fake tasks; each item is verified locally before being marked done.
   doing its job — caught it in CI before any release path saw it.
 - CI green on 786812e (verify 47s + browser 6m21s + CodeQL).
 
+## Phase 8 (release-checklist dry run on the current toolchain)
+
+- bench:browser run archived (2026-09-09T03:26); bench:compare 50% gate green
+  — no metric regressed (dedup -15%, wildcard dispatch -14%, publish -5.5%);
+  bench:trend refreshed docs/benchmarks.md (en+zh), committed cb643b2.
+- npm pack audit: 107 files (benchmark docs ship, progress.md excluded);
+  verify:pack full-surface ESM/CJS smoke green; verify:compat green against
+  v0.20.71.
+- pnpm audit (public registry): no known vulnerabilities.
+- Dependency batch update (minor/patch only, majors deliberately deferred:
+  vitest 5 / eslint / typescript majors are not patch-level moves): playwright
+  1.63, eslint 10.10, typescript-eslint 8.70, @eslint/js 10.0.1, @types/node
+  26.5, centrifuge 5.7.3. Verified: typecheck, 460 unit, lint, build, e2e
+  20/20, verify:pack. CI green (verify + browser + CodeQL) on 549cfe8.
+- No open dependabot PRs; working tree clean at 549cfe8 + this doc.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
