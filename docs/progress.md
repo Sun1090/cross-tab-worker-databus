@@ -458,6 +458,14 @@ fake tasks; each item is verified locally before being marked done.
   unreachable through public API in Node, `?? currentRecord` twins
   unreachable (self always present when started).
 
+## Phase 20 (in progress — post-merge surveillance)
+
+- External sweep: no open PRs, audit clean, zero TODO/FIXME, outdated =
+  deferred majors only (no actionable patch/minor drift since phase 8).
+- Targeted re-verification on the closing tree: cluster + stability unit
+  (68 passed), soak e2e in isolation (1 passed), BFCache e2e group in
+  isolation (3 passed).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
