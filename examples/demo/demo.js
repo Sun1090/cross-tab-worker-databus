@@ -89,6 +89,20 @@ const statusText = {
   error: '错误'
 };
 
+// Human-readable labels for trace `reliability` operations. The values are
+// the wire strings from the SDK's reliability diagnostics (deliberately
+// mirrored here instead of imported: the demo runs from built bundles and
+// must stay readable without SDK internals).
+const reliabilityText = {
+  transport_recovery: '传输恢复',
+  route_ack: '路由确认',
+  route_migration: '路由迁移',
+  route_migration_recovery: '路由恢复',
+  persistence_cleanup: '持久化清理',
+  persistence_retry: '持久化重试',
+  dedup_suppressed: '去重抑制'
+};
+
 const flowPaths = {
   publish: [
     'M160 70 C 210 70 230 70 260 70',
@@ -424,6 +438,24 @@ function handleTraceEvent(event) {
   if (event.type === 'message_metrics') {
     state.lastMetrics = event;
     renderMetrics();
+  }
+  if (event.type === 'reliability') {
+    // Route migration/recovery, transport recovery attempts, persistence
+    // retries and dedup outcomes surface here with bounded metadata only.
+    const details = [
+      event.attempt !== undefined ? `attempt ${event.attempt}` : '',
+      event.outcome ?? '',
+      event.persistenceOperation ?? ''
+    ].filter(Boolean).join(' ');
+    const label = reliabilityText[event.operation] ?? event.operation;
+    addFeed({
+      direction: '诊断',
+      pill: 'system',
+      type: `reliability:${event.operation}`,
+      topic: event.topic ?? '',
+      payload: details ? `${label} ${details}` : label,
+      source: ''
+    });
   }
 }
 
