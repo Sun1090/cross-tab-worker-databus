@@ -365,6 +365,11 @@ fake tasks; each item is verified locally before being marked done.
   `delete` instead of rest-spread + `void`.
 - 476 unit tests green (475 + 1); typecheck, lint, diff-check green.
 
+## Phase 14 result (pushed 4d8f9d7..7e358cb, CI green on first try)
+
+- CI green: verify + browser + CodeQL. Docs-only follow-ups not needed
+  (no shipped-doc changes this round).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
