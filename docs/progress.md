@@ -411,6 +411,10 @@ fake tasks; each item is verified locally before being marked done.
   the normal unconfirmed-route retry — covered by the settle round.
 - 478 unit tests green; typecheck, lint, diff-check green.
 
+## Phase 17 result (pushed ccdabd5..484ed4c, CI green on first try)
+
+- CI green: verify + browser + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
