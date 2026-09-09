@@ -466,6 +466,20 @@ fake tasks; each item is verified locally before being marked done.
   (68 passed), soak e2e in isolation (1 passed), BFCache e2e group in
   isolation (3 passed).
 
+## Phase 21 (in progress — deferred major upgrades, one at a time)
+
+- `@eslint/js` 9 → 10 (completes the eslint 10 upgrade): lint clean with no
+  new violations; check (482 unit) green.
+- vitest 4 → 5 (+ coverage provider): 482 unit + coverage green on the new
+  runner. The major rewrote the benchmarking API (`bench` module-scope
+  import removed; now a test-context fixture), which broke `pnpm bench`
+  (`bench is not a function` on all 3 files) — migrated all 25 benchmarks
+  to `test(name, async ({ bench }) => { await bench(name, fn).run(); })`
+  per the official migration guide. Bench suite green with identical
+  hot-path numbers; no `benchmark.*` config keys existed to clean up.
+- Full battery on the vitest-5 tree: typecheck, lint, e2e 20/20,
+  verify:pack, verify:compat (v0.20.71), audit clean, diff-check.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

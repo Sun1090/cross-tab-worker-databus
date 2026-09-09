@@ -4,7 +4,7 @@
  * Covers the two paths every message and every heartbeat touches:
  * cluster.subscribe/publish bookkeeping and the reconcile cycle.
  */
-import { bench, describe } from 'vitest';
+import { describe, test } from 'vitest';
 import { WorkerClusterRuntime } from '../../src/core/cluster';
 import { createFakeEnvironment, MemoryStorage } from '../fakes';
 
@@ -25,32 +25,42 @@ describe('cluster coordination', () => {
   const runtime = makeRuntime('bench-worker', storage, () => now);
   runtime.start();
 
-  bench('subscribe / 100 new topics', () => {
-    for (let index = 0; index < 100; index += 1) {
-      runtime.subscribe(`bench.subscribe.${index}`);
-    }
+  test('subscribe / 100 new topics', async ({ bench }) => {
+    await bench('subscribe / 100 new topics', () => {
+      for (let index = 0; index < 100; index += 1) {
+        runtime.subscribe(`bench.subscribe.${index}`);
+      }
+    }).run();
   });
 
-  bench('publish / 1000 messages', () => {
-    for (let index = 0; index < 1000; index += 1) {
-      runtime.publish(`bench.subscribe.${index % 100}`, { value: index });
-    }
+  test('publish / 1000 messages', async ({ bench }) => {
+    await bench('publish / 1000 messages', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        runtime.publish(`bench.subscribe.${index % 100}`, { value: index });
+      }
+    }).run();
   });
 
-  bench('publish / 1000 messages / cold route cache', () => {
-    for (let index = 0; index < 1000; index += 1) {
-      runtime.publish(`bench.cold.${index}`, { value: index });
-    }
+  test('publish / 1000 messages / cold route cache', async ({ bench }) => {
+    await bench('publish / 1000 messages / cold route cache', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        runtime.publish(`bench.cold.${index}`, { value: index });
+      }
+    }).run();
   });
 
-  bench('reconcile / 100 topics + 1 worker', () => {
-    now += 3_000;
-    runtime.getSnapshot();
+  test('reconcile / 100 topics + 1 worker', async ({ bench }) => {
+    await bench('reconcile / 100 topics + 1 worker', () => {
+      now += 3_000;
+      runtime.getSnapshot();
+    }).run();
   });
 
-  bench('isAssigned / wildcard pattern / 1000 lookups', () => {
-    for (let index = 0; index < 1000; index += 1) {
-      runtime.isAssigned(`bench.subscribe.${index % 100}`);
-    }
+  test('isAssigned / wildcard pattern / 1000 lookups', async ({ bench }) => {
+    await bench('isAssigned / wildcard pattern / 1000 lookups', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        runtime.isAssigned(`bench.subscribe.${index % 100}`);
+      }
+    }).run();
   });
 });

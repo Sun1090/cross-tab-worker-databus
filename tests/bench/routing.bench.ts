@@ -4,7 +4,7 @@
  * Owner selection runs on every subscribe; active-worker filtering runs on
  * every reconcile tick (3s default). Regressions here multiply across tabs.
  */
-import { bench, describe } from 'vitest';
+import { describe, test } from 'vitest';
 import {
   approximatePayloadBytes,
   effectiveWorkerLoad,
@@ -44,43 +44,61 @@ describe('routing', () => {
     nested: { value: 1, items: [1, 2, 3] }
   };
 
-  bench('selectLeastLoadedWorker / 50 workers', () => {
-    selectLeastLoadedWorker(workers);
+  test('selectLeastLoadedWorker / 50 workers', async ({ bench }) => {
+    await bench('selectLeastLoadedWorker / 50 workers', () => {
+      selectLeastLoadedWorker(workers);
+    }).run();
   });
 
-  bench('selectLeastLoadedWorker / 50 workers / weighted', () => {
-    selectLeastLoadedWorker(workers, undefined, weightingOptions);
+  test('selectLeastLoadedWorker / 50 workers / weighted', async ({ bench }) => {
+    await bench('selectLeastLoadedWorker / 50 workers / weighted', () => {
+      selectLeastLoadedWorker(workers, undefined, weightingOptions);
+    }).run();
   });
 
-  bench('selectLeastLoadedWorker / 50 workers / weighted + lag', () => {
-    selectLeastLoadedWorker(workers, undefined, weightingPlusLagOptions);
+  test('selectLeastLoadedWorker / 50 workers / weighted + lag', async ({ bench }) => {
+    await bench('selectLeastLoadedWorker / 50 workers / weighted + lag', () => {
+      selectLeastLoadedWorker(workers, undefined, weightingPlusLagOptions);
+    }).run();
   });
 
-  bench('effectiveWorkerLoad / 50 weighted workers', () => {
-    for (const worker of weightedWorkers) effectiveWorkerLoad(worker, weightingOptions);
+  test('effectiveWorkerLoad / 50 weighted workers', async ({ bench }) => {
+    await bench('effectiveWorkerLoad / 50 weighted workers', () => {
+      for (const worker of weightedWorkers) effectiveWorkerLoad(worker, weightingOptions);
+    }).run();
   });
 
-  bench('approximatePayloadBytes / structured payload', () => {
-    approximatePayloadBytes(structuredPayload);
+  test('approximatePayloadBytes / structured payload', async ({ bench }) => {
+    await bench('approximatePayloadBytes / structured payload', () => {
+      approximatePayloadBytes(structuredPayload);
+    }).run();
   });
 
-  bench('selectActiveWorkers / 50 workers', () => {
-    selectActiveWorkers(workers, 3);
+  test('selectActiveWorkers / 50 workers', async ({ bench }) => {
+    await bench('selectActiveWorkers / 50 workers', () => {
+      selectActiveWorkers(workers, 3);
+    }).run();
   });
 
-  bench('selectRebalanceTarget / 50 workers', () => {
-    selectRebalanceTarget(workers, 'worker-000');
+  test('selectRebalanceTarget / 50 workers', async ({ bench }) => {
+    await bench('selectRebalanceTarget / 50 workers', () => {
+      selectRebalanceTarget(workers, 'worker-000');
+    }).run();
   });
 
-  bench('topicMatchesPattern / wildcard / 1000 topics', () => {
-    for (let index = 0; index < 1000; index += 1) {
-      topicMatchesPattern('chat.*', `chat.room.${index}`);
-    }
+  test('topicMatchesPattern / wildcard / 1000 topics', async ({ bench }) => {
+    await bench('topicMatchesPattern / wildcard / 1000 topics', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        topicMatchesPattern('chat.*', `chat.room.${index}`);
+      }
+    }).run();
   });
 
-  bench('topicMatchesPattern / exact / 1000 topics', () => {
-    for (let index = 0; index < 1000; index += 1) {
-      topicMatchesPattern(`topic.${index}`, `topic.${index}`);
-    }
+  test('topicMatchesPattern / exact / 1000 topics', async ({ bench }) => {
+    await bench('topicMatchesPattern / exact / 1000 topics', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        topicMatchesPattern(`topic.${index}`, `topic.${index}`);
+      }
+    }).run();
   });
 });
