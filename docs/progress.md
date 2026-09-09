@@ -429,6 +429,10 @@ fake tasks; each item is verified locally before being marked done.
   path → fails; restored → passes).
 - 480 unit tests green (478 + 2); typecheck, lint, diff-check green.
 
+## Phase 18 result (pushed f8c8735..ea1ebf1, CI green on first try)
+
+- CI green: verify + browser + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
