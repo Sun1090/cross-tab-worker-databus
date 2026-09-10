@@ -567,6 +567,15 @@ fake tasks; each item is verified locally before being marked done.
   per-share diagnostics) + multi-round soak convergence; 484 unit, 21 e2e,
   bench, pack, compat, audit, lint, diff-check green.
 
+## Phase 28 result (pushed f8ff90a..59d8c33..e53bf30, CI green)
+
+- Local battery on the fix: 484 unit, 21 e2e, bench, pack, compat,
+  audit, lint, diff-check green.
+- CI green on the closing HEAD (verify + browser + CodeQL); no
+  failures/cancellations outstanding. (The intermediate src-fix push's
+  run was superseded by the docs push via concurrency cancel; the
+  closing run covers the full tree including the fix.)
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
