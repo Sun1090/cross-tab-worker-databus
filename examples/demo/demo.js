@@ -74,6 +74,7 @@ const elements = {
   configChannelInfo: document.querySelector('#configChannelInfo'),
   channelFallback: document.querySelector('#channelFallback'),
   loadWeighting: document.querySelector('#loadWeighting'),
+  dropHandoffAck: document.querySelector('#dropHandoffAck'),
   configClusterKey: document.querySelector('#configClusterKey'),
   configTabId: document.querySelector('#configTabId'),
   configTopic: document.querySelector('#configTopic'),
@@ -209,6 +210,24 @@ function createBus(mode) {
   const loadWeighting = elements.loadWeighting?.checked
     ? { messageRateWeight: 0.01, byteRateWeight: 0.0001, scheduleLagWeight: 1 }
     : undefined;
+  // Chaos testing: drop outgoing handoff ACKs so the new owner can only take
+  // over through the TTL-gated stranded-handoff recovery path (exercises the
+  // recovery in a real browser; the event feed then shows
+  // reliability:route_migration_recovery). Read once at bus creation like
+  // the other toggles above.
+  if (elements.dropHandoffAck?.checked) {
+    const baseCreateChannel = environment.createChannel.bind(environment);
+    environment.createChannel = name => {
+      const channel = baseCreateChannel(name);
+      if (!channel) return channel;
+      const postMessage = channel.postMessage.bind(channel);
+      channel.postMessage = message => {
+        if (message?.type === 'ROUTE_RELEASED') return;
+        postMessage(message);
+      };
+      return channel;
+    };
+  }
   if (mode === 'centrifugo') {
     const url = elements.urlInput.value.trim();
     const workerMode = elements.workerMode.value;

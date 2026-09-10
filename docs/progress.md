@@ -593,6 +593,25 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 30 (in progress — browser coverage for stranded-handoff recovery)
+
+- Real gap: the recovery path had zero browser coverage (a 10 s+ stall
+  cannot be induced deterministically in-browser). New demo chaos toggle
+  (`#dropHandoffAck`) wraps `environment.createChannel` to drop outgoing
+  `ROUTE_RELEASED`; the bus, trace, and feed are otherwise untouched, and
+  the toggle defaults off so all existing tests are unaffected.
+- E2E: pagehide with ACKs dropped on both tabs → survivor converges via
+  re-election (~14 s, vs 1–2 s graceful — the timing itself corroborates
+  the recovery path, not the ACK path) → feed shows the recovery row →
+  delivery resumes exactly once. Isolation green.
+- Full-suite note: 3/5 local parallel runs fully green; 2 runs each dropped
+  a different single test to 20 s-poll timeouts under parallel load (the
+  documented local-load flake class; CI serializes workers:1 with 2
+  retries, so gating is unaffected). The longer suite (chaos test ≈16 s)
+  adds parallel overlap locally — accepted, same trade the project
+  already documents.
+- 483 unit green; typecheck, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
