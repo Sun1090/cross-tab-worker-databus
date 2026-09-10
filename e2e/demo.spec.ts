@@ -498,6 +498,44 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     await publishJson(standby);
     await expect.poll(() => receivedCount(owner)).toBe(ownerBeforeReturnPublish + 1);
   });
+
+  test('dropped handoff ACK recovers through TTL-gated re-election in a real browser', async ({ context }) => {
+    // Chaos path for the stranded-handoff recovery: both tabs drop outgoing
+    // ROUTE_RELEASED, so the pagehide handoff route can only be taken over
+    // through the TTL-gated re-election (no ACK will ever arrive). The
+    // survivor converges and its event feed records the recovery operation.
+    test.setTimeout(180_000);
+    const topic = `e2e.chaos.${Date.now()}`;
+    const openChaosTab = async (): Promise<Page> => {
+      const page = await openDemoTab(context);
+      await page.check('#dropHandoffAck');
+      await connectDemo(page, 'dedicated', topic);
+      return page;
+    };
+    const tabA = await openChaosTab();
+    const tabB = await openChaosTab();
+
+    const ownerIndex = await waitForSingleOwner([tabA, tabB]);
+    const owner = ownerIndex === 0 ? tabA : tabB;
+    const standby = ownerIndex === 0 ? tabB : tabA;
+
+    await owner.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+
+    // Takeover rides the worker-TTL deadline plus heartbeat granularity, so
+    // it lands an order of magnitude later than a graceful handoff — well
+    // within the handoff ceiling, far beyond any graceful-handoff timing.
+    await expect.poll(() => ownerCount(standby), { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
+
+    // The survivor took over through recovery, not the ACK path.
+    const feedText = () => standby.locator('#eventBody').textContent();
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('reliability:route_migration_recovery');
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('路由恢复');
+
+    // Delivery resumes through the recovered owner exactly once.
+    const before = await receivedCount(standby);
+    await publishJson(standby);
+    await expect.poll(() => receivedCount(standby)).toBe(before + 1);
+  });
 });
 
 test.describe('cross-tab databus demo — WebSocket backend', () => {
