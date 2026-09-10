@@ -529,6 +529,10 @@ fake tasks; each item is verified locally before being marked done.
 - E2E broadened to pin all three diagnostic rows on connect.
 - Full suite 21/21 green; typecheck, lint green.
 
+## Phase 26 result (pushed c57ee87..fafd8ce, CI green on first try)
+
+- CI green: verify + browser (21 e2e) + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
