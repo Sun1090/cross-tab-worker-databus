@@ -520,6 +520,15 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser (21 e2e incl. the new reliability-feed test) + CodeQL.
 
+## Phase 26 (in progress — full low-frequency trace coverage in the demo feed)
+
+- Extended the phase-25 feed work: `subscription` and `coordination`
+  trace events now also render as bounded diagnostic rows (action + active
+  count; coordinated worker/route counts only — arrays stay out of the
+  DOM). The feed now covers every low-frequency trace event type.
+- E2E broadened to pin all three diagnostic rows on connect.
+- Full suite 21/21 green; typecheck, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
