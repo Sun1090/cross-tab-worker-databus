@@ -589,6 +589,10 @@ fake tasks; each item is verified locally before being marked done.
   end; mutation-checked (always-stand-down probe fails; restored passes).
 - 485 unit green; typecheck, lint, diff-check green.
 
+## Phase 29 result (pushed 7bab502..287656c, CI green on first try)
+
+- CI green: verify + browser + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
