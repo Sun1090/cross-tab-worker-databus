@@ -576,6 +576,19 @@ fake tasks; each item is verified locally before being marked done.
   run was superseded by the docs push via concurrency cancel; the
   closing run covers the full tree including the fix.)
 
+## Phase 29 (in progress — single-writer liveness hole)
+
+- Review of the phase-28 rule found a real stall: when the elected owner
+  has no local subscription it never reconciles the topic, so universal
+  stand-down stalls forever (reachable through ordinary unsubscribe
+  timing — unsubscribing drops load, making the unsubscribed tab the
+  likely winner). Fix: stand down only when the elected owner is
+  subscribed (mapped via subscriber tabIds); otherwise write the route
+  and notify it directly, exactly like the handoff and crash paths.
+- Regression test pins the unsubscribed-elected-owner recovery end to
+  end; mutation-checked (always-stand-down probe fails; restored passes).
+- 485 unit green; typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

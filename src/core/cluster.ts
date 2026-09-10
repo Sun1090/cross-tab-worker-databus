@@ -1016,7 +1016,18 @@ export class WorkerClusterRuntime {
           // owner reconciles on its own heartbeat, and if views disagree this
           // round they converge on the next flush (bounded by one heartbeat),
           // after which every peer computes the same owner.
-          if (owner.workerId !== this.workerId) continue;
+          // Exception: when the elected owner has no local subscription it
+          // will never reconcile this topic, so standing down would stall
+          // forever. Fall back to writing the route and notifying it
+          // directly (assigning without a local subscription is exactly what
+          // the graceful handoff and the crash path already do).
+          if (owner.workerId !== this.workerId) {
+            const subscriberTabIds = new Set(this.readSubscriberTabIds(topicKey, workers));
+            const ownerSubscribed = workers.some(
+              worker => worker.workerId === owner.workerId && subscriberTabIds.has(worker.tabId)
+            );
+            if (ownerSubscribed) continue;
+          }
           this.writeRoute(topicKey, owner, undefined, route.generation + 1);
           this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
           this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION_RECOVERY, topic });

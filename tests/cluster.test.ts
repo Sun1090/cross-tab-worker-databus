@@ -1725,6 +1725,86 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(diagnosticsC).not.toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-dist-1' });
   });
 
+  it('recovers to an unsubscribed elected owner instead of standing down forever', async () => {
+    // Single-writer liveness hole: when the elected owner has no local
+    // subscription it will never reconcile the topic, so standing down
+    // would stall forever. The recovering peer must write the route and
+    // notify it directly (assigning without a local subscription is what
+    // the graceful handoff and the crash path already do).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const diagnosticsB: Array<{ operation: string; topic: string }> = [];
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onDiagnostic: event => diagnosticsB.push(event)
+    });
+    // B owns an unrelated topic first so the later election prefers the
+    // zero-load, never-subscribed C for the stranded one.
+    b.runtime.start();
+    b.runtime.subscribe('topic-other');
+    await Promise.resolve();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const c = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-c', workerId: 'worker-c' });
+    a.runtime.start();
+    a.runtime.subscribe('topic-lonely');
+    await Promise.resolve();
+    b.runtime.subscribe('topic-lonely');
+    await Promise.resolve();
+    c.runtime.start();
+    await Promise.resolve();
+    expect(a.runtime.getSnapshot().assignedTopics).toContain('topic-lonely');
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-other');
+
+    // Strand the lonely topic's handoff toward worker-b with no ACK ever.
+    // (Identified by owner: it is the only route pointing at worker-a.)
+    const routeEntry = storage
+      .entries()
+      .find(([key, value]) => key.includes(':route:') && (JSON.parse(value) as { workerId: string }).workerId === 'worker-a')!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+    a.runtime.stop();
+    await Promise.resolve();
+
+    // Heartbeat-sized steps so peer heartbeats keep propagating.
+    for (let step = 0; step < 11; step += 1) {
+      now += 1000;
+      b.env.runIntervals();
+      c.env.runIntervals();
+      await Promise.resolve();
+    }
+    b.env.runIntervals();
+    c.env.runIntervals();
+    await Promise.resolve();
+
+    // C was elected (zero load) despite never subscribing: B wrote the
+    // route and notified it instead of standing down, so C holds the
+    // topic with a confirmed, marker-free route.
+    expect(c.runtime.getSnapshot().assignedTopics).toContain('topic-lonely');
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('topic-lonely');
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-other');
+    const recovered = c.runtime.getSnapshot().routes.find(entry => entry.topic === 'topic-lonely');
+    expect(recovered).toMatchObject({ workerId: 'worker-c', generation: 3 });
+    expect(recovered?.confirmedAt).toBeDefined();
+    expect(recovered).not.toHaveProperty('handoffFromWorkerId');
+    expect(diagnosticsB).toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-lonely' });
+  });
+
   it('has the old owner release and re-ACK when it still holds a handed-off assignment', async () => {
     // Covers reconcileAssignedTopics' cooperative path: an old owner that
     // still lists the topic as assigned while the route already names a new
