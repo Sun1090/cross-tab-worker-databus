@@ -546,6 +546,27 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser + CodeQL.
 
+## Phase 28 (in progress — single-writer + projected loads for recovery)
+
+- Found via the new distribution test failing: concurrent re-elections
+  from divergent cross-tab views ping-ponged generations and dropped
+  confirmations (each fresh write is unconfirmed by construction), with
+  per-pass SUBSCRIBE churn and topic pile-up. Debug forensics (temporary
+  elect/write/confirm/assign logging, removed afterwards) pinned the exact
+  interleaving.
+- Fix (`src/core/cluster.ts`): single-writer rule (only the elected owner
+  writes; peers stand down, views converge on the next flush) + projected
+  loads within the pass (mirrors graceful handoff). Standing down stays
+  live: bounded by one heartbeat, then all peers agree.
+- Process lesson recorded: never restore probes from /tmp snapshots (an
+  expired snapshot silently clobbered the rule mid-session and all later
+  analysis ran against rule-less code — which itself corroborated the
+  rule's necessity). Snapshots purged; src fix committed immediately
+  (59d8c33) before further probing.
+- Tests: distribution (one topic per survivor, confirmed, markers cleared,
+  per-share diagnostics) + multi-round soak convergence; 484 unit, 21 e2e,
+  bench, pack, compat, audit, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
