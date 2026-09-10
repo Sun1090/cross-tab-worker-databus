@@ -75,6 +75,7 @@ const elements = {
   channelFallback: document.querySelector('#channelFallback'),
   loadWeighting: document.querySelector('#loadWeighting'),
   dropHandoffAck: document.querySelector('#dropHandoffAck'),
+  simulateCrash: document.querySelector('#simulateCrash'),
   configClusterKey: document.querySelector('#configClusterKey'),
   configTabId: document.querySelector('#configTabId'),
   configTopic: document.querySelector('#configTopic'),
@@ -227,6 +228,38 @@ function createBus(mode) {
       };
       return channel;
     };
+  }
+  // Chaos testing: simulate a crash with NO pagehide. All outgoing
+  // coordination stops — channel messages and localStorage writes — while
+  // reads keep flowing, so heartbeats go stale and survivors must notice
+  // the TTL expiry and re-elect through the crash path. Unlike the ACK
+  // toggle above this must arm AFTER the owner is elected, so the gate is
+  // read live on every call instead of once at bus creation. The tab itself
+  // stays alive (a "zombie": it keeps its stale in-memory ownership view),
+  // which is fine — assertions only ever read the survivors.
+  {
+    const baseCreateChannel = environment.createChannel.bind(environment);
+    environment.createChannel = name => {
+      const channel = baseCreateChannel(name);
+      if (!channel) return channel;
+      const postMessage = channel.postMessage.bind(channel);
+      channel.postMessage = message => {
+        if (elements.simulateCrash?.checked) return;
+        postMessage(message);
+      };
+      return channel;
+    };
+    const storage = environment.storage;
+    if (storage) {
+      const setItem = storage.setItem.bind(storage);
+      const removeItem = storage.removeItem.bind(storage);
+      storage.setItem = (key, value) => {
+        if (!elements.simulateCrash?.checked) setItem(key, value);
+      };
+      storage.removeItem = key => {
+        if (!elements.simulateCrash?.checked) removeItem(key);
+      };
+    }
   }
   if (mode === 'centrifugo') {
     const url = elements.urlInput.value.trim();
