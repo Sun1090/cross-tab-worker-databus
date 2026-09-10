@@ -634,6 +634,10 @@ fake tasks; each item is verified locally before being marked done.
   after TTL expiry (~13.6 s) and delivery resumes exactly once.
 - Full suite 23/23 green locally (24.8 s); typecheck, lint green.
 
+## Phase 31 result (pushed 779a378..cb29413, CI green on first try)
+
+- CI green: verify + browser (23 e2e) + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
