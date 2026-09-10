@@ -618,6 +618,22 @@ fake tasks; each item is verified locally before being marked done.
   CodeQL. The serialized CI workers absorb the longer suite without the
   local parallel-load flake.
 
+## Phase 31 (in progress — browser coverage for the crash path)
+
+- Real gap: the crash path (owner dies with no pagehide at all) had only
+  unit coverage. A real renderer crash via CDP was evaluated first and
+  rejected with evidence: same-origin tabs share the renderer
+  (TAB-B-ALIVE: false in the probe), so siblings die too and the survivors
+  under test disappear.
+- Instead: demo `#simulateCrash` chaos toggle stops all outgoing
+  coordination on the armed tab with no pagehide dispatched (channel sends
+  + localStorage writes blocked live-gated, reads unaffected). Always
+  installed, pass-through when unchecked — the full suite passing proves
+  zero regression to existing tests.
+- E2E: converge 3 tabs, arm crash on the owner only, survivors re-elect
+  after TTL expiry (~13.6 s) and delivery resumes exactly once.
+- Full suite 23/23 green locally (24.8 s); typecheck, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

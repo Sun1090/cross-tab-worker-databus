@@ -231,6 +231,41 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(survivorB)).toBe(1);
   });
 
+  test('simulated crash without pagehide recovers through heartbeat-TTL expiry', async ({ context }) => {
+    // Unlike closing (which runs pagehide and hands off gracefully), the
+    // chaos crash toggle stops all outgoing coordination on the owner tab
+    // with NO pagehide: no handoff write, no worker-record removal. The
+    // route keeps pointing at the dead owner until survivors notice the
+    // heartbeat TTL expiry and re-elect through the crash path. (A real
+    // renderer crash via CDP cannot isolate one tab: same-origin tabs share
+    // the renderer, so siblings die too.)
+    test.setTimeout(180_000);
+    const topic = `e2e.crash.${Date.now()}`;
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'dedicated', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'dedicated', topic);
+    const tabC = await openDemoTab(context);
+    await connectDemo(tabC, 'dedicated', topic);
+
+    const tabs = [tabA, tabB, tabC];
+    const ownerIndex = await waitForSingleOwner(tabs, { timeout: 30_000 });
+    const owner = tabs[ownerIndex]!;
+
+    // Arm crash simulation on the owner only, after convergence: from here
+    // its heartbeats silently stop landing.
+    await owner.check('#simulateCrash');
+
+    // The dead owner's worker record expires after the worker TTL, then a
+    // survivor re-elects — same timing class as stranded-handoff recovery.
+    const survivors = tabs.filter(tab => tab !== owner);
+    const [survivorA, survivorB] = survivors as [Page, Page];
+    await waitForSingleOwner(survivors, { timeout: HANDOFF_TIMEOUT_MS });
+
+    await publishJson(survivorA);
+    await expect.poll(() => receivedCount(survivorB)).toBe(1);
+  });
+
   test('concurrent multi-publisher burst stays duplicate-free across all tabs', async ({ context }) => {
     test.setTimeout(120_000);
     const topic = `e2e.burst.${Date.now()}`;
