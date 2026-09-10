@@ -612,6 +612,12 @@ fake tasks; each item is verified locally before being marked done.
   already documents.
 - 483 unit green; typecheck, lint green.
 
+## Phase 30 result (pushed dc73b15..bd2dfe1, CI green on first try)
+
+- CI green: verify + browser (22 e2e incl. the chaos recovery test) +
+  CodeQL. The serialized CI workers absorb the longer suite without the
+  local parallel-load flake.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
