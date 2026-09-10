@@ -1622,6 +1622,109 @@ describe('WorkerClusterRuntime resilience', () => {
     }
   });
 
+  it('distributes stranded multi-topic recovery across survivors', async () => {
+    // Two topics strand on the same dead owner. Recovery must spread them
+    // across the survivors (projected loads within the pass, mirroring the
+    // graceful handoff, plus the single-writer rule) instead of piling both
+    // onto one worker — routes are sticky, so a pile-up would persist.
+    // Time advances in heartbeat-sized steps so peer heartbeats keep
+    // propagating: a single jump would strand every heartbeat write in its
+    // own writer's pending queue, making live peers look TTL-dead to a
+    // nested reconcile (see the soak test's fake-clock discipline note).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const diagnosticsB: Array<{ operation: string; topic: string }> = [];
+    const diagnosticsC: Array<{ operation: string; topic: string }> = [];
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onDiagnostic: event => diagnosticsB.push(event)
+    });
+    const c = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-c',
+      workerId: 'worker-c',
+      onDiagnostic: event => diagnosticsC.push(event)
+    });
+    // A subscribes first while it is the only worker record: least-loaded
+    // election (all loads zero, tie broken by workerId) gives it both topics.
+    a.runtime.start();
+    a.runtime.subscribe('topic-dist-1');
+    await Promise.resolve();
+    a.runtime.subscribe('topic-dist-2');
+    await Promise.resolve();
+    // B and C join afterwards as standbys on the live routes.
+    b.runtime.start();
+    c.runtime.start();
+    for (const topic of ['topic-dist-1', 'topic-dist-2']) {
+      b.runtime.subscribe(topic);
+      await Promise.resolve();
+      c.runtime.subscribe(topic);
+      await Promise.resolve();
+    }
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(
+      expect.arrayContaining(['topic-dist-1', 'topic-dist-2'])
+    );
+
+    // Strand both handoffs toward worker-b with no ACK ever sent.
+    for (const entry of storage.entries()) {
+      if (!entry[0].includes(':route:')) continue;
+      const route = JSON.parse(entry[1]) as Record<string, unknown>;
+      delete route.confirmedAt;
+      storage.setItem(
+        entry[0],
+        JSON.stringify({
+          ...route,
+          workerId: 'worker-b',
+          tabId: 'tab-b',
+          generation: 2,
+          handoffFromWorkerId: 'worker-a',
+          updatedAt: now
+        })
+      );
+    }
+    a.runtime.stop();
+    await Promise.resolve();
+
+    for (let step = 0; step < 11; step += 1) {
+      now += 1000;
+      b.env.runIntervals();
+      c.env.runIntervals();
+      await Promise.resolve();
+    }
+    // One settle round so the last writer's confirmation flushes through.
+    b.env.runIntervals();
+    c.env.runIntervals();
+    await Promise.resolve();
+
+    // Spread, not piled: one topic per survivor, both confirmed, markers out.
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('topic-dist-1');
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('topic-dist-2');
+    expect(c.runtime.getSnapshot().assignedTopics).toContain('topic-dist-2');
+    expect(c.runtime.getSnapshot().assignedTopics).not.toContain('topic-dist-1');
+    for (const [holder, topic] of [
+      [b, 'topic-dist-1'],
+      [c, 'topic-dist-2']
+    ] as const) {
+      const route = holder.runtime.getSnapshot().routes.find(entry => entry.topic === topic);
+      expect(route).toMatchObject({ generation: 3 });
+      expect(route?.confirmedAt).toBeDefined();
+      expect(route).not.toHaveProperty('handoffFromWorkerId');
+    }
+    // Each survivor performed exactly its own share of the recovery.
+    expect(diagnosticsB).toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-dist-1' });
+    expect(diagnosticsB).not.toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-dist-2' });
+    expect(diagnosticsC).toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-dist-2' });
+    expect(diagnosticsC).not.toContainEqual({ operation: 'route_migration_recovery', topic: 'topic-dist-1' });
+  });
+
   it('has the old owner release and re-ACK when it still holds a handed-off assignment', async () => {
     // Covers reconcileAssignedTopics' cooperative path: an old owner that
     // still lists the topic as assigned while the route already names a new

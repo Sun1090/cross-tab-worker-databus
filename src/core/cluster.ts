@@ -960,6 +960,11 @@ export class WorkerClusterRuntime {
     activeWorkers: readonly WorkerRecord[]
   ): void {
     const liveWorkerIds = new Set(workers.map(worker => worker.workerId));
+    // Projected loads for stranded-handoff re-elections within this pass,
+    // mirroring handoffAssignedTopics(): without it, every stranded topic
+    // would pile onto the same least-loaded worker from the pass-start
+    // snapshot — and routes are sticky, so the imbalance would persist.
+    const recoveryProjectedLoads = new Map<string, number>();
 
     for (const topic of this.subscribedTopics) {
       const topicKey = this.rememberTopic(topic);
@@ -995,7 +1000,23 @@ export class WorkerClusterRuntime {
           // stranded one. While the previous owner is still alive this branch
           // is unreachable, so the strict handoff keeps its no-overlap
           // guarantee.
-          const owner = selectLeastLoadedWorker(activeWorkers, undefined, this.loadWeighting) ?? this.currentRecord;
+          const owner = selectLeastLoadedWorker(
+            activeWorkers.map(worker => ({ ...worker, load: recoveryProjectedLoads.get(worker.workerId) ?? worker.load })),
+            undefined,
+            this.loadWeighting
+          ) ?? this.currentRecord;
+          recoveryProjectedLoads.set(owner.workerId, (recoveryProjectedLoads.get(owner.workerId) ?? owner.load) + 1);
+          // Single-writer rule: only the elected owner performs the
+          // re-election. Peers that compute a different owner stand down and
+          // wait for its write. Concurrent writes from divergent views would
+          // ping-pong generations and drop confirmations — every fresh write
+          // is unconfirmed by construction, so two writers rewriting the same
+          // route keep invalidating each other's confirmations and re-send
+          // SUBSCRIBEs every pass. Standing down is always safe: the elected
+          // owner reconciles on its own heartbeat, and if views disagree this
+          // round they converge on the next flush (bounded by one heartbeat),
+          // after which every peer computes the same owner.
+          if (owner.workerId !== this.workerId) continue;
           this.writeRoute(topicKey, owner, undefined, route.generation + 1);
           this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
           this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION_RECOVERY, topic });
