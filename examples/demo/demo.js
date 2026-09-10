@@ -457,6 +457,30 @@ function handleTraceEvent(event) {
       source: ''
     });
   }
+  if (event.type === 'subscription') {
+    // Bounded: action + topic + active count only.
+    addFeed({
+      direction: '诊断',
+      pill: 'system',
+      type: `subscription:${event.action}`,
+      topic: event.topic ?? '',
+      payload: `${event.action === 'subscribe' ? '订阅' : '退订'} · 活跃 ${event.activeTopics ?? 0}`,
+      source: ''
+    });
+  }
+  if (event.type === 'coordination') {
+    // Bounded: counts only — the workers/routes arrays stay out of the DOM.
+    addFeed({
+      direction: '诊断',
+      pill: 'system',
+      type: 'coordination',
+      topic: '',
+      payload: event.coordinated
+        ? `协同 · ${event.activeWorkers ?? 0} workers / ${(event.routes ?? []).length} 路由`
+        : '未协同',
+      source: ''
+    });
+  }
 }
 
 function renderMetrics() {

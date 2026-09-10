@@ -160,19 +160,20 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(ownerIsA ? tabB : tabA)).toBe(1);
   });
 
-  test('reliability trace events surface route acknowledgments in the event feed', async ({ context }) => {
+  test('diagnostic trace events surface in the event feed', async ({ context }) => {
     const topic = `e2e.reliability.${Date.now()}`;
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
 
     // Confirming the initial route emits a reliability trace event, which
     // the demo renders into the event feed with the operation label.
-    await expect
-      .poll(() => tabA.locator('#eventBody').textContent(), { timeout: 30_000 })
-      .toContain('reliability:route_ack');
-    await expect
-      .poll(() => tabA.locator('#eventBody').textContent(), { timeout: 30_000 })
-      .toContain('路由确认');
+    const feedText = () => tabA.locator('#eventBody').textContent();
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('reliability:route_ack');
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('路由确认');
+    // Subscribing and opening the transport emit subscription/coordination
+    // events, rendered bounded (no worker/route arrays in the DOM).
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('subscription:subscribe');
+    await expect.poll(feedText, { timeout: 30_000 }).toContain('coordination');
   });
 
   test('adaptive-weighting toggle samples throughput and keeps routing stable', async ({ context }) => {
