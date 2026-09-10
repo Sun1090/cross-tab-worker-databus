@@ -533,6 +533,15 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser (21 e2e) + CodeQL.
 
+## Phase 27 (in progress — recovery-op end-to-end sink coverage)
+
+- Data-bus-level test drives two live buses through a real pageHide with
+  the ACK dropped: past the TTL the survivor re-elects and the public
+  trace sink carries `reliability` / `route_migration_recovery` (and never
+  the graceful op) for the topic. Mutation-checked (forwarding cut →
+  fails; restored → passes).
+- 483 unit tests green (482 + 1); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

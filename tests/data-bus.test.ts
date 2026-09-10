@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataBusTraceReporter } from '../src/core/trace';
 import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
+import type { WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
+import { CLUSTER_MESSAGE_TYPE } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
@@ -260,6 +262,78 @@ describe('CrossTabDataBus', () => {
         event => event.type === 'subscription' && event.action === 'subscribe' && event.topic === 'market.tick'
       )
     ).toHaveLength(1);
+
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
+
+  it('surfaces stranded-handoff recovery in the trace sink as route_migration_recovery', async () => {
+    // End-to-end of the recovery diagnostic: two live buses, the owner's
+    // ROUTE_RELEASED dropped on the wire, owner suspended. Past the worker
+    // TTL the survivor re-elects and the trace sink — the public surface —
+    // must carry the recovery operation, not the graceful-migration one.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'trace-rec-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'trace-rec-b' });
+    const eventsB: DataBusTraceEvent[] = [];
+    const busA = new CrossTabDataBus({
+      clusterKey: 'trace-recovery',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: new FakeTransport<number>()
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'trace-recovery',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: new FakeTransport<number>(),
+      trace: { enabled: true, sink: event => eventsB.push(event) }
+    });
+    await busA.start({});
+    await busB.start({});
+    busA.subscribe('t', vi.fn());
+    busB.subscribe('t', vi.fn());
+    await busA.ready();
+    await busB.ready();
+    expect(busA.getClusterSnapshot().assignedTopics).toContain('t');
+
+    const originalSend = hub.send.bind(hub);
+    let ackDropped = false;
+    hub.send = (source: { name: string }, message: WorkerClusterMessage) => {
+      if (!ackDropped && message.type === CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED) {
+        ackDropped = true;
+        return;
+      }
+      originalSend(source as never, message);
+    };
+    envA.pageHide();
+    await Promise.resolve();
+    expect(ackDropped).toBe(true);
+
+    // Heartbeat-sized steps so peer heartbeats keep propagating (mirrors the
+    // cluster soak test's fake-clock discipline).
+    for (let step = 0; step < 11; step += 1) {
+      now += 1000;
+      envA.runIntervals();
+      envB.runIntervals();
+      await Promise.resolve();
+    }
+    envB.runIntervals();
+    await Promise.resolve();
+
+    expect(busB.getClusterSnapshot().assignedTopics).toContain('t');
+    const recoveries = eventsB.filter(
+      event => event.type === 'reliability' && event.operation === 'route_migration_recovery' && event.topic === 't'
+    );
+    expect(recoveries.length).toBeGreaterThanOrEqual(1);
+    expect(
+      eventsB.filter(
+        event => event.type === 'reliability' && event.operation === 'route_migration' && event.topic === 't'
+      )
+    ).toHaveLength(0);
 
     await Promise.all([busA.stop(), busB.stop()]);
   });
