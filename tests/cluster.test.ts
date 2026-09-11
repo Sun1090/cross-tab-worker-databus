@@ -2213,3 +2213,149 @@ describe('WorkerClusterRuntime adaptive load weighting', () => {
     runtimeB.stop();
   });
 });
+
+describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () => {
+  function makeRuntime(id: string, storage = new MemoryStorage(), hub = new ChannelHub()) {
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: id });
+    const onControl = vi.fn();
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'publish-cache',
+      environment: env.environment,
+      tabId: `tab-${id}`,
+      workerId: `worker-${id}`,
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    return { runtime, onControl, env, storage, hub, advance: (ms: number) => { now += ms; } };
+  }
+
+  it('reuses the wildcard publish cache on the second publish to the same topic', async () => {
+    const { runtime, onControl } = makeRuntime('wild');
+    runtime.start();
+    runtime.subscribe('chat.*');
+    await Promise.resolve();
+    expect(runtime.isAssigned('chat.room.1')).toBe(true);
+
+    // First publish computes and caches the matching pattern...
+    runtime.publish('chat.room.1', { n: 1 });
+    // ...the second must take the cache-hit branch and route identically.
+    runtime.publish('chat.room.1', { n: 2 });
+    const publishes = onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'chat.room.1');
+    expect(publishes).toHaveLength(2);
+    runtime.stop();
+  });
+
+  it('a negative wildcard cache entry does not short-circuit a remote-owner publish', async () => {
+    // Regression for the 0.20.58 correctness bug: a `null` wildcardPublishCache
+    // entry means "no local wildcard subscription", NOT "owned locally". If
+    // null short-circuits, a topic owned by another worker is dispatched
+    // locally and never reaches its real owner.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a = makeRuntime('remote-a', storage, hub);
+    const b = makeRuntime('remote-b', storage, hub);
+    a.runtime.start();
+    b.runtime.start();
+
+    // A holds an unrelated wildcard subscription, so its wildcard cache is live.
+    a.runtime.subscribe('chat.*');
+    // B owns 'metrics.cpu' outright.
+    b.runtime.subscribe('metrics.cpu');
+    for (let round = 0; round < 6; round += 1) {
+      await Promise.resolve();
+      a.env.runIntervals();
+      b.env.runIntervals();
+    }
+    expect(b.runtime.isAssigned('metrics.cpu')).toBe(true);
+    expect(a.runtime.isAssigned('metrics.cpu')).toBe(false);
+
+    // A publishes twice: the first call writes the null cache entry, the second
+    // reads it back. Both must be forwarded to B, never handled by A.
+    a.runtime.publish('metrics.cpu', { n: 1 });
+    a.runtime.publish('metrics.cpu', { n: 2 });
+    await Promise.resolve();
+
+    const ownerDeliveries = b.onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'metrics.cpu');
+    expect(ownerDeliveries).toHaveLength(2);
+    expect(a.onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'metrics.cpu')).toHaveLength(0);
+
+    a.runtime.stop();
+    b.runtime.stop();
+  });
+
+  it('routes publishBatch through the wildcard cache on repeat calls', async () => {
+    const { runtime, onControl } = makeRuntime('batch');
+    runtime.start();
+    runtime.subscribe('feed.*');
+    await Promise.resolve();
+
+    const items = [{ data: 1 }, { data: 2 }, { data: 3 }];
+    expect(runtime.publishBatch('feed.eu', items)).toBe(true);
+    // Second call hits the cached pattern branch.
+    expect(runtime.publishBatch('feed.eu', items)).toBe(true);
+    const delivered = onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'feed.eu');
+    expect(delivered).toHaveLength(6);
+    runtime.stop();
+  });
+
+  it('publishBatch treats an empty batch as a no-op and a single item as publish()', async () => {
+    const { runtime, onControl } = makeRuntime('single');
+    runtime.start();
+    runtime.subscribe('t');
+    await Promise.resolve();
+
+    expect(runtime.publishBatch('t', [])).toBe(true);
+    expect(onControl.mock.calls.filter(call => call[0] === 'PUBLISH')).toHaveLength(0);
+
+    // A single-item batch delegates to publish() and must still carry metadata.
+    expect(runtime.publishBatch('t', [{ data: 9, messageId: 'm1', timestamp: 42 }])).toBe(true);
+    const publishes = onControl.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishes).toHaveLength(1);
+    expect(publishes[0]!.slice(3)).toEqual(['m1', 42]);
+    runtime.stop();
+  });
+
+  it('unsubscribing a topic that has no route is a no-op', async () => {
+    const { runtime } = makeRuntime('noroute');
+    runtime.start();
+    // Never subscribed, so no route record exists — releaseSubscription must
+    // return early rather than reading subscribers off a missing route.
+    expect(() => runtime.unsubscribe('never.subscribed')).not.toThrow();
+    expect(runtime.isAssigned('never.subscribed')).toBe(false);
+    runtime.stop();
+  });
+
+  it('reports active-worker eligibility and drops out once stopped', async () => {
+    const { runtime } = makeRuntime('active');
+    runtime.start();
+    await Promise.resolve();
+    expect(runtime.isActiveWorker()).toBe(true);
+    runtime.stop();
+    // After stop the worker record is removed, so it is no longer eligible to
+    // own topics.
+    expect(runtime.isActiveWorker()).toBe(false);
+  });
+
+  it('start() and stop() are idempotent', async () => {
+    const { runtime } = makeRuntime('idem');
+    runtime.start();
+    runtime.start();
+    await Promise.resolve();
+    expect(runtime.getSnapshot().coordinated).toBe(true);
+    runtime.stop();
+    expect(() => runtime.stop()).not.toThrow();
+  });
+
+  it('hasLocalSubscriber matches through a wildcard pattern but not across segment boundaries', async () => {
+    const { runtime } = makeRuntime('local');
+    runtime.start();
+    runtime.subscribe('chat.*');
+    await Promise.resolve();
+    expect(runtime.hasLocalSubscriber('chat.room.1')).toBe(true);
+    expect(runtime.hasLocalSubscriber('chat.*')).toBe(true);
+    // Segment-boundary rule: 'chat.*' must not swallow 'chatter.1'.
+    expect(runtime.hasLocalSubscriber('chatter.1')).toBe(false);
+    expect(runtime.hasLocalSubscriber('unrelated')).toBe(false);
+    runtime.stop();
+  });
+});
