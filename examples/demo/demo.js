@@ -822,7 +822,13 @@ function hostOf(url) {
 
 elements.modeButtons.forEach(button => {
   button.addEventListener('click', () => {
-    elements.modeButtons.forEach(item => item.classList.toggle('active', item === button));
+    elements.modeButtons.forEach(item => {
+      const selected = item === button;
+      item.classList.toggle('active', selected);
+      // The radiogroup's selected state must travel with the visual `active`
+      // class, or assistive tech keeps announcing the initial mode.
+      item.setAttribute('aria-checked', String(selected));
+    });
     const mode = button.dataset.mode;
     // The WebSocket mode connects to the bundled /ws/demo endpoint, so it
     // needs no URL input either.

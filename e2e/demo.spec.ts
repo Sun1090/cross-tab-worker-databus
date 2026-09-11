@@ -914,3 +914,82 @@ test.describe('cross-tab databus replay persistence', () => {
     });
   });
 });
+
+test.describe('cross-tab databus demo — accessibility contracts', () => {
+  test('every form control has an accessible name and the tables are described', async ({ context }) => {
+    const page = await openDemoTab(context);
+
+    // Playwright resolves accessible names the same way assistive tech does
+    // (label[for], aria-label, aria-labelledby, wrapping <label>), so an
+    // unlabelled control shows up here as an empty name.
+    const unnamed = await page.evaluate(() => {
+      const missing: string[] = [];
+      for (const control of document.querySelectorAll('input, select, textarea, button')) {
+        const element = control as HTMLElement;
+        if (element.hasAttribute('aria-hidden') || (element as HTMLInputElement).type === 'hidden') continue;
+        const id = element.id;
+        const labelled = id ? document.querySelector(`label[for="${id}"]`) : null;
+        const wrapped = element.closest('label');
+        const name = element.getAttribute('aria-label')
+          ?? (element.getAttribute('aria-labelledby')
+            ? document.getElementById(element.getAttribute('aria-labelledby')!)?.textContent
+            : null)
+          ?? labelled?.textContent
+          ?? wrapped?.textContent
+          ?? element.textContent;
+        if (!name || !name.trim()) missing.push(element.tagName.toLowerCase() + (id ? `#${id}` : ''));
+      }
+      return missing;
+    });
+    expect(unnamed).toEqual([]);
+
+    // Every data table needs a caption (what the table is) and column scopes
+    // (so a screen reader announces the right header with each cell).
+    const tableIssues = await page.evaluate(() => {
+      const issues: string[] = [];
+      document.querySelectorAll('table').forEach((table, index) => {
+        const name = table.className || `table-${index}`;
+        if (!table.querySelector('caption')) issues.push(`${name}: missing caption`);
+        table.querySelectorAll('thead th').forEach(th => {
+          if (th.getAttribute('scope') !== 'col') issues.push(`${name}: th "${th.textContent}" missing scope=col`);
+        });
+      });
+      return issues;
+    });
+    expect(tableIssues).toEqual([]);
+  });
+
+  test('the mode segmented control exposes its selection to assistive tech', async ({ context }) => {
+    const page = await openDemoTab(context);
+
+    const group = page.locator('#modeSwitch');
+    await expect(group).toHaveAttribute('role', 'radiogroup');
+    // The group must be named, otherwise the radios are announced with no
+    // context for what is being chosen.
+    await expect(group).toHaveAttribute('aria-labelledby', 'modeSwitchLabel');
+    await expect(page.locator('#modeSwitchLabel')).toHaveText('运行模式');
+
+    const centrifugo = group.locator('[data-mode="centrifugo"]');
+    const websocket = group.locator('[data-mode="websocket"]');
+    await expect(centrifugo).toHaveAttribute('aria-checked', 'true');
+    await expect(websocket).toHaveAttribute('aria-checked', 'false');
+
+    // Switching modes must move aria-checked with the visual `active` class —
+    // a static attribute would keep announcing the initial mode forever.
+    await websocket.click();
+    await expect(websocket).toHaveAttribute('aria-checked', 'true');
+    await expect(centrifugo).toHaveAttribute('aria-checked', 'false');
+    await expect(websocket).toHaveClass(/active/);
+
+    // Exactly one radio is ever checked.
+    await expect(group.locator('[aria-checked="true"]')).toHaveCount(1);
+  });
+
+  test('the live status badge announces connection changes politely', async ({ context }) => {
+    const page = await openDemoTab(context);
+    const badge = page.locator('#statusBadge');
+    await expect(badge).toHaveAttribute('role', 'status');
+    await expect(badge).toHaveAttribute('aria-live', 'polite');
+    await expect(badge).toHaveText('已连接');
+  });
+});

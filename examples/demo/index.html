@@ -150,12 +150,12 @@
                 <caption class="visually-hidden">实时事件流：每行一条跨 Tab 消息，新事件插入在顶部</caption>
                 <thead>
                   <tr>
-                    <th>时间</th>
-                    <th>方向</th>
-                    <th>类型</th>
-                    <th>Topic</th>
-                    <th>载荷</th>
-                    <th>来源</th>
+                    <th scope="col">时间</th>
+                    <th scope="col">方向</th>
+                    <th scope="col">类型</th>
+                    <th scope="col">Topic</th>
+                    <th scope="col">载荷</th>
+                    <th scope="col">来源</th>
                   </tr>
                 </thead>
                 <tbody id="eventBody" aria-live="off"></tbody>
@@ -168,11 +168,11 @@
         <div class="panel">
           <div class="panel-head"><h2>连接</h2></div>
           <div class="field">
-            <label>运行模式</label>
-            <div class="segmented" id="modeSwitch">
-              <button class="seg active" data-mode="centrifugo" type="button">Centrifugo</button>
-              <button class="seg" data-mode="websocket" type="button">WebSocket</button>
-              <button class="seg" data-mode="local" type="button">本地广播</button>
+            <span class="field-label" id="modeSwitchLabel">运行模式</span>
+            <div class="segmented" id="modeSwitch" role="radiogroup" aria-labelledby="modeSwitchLabel">
+              <button class="seg active" data-mode="centrifugo" type="button" role="radio" aria-checked="true">Centrifugo</button>
+              <button class="seg" data-mode="websocket" type="button" role="radio" aria-checked="false">WebSocket</button>
+              <button class="seg" data-mode="local" type="button" role="radio" aria-checked="false">本地广播</button>
             </div>
           </div>
           <div class="field" id="urlField">
@@ -373,16 +373,18 @@
           </div>
           <div class="table-wrap compact">
             <table class="state-table">
+              <caption class="visually-hidden">Worker 集群成员：每行一个 Tab 的角色、连接状态、负载与吞吐</caption>
               <thead>
-                <tr><th>Tab</th><th>角色</th><th>状态</th><th>负载</th><th>吞吐</th></tr>
+                <tr><th scope="col">Tab</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">负载</th><th scope="col">吞吐</th></tr>
               </thead>
               <tbody id="workersBody"></tbody>
             </table>
           </div>
           <div class="table-wrap compact">
             <table class="state-table">
+              <caption class="visually-hidden">Topic 路由表：每行一个 Topic 及其当前归属的 Worker</caption>
               <thead>
-                <tr><th>Topic 路由</th><th>归属</th></tr>
+                <tr><th scope="col">Topic 路由</th><th scope="col">归属</th></tr>
               </thead>
               <tbody id="routesBody"></tbody>
             </table>

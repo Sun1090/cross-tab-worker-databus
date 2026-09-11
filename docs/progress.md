@@ -821,6 +821,43 @@ Verified end to end on PR #10: `verify`, `browser` (23 e2e), `analyze`, and
 `CodeQL` all green, with the three new gate steps confirmed executing in the
 runner.
 
+## Phase 38 (autonomous session, cont. - demo accessibility)
+
+First pass over the UI/a11y area of the brief, which no prior phase had
+examined. Audited `examples/demo/index.html` (396 lines) against what
+assistive tech can actually perceive.
+
+Already correct: every form control's `label[for=]` resolves to a real
+control (`endpointPreset`, `urlInput`, `workerMode`, `topicInput`,
+`payloadInput`), `#statusBadge` is already `role="status"` +
+`aria-live="polite"`, and the event table already carried a visually-hidden
+caption.
+
+Four genuine gaps found and fixed:
+
+1. The run-mode segmented control conveyed its selection **only** through a
+   CSS `active` class. Screen readers announced three plain buttons with no
+   selected state. Now `role="radiogroup"` + `aria-labelledby`, with
+   `role="radio"` / `aria-checked` per button.
+2. `demo.js` toggled just the `active` class on click, so the new
+   `aria-checked` would have gone stale after the first switch - the handler
+   now moves both together. Static ARIA that lies is worse than none.
+3. The dangling `<label>run mode</label>` had no form control to label (a
+   `<label>` around a button group contributes no accessible name). It became
+   a `<span class="field-label" id="modeSwitchLabel">`, with a CSS rule added
+   so it renders identically to the real field labels.
+4. Both `.state-table`s lacked captions, and all eight `<th>` across the three
+   tables lacked `scope="col"`, so cells were announced without their column
+   header.
+
+Verification: the assertions were run against the real HTML through jsdom
+before and after the fix - **15 violations before, 0 after** - because
+Playwright browsers cannot be installed in this sandbox. Three browser E2E
+specs in `e2e/demo.spec.ts` encode the same contracts for CI: no unnamed
+interactive control, a caption + column scopes on every table, and
+`aria-checked` following the selection through an actual mode switch (the
+regression guard for gap 2). `pnpm check` (568) and `pnpm lint` green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
