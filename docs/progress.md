@@ -785,6 +785,42 @@ remain as defensive depth with the contract pinned by tests.
 Cumulative this session: **485 -> 564 unit tests**, all files
 94.00 / 88.62 / 94.37 -> **96.53 / 91.70 / 95.78**.
 
+## Phase 37 (autonomous session, cont. — Centrifuge transport edges)
+
+`CentrifugeWorkerTransport` (4 tests, all mutation-checked): duplicate
+`start()` reusing the live backend (a second Worker means a second WebSocket),
+SharedWorker-level vs port message-decode failures reported as distinct
+errors, a `channelToken` request falling back to `getToken` when the provider
+lacks `getChannelToken`, and a token request answered with `TOKEN_ERROR`
+instead of dropped when no `credentialProvider` exists (a silent drop hangs
+the worker's connect indefinitely). 93.12 -> 95.00 statements, 91.08 -> 93.06
+branches, 100 functions.
+
+Remaining uncovered lines in `centrifuge.ts` (421/427/442/448) are the
+`typeof Worker === 'undefined'` / `typeof SharedWorker === 'undefined'` SSR
+guards inside the *default* factory functions. They are unreachable from the
+test process without deleting the globals for the whole module graph, and the
+degradation behavior they back is already covered through injected factories.
+Left deliberately uncovered.
+
+Cumulative this session: **485 -> 568 unit tests**, all files
+94.00 / 88.62 / 94.37 / 96.77 -> **96.64 / 91.83 / 95.78 / 98.22**.
+
+### Session summary (phases 34-37)
+
+Two real problems found and fixed, both by coverage-driven probing rather
+than by reading the task list:
+
+1. `src/vue.ts` leaked a bus when a component unmounted inside the async
+   start window (fixed; regression test).
+2. `verify:compat`, `verify:pack`, and the coverage thresholds were
+   documented release gates that no workflow ran (wired into CI + Release,
+   with the `fetch-tags` checkout fix `verify:compat` requires).
+
+Verified end to end on PR #10: `verify`, `browser` (23 e2e), `analyze`, and
+`CodeQL` all green, with the three new gate steps confirmed executing in the
+runner.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
