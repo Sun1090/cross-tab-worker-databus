@@ -1273,3 +1273,103 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(empty[empty.length - 1]).toMatchObject({ requestId: 4 });
   });
 });
+
+describe('CentrifugeWorkerTransport start guard and shared-worker failure variants', () => {
+  const handlers = () => ({ onStatus: vi.fn(), onMessage: vi.fn(), onError: vi.fn() });
+
+  it('a second start() while a backend is live does not build a replacement worker', () => {
+    const workers: WorkerDouble[] = [];
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => {
+        const worker = new WorkerDouble();
+        workers.push(worker);
+        return worker as unknown as Worker;
+      }
+    });
+    const first = handlers();
+    transport.start({ url: 'wss://example.test/connection/websocket' }, first);
+    expect(workers).toHaveLength(1);
+    const initFrames = workers[0]!.messages.filter(message => message.type === 'INIT').length;
+
+    // A duplicate start (resume racing an in-flight open) must reuse the live
+    // backend — a second Worker would mean two WebSocket connections.
+    transport.start({ url: 'wss://example.test/other' }, handlers());
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.messages.filter(message => message.type === 'INIT')).toHaveLength(initFrames);
+    transport.stop();
+  });
+
+  it('reports a shared-worker error and a port decode error as distinct failures', () => {
+    const sharedWorkers: SharedWorkerDouble[] = [];
+    const makeTransport = () => {
+      const transport = new CentrifugeWorkerTransport({
+        workerMode: 'shared',
+        sharedWorkerFactory: () => {
+          const shared = new SharedWorkerDouble();
+          sharedWorkers.push(shared);
+          return shared as unknown as SharedWorker;
+        }
+      });
+      const handler = handlers();
+      transport.start({ url: 'wss://example.test/connection/websocket' }, handler);
+      return { transport, handler };
+    };
+
+    // SharedWorker-level failure.
+    const workerLevel = makeTransport();
+    sharedWorkers[0]!.fail();
+    expect(workerLevel.handler.onError).toHaveBeenCalledTimes(1);
+    expect(String((workerLevel.handler.onError.mock.calls[0]![0] as Error).message)).toContain('shared worker failed');
+    workerLevel.transport.stop();
+
+    // Port-level message-decode failure is a different message so operators
+    // can tell a crashed worker apart from an undeliverable payload.
+    const portLevel = makeTransport();
+    sharedWorkers[1]!.port.failDecode();
+    expect(portLevel.handler.onError).toHaveBeenCalledTimes(1);
+    expect(String((portLevel.handler.onError.mock.calls[0]![0] as Error).message)).toContain('decoding failed');
+    portLevel.transport.stop();
+  });
+
+  it('answers a channelToken request from getToken when the provider has no getChannelToken', async () => {
+    const worker = new WorkerDouble();
+    const getToken = vi.fn(() => 'shared-token');
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, handlers());
+
+    // A provider that only implements getToken must still satisfy a channel
+    // token request rather than stranding the subscription.
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 11, kind: 'channelToken', channel: 'chat.room.1' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getToken).toHaveBeenCalled();
+    expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 11, token: 'shared-token' });
+    transport.stop();
+  });
+
+  it('answers a token request with TOKEN_ERROR when no credentialProvider is configured', async () => {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, handlers());
+
+    // Without a provider the request must be answered (with an error), never
+    // dropped — a silent drop would hang the worker's connect forever.
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 12, kind: 'token' });
+    await Promise.resolve();
+    await Promise.resolve();
+    const failure = worker.messages.find(message => message.type === 'TOKEN_ERROR') as
+      | { type: 'TOKEN_ERROR'; requestId: number; error: { message?: string } }
+      | undefined;
+    expect(failure).toBeDefined();
+    expect(failure!.requestId).toBe(12);
+    transport.stop();
+  });
+});
