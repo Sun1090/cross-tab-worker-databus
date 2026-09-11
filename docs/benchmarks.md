@@ -2,19 +2,19 @@
 
 # Browser Benchmark Trend
 
-> Auto-generated 2026-09-09 from 11 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
+> Auto-generated 2026-09-11 from 12 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
 
 The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50` between the two most recent reports (50% ceiling absorbs shared-runner noise). This doc records the long-run picture: values are per-metric latencies where lower is better, and the all-time best marks the healthiest observed run on this machine.
 
 <!-- BENCH-TREND:BEGIN (machine-generated) -->
 | Metric | Previous (ms) | Latest (ms) | Δ | All-time best (ms) |
 |---|---|---|---|---|
-| publish per-message (ms, lower is better) — dedicated | 45.6489 | 43.8388 | -1.81 | 41.3664 |
-| publish per-message (ms, lower is better) — shared | 33.8471 | 34.2105 | +0.36 | 33.8206 |
-| wildcard dispatch ×1000 (ms, lower is better) | 6.2 | 6.5 | +0.30 | 0.1 |
-| publishBatch ×1000 (ms, lower is better) | 4.1 | 4.2 | +0.10 | 0.4 |
-| dedup ×1000 (ms, lower is better) | 15.8 | 15.5 | -0.30 | 0 |
-| trace + publish ×1000 (ms, lower is better) | 5.6 | 5.8 | +0.20 | 4.8 |
+| publish per-message (ms, lower is better) — dedicated | 43.8388 | 40.8227 | -3.02 | 40.8227 |
+| publish per-message (ms, lower is better) — shared | 34.2105 | 35.4339 | +1.22 | 33.8206 |
+| wildcard dispatch ×1000 (ms, lower is better) | 6.5 | 6.7 | +0.20 | 0.1 |
+| publishBatch ×1000 (ms, lower is better) | 4.2 | 4 | -0.20 | 0.4 |
+| dedup ×1000 (ms, lower is better) | 15.5 | 13.9 | -1.60 | 0 |
+| trace + publish ×1000 (ms, lower is better) | 5.8 | 5.3 | -0.50 | 4.8 |
 | first-packet cold dispatch (ms, lower is better) | 0 | 0 | +0.00 | 0 |
 <!-- BENCH-TREND:END -->
 

@@ -638,6 +638,17 @@ fake tasks; each item is verified locally before being marked done.
 
 - CI green: verify + browser (23 e2e) + CodeQL.
 
+## Phase 32 (in progress — TS 7.1 probe + bench-engine baseline re-check)
+
+- TypeScript 7.1: only a `next`-tag dev build exists (`7.1.0-dev…`);
+  latest stable is still 7.0.2, which typescript-eslint rejects. TS 7
+  stays deferred with even stronger evidence; the configured mirror does
+  not even carry 7.1 yet. Retry when a stable 7.1 lands alongside
+  typescript-eslint support.
+- Vitest 5 swapped the bench engine (tinybench 6): re-running
+  `bench:browser` to check for a systematic baseline shift (the release
+  checklist anticipates a one-time shift on engine changes).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
