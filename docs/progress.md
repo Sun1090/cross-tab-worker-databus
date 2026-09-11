@@ -758,6 +758,33 @@ Unit tests 485 -> 554. typecheck, lint, coverage, build all green.
   Playwright Chromium could not be downloaded in the dev sandbox (ECONNRESET
   against cdn.playwright.dev), so E2E was verified in CI instead.
 
+## Phase 36 (autonomous session, cont. — worker/transport edge coverage)
+
+Continued down the coverage ranking to the two remaining sub-95% modules.
+
+`PortReaper` (SharedWorker cleanup, 5 tests): untracked-port no-ops for
+`setTimeout`/`touch`/`remove` (a STOP or INIT racing a reap must not resurrect
+a port), duplicate `remove` plus cadence-timer teardown when the last port
+goes, `dispose()` closing and stopping every session and being repeat-safe,
+`dispose()` continuing after a target throws (one detached port must not
+strand the remaining WebSockets), and the non-finite/non-positive heartbeat
+fallback. Three mutations checked, all caught. **97.18 -> 100 statements**,
+81.81 -> 90.91 branches, 100 functions.
+
+`WebSocketTransport` (5 tests): empty `publishBatch`, ArrayBuffer items
+embedded as byte arrays in a mixed batch, duplicate `start()` reusing the live
+socket, and non-string / non-object frames ignored. 92.59 -> 96.29 statements,
+85.54 -> 91.56 branches, 100 functions.
+
+Mutation-testing note: two probes turned out **equivalent** rather than
+uncaught, and were recorded as such instead of chasing them —
+`assignedTopics.has(null)` is already false (phase 35), and the websocket
+non-object JSON guard is redundant with `parseDataBusPublication`. Both
+remain as defensive depth with the contract pinned by tests.
+
+Cumulative this session: **485 -> 564 unit tests**, all files
+94.00 / 88.62 / 94.37 -> **96.53 / 91.70 / 95.78**.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
