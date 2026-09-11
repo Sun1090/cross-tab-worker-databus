@@ -655,6 +655,14 @@ fake tasks; each item is verified locally before being marked done.
   within ±10% noise — no engine-shift regression); trend docs refreshed
   (12 reports). CI green: verify + browser + CodeQL.
 
+## Phase 33 (in progress — definitive full battery on the final tree)
+
+- check: typecheck + build + 485 unit green (26 files); lint clean.
+- e2e 23/23 green locally; Node bench green; verify:pack full-surface
+  green; verify:compat (v0.20.71 baseline) green; audit clean;
+  npm pack 107 files without progress.md; diff-check clean.
+- bench:browser covered in phase 32 (gate green, trend refreshed).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
