@@ -292,5 +292,29 @@ describe('useCrossTabHealth edge cases', () => {
     expect(bus.calls()).toBe(callsAtUnmount);
     vi.useRealTimers();
   });
+
+  it('defaults the poll interval to 1s when no options object is supplied', async () => {
+    vi.useFakeTimers();
+    const bus = makeFakeHealthBus();
+    function DefaultDemo() {
+      // No options argument at all — exercises the `options?.intervalMs ?? 1_000`
+      // default rather than the explicit-interval path the other test covers.
+      const health = useCrossTabHealth(bus as never);
+      return <span data-testid="health">{health ? 'up' : 'none'}</span>;
+    }
+    const view = render(<DefaultDemo />);
+    expect(view.getByTestId('health').textContent).toBe('up');
+    const initial = bus.calls();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(bus.calls()).toBe(initial);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2);
+    });
+    expect(bus.calls()).toBe(initial + 1);
+    view.unmount();
+    vi.useRealTimers();
+  });
 });
 });
