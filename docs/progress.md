@@ -714,6 +714,36 @@ Chromium download is network-blocked: ECONNRESET against cdn.playwright.dev);
 the `browser` CI job covers it, and no E2E-facing source changed except
 `src/vue.ts`, which has no demo/E2E surface.
 
+## Phase 35 (autonomous session, cont. — core-module coverage + routing regression)
+
+Continued the coverage-driven hunt into the two core modules.
+
+`CrossTabDataBus` lifecycle contract edges (5 tests): `ready()` rejecting with
+the configuration error when no `initialConfig` exists and resurfacing the
+recorded transport failure once the opening settled; `unsubscribe` no-ops for
+an unknown topic and an unregistered handler; `stop()` idempotence; and the
+third dispatch gate — a two-tab setup where the owner fans out to a peer
+subscriber and records the message *discarded*, so its throughput and dispatch
+percentiles are not inflated by a message it never handed to a handler.
+Mutation-checked (removing the `hasLocalSubscriber` gate fails it).
+
+`WorkerClusterRuntime` publish-routing cache + lifecycle guards (8 tests),
+including a two-runtime regression pinning the 0.20.58 correctness fix: a
+`null` `wildcardPublishCache` entry means "no local wildcard subscription",
+not "owned locally", so a topic owned by a remote worker must still be
+forwarded. Note: the obvious mutation (dropping `&& cachedPattern !== null`)
+is *equivalent* — `Map.has(null)` is already false — so the probe used was
+the semantic one (treat any cached entry as locally-owned), which fails 4
+tests including the new one.
+
+| Module | Before (stmt/branch/func) | After |
+|---|---|---|
+| `core/data-bus.ts` | 94.58 / 89.79 / 90.21 | 95.07 / 90.20 / 90.21 |
+| `core/cluster.ts` | 94.30 / 87.50 / 98.79 | 95.95 / 90.21 / **100** |
+| All files | 94.00 / 88.62 / 94.37 | **96.29 / 91.19 / 95.78** |
+
+Unit tests 485 -> 554. typecheck, lint, coverage, build all green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
