@@ -663,6 +663,57 @@ fake tasks; each item is verified locally before being marked done.
   npm pack 107 files without progress.md; diff-check clean.
 - bench:browser covered in phase 32 (gate green, trend refreshed).
 
+## Phase 34 (autonomous session — coverage-driven defect hunt + CI gate enforcement)
+
+Method: rather than assume the "feature-complete" state was verified, re-ran
+the full battery from a clean install and used per-branch v8 coverage to find
+code paths no test reaches, then wrote focused tests there. Every new suite was
+mutation-checked (delete the guard under test -> the test must fail).
+
+**Real defect found and fixed** — `src/vue.ts` `useCrossTabDataBus`:
+`start()` awaits `stop()` before calling `create()`. An unmount landing inside
+that async window ran `stop()` without bumping `lifecycleGeneration`, so the
+pending continuation still ran `create()` after the component was gone,
+leaving a live bus with no owner to stop it. `onBeforeUnmount` now bumps the
+generation. Regression test fails without the fix. (React adapter unaffected:
+its `create()` is synchronous inside `useEffect`.)
+
+**Real CI gap found and fixed** — `verify:compat`, `verify:pack`, and the
+`vitest.config.ts` coverage thresholds were all documented release gates that
+no workflow ran. They could only ever fail after a tag was pushed, or never.
+Added to the CI `verify` job and (compat/pack) to the `Release` job. Both
+checkouts needed `fetch-depth: 0` + `fetch-tags: true` — `verify:compat`
+resolves its baseline from the latest release tag and dies with
+"no version tag found" on the default shallow checkout (reproduced locally).
+Documented the automated gate set in both release checklists.
+
+**Coverage** (485 -> 541 unit tests, 26 -> 27 files):
+
+| Module | Before (stmt/branch) | After |
+|---|---|---|
+| `core/replay-manager.ts` | 86.95 / 81.60 | 97.10 / 96.00 |
+| `core/replay-persistence.ts` | 84.02 / 66.17 | 93.29 / 72.05 |
+| `centrifuge-session.ts` | 92.62 / 88.05 | 98.36 / 94.02 |
+| `vue.ts` | 96.55 / 86.66 | 97.72 / 93.33 |
+| All files | 94.00 / 88.62 | 95.86 / 90.48 |
+
+New `tests/replay-manager.test.ts` (41 tests) drives the manager directly —
+previously it was only exercised transitively through `CrossTabDataBus`, which
+left the retention-sweep coalescing, the persistence retry/backoff loop, the
+suspend-cancellation path, and the wildcard replay gates unpinned.
+
+**Deps**: react / react-dom / @types/react -> 19.3.0 (dev-only). TypeScript
+stays on 6.0.3; 7.0.2 is still rejected by typescript-eslint (phase-32
+deferral stands). `pnpm audit` clean.
+
+**Local battery**: install (frozen lockfile), typecheck, lint, build, 541 unit
+tests, coverage (95.86 / 90.48 / 95.58 / 97.80 vs 85 / 80 / 90 / 85 floors),
+bench (25 cases), verify:compat (baseline v0.20.71), verify:pack — all green,
+run in the exact CI order. E2E could not run in this sandbox (the Playwright
+Chromium download is network-blocked: ECONNRESET against cdn.playwright.dev);
+the `browser` CI job covers it, and no E2E-facing source changed except
+`src/vue.ts`, which has no demo/E2E surface.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
