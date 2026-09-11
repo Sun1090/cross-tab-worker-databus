@@ -2655,3 +2655,132 @@ describe('adaptive dedup TTL', () => {
     await bus.stop();
   });
 });
+
+describe('CrossTabDataBus lifecycle contract edges', () => {
+  afterEach(() => vi.useRealTimers());
+
+  function makeBus(overrides: Record<string, unknown> = {}) {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'edge' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'lifecycle-edges',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      ...overrides
+    });
+    return { bus, transport, environment, storage, hub };
+  }
+
+  it('ready() rejects with the configuration error when no initialConfig exists', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'no-config' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'no-config',
+      environment: environment.environment,
+      transport
+    });
+    // ready() converts the ensureStarted throw into a rejection so callers can
+    // await it uniformly instead of needing a try/catch around the call.
+    await expect(bus.ready()).rejects.toThrow('requires initialConfig');
+    expect(transport.startCalls).toBe(0);
+  });
+
+  it('ready() surfaces the last transport failure once no start is in flight', async () => {
+    const { bus, transport } = makeBus();
+    transport.startShouldFail = true;
+    await expect(bus.ready()).rejects.toBeTruthy();
+
+    // With the opening settled and the transport still not ready, a second
+    // ready() must resurface the recorded failure rather than resolving or
+    // producing the generic "no start in flight" error.
+    await expect(bus.ready()).rejects.toBeTruthy();
+    await bus.stop();
+  });
+
+  it('the owning tab fans out to a peer subscriber and records the message discarded locally', async () => {
+    // The realistic shape of the third dispatch gate: tab A wins ownership of
+    // a topic only tab B subscribes to. A must broadcast the publication to B
+    // and then record it as *discarded* locally — counting it as dispatched
+    // would inflate A's throughput and skew its latency percentiles with a
+    // message A never handed to a handler.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'owner' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'peer' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const trace = { enabled: true, sink: () => undefined };
+    const busA = new CrossTabDataBus({
+      clusterKey: 'fanout', environment: envA.environment, initialConfig: {}, transport: transportA, trace
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'fanout', environment: envB.environment, initialConfig: {}, transport: transportB, trace
+    });
+    await busA.ready();
+    await busB.ready();
+
+    const peerHandler = vi.fn();
+    busB.subscribe('shared', peerHandler);
+    // Converge: A takes the transport subscription, B keeps only the handler.
+    for (let round = 0; round < 10; round += 1) {
+      await Promise.resolve();
+      envA.runIntervals();
+      envB.runIntervals();
+    }
+    expect(transportA.subscribeCalls).toContain('shared');
+    expect(transportB.subscribeCalls).toEqual([]);
+
+    transportA.emit('shared', 7);
+    await Promise.resolve();
+
+    // Delivered to the peer...
+    expect(peerHandler).toHaveBeenCalledTimes(1);
+    // ...and counted as received-but-not-dispatched on the owner.
+    const ownerMetrics = busA.getMetrics()!;
+    expect(ownerMetrics.received).toBe(1);
+    expect(ownerMetrics.dispatched).toBe(0);
+    expect(ownerMetrics.dispatchSamples).toBe(0);
+
+    await busA.stop();
+    await busB.stop();
+  });
+
+  it('unsubscribe is a no-op for an unknown topic and for an unregistered handler', async () => {
+    const { bus, transport } = makeBus();
+    await bus.ready();
+    const handler = vi.fn();
+    bus.subscribe('t', handler);
+    expect(transport.subscribeCalls).toEqual(['t']);
+
+    // Unknown topic: nothing to remove, and the live subscription is untouched.
+    expect(() => bus.unsubscribe('ghost')).not.toThrow();
+    // Known topic, foreign handler: the set is non-empty afterwards, so the
+    // transport subscription must survive.
+    bus.unsubscribe('t', vi.fn());
+    expect(transport.unsubscribeCalls).toEqual([]);
+
+    transport.emit('t', 5);
+    await Promise.resolve();
+    expect(handler).toHaveBeenCalled();
+
+    // Removing the last handler does tear the transport subscription down.
+    bus.unsubscribe('t', handler);
+    await vi.waitFor(() => expect(transport.unsubscribeCalls).toEqual(['t']));
+    await bus.stop();
+  });
+
+  it('stop() is idempotent and stops the transport exactly once', async () => {
+    const { bus, transport } = makeBus();
+    await bus.ready();
+    bus.subscribe('t', vi.fn());
+    await bus.stop();
+    const stopsAfterFirst = transport.stopCalls;
+    await bus.stop();
+    await bus.stop();
+    expect(transport.stopCalls).toBe(stopsAfterFirst);
+  });
+});
