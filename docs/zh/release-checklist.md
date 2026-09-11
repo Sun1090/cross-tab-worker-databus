@@ -9,6 +9,12 @@
 - 协议别名（worker/cluster/transport 消息形态）遵循同一规则：弃用后至少一个小版本继续解析 legacy 帧，保证混版本 peer 兼容（见 `getDiagnostics().protocol` 的协议版本诊断）。
 - 晋升 `1.0.0` 要求公共 API 与协议弃用策略正式冻结，并发布迁移指南（见 `docs/roadmap.md` 的 0.13.0 candidates）。
 
+## 自动化门禁（CI）
+
+`CI` 工作流的 `verify` job 在每次 push 与 pull request 上运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`（`vitest.config.ts` 中的下限：语句 85% / 分支 80% / 函数 90% / 行 85%）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench` 与 `pnpm audit`；`browser` job 运行 Playwright E2E 套件。`Release` 工作流在发布前重跑 `verify:compat` 与 `verify:pack`，随后执行阻塞式 `verify:published` 门禁。两个工作流的 checkout 均使用 `fetch-depth: 0` + `fetch-tags: true`，因为 `verify:compat` 需要从最近的发布 tag 解析基线。
+
+只有 `pnpm bench:browser` / `pnpm bench:compare` 保持仅本地执行：共享 runner 的计时噪声会让数值型 CI 门禁不可靠。
+
 ## 打 tag 前
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。

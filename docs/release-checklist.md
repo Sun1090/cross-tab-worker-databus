@@ -9,6 +9,12 @@ Use this checklist for each pre-1.0 release. The repository does not publish fro
 - Protocol aliases (worker/cluster/transport message shapes) follow the same rule: keep parsing legacy frames for one minor after deprecation so mixed-version peers stay compatible (see the protocol-version diagnostics in `getDiagnostics().protocol`).
 - Advancing to `1.0.0` requires the public API and protocol deprecation policy to be frozen and a migration guide published (see `docs/roadmap.md`, 0.13.0 candidates).
 
+## Automated gates (CI)
+
+The `CI` workflow's `verify` job runs `pnpm check`, `pnpm lint`, `pnpm test:coverage` (the `vitest.config.ts` floors: 85% statements / 80% branches / 90% functions / 85% lines), `pnpm verify:compat`, `pnpm verify:pack`, `pnpm bench`, and `pnpm audit` on every push and pull request; the `browser` job runs the Playwright E2E suite. The `Release` workflow repeats `verify:compat` and `verify:pack` before publishing, then runs the blocking `verify:published` gate. The checkout in both workflows uses `fetch-depth: 0` + `fetch-tags: true` because `verify:compat` resolves its baseline from the most recent release tag.
+
+Only `pnpm bench:browser` / `pnpm bench:compare` stay local-only: shared-runner timing noise makes numeric CI gates unreliable.
+
 ## Before tagging
 
 1. Update `package.json`, `CHANGELOG.md`, and both roadmap files.

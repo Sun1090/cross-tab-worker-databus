@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+          # verify:compat needs the previous release tags as its baseline.
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: pnpm/action-setup@v6
 
@@ -44,6 +47,16 @@ jobs:
       # tests/dual-format.test.ts imports the dist artifacts.
       - name: Verify (typecheck + build + unit tests)
         run: pnpm check
+
+      - name: Public export compatibility
+        # Blocking: a release that silently drops a public subpath export or
+        # type entry is a breaking change shipped as a patch.
+        run: pnpm verify:compat
+
+      - name: Packed consumer smoke
+        # Verifies the actual tarball before publish, so a broken
+        # `files`/`exports` mapping cannot reach the registry.
+        run: pnpm verify:pack
 
       - name: Extract changelog for this version
         run: |
