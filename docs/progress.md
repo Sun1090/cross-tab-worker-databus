@@ -858,6 +858,16 @@ interactive control, a caption + column scopes on every table, and
 `aria-checked` following the selection through an actual mode switch (the
 regression guard for gap 2). `pnpm check` (568) and `pnpm lint` green.
 
+Follow-up in the same phase: declaring `role="radio"` without implementing the
+radiogroup keyboard pattern would have been a promise the widget did not keep,
+so the click handler was refactored into a shared `selectMode()` that also
+maintains a **roving tabindex** (one tab stop for the group), with Arrow / Home
+/ End navigation where selection follows focus. Buttons also had *no* focus
+style at all, making keyboard navigation invisible - added a `:focus-visible`
+outline. The state machine was validated in jsdom (wrap-around both
+directions, Home/End, click, and the "exactly one tabbable / one checked"
+invariant) and pinned by a fourth E2E spec; the browser suite is now 27.
+
 Confirmed on PR #10 at commit `18ab15d`: all four checks pass and the browser
 job's spec count went 23 -> 26, so the new specs really executed in CI rather
 than being collected and skipped. (Job log download fails from this sandbox

@@ -436,6 +436,17 @@ select:focus {
   box-shadow: 0 0 0 2px #e5e4fb;
 }
 
+/* Buttons had no focus style of their own, so keyboard users driving the mode
+   radiogroup (arrow keys) or the action rows had no idea where focus was.
+   :focus-visible keeps the ring off pointer clicks. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
