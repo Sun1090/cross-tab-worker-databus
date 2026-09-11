@@ -858,6 +858,12 @@ interactive control, a caption + column scopes on every table, and
 `aria-checked` following the selection through an actual mode switch (the
 regression guard for gap 2). `pnpm check` (568) and `pnpm lint` green.
 
+Confirmed on PR #10 at commit `18ab15d`: all four checks pass and the browser
+job's spec count went 23 -> 26, so the new specs really executed in CI rather
+than being collected and skipped. (Job log download fails from this sandbox
+with an EOF from the results receiver; `npx playwright test --list` locally
+corroborates the 26-spec collection.)
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
