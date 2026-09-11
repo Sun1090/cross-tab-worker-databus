@@ -744,6 +744,20 @@ tests including the new one.
 
 Unit tests 485 -> 554. typecheck, lint, coverage, build all green.
 
+## Phase 34-35 result (PR #10, CI green on first try)
+
+- PR: https://github.com/Sun1090/cross-tab-worker-databus/pull/10
+- All four checks green on the first run: `verify`, `browser`, `analyze`,
+  `CodeQL`.
+- The three newly-wired gate steps each ran and passed in the real runner:
+  `Coverage thresholds`, `Public export compatibility`, `Packed consumer
+  smoke`. The compat step passing confirms the `fetch-depth: 0` +
+  `fetch-tags: true` checkout fix — without it that step aborts with
+  "no version tag found".
+- `browser` (23 e2e) green, which closes the one gap from the local battery:
+  Playwright Chromium could not be downloaded in the dev sandbox (ECONNRESET
+  against cdn.playwright.dev), so E2E was verified in CI instead.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
