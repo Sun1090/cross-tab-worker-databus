@@ -868,6 +868,19 @@ outline. The state machine was validated in jsdom (wrap-around both
 directions, Home/End, click, and the "exactly one tabbable / one checked"
 invariant) and pinned by a fourth E2E spec; the browser suite is now 27.
 
+That fourth spec **failed in CI on first run** (commit `ec29397`), which is
+exactly what it was for - though the bug was in the assertion, not the app:
+`options.locator('[tabindex="0"]')` searches *descendants* of each `.seg`
+button, while the roving tabindex lives on the button itself, so the count was
+always 0. Fixed to `group.locator('.seg[tabindex="0"]')` in `6ac3a81`; all four
+checks green. Lesson for this repo: Playwright's `locator.locator()` is
+descendant-scoped - use a compound selector to filter the elements themselves.
+
+Note: CI job logs and run artifacts cannot be downloaded from this sandbox
+(the results-receiver and blob endpoints both close with EOF). Diagnosis has to
+come from `gh pr checks`, the check-run annotations API, and local reasoning /
+jsdom reproduction. Budget an extra CI round trip for browser-only failures.
+
 Confirmed on PR #10 at commit `18ab15d`: all four checks pass and the browser
 job's spec count went 23 -> 26, so the new specs really executed in CI rather
 than being collected and skipped. (Job log download fails from this sandbox
