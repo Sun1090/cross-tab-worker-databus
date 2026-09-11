@@ -988,14 +988,13 @@ test.describe('cross-tab databus demo — accessibility contracts', () => {
   test('the mode radiogroup is operable by keyboard as a single tab stop', async ({ context }) => {
     const page = await openDemoTab(context);
     const group = page.locator('#modeSwitch');
-    const options = group.locator('.seg');
     const centrifugo = group.locator('[data-mode="centrifugo"]');
     const local = group.locator('[data-mode="local"]');
 
     // Roving tabindex: a radiogroup is ONE tab stop, so only the checked
     // option is reachable with Tab. Without this, declaring role=radio would
     // promise arrow-key navigation while Tab walked through every button.
-    await expect(options.locator('[tabindex="0"]')).toHaveCount(1);
+    await expect(group.locator('.seg[tabindex="0"]')).toHaveCount(1);
     await expect(centrifugo).toHaveAttribute('tabindex', '0');
 
     await centrifugo.focus();
@@ -1016,7 +1015,7 @@ test.describe('cross-tab databus demo — accessibility contracts', () => {
     await expect(local).toHaveAttribute('aria-checked', 'true');
 
     // The invariants hold after keyboard driving, not just after clicks.
-    await expect(options.locator('[tabindex="0"]')).toHaveCount(1);
+    await expect(group.locator('.seg[tabindex="0"]')).toHaveCount(1);
     await expect(group.locator('[aria-checked="true"]')).toHaveCount(1);
     // Keyboard selection drives the real behaviour, not just the ARIA: local
     // mode needs no URL field.
