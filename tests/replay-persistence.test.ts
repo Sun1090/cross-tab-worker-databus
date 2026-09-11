@@ -269,6 +269,84 @@ describe('createIndexedDbReplayPersistence', () => {
     expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
   });
 
+  it('throws when IndexedDB is unavailable in the environment', () => {
+    delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    expect(() => createIndexedDbReplayPersistence({ maxPerTopic: 4 })).toThrow('IndexedDB is unavailable');
+  });
+
+  it('preserves ordering when a clear is interleaved between appends', async () => {
+    // The coalescing loop merges only *adjacent* batch entries; a queued
+    // clear must break the merge so the pre-clear appends are not resurrected
+    // into the post-clear transaction.
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 10 });
+    const first = persistence.append(message('t', 1));
+    const cleared = persistence.clear!();
+    const second = persistence.append(message('t', 2));
+    await Promise.all([first, cleared, second]);
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([2]);
+  });
+
+  it('closes and drops the cached connection on a versionchange from another tab', async () => {
+    const dbName = 'versionchange-db';
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ dbName, maxPerTopic: 4 });
+    await persistence.append(message('t', 1));
+
+    // Another tab starts a schema upgrade. Without the adapter's
+    // onversionchange handler the open v1 connection would block the upgrade
+    // forever; the handler closes it so the upgrade can proceed.
+    const upgrade = factory.open(dbName, 2);
+    let blocked = false;
+    upgrade.onblocked = () => { blocked = true; };
+    const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
+      upgrade.onupgradeneeded = () => undefined;
+      upgrade.onsuccess = () => resolve(upgrade.result);
+      upgrade.onerror = () => reject(upgrade.error);
+    });
+    upgraded.close();
+    expect(blocked).toBe(false);
+
+    // The cached promise was cleared, so the next operation reopens rather
+    // than reusing the closed connection. Version 1 is now stale, so the
+    // reopen surfaces a clean rejection instead of an InvalidStateError on a
+    // dead handle.
+    await expect(persistence.append(message('t', 2))).rejects.toBeTruthy();
+  });
+
+  it('invalidates the connection when transaction construction fails on every mutation path', async () => {
+    for (const operation of ['load', 'clear', 'clearTopic', 'clearBefore'] as const) {
+      const broken = makeBrokenFactory('transaction-throws');
+      (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+      const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+      const call = operation === 'load'
+        ? persistence.load()
+        : operation === 'clear'
+          ? persistence.clear!()
+          : operation === 'clearTopic'
+            ? persistence.clearTopic!('t')
+            : persistence.clearBefore!(1_000);
+      await expect(call).rejects.toThrow('connection is closed');
+      // Recovery through the same captured factory proves the connection was
+      // invalidated rather than left cached in a dead state.
+      broken.disable();
+      await persistence.append(message('t', 1));
+      expect((await persistence.load()).map(item => item.data.value)).toEqual([1]);
+      await persistence.clear!();
+    }
+  });
+
+  it('rejects a batched append only once when several store reads fail', async () => {
+    // The hasError latch must keep the first failure authoritative: multiple
+    // failing per-topic reads in one transaction must not double-reject or
+    // resolve on completion.
+    const broken = makeBrokenFactory('request-fails');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    await expect(persistence.appendBatch!([message('a', 1), message('b', 2), message('c', 3)])).rejects.toThrow('request failed');
+    broken.disable();
+    await persistence.append(message('a', 9));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
+  });
+
   it('rejects and invalidates when a store request fails during load or clearBefore', async () => {
     const broken = makeBrokenFactory('request-fails');
     (globalThis as { indexedDB?: unknown }).indexedDB = broken;
