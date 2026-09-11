@@ -649,6 +649,12 @@ fake tasks; each item is verified locally before being marked done.
   `bench:browser` to check for a systematic baseline shift (the release
   checklist anticipates a one-time shift on engine changes).
 
+## Phase 32 result (pushed 86fee81..2388d5e, CI green on first try)
+
+- bench:compare 50% gate green on the post-vitest-5 run (all deltas
+  within ±10% noise — no engine-shift regression); trend docs refreshed
+  (12 reports). CI green: verify + browser + CodeQL.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
