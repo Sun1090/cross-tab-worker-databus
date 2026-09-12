@@ -22,6 +22,16 @@ describe('parseDataBusPublication', () => {
     expect(parseDataBusPublication({ data: 1 })).toBeNull();
   });
 
+  it('rejects primitives, null, and undefined when no fallback is supplied', () => {
+    // A transport with no out-of-band channel cannot route a non-object frame
+    // at all, so it must resolve to null rather than a topic-less publication.
+    expect(parseDataBusPublication('hello')).toBeNull();
+    expect(parseDataBusPublication(42)).toBeNull();
+    expect(parseDataBusPublication(null)).toBeNull();
+    expect(parseDataBusPublication(undefined)).toBeNull();
+    expect(parseDataBusPublication(false)).toBeNull();
+  });
+
   it('uses the fallback topic for primitive and legacy channel payloads', () => {
     expect(parseDataBusPublication('hello', 'chat.room')).toEqual({ topic: 'chat.room', data: 'hello' });
     expect(parseDataBusPublication(null, 'chat.room')).toEqual({ topic: 'chat.room', data: null });
