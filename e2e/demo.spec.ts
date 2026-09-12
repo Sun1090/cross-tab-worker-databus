@@ -255,6 +255,9 @@ test.describe('cross-tab databus demo', () => {
     // Arm crash simulation on the owner only, after convergence: from here
     // its heartbeats silently stop landing.
     await owner.check('#simulateCrash');
+    // The config panel surfaces the active chaos mode (otherwise the zombie
+    // tab is visually indistinguishable from a healthy one).
+    await expect.poll(() => owner.locator('#configChaos').textContent()).toContain('模拟崩溃');
 
     // The dead owner's worker record expires after the worker TTL, then a
     // survivor re-elects — same timing class as stranded-handoff recovery.
@@ -549,6 +552,9 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     };
     const tabA = await openChaosTab();
     const tabB = await openChaosTab();
+
+    // The config panel surfaces the active chaos mode.
+    await expect.poll(() => tabB.locator('#configChaos').textContent()).toContain('丢弃交接确认');
 
     const ownerIndex = await waitForSingleOwner([tabA, tabB]);
     const owner = ownerIndex === 0 ? tabA : tabB;

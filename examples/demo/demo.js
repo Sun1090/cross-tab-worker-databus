@@ -70,6 +70,7 @@ const elements = {
   configBackend: document.querySelector('#configBackend'),
   configTransferable: document.querySelector('#configTransferable'),
   configLoadWeighting: document.querySelector('#configLoadWeighting'),
+  configChaos: document.querySelector('#configChaos'),
   configTransportBackend: document.querySelector('#configTransportBackend'),
   configChannelInfo: document.querySelector('#configChannelInfo'),
   channelFallback: document.querySelector('#channelFallback'),
@@ -696,6 +697,13 @@ function renderConfig() {
   elements.configLoadWeighting.textContent = elements.loadWeighting?.checked
     ? '启用（消息/字节/滞后）'
     : '禁用（纯 Topic 数）';
+  // A tab that is dropping handoff ACKs or simulating a crash otherwise looks
+  // identical to a healthy one; surface the active chaos modes in the panel.
+  const chaosModes = [
+    elements.dropHandoffAck?.checked ? '丢弃交接确认' : '',
+    elements.simulateCrash?.checked ? '模拟崩溃' : ''
+  ].filter(Boolean);
+  elements.configChaos.textContent = chaosModes.length > 0 ? `启用（${chaosModes.join('、')}）` : '未启用';
   elements.configClusterKey.textContent = state.clusterKey || '-';
   elements.configTabId.textContent = state.tabId || '-';
   elements.configTopic.textContent = state.topic || '-';

@@ -1414,6 +1414,17 @@ corroborates the 26-spec collection.)
   for the load-variance note); trend doc intentionally not refreshed while
   the machine was loaded.
 
+## Phase 50 (demo chaos visibility + README recovery feature)
+
+- UI gap: a tab dropping handoff ACKs or simulating a crash looked
+  identical to a healthy tab. Added a `混沌测试` config row driven by the
+  two chaos toggles (`未启用` / `启用（丢弃交接确认、模拟崩溃）`), and asserted
+  it in both chaos E2E specs.
+- README (en+zh) feature list gained the automatic owner-recovery bullet
+  (TTL-gated re-election + the route ack/migration/recovery reliability
+  events); the doc parity guard keeps the list-item counts aligned.
+- 646 unit green; typecheck, lint, e2e 27/27 green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
