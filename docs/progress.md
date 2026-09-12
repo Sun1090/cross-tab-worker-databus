@@ -906,6 +906,22 @@ corroborates the 26-spec collection.)
   checkouts), replay-manager direct suites, and demo a11y (mode radiogroup
   with roving tabindex/keyboard nav, table captions + column scopes).
 
+## Phase 39 (docs defect: capabilities matrix table corruption + guard)
+
+- Found while auditing doc accuracy after the merge: the capabilities matrix
+  in BOTH languages had a 3-cell row ("Optional ArrayBuffer Transferable
+  transport") beside a 5-cell row (`publishBatch`), because the Transferable
+  description was orphaned onto the following row — the whole matrix
+  rendered with shifted columns. Fixed in `docs/capabilities.md` and
+  `docs/zh/capabilities.md`.
+- New documentation guard: every contiguous markdown table in the shipped
+  docs must have a single cell count. Splits on unescaped pipes only, so a
+  literal `\|` inside a cell (several config tables use type unions) is not
+  mistaken for a separator. Mutation-checked: re-introducing the malformed
+  row fails the guard; restoring passes. A full scan found only these two
+  tables affected.
+- 569 unit tests green (568 + 1 guard); typecheck, lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

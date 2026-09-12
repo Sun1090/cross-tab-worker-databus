@@ -72,4 +72,41 @@ describe('public documentation', () => {
       expect(content, `${file} must describe the check as blocking`).toMatch(/blocking|阻塞/);
     }
   });
+
+  it('keeps every markdown table rectangular', () => {
+    // A cell containing an unescaped pipe silently splits the row and shifts
+    // every following column, so the table renders wrong (a real defect found
+    // in the capabilities matrix: a description landed one row down, leaving
+    // a 3-cell row beside a 5-cell row). Split on unescaped pipes only — `\|`
+    // is a literal pipe inside a cell and must not count as a separator.
+    const countCells = (line: string): number => {
+      const parts = line.split(/(?<!\\)\|/);
+      if (parts[0]?.trim() === '') parts.shift();
+      if (parts[parts.length - 1]?.trim() === '') parts.pop();
+      return parts.length;
+    };
+    const files = ['README.md', 'README.zh.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
+
+    for (const file of files) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      let block: Array<{ line: number; text: string }> = [];
+      const check = () => {
+        if (block.length < 2) return;
+        const widths = new Set(block.map(entry => countCells(entry.text)));
+        expect(
+          widths.size,
+          `${file}:${block[0]!.line} table mixes cell counts ${[...widths].sort().join('/')} — an unescaped pipe is splitting a row`
+        ).toBe(1);
+      };
+      lines.forEach((text, index) => {
+        if (text.startsWith('|')) {
+          block.push({ line: index + 1, text });
+        } else {
+          check();
+          block = [];
+        }
+      });
+      check();
+    }
+  });
 });
