@@ -887,6 +887,25 @@ than being collected and skipped. (Job log download fails from this sandbox
 with an EOF from the results receiver; `npx playwright test --list` locally
 corroborates the 26-spec collection.)
 
+## Phase 38 (PR #10 merged — coverage hunt, Vue leak fix, CI gates)
+
+- Reviewed PR #10 (forked from 6a853d3; no conflicts — verified with a real
+  trial merge before merging) and ran the full battery on the merged tree,
+  including the browser suite the PR author's sandbox could not run.
+- Merged as squash `7e65f28` (branch deleted). CI on the merge commit green:
+  verify (now running coverage + verify:compat + verify:pack) + browser +
+  CodeQL.
+- Post-merge local verification: 27 files / 568 unit tests, coverage
+  96.64/91.83/95.78/98.22 vs the 85/80/90/85 floors, verify:compat
+  (v0.20.71), verify:pack, e2e 27/27, lint, typecheck, pack 107 files
+  (no progress.md).
+- Shipped from the PR: the Vue `useCrossTabDataBus` unmount leak fix
+  (pending `start()` continuation could `create()` a bus after unmount with
+  no owner to stop it), the CI enforcement gap (documented-but-unrun
+  coverage/compat/pack gates now wired into CI + Release with full-history
+  checkouts), replay-manager direct suites, and demo a11y (mode radiogroup
+  with roving tabindex/keyboard nav, table captions + column scopes).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
