@@ -77,6 +77,6 @@ centrifugoHub = installDemoWebSocketServer(server, demoWebSocketPath);
 server.listen(port, () => {
   console.log(`Examples server: http://localhost:${port}/examples/demo/`);
   console.log(`Demo Centrifugo endpoint: ws://localhost:${port}${demoWebSocketPath}`);
-console.log(`Demo WebSocket-bus endpoint: ws://localhost:${port}/ws/demo`);
+  console.log(`Demo WebSocket-bus endpoint: ws://localhost:${port}/ws/demo`);
   console.log(`Open the URL in multiple browser tabs to observe cross-tab data flow.`);
 });

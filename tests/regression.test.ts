@@ -61,6 +61,16 @@ describe('source hygiene', () => {
     return walk('src');
   };
 
+  it('keeps scripts/ covered by ESLint', () => {
+    // scripts/ used to be in the ignores list, so the release-critical tooling
+    // (the bench gate, the consumer verifiers, the demo servers) was never
+    // linted. Removing the ignore surfaced a real `preserve-caught-error` in
+    // verify-version-compat.mjs and a misindented line in serve-examples.mjs.
+    const config = readFileSync('eslint.config.js', 'utf8');
+    const ignores = /ignores:\s*\[([^\]]*)\]/.exec(config)?.[1] ?? '';
+    expect(ignores, 'scripts/ must not be in the ESLint ignores list').not.toContain("'scripts/**'");
+  });
+
   it('does not leave a duplicated JSDoc block stacked on a declaration', () => {
     // A copy-paste can leave two JSDoc blocks in a row; only the last one is
     // attached to the declaration, so the first becomes dead documentation that

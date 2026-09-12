@@ -1040,6 +1040,39 @@ corroborates the 26-spec collection.)
   "expected ... to contain 'Data through 2020-01-02'".
 - 587 unit tests green (581 + 6); typecheck, lint, build green.
 
+## Phase 45 (silent benchmark-gate bypass + scripts/ lint coverage)
+
+- Swept the release-critical scripts (they are mostly unguarded). Found a
+  real gate defect in `scripts/bench-compare.mjs`, which both release
+  checklists invoke as `pnpm bench:compare --fail-above-pct 50`:
+  the threshold was `Number(...)`-coerced with no validation, so
+  `--fail-above-pct abc` produced `NaN` — and because every `pct > NaN`
+  comparison is false, the gate reported
+  `[bench] OK: no metric regressed more than NaN%` and exited 0. A typo
+  therefore **silently disabled the regression gate**. Now a missing, empty,
+  non-numeric, or negative threshold throws.
+- Also fixed the adjacent argument-handling wart: passing exactly one report
+  path silently compared the two most recent reports instead of erroring.
+- Refactored the CLI into validated exported helpers (`parseArgs`,
+  `compareReports`, `findRegressions`, `latestReports`) with
+  `scripts/bench-compare.d.mts`, plus `tests/bench-compare.test.ts` (8 tests)
+  pinning the loud failure, the row pairing, the threshold boundary, the
+  near-zero-baseline skip, and the null-threshold off switch. Mutation-checked
+  (removing the validation fails the test). Real-CLI smoke: `abc` now exits 1
+  with a clear message; `50` still prints `[bench] OK`.
+- Second finding: `scripts/` was in the ESLint `ignores` list, so none of the
+  release tooling was linted. Removed the ignore and added a Node config block
+  (Node globals, `no-console` allowed; browser globals scoped to
+  `bench-browser.mjs`, whose Playwright `waitForFunction` callback really runs
+  in the page). Enabling it surfaced two genuine findings, both fixed:
+  - `verify-version-compat.mjs` threw a new error without attaching the
+    original as `cause` (`preserve-caught-error`), discarding the git failure
+    detail.
+  - `serve-examples.mjs` had a misindented `console.log` in the startup block.
+  A guard now fails if `scripts/**` returns to the ignore list.
+- 596 unit tests green (587 + 8 + 1); typecheck, lint (now covering scripts),
+  build, `verify:compat`, `bench:compare`, idempotent `bench:trend` green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

@@ -27,7 +27,10 @@ let baseline;
 try {
   baseline = JSON.parse(execFileSync('git', ['show', `${baseTag}:package.json`], { encoding: 'utf8' }));
 } catch (error) {
-  throw new Error(`unable to read compatibility baseline ${baseTag}: ${error instanceof Error ? error.message : String(error)}`);
+  throw new Error(
+    `unable to read compatibility baseline ${baseTag}: ${error instanceof Error ? error.message : String(error)}`,
+    { cause: error }
+  );
 }
 
 const currentExports = current.exports ?? {};
