@@ -208,3 +208,39 @@ describe('BatchingStorageWriter', () => {
     warnSpy.mockRestore();
     vi.useRealTimers();
   });
+
+  it('keeps at most one retry timer pending while writes keep failing', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      storage.setItem = () => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      };
+      const writer = new BatchingStorageWriter(storage);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // First failing flush arms the backoff timer. Drain the coalescing
+      // microtask explicitly so the assertion observes the flush result.
+      writer.setItem('a', '1');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(1);
+
+      // A write that fails while the retry is still pending must not stack a
+      // second timer. (flush() cancels any pending retry before re-arming, so
+      // the invariant holds even without scheduleRetry's own guard; this test
+      // pins the observable invariant rather than that one mechanism.)
+      writer.setItem('b', '2');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(1);
+
+      // Eventually both keys are dropped through the shared timer chain.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(writer.pendingSize).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      warnSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });

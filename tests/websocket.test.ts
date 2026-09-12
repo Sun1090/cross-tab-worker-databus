@@ -518,6 +518,16 @@ describe('WebSocketTransport', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('not open') }));
   });
 
+  it('reports a dropped binary publish while the socket is not open', () => {
+    // Binary publishes take a separate framing path; a closed socket must be
+    // surfaced there too instead of silently discarding the ArrayBuffer.
+    const { transport, onError } = makeTransport();
+    transport.publish('bin.topic', new Uint8Array([1, 2, 3]).buffer);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('not open') })
+    );
+  });
+
   it('reports a throwing factory through onStatus(error) instead of throwing', () => {
     const transport = new WebSocketTransport({
       url: 'wss://example.test/ws',
