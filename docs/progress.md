@@ -1402,6 +1402,18 @@ corroborates the 26-spec collection.)
   change made (the 50% ceiling already absorbs it, and changing the
   comparison semantics is a design decision).
 
+## Definitive verification record (2026-09-13, main @ 2b89720 + release dry run)
+
+- `pnpm check`: typecheck + build + 646 unit tests green (33 files).
+- `pnpm lint` clean; `pnpm test:e2e` 27/27; `pnpm bench` green.
+- `pnpm verify:compat` (baseline v0.20.71) green; `pnpm verify:pack`
+  full-surface ESM/CJS green; `pnpm audit` (public registry) clean.
+- `npm pack --dry-run`: 107 files, `docs/progress.md` excluded.
+- `git diff --check` clean.
+- `bench:browser` + `bench:compare --fail-above-pct 50` green (see phase 49
+  for the load-variance note); trend doc intentionally not refreshed while
+  the machine was loaded.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
