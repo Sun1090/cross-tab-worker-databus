@@ -1283,6 +1283,22 @@ corroborates the 26-spec collection.)
 - Verification: `tsc --noEmit` (also with `dist/` hidden, the CI condition),
   `eslint .`, and the full suite — **625 tests** (617 + 7 + 1), all green.
 
+## Phase 43 (adopted the neighbor's uncommitted transaction-abort WIP)
+
+- Found uncommitted work in the tree: a `transaction-aborts` fault mode for
+  the IndexedDB test double plus two tests (abort rejects + invalidates;
+  generic message when `transaction.error` is null). Verified the tests pass
+  at runtime, but `pnpm typecheck` failed: the `set onerror` stub calls its
+  parameter, which contextually inherits `this: IDBTransaction` and rejects
+  a void-receiver call (TS2684). Fixed with a local plain-callback alias.
+- Mutation-checked the suite's value: neutering the adapter's
+  `transaction.onerror` handler makes both new tests fail (the append hangs
+  until timeout — exactly the production failure being pinned); restoring
+  passes. 627 unit green; typecheck, lint green.
+- Note: the very first post-sync `pnpm check` printed 27 files / 568 tests
+  while every later run (5x) shows 32 / 627 green. Unexplained transient;
+  recorded here rather than ignored. Ground truth is the repeated 32/627.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
