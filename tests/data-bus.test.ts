@@ -2747,6 +2747,45 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     await bus.stop();
   });
 
+  it('isolates a transport that throws synchronously or rejects during an operation', async () => {
+    // A misbehaving transport must not break the DataBus: a synchronous throw
+    // from publish() and a rejected promise from subscribe() both have to be
+    // funnelled into onError instead of escaping the caller or being lost.
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'throwing-transport' });
+    const errors: unknown[] = [];
+    const transport = {
+      start: (_config: object, handlers: { onStatus: (status: string) => void }) => {
+        handlers.onStatus('connected');
+      },
+      stop: () => {},
+      subscribe: () => Promise.reject(new Error('async subscribe boom')),
+      unsubscribe: () => {},
+      publish: () => {
+        throw new Error('sync transport boom');
+      }
+    } as unknown as FakeTransport<number>;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'throwing-transport',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+
+    // The synchronous throw is caught inside runTransport, never propagated.
+    expect(() => bus.publish('t', 1)).not.toThrow();
+    // The rejected subscribe promise is reported asynchronously.
+    bus.subscribe('t', () => {});
+    await vi.waitFor(() => {
+      expect(errors.map(String).some(message => message.includes('sync transport boom'))).toBe(true);
+      expect(errors.map(String).some(message => message.includes('async subscribe boom'))).toBe(true);
+    });
+
+    await bus.stop();
+  });
+
   it('the owning tab fans out to a peer subscriber and records the message discarded locally', async () => {
     // The realistic shape of the third dispatch gate: tab A wins ownership of
     // a topic only tab B subscribes to. A must broadcast the publication to B

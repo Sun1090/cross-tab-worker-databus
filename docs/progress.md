@@ -1365,6 +1365,18 @@ corroborates the 26-spec collection.)
   the documented local-load flake class, no source coupling.
 - 643 unit green; typecheck, lint, e2e 27/27, pack, compat green.
 
+## Phase 47 (transport error isolation + publication null branch)
+
+- Pinned DataBus transport error isolation: a transport whose `publish`
+  throws synchronously (runTransport's inner try/catch) or whose `subscribe`
+  rejects (the promise `.catch`) both surface through `onError` and never
+  escape the caller. Mutation-checked by deleting the synchronous catch
+  (test fails with the raw transport error).
+- Pinned `parseDataBusPublication`'s null branch for primitive/null/undefined
+  frames with no fallback topic (a transport with no out-of-band channel
+  cannot attribute a topic).
+- 645 unit tests green; typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
