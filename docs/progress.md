@@ -1460,6 +1460,16 @@ corroborates the 26-spec collection.)
   events); the doc parity guard keeps the list-item counts aligned.
 - 646 unit green; typecheck, lint, e2e 27/27 green.
 
+## Phase 51 (live chaos gates — fix a mismatch introduced in phase 50)
+
+- The new 混沌测试 config row reads the checkboxes live, but `dropHandoffAck`
+  was captured once at bus creation, so toggling it after connect would
+  display "启用" while the gate was inactive. Unified both chaos gates into
+  one always-installed wrapper that reads the checkboxes at call time
+  (transparent when unchecked); the panel can no longer claim an inactive
+  mode, and toggling now takes effect immediately. Both chaos E2E specs
+  green (13.7 s / 14.0 s); full e2e 27/27; 646 unit green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

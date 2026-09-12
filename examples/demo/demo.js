@@ -212,32 +212,10 @@ function createBus(mode) {
   const loadWeighting = elements.loadWeighting?.checked
     ? { messageRateWeight: 0.01, byteRateWeight: 0.0001, scheduleLagWeight: 1 }
     : undefined;
-  // Chaos testing: drop outgoing handoff ACKs so the new owner can only take
-  // over through the TTL-gated stranded-handoff recovery path (exercises the
-  // recovery in a real browser; the event feed then shows
-  // reliability:route_migration_recovery). Read once at bus creation like
-  // the other toggles above.
-  if (elements.dropHandoffAck?.checked) {
-    const baseCreateChannel = environment.createChannel.bind(environment);
-    environment.createChannel = name => {
-      const channel = baseCreateChannel(name);
-      if (!channel) return channel;
-      const postMessage = channel.postMessage.bind(channel);
-      channel.postMessage = message => {
-        if (message?.type === 'ROUTE_RELEASED') return;
-        postMessage(message);
-      };
-      return channel;
-    };
-  }
-  // Chaos testing: simulate a crash with NO pagehide. All outgoing
-  // coordination stops — channel messages and localStorage writes — while
-  // reads keep flowing, so heartbeats go stale and survivors must notice
-  // the TTL expiry and re-elect through the crash path. Unlike the ACK
-  // toggle above this must arm AFTER the owner is elected, so the gate is
-  // read live on every call instead of once at bus creation. The tab itself
-  // stays alive (a "zombie": it keeps its stale in-memory ownership view),
-  // which is fine — assertions only ever read the survivors.
+  // Chaos testing (demo-only): both wrappers are always installed and read
+  // their checkbox live at call time, so a toggle takes effect immediately and
+  // the config panel's 混沌测试 row always matches reality. With every gate
+  // unchecked these are transparent pass-throughs.
   {
     const baseCreateChannel = environment.createChannel.bind(environment);
     environment.createChannel = name => {
@@ -245,7 +223,10 @@ function createBus(mode) {
       if (!channel) return channel;
       const postMessage = channel.postMessage.bind(channel);
       channel.postMessage = message => {
+        // simulates a crashed tab: all outgoing coordination stops.
         if (elements.simulateCrash?.checked) return;
+        // drops the handoff ACK so the new owner must recover via the TTL.
+        if (elements.dropHandoffAck?.checked && message?.type === 'ROUTE_RELEASED') return;
         postMessage(message);
       };
       return channel;
