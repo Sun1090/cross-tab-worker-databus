@@ -1,14 +1,80 @@
+/**
+ * Browser benchmark: measures the publish hot path and the data-bus matrix in a
+ * real Chromium page against the built ESM bundle.
+ *
+ * The runtime body lives in `main()`, guarded by an `invokedDirectly` check, so
+ * the pure `parseBenchEnv` can be imported and tested without spawning a server
+ * or launching a browser. (The module previously ran everything at import time.)
+ *
+ * Usage: node scripts/bench-browser.mjs
+ *   PORT=4173 BENCH_MESSAGES=100 BENCH_MODES=dedicated,shared
+ */
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
-const port = Number(process.env.PORT || 4173);
-const baseUrl = `http://localhost:${port}/examples/demo/`;
-const wsUrl = `ws://localhost:${port}/centrifuge/demo/connection/websocket`;
-const messages = Number(process.env.BENCH_MESSAGES || 100);
-const modes = (process.env.BENCH_MODES || 'dedicated,shared').split(',').map(value => value.trim()).filter(Boolean);
+const DEFAULT_PORT = 4173;
+const DEFAULT_MESSAGES = 100;
+const WORKER_MODES = ['dedicated', 'shared'];
 
-async function waitForServer() {
+function parseInteger(raw, fallback, name, min, max) {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  const bounds = max === undefined ? `at least ${min}` : `between ${min} and ${max}`;
+  if (!Number.isSafeInteger(value) || value < min || (max !== undefined && value > max)) {
+    throw new TypeError(`${name} must be an integer ${bounds}, got "${raw}"`);
+  }
+  return value;
+}
+
+/**
+ * Parse and validate the benchmark's environment inputs.
+ *
+ * Pure and exported so it can be tested without launching a browser. These were
+ * previously `Number(...)`-coerced with no validation, so a typo produced a
+ * meaningless run instead of an error:
+ *  - `BENCH_MESSAGES=abc` became `NaN`, the publish loop never executed, and the
+ *    run died on a 30s `waitForFunction` timeout with no hint of the cause.
+ *  - `BENCH_MESSAGES=0` made `perMessageMs` `0/0` — a `NaN` that
+ *    `JSON.stringify` archives as `null`, poisoning the trend comparison.
+ *  - `BENCH_MODES=,` (only separators) silently ran *zero* modes and archived an
+ *    empty `results` array, so `bench:compare` had nothing to compare while
+ *    still reporting OK. A genuinely empty value still means "use the default".
+ *  - `PORT=abc` produced `http://localhost:NaN/...` and a server that failed to
+ *    listen, far from the actual mistake.
+ */
+export function parseBenchEnv(env = process.env) {
+  const port = parseInteger(env.PORT, DEFAULT_PORT, 'PORT', 1, 65_535);
+  const messages = parseInteger(env.BENCH_MESSAGES, DEFAULT_MESSAGES, 'BENCH_MESSAGES', 1);
+  // An empty/whitespace value means "unset" and falls back to the defaults, the
+  // same way the old `process.env.BENCH_MODES || 'dedicated,shared'` behaved.
+  // A value that is only separators (e.g. ",") is *not* empty and is rejected
+  // below, so a mis-typed list never silently runs zero modes.
+  const rawModes = env.BENCH_MODES?.trim() ? env.BENCH_MODES : WORKER_MODES.join(',');
+  const modes = rawModes
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (modes.length === 0) {
+    throw new TypeError(`BENCH_MODES must list at least one worker mode (${WORKER_MODES.join(', ')}), got "${rawModes}"`);
+  }
+  for (const mode of modes) {
+    if (!WORKER_MODES.includes(mode)) {
+      throw new TypeError(`BENCH_MODES contains an unknown worker mode "${mode}"; expected ${WORKER_MODES.join(' or ')}`);
+    }
+  }
+  return {
+    port,
+    messages,
+    modes,
+    baseUrl: `http://localhost:${port}/examples/demo/`,
+    wsUrl: `ws://localhost:${port}/centrifuge/demo/connection/websocket`
+  };
+}
+
+async function waitForServer(baseUrl) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const response = await fetch(baseUrl);
@@ -21,7 +87,7 @@ async function waitForServer() {
   throw new Error(`Timed out waiting for ${baseUrl}`);
 }
 
-async function openTab(context, mode, topic) {
+async function openTab({ baseUrl, wsUrl }, context, mode, topic) {
   const page = await context.newPage();
   await page.goto(baseUrl);
   await page.locator('#statusBadge').getByText('已连接').waitFor();
@@ -34,11 +100,12 @@ async function openTab(context, mode, topic) {
   return page;
 }
 
-async function runMode(browser, mode) {
+async function runMode(env, browser, mode) {
+  const { messages } = env;
   const context = await browser.newContext();
   const topic = `bench.publish.${mode}.${Date.now()}`;
-  const publisher = await openTab(context, mode, topic);
-  const receiver = await openTab(context, mode, topic);
+  const publisher = await openTab(env, context, mode, topic);
+  const receiver = await openTab(env, context, mode, topic);
   await receiver.waitForTimeout(250);
 
   const start = performance.now();
@@ -64,7 +131,7 @@ async function runMode(browser, mode) {
 /** Run the data-bus hot-path matrix inside a real browser page using the
  * built ESM bundle. Mirrors tests/bench/data-bus.bench.ts so local (Node)
  * and browser numbers can be compared side by side. */
-async function runDatabusMatrix(browser) {
+async function runDatabusMatrix(baseUrl, browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(baseUrl);
@@ -249,43 +316,54 @@ async function runDatabusMatrix(browser) {
   return results;
 }
 
-let server;
-let ownsServer = false;
+async function main() {
+  const env = parseBenchEnv();
+  const { baseUrl, modes, port } = env;
 
-try {
+  let server;
+  let ownsServer = false;
+
   try {
-    const response = await fetch(baseUrl);
-    if (!response.ok) throw new Error('unhealthy');
-  } catch {
-    ownsServer = true;
-    server = spawn(process.execPath, ['scripts/serve-examples.mjs'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: String(port) }
-    });
-    server.stdout.on('data', chunk => process.stdout.write(`[demo] ${chunk}`));
-    server.stderr.on('data', chunk => process.stderr.write(`[demo] ${chunk}`));
-    await waitForServer();
-  }
-  const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome', headless: true });
-  try {
-    const results = [];
-    for (const mode of modes) results.push(await runMode(browser, mode));
-    const databus = await runDatabusMatrix(browser);
-    const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus };
-    console.log(JSON.stringify(report, null, 2));
-    // Archive for trend comparison via scripts/bench-compare.mjs. Failures
-    // here must never break the benchmark run itself.
     try {
-      const { mkdirSync, writeFileSync } = await import('node:fs');
-      mkdirSync(new URL('../bench-results/', import.meta.url), { recursive: true });
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      writeFileSync(new URL(`../bench-results/browser-${stamp}.json`, import.meta.url), JSON.stringify(report, null, 2));
-    } catch (error) {
-      console.warn('[bench] failed to archive results:', error instanceof Error ? error.message : error);
+      const response = await fetch(baseUrl);
+      if (!response.ok) throw new Error('unhealthy');
+    } catch {
+      ownsServer = true;
+      server = spawn(process.execPath, ['scripts/serve-examples.mjs'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PORT: String(port) }
+      });
+      server.stdout.on('data', chunk => process.stdout.write(`[demo] ${chunk}`));
+      server.stderr.on('data', chunk => process.stderr.write(`[demo] ${chunk}`));
+      await waitForServer(baseUrl);
+    }
+    const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome', headless: true });
+    try {
+      const results = [];
+      for (const mode of modes) results.push(await runMode(env, browser, mode));
+      const databus = await runDatabusMatrix(baseUrl, browser);
+      const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus };
+      console.log(JSON.stringify(report, null, 2));
+      // Archive for trend comparison via scripts/bench-compare.mjs. Failures
+      // here must never break the benchmark run itself.
+      try {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        mkdirSync(new URL('../bench-results/', import.meta.url), { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        writeFileSync(new URL(`../bench-results/browser-${stamp}.json`, import.meta.url), JSON.stringify(report, null, 2));
+      } catch (error) {
+        console.warn('[bench] failed to archive results:', error instanceof Error ? error.message : error);
+      }
+    } finally {
+      await browser.close();
     }
   } finally {
-    await browser.close();
+    if (ownsServer) server.kill('SIGTERM');
   }
-} finally {
-  if (ownsServer) server.kill('SIGTERM');
+}
+
+const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  await main();
 }

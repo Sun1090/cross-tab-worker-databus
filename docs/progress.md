@@ -1243,6 +1243,46 @@ corroborates the 26-spec collection.)
 - Lesson recorded: after adding any test that touches `dist/`, run the *CI
   sequence* (`tsc --noEmit` **before** the build), not just the test suite.
 
+## Phase 51 (bench-browser: unimportable module + unvalidated env inputs)
+
+- `scripts/bench-browser.mjs` executed the *whole* benchmark at module scope
+  (top-level `await` fetch → `spawn` the demo server → `chromium.launch`). No
+  test could import its pure parts, and any future tooling that imported it
+  would have silently started a server and a browser. Moved the runtime body
+  into `main()` behind an `invokedDirectly` guard — the pattern
+  `verify-packed-consumer.mjs`, `bench-compare.mjs` and `bench-trend.mjs`
+  already used. Verified: `node -e "import('./scripts/bench-browser.mjs')"`
+  returns in ~0.44s with no spawn and no browser.
+- Its environment inputs were `Number(...)`-coerced with no validation — the
+  same defect class as the Phase 45 `bench:compare` gate. Four real failure
+  modes, all reproduced:
+  - `BENCH_MESSAGES=abc` → `NaN`, the publish loop never ran, and the run died
+    on a 30s `waitForFunction` timeout with no hint of the cause.
+  - `BENCH_MESSAGES=0` → `perMessageMs` was `0/0` = `NaN`, which
+    `JSON.stringify` archives as `null`, poisoning `bench:compare`.
+  - `BENCH_MODES=,` → zero modes ran and an empty `results: []` was archived,
+    so `bench:compare` had nothing to compare and still reported OK.
+  - `PORT=abc` → `http://localhost:NaN/...` and a server that failed to listen.
+- Extracted an exported `parseBenchEnv(env = process.env)` + `parseInteger`:
+  `PORT` must be an integer in 1..65535, `BENCH_MESSAGES` an integer >= 1,
+  `BENCH_MODES` a non-empty subset of `dedicated,shared`. An empty/whitespace
+  value still means "use the default" (preserving the old `|| default`
+  behaviour); a separators-only list is an error, not an empty run.
+- New `tests/bench-browser.test.ts` (7 tests) pins defaults, valid overrides +
+  derived URLs, empty-as-absent, and each rejection message.
+- Added a source-hygiene guard: a script that is both a `package.json` entry
+  point and imported by a test must carry the `invokedDirectly` guard. It
+  initially flagged `demo-ws-server.mjs` / `demo-centrifuge-server.mjs`, which
+  are pure library modules (exports only, no top-level execution) — the guard
+  was narrowed to entry points rather than exempting them by name.
+- Mutation-checked twice: reverting `parseInteger` to the raw coercion fails
+  exactly the two integer guards; restoring `??` over the empty check fails
+  exactly the empty-value test; removing the `invokedDirectly` guard fails the
+  hygiene guard with `scripts/bench-browser.mjs runs at import time — gate its
+  body behind \`invokedDirectly\``.
+- Verification: `tsc --noEmit` (also with `dist/` hidden, the CI condition),
+  `eslint .`, and the full suite — **625 tests** (617 + 7 + 1), all green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

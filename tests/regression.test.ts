@@ -92,6 +92,50 @@ describe('source hygiene', () => {
     }
   });
 
+  it('keeps every test-imported entry-point script free of import-time side effects', () => {
+    // tests/bench-browser.test.ts imports the pure `parseBenchEnv` from
+    // scripts/bench-browser.mjs. That script used to run the *whole* benchmark
+    // at module scope, so importing it spawned the demo server and launched a
+    // Chromium instance — making the parser untestable. Any script that is both
+    // a package.json entry point (`node scripts/x.mjs`) and imported by a test
+    // must gate its runtime body behind an `invokedDirectly` check.
+    //
+    // Pure library modules (scripts/demo-ws-server.mjs, which exports installer
+    // functions with no top-level execution) are exempt: they have nothing to
+    // gate, and are imported for their exports.
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap(name => {
+        const child = join(dir, name);
+        return statSync(child).isDirectory() ? walk(child) : /\.tsx?$/.test(child) ? [child] : [];
+      });
+
+    const imported = new Set<string>();
+    for (const file of walk('tests')) {
+      for (const match of readFileSync(file, 'utf8').matchAll(/from '(\.\.\/scripts\/[\w.-]+\.mjs)'/g)) {
+        imported.add(match[1]!.replace('../scripts/', ''));
+      }
+    }
+
+    const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> };
+    const entryPoints = new Set(
+      Object.values(manifest.scripts ?? {}).flatMap(command =>
+        [...command.matchAll(/scripts\/([\w.-]+\.mjs)/g)].map(match => match[1]!)
+      )
+    );
+
+    const covered = [...imported].filter(name => entryPoints.has(name)).sort();
+    expect(covered, 'expected a test to import at least one entry-point script').not.toEqual([]);
+
+    const offenders: string[] = [];
+    for (const name of covered) {
+      const source = readFileSync(join('scripts', name), 'utf8');
+      if (!/^const invokedDirectly =/m.test(source) || !/^if \(invokedDirectly\) \{/m.test(source)) {
+        offenders.push(`scripts/${name} runs at import time — gate its body behind \`invokedDirectly\``);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('never statically imports dist from a test (tsc runs before the build)', () => {
     // `pnpm check` is `typecheck && build && test`, so `tsc --noEmit` sees a
     // fresh checkout with no dist/ and rejects a literal specifier with
