@@ -338,3 +338,112 @@ describe('PortReaper fault tolerance', () => {
     vi.useRealTimers();
   });
 });
+
+describe('PortReaper untracked-port and shutdown guards', () => {
+  it('ignores setTimeout, touch, and remove for a port it never tracked', () => {
+    vi.useFakeTimers();
+    try {
+      const { reaper } = makeReaper();
+      const stranger = new PortDouble() as unknown as MessagePort;
+
+      // A STOP/INIT racing a reap can arrive for a port the reaper already
+      // dropped. None of these may resurrect it or spawn a timer.
+      expect(() => reaper.setTimeout(stranger, 1_000)).not.toThrow();
+      expect(() => reaper.touch(stranger)).not.toThrow();
+      expect(() => reaper.remove(stranger)).not.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is a no-op on a duplicate remove and stops the timer once the last port goes', () => {
+    vi.useFakeTimers();
+    try {
+      const { reaper, register } = makeReaper();
+      const { port } = register('tab-a', 1_000);
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      reaper.remove(port as unknown as MessagePort);
+      // No ports left: the cadence timer must be cleared, not left spinning
+      // for the life of the SharedWorker.
+      expect(vi.getTimerCount()).toBe(0);
+      expect(() => reaper.remove(port as unknown as MessagePort)).not.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispose closes and stops every tracked session and is safe to repeat', () => {
+    vi.useFakeTimers();
+    try {
+      const { reaper, ports, sessions, register } = makeReaper();
+      register('tab-a', 1_000);
+      register('tab-b', 1_000);
+
+      reaper.dispose();
+      for (const port of ports.values()) expect(port.closed).toBe(true);
+      for (const session of sessions.values()) expect(session.stopped).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // A second dispose (e.g. shutdown racing the last STOP) must not
+      // re-stop the already-stopped sessions.
+      reaper.dispose();
+      for (const session of sessions.values()) expect(session.stopped).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dispose keeps cleaning up after a target throws', () => {
+    vi.useFakeTimers();
+    try {
+      const reaper = new PortReaper();
+      const good = new SessionDouble();
+      const badPort = new PortDouble() as unknown as MessagePort;
+      const goodPort = new PortDouble() as unknown as MessagePort;
+      reaper.register(badPort, {
+        close: () => { throw new Error('port already detached'); },
+        stop: () => undefined
+      });
+      reaper.register(goodPort, { close: () => good.close(), stop: () => good.stop() });
+
+      // One failing target must not strand the rest — otherwise a detached
+      // port would leak every remaining WebSocket on shutdown.
+      expect(() => reaper.dispose()).not.toThrow();
+      expect(good.closed).toBe(true);
+      expect(good.stopped).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to the default session timeout for a non-finite or non-positive heartbeat', () => {
+    vi.useFakeTimers();
+    try {
+      const { register } = makeReaper();
+      // A malformed INIT payload must not silence the reaper (Infinity) nor
+      // degenerate it into a busy loop (0 / negative).
+      const nan = register('nan', Number.NaN);
+      const zero = register('zero', 0);
+      const negative = register('neg', -5_000);
+
+      // Default heartbeat 10s x3 = 30s session timeout for all three. The
+      // reap runs on the 10s cadence, so the 30s tick still sees
+      // now - lastSeen == timeout (not strictly greater) and spares them.
+      vi.advanceTimersByTime(30_000);
+      expect(nan.port.closed).toBe(false);
+      expect(zero.port.closed).toBe(false);
+      expect(negative.port.closed).toBe(false);
+
+      // The 40s tick exceeds the timeout for all three.
+      vi.advanceTimersByTime(10_000);
+      expect(nan.port.closed).toBe(true);
+      expect(zero.port.closed).toBe(true);
+      expect(negative.port.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

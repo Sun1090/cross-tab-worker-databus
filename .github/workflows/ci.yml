@@ -18,6 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # verify:compat diffs the public export map against the most recent
+          # release tag, so the tags must be present in the checkout.
+          fetch-depth: 0
+          fetch-tags: true
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -29,6 +34,18 @@ jobs:
         run: pnpm check
       - name: Lint
         run: pnpm lint
+      - name: Coverage thresholds
+        # vitest.config.ts carries the coverage floors (85/80/90/85). Running
+        # the gate in CI keeps them enforced instead of advisory.
+        run: pnpm test:coverage
+      - name: Public export compatibility
+        # Catches an accidentally removed/renamed subpath export or type entry
+        # on the PR that introduces it, rather than at release time.
+        run: pnpm verify:compat
+      - name: Packed consumer smoke
+        # Packs the tarball and imports every public subpath as both ESM and
+        # CJS, so a broken `files`/`exports` mapping fails here, not on npm.
+        run: pnpm verify:pack
       - name: Bench smoke (Node, no thresholds)
         # Keep the bench files runnable in CI without timing thresholds —
         # shared-runner noise makes numeric gates unreliable here; the

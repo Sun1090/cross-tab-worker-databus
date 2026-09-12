@@ -137,6 +137,65 @@ describe('WebSocketTransport', () => {
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('publishBatch') }));
   });
 
+  it('treats an empty batch as a no-op and never touches the socket', () => {
+    const { sockets, transport, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    transport.publishBatch!('market.tick', []);
+    expect(socket.sent).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('embeds ArrayBuffer items as byte arrays so a mixed batch stays one frame', () => {
+    const { sockets, transport } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    const binary = new Uint8Array([1, 2, 3]).buffer;
+    transport.publishBatch!('market.tick', [
+      { data: binary, messageId: 'bin' },
+      { data: { price: 9 } }
+    ]);
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] as string)).toEqual({
+      op: 'publishBatch',
+      topic: 'market.tick',
+      items: [
+        { data: [1, 2, 3], messageId: 'bin' },
+        { data: { price: 9 } }
+      ]
+    });
+  });
+
+  it('a second start() while a socket is live does not open a replacement', () => {
+    const { sockets, transport, onMessage, onStatus, onError } = makeTransport();
+    expect(sockets).toHaveLength(1);
+    // A duplicate start (e.g. a resume racing an in-flight open) must reuse
+    // the existing socket rather than orphaning it.
+    transport.start({ url: 'wss://example.test/other' }, { onMessage, onStatus, onError });
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('ignores a non-string, non-binary server frame', () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.onmessage?.({ data: 12345 as unknown as string });
+    socket.onmessage?.({ data: null as unknown as string });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('ignores a JSON frame that parses to a non-object', () => {
+    const { sockets, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.onmessage?.({ data: 'null' });
+    socket.onmessage?.({ data: '42' });
+    socket.onmessage?.({ data: '"a string"' });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('sends JSON subscribe/unsubscribe/publish frames and tracks topics', () => {
     const { sockets, transport } = makeTransport();
     const socket = sockets[0]!;

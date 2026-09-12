@@ -382,6 +382,64 @@ describe('CentrifugeSession protocol coverage', () => {
     expect(sink).toHaveBeenCalledTimes(2);
   });
 
+  it('maps the client-level connected and disconnected events to STATUS', () => {
+    // These are separate listeners from the 'state' mapping: Centrifuge emits
+    // both, and the session must report a terminal status even when a
+    // 'state' event does not accompany the transition.
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.emit('connected', {});
+    client.emit('disconnected', {});
+    expect(sink).toHaveBeenNthCalledWith(1, { type: 'STATUS', status: 'connected' });
+    expect(sink).toHaveBeenNthCalledWith(2, { type: 'STATUS', status: 'disconnected' });
+  });
+
+  it('reports a client-level error through the sink without changing status', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.emit('error', { error: new Error('transport hiccup') });
+    // A transient client error must not surface as STATUS: error, or
+    // selectActiveWorkers() would evict this worker from routing.
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink.mock.calls[0]![0]).toMatchObject({ type: 'ERROR' });
+    expect(sink).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'STATUS' }));
+  });
+
+  it('drops the tracked subscription when the server emits unsubscribed', () => {
+    const { session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const first = client.getSubscription('market.tick')!;
+
+    // A server-initiated unsubscribe must clear the local map, so a later
+    // SUBSCRIBE re-wires listeners instead of taking the "already tracked"
+    // fast path and leaving a dead subscription in place.
+    for (const listener of first.listeners.get('unsubscribed') ?? []) listener({});
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    expect(client.getSubscription('market.tick')!.listeners.has('publication')).toBe(true);
+  });
+
+  it('drops a publication with no resolvable topic', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    // No channel field and no push.channel — nothing to route it to.
+    client.emit('publication', { channel: '', data: { value: 1 } });
+    client.emit('publication', { channel: '', data: 'not-an-object' });
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('resolves a server-side publication topic from the nested push.channel shape', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    client.emit('publication', { channel: '', data: { push: { channel: 'sys.alerts' }, value: 7 } });
+    expect(sink).toHaveBeenCalledWith(expect.objectContaining({ type: 'MESSAGE', topic: 'sys.alerts' }));
+  });
+
   it('serialises non-Error failures with the right shape', () => {
     const { sink, session } = makeSession();
     session.handle(init());
@@ -505,5 +563,27 @@ describe('CentrifugeSession token bridge', () => {
     session.handle({ type: 'STOP' });
     await expect(first).rejects.toThrow('stopped');
     await expect(second).rejects.toThrow('stopped');
+  });
+
+  it('ignores a token response or error for an unknown request id', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client } = makeSession();
+    const tokenPromise = client.options.getToken!();
+    const request = sink.mock.calls[0]![0] as { requestId: number };
+
+    // A stale/duplicate reply (e.g. after a retry) must not throw and must not
+    // disturb the still-pending request.
+    expect(() => session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId + 99, token: 'stray' })).not.toThrow();
+    expect(() => session.handle({
+      type: 'TOKEN_ERROR',
+      requestId: request.requestId + 99,
+      error: { name: 'Error', message: 'stray', stack: '' }
+    })).not.toThrow();
+
+    session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'real' });
+    await expect(tokenPromise).resolves.toBe('real');
+
+    // A second reply for the now-settled request is also ignored.
+    expect(() => session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'late' })).not.toThrow();
   });
 });

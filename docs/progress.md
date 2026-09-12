@@ -663,6 +663,230 @@ fake tasks; each item is verified locally before being marked done.
   npm pack 107 files without progress.md; diff-check clean.
 - bench:browser covered in phase 32 (gate green, trend refreshed).
 
+## Phase 34 (autonomous session — coverage-driven defect hunt + CI gate enforcement)
+
+Method: rather than assume the "feature-complete" state was verified, re-ran
+the full battery from a clean install and used per-branch v8 coverage to find
+code paths no test reaches, then wrote focused tests there. Every new suite was
+mutation-checked (delete the guard under test -> the test must fail).
+
+**Real defect found and fixed** — `src/vue.ts` `useCrossTabDataBus`:
+`start()` awaits `stop()` before calling `create()`. An unmount landing inside
+that async window ran `stop()` without bumping `lifecycleGeneration`, so the
+pending continuation still ran `create()` after the component was gone,
+leaving a live bus with no owner to stop it. `onBeforeUnmount` now bumps the
+generation. Regression test fails without the fix. (React adapter unaffected:
+its `create()` is synchronous inside `useEffect`.)
+
+**Real CI gap found and fixed** — `verify:compat`, `verify:pack`, and the
+`vitest.config.ts` coverage thresholds were all documented release gates that
+no workflow ran. They could only ever fail after a tag was pushed, or never.
+Added to the CI `verify` job and (compat/pack) to the `Release` job. Both
+checkouts needed `fetch-depth: 0` + `fetch-tags: true` — `verify:compat`
+resolves its baseline from the latest release tag and dies with
+"no version tag found" on the default shallow checkout (reproduced locally).
+Documented the automated gate set in both release checklists.
+
+**Coverage** (485 -> 541 unit tests, 26 -> 27 files):
+
+| Module | Before (stmt/branch) | After |
+|---|---|---|
+| `core/replay-manager.ts` | 86.95 / 81.60 | 97.10 / 96.00 |
+| `core/replay-persistence.ts` | 84.02 / 66.17 | 93.29 / 72.05 |
+| `centrifuge-session.ts` | 92.62 / 88.05 | 98.36 / 94.02 |
+| `vue.ts` | 96.55 / 86.66 | 97.72 / 93.33 |
+| All files | 94.00 / 88.62 | 95.86 / 90.48 |
+
+New `tests/replay-manager.test.ts` (41 tests) drives the manager directly —
+previously it was only exercised transitively through `CrossTabDataBus`, which
+left the retention-sweep coalescing, the persistence retry/backoff loop, the
+suspend-cancellation path, and the wildcard replay gates unpinned.
+
+**Deps**: react / react-dom / @types/react -> 19.3.0 (dev-only). TypeScript
+stays on 6.0.3; 7.0.2 is still rejected by typescript-eslint (phase-32
+deferral stands). `pnpm audit` clean.
+
+**Local battery**: install (frozen lockfile), typecheck, lint, build, 541 unit
+tests, coverage (95.86 / 90.48 / 95.58 / 97.80 vs 85 / 80 / 90 / 85 floors),
+bench (25 cases), verify:compat (baseline v0.20.71), verify:pack — all green,
+run in the exact CI order. E2E could not run in this sandbox (the Playwright
+Chromium download is network-blocked: ECONNRESET against cdn.playwright.dev);
+the `browser` CI job covers it, and no E2E-facing source changed except
+`src/vue.ts`, which has no demo/E2E surface.
+
+## Phase 35 (autonomous session, cont. — core-module coverage + routing regression)
+
+Continued the coverage-driven hunt into the two core modules.
+
+`CrossTabDataBus` lifecycle contract edges (5 tests): `ready()` rejecting with
+the configuration error when no `initialConfig` exists and resurfacing the
+recorded transport failure once the opening settled; `unsubscribe` no-ops for
+an unknown topic and an unregistered handler; `stop()` idempotence; and the
+third dispatch gate — a two-tab setup where the owner fans out to a peer
+subscriber and records the message *discarded*, so its throughput and dispatch
+percentiles are not inflated by a message it never handed to a handler.
+Mutation-checked (removing the `hasLocalSubscriber` gate fails it).
+
+`WorkerClusterRuntime` publish-routing cache + lifecycle guards (8 tests),
+including a two-runtime regression pinning the 0.20.58 correctness fix: a
+`null` `wildcardPublishCache` entry means "no local wildcard subscription",
+not "owned locally", so a topic owned by a remote worker must still be
+forwarded. Note: the obvious mutation (dropping `&& cachedPattern !== null`)
+is *equivalent* — `Map.has(null)` is already false — so the probe used was
+the semantic one (treat any cached entry as locally-owned), which fails 4
+tests including the new one.
+
+| Module | Before (stmt/branch/func) | After |
+|---|---|---|
+| `core/data-bus.ts` | 94.58 / 89.79 / 90.21 | 95.07 / 90.20 / 90.21 |
+| `core/cluster.ts` | 94.30 / 87.50 / 98.79 | 95.95 / 90.21 / **100** |
+| All files | 94.00 / 88.62 / 94.37 | **96.29 / 91.19 / 95.78** |
+
+Unit tests 485 -> 554. typecheck, lint, coverage, build all green.
+
+## Phase 34-35 result (PR #10, CI green on first try)
+
+- PR: https://github.com/Sun1090/cross-tab-worker-databus/pull/10
+- All four checks green on the first run: `verify`, `browser`, `analyze`,
+  `CodeQL`.
+- The three newly-wired gate steps each ran and passed in the real runner:
+  `Coverage thresholds`, `Public export compatibility`, `Packed consumer
+  smoke`. The compat step passing confirms the `fetch-depth: 0` +
+  `fetch-tags: true` checkout fix — without it that step aborts with
+  "no version tag found".
+- `browser` (23 e2e) green, which closes the one gap from the local battery:
+  Playwright Chromium could not be downloaded in the dev sandbox (ECONNRESET
+  against cdn.playwright.dev), so E2E was verified in CI instead.
+
+## Phase 36 (autonomous session, cont. — worker/transport edge coverage)
+
+Continued down the coverage ranking to the two remaining sub-95% modules.
+
+`PortReaper` (SharedWorker cleanup, 5 tests): untracked-port no-ops for
+`setTimeout`/`touch`/`remove` (a STOP or INIT racing a reap must not resurrect
+a port), duplicate `remove` plus cadence-timer teardown when the last port
+goes, `dispose()` closing and stopping every session and being repeat-safe,
+`dispose()` continuing after a target throws (one detached port must not
+strand the remaining WebSockets), and the non-finite/non-positive heartbeat
+fallback. Three mutations checked, all caught. **97.18 -> 100 statements**,
+81.81 -> 90.91 branches, 100 functions.
+
+`WebSocketTransport` (5 tests): empty `publishBatch`, ArrayBuffer items
+embedded as byte arrays in a mixed batch, duplicate `start()` reusing the live
+socket, and non-string / non-object frames ignored. 92.59 -> 96.29 statements,
+85.54 -> 91.56 branches, 100 functions.
+
+Mutation-testing note: two probes turned out **equivalent** rather than
+uncaught, and were recorded as such instead of chasing them —
+`assignedTopics.has(null)` is already false (phase 35), and the websocket
+non-object JSON guard is redundant with `parseDataBusPublication`. Both
+remain as defensive depth with the contract pinned by tests.
+
+Cumulative this session: **485 -> 564 unit tests**, all files
+94.00 / 88.62 / 94.37 -> **96.53 / 91.70 / 95.78**.
+
+## Phase 37 (autonomous session, cont. — Centrifuge transport edges)
+
+`CentrifugeWorkerTransport` (4 tests, all mutation-checked): duplicate
+`start()` reusing the live backend (a second Worker means a second WebSocket),
+SharedWorker-level vs port message-decode failures reported as distinct
+errors, a `channelToken` request falling back to `getToken` when the provider
+lacks `getChannelToken`, and a token request answered with `TOKEN_ERROR`
+instead of dropped when no `credentialProvider` exists (a silent drop hangs
+the worker's connect indefinitely). 93.12 -> 95.00 statements, 91.08 -> 93.06
+branches, 100 functions.
+
+Remaining uncovered lines in `centrifuge.ts` (421/427/442/448) are the
+`typeof Worker === 'undefined'` / `typeof SharedWorker === 'undefined'` SSR
+guards inside the *default* factory functions. They are unreachable from the
+test process without deleting the globals for the whole module graph, and the
+degradation behavior they back is already covered through injected factories.
+Left deliberately uncovered.
+
+Cumulative this session: **485 -> 568 unit tests**, all files
+94.00 / 88.62 / 94.37 / 96.77 -> **96.64 / 91.83 / 95.78 / 98.22**.
+
+### Session summary (phases 34-37)
+
+Two real problems found and fixed, both by coverage-driven probing rather
+than by reading the task list:
+
+1. `src/vue.ts` leaked a bus when a component unmounted inside the async
+   start window (fixed; regression test).
+2. `verify:compat`, `verify:pack`, and the coverage thresholds were
+   documented release gates that no workflow ran (wired into CI + Release,
+   with the `fetch-tags` checkout fix `verify:compat` requires).
+
+Verified end to end on PR #10: `verify`, `browser` (23 e2e), `analyze`, and
+`CodeQL` all green, with the three new gate steps confirmed executing in the
+runner.
+
+## Phase 38 (autonomous session, cont. - demo accessibility)
+
+First pass over the UI/a11y area of the brief, which no prior phase had
+examined. Audited `examples/demo/index.html` (396 lines) against what
+assistive tech can actually perceive.
+
+Already correct: every form control's `label[for=]` resolves to a real
+control (`endpointPreset`, `urlInput`, `workerMode`, `topicInput`,
+`payloadInput`), `#statusBadge` is already `role="status"` +
+`aria-live="polite"`, and the event table already carried a visually-hidden
+caption.
+
+Four genuine gaps found and fixed:
+
+1. The run-mode segmented control conveyed its selection **only** through a
+   CSS `active` class. Screen readers announced three plain buttons with no
+   selected state. Now `role="radiogroup"` + `aria-labelledby`, with
+   `role="radio"` / `aria-checked` per button.
+2. `demo.js` toggled just the `active` class on click, so the new
+   `aria-checked` would have gone stale after the first switch - the handler
+   now moves both together. Static ARIA that lies is worse than none.
+3. The dangling `<label>run mode</label>` had no form control to label (a
+   `<label>` around a button group contributes no accessible name). It became
+   a `<span class="field-label" id="modeSwitchLabel">`, with a CSS rule added
+   so it renders identically to the real field labels.
+4. Both `.state-table`s lacked captions, and all eight `<th>` across the three
+   tables lacked `scope="col"`, so cells were announced without their column
+   header.
+
+Verification: the assertions were run against the real HTML through jsdom
+before and after the fix - **15 violations before, 0 after** - because
+Playwright browsers cannot be installed in this sandbox. Three browser E2E
+specs in `e2e/demo.spec.ts` encode the same contracts for CI: no unnamed
+interactive control, a caption + column scopes on every table, and
+`aria-checked` following the selection through an actual mode switch (the
+regression guard for gap 2). `pnpm check` (568) and `pnpm lint` green.
+
+Follow-up in the same phase: declaring `role="radio"` without implementing the
+radiogroup keyboard pattern would have been a promise the widget did not keep,
+so the click handler was refactored into a shared `selectMode()` that also
+maintains a **roving tabindex** (one tab stop for the group), with Arrow / Home
+/ End navigation where selection follows focus. Buttons also had *no* focus
+style at all, making keyboard navigation invisible - added a `:focus-visible`
+outline. The state machine was validated in jsdom (wrap-around both
+directions, Home/End, click, and the "exactly one tabbable / one checked"
+invariant) and pinned by a fourth E2E spec; the browser suite is now 27.
+
+That fourth spec **failed in CI on first run** (commit `ec29397`), which is
+exactly what it was for - though the bug was in the assertion, not the app:
+`options.locator('[tabindex="0"]')` searches *descendants* of each `.seg`
+button, while the roving tabindex lives on the button itself, so the count was
+always 0. Fixed to `group.locator('.seg[tabindex="0"]')` in `6ac3a81`; all four
+checks green. Lesson for this repo: Playwright's `locator.locator()` is
+descendant-scoped - use a compound selector to filter the elements themselves.
+
+Note: CI job logs and run artifacts cannot be downloaded from this sandbox
+(the results-receiver and blob endpoints both close with EOF). Diagnosis has to
+come from `gh pr checks`, the check-run annotations API, and local reasoning /
+jsdom reproduction. Budget an extra CI round trip for browser-only failures.
+
+Confirmed on PR #10 at commit `18ab15d`: all four checks pass and the browser
+job's spec count went 23 -> 26, so the new specs really executed in CI rather
+than being collected and skipped. (Job log download fails from this sandbox
+with an EOF from the results receiver; `npx playwright test --list` locally
+corroborates the 26-spec collection.)
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

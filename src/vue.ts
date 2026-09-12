@@ -25,7 +25,15 @@ export function useCrossTabDataBus<TConfig, TData>(
     });
   };
   onMounted(start);
-  onBeforeUnmount(() => { void stop(); });
+  onBeforeUnmount(() => {
+    // Bump the generation so a start() still awaiting its stop() sees itself
+    // superseded. Without this the pending continuation would run create()
+    // after the component is gone, leaving a live bus with no owner to stop
+    // it (the React adapter has no such window: its create() is synchronous
+    // inside useEffect).
+    lifecycleGeneration += 1;
+    void stop();
+  });
   if (deps.length > 0) watch(deps, start);
   return bus as Ref<CrossTabDataBus<TConfig, TData> | null>;
 }

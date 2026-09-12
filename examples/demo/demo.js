@@ -820,15 +820,47 @@ function hostOf(url) {
   }
 }
 
-elements.modeButtons.forEach(button => {
-  button.addEventListener('click', () => {
-    elements.modeButtons.forEach(item => item.classList.toggle('active', item === button));
-    const mode = button.dataset.mode;
-    // The WebSocket mode connects to the bundled /ws/demo endpoint, so it
-    // needs no URL input either.
-    elements.urlField.hidden = mode === 'local' || mode === 'websocket';
-    elements.workerModeField.hidden = mode !== 'centrifugo';
-    elements.transferableField.hidden = mode !== 'centrifugo';
+/**
+ * Select a run mode in the segmented radiogroup.
+ *
+ * Keeps three things in lockstep: the visual `active` class, the `aria-checked`
+ * state assistive tech reads, and the roving tabindex. A radiogroup is a single
+ * tab stop -- only the checked radio is tabbable, and arrow keys move between
+ * options -- so a static tabindex would make Tab walk through all three buttons
+ * and contradict the role we declare.
+ */
+function selectMode(button, { focus = false } = {}) {
+  elements.modeButtons.forEach(item => {
+    const selected = item === button;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-checked', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+  });
+  if (focus) button.focus();
+  const mode = button.dataset.mode;
+  // The WebSocket mode connects to the bundled /ws/demo endpoint, so it
+  // needs no URL input either.
+  elements.urlField.hidden = mode === 'local' || mode === 'websocket';
+  elements.workerModeField.hidden = mode !== 'centrifugo';
+  elements.transferableField.hidden = mode !== 'centrifugo';
+}
+
+elements.modeButtons.forEach((button, index) => {
+  button.tabIndex = button.classList.contains('active') ? 0 : -1;
+  button.addEventListener('click', () => selectMode(button));
+  button.addEventListener('keydown', event => {
+    // Arrow keys wrap around the group; Home/End jump to the ends. Selection
+    // follows focus, which is the expected behaviour for a radiogroup whose
+    // options are cheap to switch between.
+    const count = elements.modeButtons.length;
+    let next = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % count;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + count) % count;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = count - 1;
+    if (next === null) return;
+    event.preventDefault();
+    selectMode(elements.modeButtons[next], { focus: true });
   });
 });
 

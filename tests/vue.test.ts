@@ -243,5 +243,83 @@ describe('useCrossTabHealth edge cases', () => {
     // Vue removes the host DOM on unmount; the detach assertions above
     // already cover the reset and listener cleanup.
   });
+
+  it('unmounting during the async start window never leaves a bus running', async () => {
+    // start() awaits stop() before calling create(), so an unmount landing in
+    // that window used to let the pending continuation create a bus after the
+    // component was gone — with nobody left to stop it. onBeforeUnmount now
+    // bumps the lifecycle generation so the continuation sees itself
+    // superseded.
+    const bus = fakeBus();
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const active = useCrossTabDataBus(() => bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      return () => h('span', active.value ? 'up' : 'down');
+    }}));
+    app.mount(host);
+    app.unmount();
+    await nextTick();
+    await nextTick();
+    await nextTick();
+    // The superseded start never created the bus at all.
+    expect(bus.ready).not.toHaveBeenCalled();
+  });
+
+  it('holds a plain string topic without installing a topic watcher', async () => {
+    const bus = fakeBus();
+    const received: unknown[] = [];
+    const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      // A literal topic takes the `typeof topic === 'string'` branch, so the
+      // reactive-topic watch is skipped entirely.
+      useCrossTabSubscription(active, 'literal.topic', message => received.push(message.data));
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    bus.emit('literal.topic', 'x');
+    expect(received).toEqual(['x']);
+    expect(bus.subscribe).toHaveBeenCalledTimes(1);
+
+    // Detaching the bus tears the subscription down and re-attaching rebinds.
+    active.value = null;
+    await nextTick();
+    active.value = bus as unknown as CrossTabDataBus<unknown, unknown>;
+    await nextTick();
+    expect(bus.subscribe).toHaveBeenCalledTimes(2);
+    app.unmount();
+  });
+
+  it('defaults the health poll interval to 1s when no options object is supplied', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const bus = {
+        getHealthSummary: () => { calls += 1; return { healthy: true, state: 'healthy' }; },
+        onStatus: () => () => {},
+        onError: () => () => {}
+      } as unknown as CrossTabDataBus<unknown, unknown>;
+      const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      const host = document.createElement('div');
+      const app = createApp(defineComponent({ setup() {
+        // No options argument — exercises the `options?.intervalMs ?? 1_000`
+        // default rather than the explicit-interval path.
+        const health = useCrossTabHealth(active);
+        return () => h('span', health.value ? 'up' : 'none');
+      }}));
+      app.mount(host);
+      await nextTick();
+      expect(host.textContent).toBe('up');
+      const initial = calls;
+      await vi.advanceTimersByTimeAsync(999);
+      expect(calls).toBe(initial);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(calls).toBe(initial + 1);
+      app.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 });

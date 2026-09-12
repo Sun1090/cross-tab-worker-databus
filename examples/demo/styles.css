@@ -396,7 +396,11 @@ tbody tr:last-child td {
   padding: 9px 12px 0;
 }
 
-.field label {
+.field label,
+/* `.field-label` is a non-label element (a <span> labelling a radiogroup via
+   aria-labelledby, where a <label> would have no valid form control to point
+   at). It must render identically to a real field label. */
+.field .field-label {
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
@@ -430,6 +434,17 @@ input:focus,
 select:focus {
   border-color: #8f8cea;
   box-shadow: 0 0 0 2px #e5e4fb;
+}
+
+/* Buttons had no focus style of their own, so keyboard users driving the mode
+   radiogroup (arrow keys) or the action rows had no idea where focus was.
+   :focus-visible keeps the ring off pointer clicks. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
 }
 
 .segmented {
