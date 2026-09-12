@@ -10,6 +10,41 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## RELEASE_FREEZE — milestone ready, tagging left to the maintainer
+
+- Status: DONE (all local work and all gates green); BLOCKED_EXTERNAL for the
+  tag/publish step only (needs the maintainer's release decision + npm token).
+- Milestone / release target: the accumulated `[Unreleased]` line on top of
+  `0.20.83` (pre-1.0; no required public-API additions, so a patch release
+  `0.20.84` fits semver — the maintainer chooses the exact number).
+- Branch / PR: `main` (repo norm in this project is direct-to-main after a
+  fully green local battery; no `feat/*` flow is configured).
+- Local commits: see `git log 0.20.83..HEAD`; latest `65db0da`.
+- Target: close the reliability/observability hardening line and ship it.
+- Completed: stranded-handoff recovery (single-writer + projected loads +
+  TTL-gated re-election), `route_migration_recovery` reliability trace op,
+  adaptive dedup TTL hot-path fix, dead-branch removals (wildcard publish
+  cache, replay flush fallback), Vue unmount leak fix, CI gate enforcement
+  (coverage/compat/pack/lint), vitest 5 + @eslint/js 10 upgrades, demo
+  reliability + chaos observability + a11y, README/capabilities/CHANGELOG.
+- Changed files: library (`src/`), tests (646 unit + 27 e2e), workflows,
+  docs (en+zh), examples/demo, scripts.
+- Verification commands & results: `pnpm check` 646/33 green; `pnpm lint`
+  clean; `pnpm test:e2e` 27/27; `pnpm bench` + `bench:compare --fail-above-pct
+  50` green; `pnpm verify:compat` (v0.20.71) green; `pnpm verify:pack` green;
+  `pnpm audit` clean; `npm pack --dry-run` 107 files (no progress.md);
+  `git diff --check` clean; CI (verify incl. coverage/compat/pack + browser +
+  CodeQL) green on every push.
+- Blockers: none technical.
+- Risk & rollback: all changes are additive or fix-only; rollback is
+  `git revert` of the commit range, or re-tag from the previous tag.
+- Next: maintainer release steps — (1) move `[Unreleased]` in `CHANGELOG.md`
+  under `## [0.20.84] - <date>` and bump `package.json`; (2) update both
+  roadmap files; (3) `git tag v0.20.84 && git push origin main --tags`;
+  (4) the `Release` workflow runs check+lint+compat+pack, opens the GitHub
+  release, and publishes to npm only if `NPM_TOKEN` is set; (5) verify
+  `verify:published`. Nothing further is executable without that decision.
+
 ## Baseline (2026-09-06, main @ 06dcc25)
 
 - CI green for all prior pushes (last: browser 3m20s + verify 45s after reruns of
