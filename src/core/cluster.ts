@@ -485,15 +485,16 @@ export class WorkerClusterRuntime {
     if (this.assignedTopics.has(topicKey)) {
       return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
     }
-    // `cachedPattern` is `undefined` (never computed), a pattern string
-    // (this worker owns the topic via a local wildcard subscription), or
-    // `null` (no local wildcard subscription). A `null` entry must NOT
-    // short-circuit: the topic may still have a remote owner and the
-    // route-owner cache lookup below has to run.
+    // A local wildcard owns matching concrete topics. The scan result is
+    // memoised per concrete topic: `undefined` means "not scanned yet", a
+    // pattern string means "this local wildcard matched", and `null` means
+    // "scanned, no local wildcard matched". The cached positive value is a
+    // scan-skip marker only — it is deliberately NOT re-checked against
+    // `assignedTopics`, because that map is keyed by the opaque topic key, so
+    // a plaintext pattern could never match a key (the check was unreachable).
+    // Only the first (scanning) call may dispatch locally; later calls route
+    // through `resolvePublishTarget`, which honours a concrete remote owner.
     const cachedPattern = this.wildcardPublishCache.get(topic);
-    if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
-      return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
-    }
     if (cachedPattern === undefined) {
       for (const pattern of this.assignedTopics.values()) {
         if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
@@ -534,10 +535,6 @@ export class WorkerClusterRuntime {
       return true;
     }
     const cachedPattern = this.wildcardPublishCache.get(topic);
-    if (cachedPattern !== undefined && cachedPattern !== null && this.assignedTopics.has(cachedPattern)) {
-      this.dispatchLocalPublishBatch(topic, topicKey, items);
-      return true;
-    }
     if (cachedPattern === undefined) {
       for (const pattern of this.assignedTopics.values()) {
         if (pattern !== topic && topicMatchesPattern(pattern, topic)) {

@@ -171,6 +171,26 @@ describe('CentrifugeSession', () => {
 });
 
 describe('CentrifugeSession additional coverage', () => {
+  it('sends a partial metadata envelope without undefined keys', async () => {
+    // A caller may supply only a messageId or only a timestamp. The envelope
+    // must then omit the other field entirely rather than serialising
+    // `timestamp: undefined` into the server payload.
+    for (const options of [{ messageId: 'only-id' }, { timestamp: 7 }]) {
+      FakeCentrifuge.instances.length = 0;
+      const sink = vi.fn();
+      const session = new CentrifugeSession({ post: (message: CentrifugeWorkerOutput) => sink(message) });
+      session.handle({ type: 'INIT', url: 'wss://example.test/connection/websocket', config: {} });
+      const client = FakeCentrifuge.instances[0]!;
+      const publish = vi.fn().mockResolvedValue({});
+      client.publish = publish;
+      session.handle({ type: 'PUBLISH', topic: 'market.tick', data: { price: 1 }, ...options });
+      await vi.waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+      const payload = publish.mock.calls[0]![1] as Record<string, unknown>;
+      expect(payload).toEqual({ data: { price: 1 }, ...options });
+      expect(Object.keys(payload)).toHaveLength(2);
+    }
+  });
+
   it('ignores unknown worker protocol variants without disturbing the session', () => {
     FakeCentrifuge.instances.length = 0;
     const sink = vi.fn();

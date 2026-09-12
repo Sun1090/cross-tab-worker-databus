@@ -2819,6 +2819,57 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     await bus.stop();
   });
 
+  it('unsubscribe(topic) without a handler tears down every handler, the subscription, and replay history once', async () => {
+    // The no-handler form is the documented whole-topic teardown, but the
+    // existing edge tests only ever pass a handler (or hit the unknown-topic
+    // early return), so `handlers.clear()` and its n→0 teardown were never
+    // exercised.
+    const { bus, transport } = makeBus({ replay: { maxPerTopic: 4 } });
+    await bus.ready();
+    const first = vi.fn();
+    const second = vi.fn();
+    const offFirst = bus.subscribe('t', first);
+    const offSecond = bus.subscribe('t', second);
+    expect(transport.subscribeCalls).toEqual(['t']);
+
+    // Buffer replay history for this topic so the teardown can be shown to
+    // drop it as well.
+    transport.emit('t', 1);
+    transport.emit('t', 2);
+    const firstLive = first.mock.calls.length;
+    const secondLive = second.mock.calls.length;
+    expect(firstLive).toBeGreaterThan(0);
+    expect(secondLive).toBeGreaterThan(0);
+
+    bus.unsubscribe('t');
+    await vi.waitFor(() => expect(transport.unsubscribeCalls).toEqual(['t']));
+
+    // Both handlers stop receiving live deliveries.
+    transport.emit('t', 3);
+    await Promise.resolve();
+    expect(first.mock.calls.length).toBe(firstLive);
+    expect(second.mock.calls.length).toBe(secondLive);
+
+    // The per-handler closers returned by the original subscribes are now
+    // no-ops: they must not trigger a second transport teardown.
+    offFirst();
+    offSecond();
+    await Promise.resolve();
+    expect(transport.unsubscribeCalls).toEqual(['t']);
+
+    // Re-subscribing re-establishes the transport subscription, and the
+    // prior history was dropped with the topic (no stale replay delivery).
+    const rejoined = vi.fn();
+    bus.subscribe('t', rejoined, { replay: true });
+    expect(rejoined).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(transport.subscribeCalls).toEqual(['t', 't']));
+    transport.emit('t', 4);
+    await Promise.resolve();
+    expect(rejoined).toHaveBeenCalledTimes(1);
+
+    await bus.stop();
+  });
+
   it('stop() is idempotent and stops the transport exactly once', async () => {
     const { bus, transport } = makeBus();
     await bus.ready();

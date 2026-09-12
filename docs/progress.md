@@ -1318,6 +1318,30 @@ corroborates the 26-spec collection.)
   it would be churn, not a fix.
 - 638 unit tests green (627 + 11); typecheck, lint, diff-check green.
 
+## Phase 45 (wildcard dead branch, full-teardown coverage, metadata edges)
+
+- Real defect found by reading `cluster.ts` against its own comments: the
+  wildcard publish-cache hit guard did `assignedTopics.has(cachedPattern)`,
+  but `assignedTopics` is keyed by the opaque topic key while the cached
+  value is a plaintext pattern — always false, so the branch was
+  unreachable (and the cache's positive value never short-circuited).
+  Removed as provably behaviour-preserving (640 tests unchanged) and
+  corrected the comment to describe the memoisation as a scan-skip marker.
+  cluster.ts statements 95.96 → 96.48, branches 90.21 → 90.50, lines
+  97.61 → 98.24.
+- Public-API gap: `CrossTabDataBus.unsubscribe(topic)` with NO handler (the
+  documented whole-topic teardown) had zero direct coverage — only the
+  with-handler and unknown-topic forms were tested, so `handlers.clear()`
+  and its n→0 teardown never ran. Added a test pinning: all handlers
+  cleared, transport unsubscribe exactly once, per-handler closers become
+  no-ops, replay history dropped (no stale replay on re-subscribe), and
+  re-subscribe re-establishes the transport subscription. Mutation-checked
+  both ways (clear→no-op and skip-replay-cleanup each fail).
+- Centrifuge partial metadata envelope: added coverage for messageId-only
+  and timestamp-only publishes (the absent key must not be serialised as
+  `undefined`). 640 unit tests green (638 + 2); typecheck, lint, e2e 27/27,
+  pack, compat green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
