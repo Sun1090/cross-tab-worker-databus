@@ -74,8 +74,16 @@ export function assertDedupOptions(dedup: DataBusDedupOptions | undefined): void
   if (dedup.ttlMs !== undefined) assertPositiveFiniteNumber(dedup.ttlMs, 'dedup.ttlMs');
   if (dedup.sweepMs !== undefined) assertPositiveFiniteNumber(dedup.sweepMs, 'dedup.sweepMs');
   const bounds = dedup.adaptiveTtl;
-  if (bounds && (bounds.minMs <= 0 || bounds.maxMs < bounds.minMs)) {
-    throw new TypeError('dedup.adaptiveTtl bounds are invalid.');
+  if (bounds !== undefined) {
+    // Both bounds must be finite positive numbers with `minMs <= maxMs`.
+    // A `NaN`/non-number slips past a plain `<=` comparison (`NaN <= 0` and
+    // `maxMs < NaN` are both false), which would leave `currentTtl()` returning
+    // `NaN` and silently disable expiry instead of failing loudly.
+    const finite = (value: unknown): value is number =>
+      typeof value === 'number' && Number.isFinite(value);
+    if (!finite(bounds.minMs) || !finite(bounds.maxMs) || bounds.minMs <= 0 || bounds.maxMs < bounds.minMs) {
+      throw new TypeError('dedup.adaptiveTtl bounds are invalid.');
+    }
   }
 }
 

@@ -164,4 +164,105 @@ describe('public documentation', () => {
       ).toBe('##');
     }
   });
+
+  // The localized docs are maintained side by side with the English originals,
+  // so they drift silently when a section, table row, or config entry is only
+  // added to one language. These guards compare the structural skeleton of each
+  // pair; they do not compare prose (translations legitimately differ).
+  const localizedDocNames = readdirSync('docs').filter(
+    name => name.endsWith('.md') && name !== 'progress.md'
+  );
+
+  const countMatches = (text: string, pattern: RegExp): number => (text.match(pattern) ?? []).length;
+
+  it('keeps every localized doc pair at the same h2 section count', () => {
+    // A section present in only one language is invisible to readers of the
+    // other. (Found: docs/release-checklist.md lacked the "Security and
+    // dependency scanning" section that only the Chinese copy carried.)
+    for (const name of localizedDocNames) {
+      const en = readFileSync(join('docs', name), 'utf8');
+      const zh = readFileSync(join('docs/zh', name), 'utf8');
+      expect(
+        countMatches(zh, /^## /gm),
+        `docs/zh/${name} has a different number of "## " sections than docs/${name}`
+      ).toBe(countMatches(en, /^## /gm));
+    }
+  });
+
+  it('keeps every localized doc pair at the same markdown table row count', () => {
+    // Table rows are 1:1 across languages (only the cell text is translated),
+    // so a missing row means a documented option silently vanished from one
+    // language. (Found: docs/zh/configuration.md was missing the
+    // `recovery.cooldownMs` and `recovery.maxAttempts` rows.)
+    for (const name of localizedDocNames) {
+      const en = readFileSync(join('docs', name), 'utf8');
+      const zh = readFileSync(join('docs/zh', name), 'utf8');
+      expect(
+        countMatches(zh, /^\|/gm),
+        `docs/zh/${name} has a different number of table rows than docs/${name}`
+      ).toBe(countMatches(en, /^\|/gm));
+    }
+  });
+
+  it('enumerates every shipped doc explicitly in package.json files', () => {
+    // package.json lists the docs one by one (so the internal progress.md stays
+    // out of the tarball). npm only auto-includes files named README* / LICENSE*
+    // / CHANGELOG* plus package.json — a *non*-README doc that is added to disk
+    // but forgotten here would silently vanish from the published package. This
+    // asserts the enumeration is complete, and keeps the English/Chinese pairs
+    // symmetric (docs/README.md and README.md are both listed explicitly, so
+    // their localized twins must be too).
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { files: string[] };
+    const listed = new Set(pkg.files);
+    const missing: string[] = [];
+    for (const dir of ['docs', 'docs/zh']) {
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith('.md') || name === 'progress.md') continue;
+        const relative = `${dir}/${name}`;
+        if (!listed.has(relative)) missing.push(relative);
+      }
+    }
+    for (const name of ['README.md', 'README.zh.md', 'CHANGELOG.md', 'LICENSE']) {
+      if (!listed.has(name)) missing.push(name);
+    }
+    expect(missing, 'every shipped doc must be enumerated in package.json files').toEqual([]);
+    expect(pkg.files, 'the internal progress.md must not be published').not.toContain('docs/progress.md');
+  });
+
+  it('keeps every localized doc pair at the same list-item count', () => {
+    // Bullet and ordered-list items are 1:1 across languages, so a dropped item
+    // is a silently lost guarantee/step in one language. (Would have caught the
+    // Chinese roadmap losing the 0.11.0 section and the 0.13.0 candidate list.)
+    for (const name of localizedDocNames) {
+      const en = readFileSync(join('docs', name), 'utf8');
+      const zh = readFileSync(join('docs/zh', name), 'utf8');
+      expect(
+        countMatches(zh, /^([-*] |\d+\. )/gm),
+        `docs/zh/${name} has a different number of list items than docs/${name}`
+      ).toBe(countMatches(en, /^([-*] |\d+\. )/gm));
+    }
+  });
+
+  it('leaves no empty section in the shipped documentation', () => {
+    // A heading immediately followed by another heading of the same or higher
+    // level renders as an empty section. (Found: docs/zh/roadmap.md's
+    // "0.13.0 候选" section had lost its four items.)
+    const files = ['README.md', 'README.zh.md', ...listDocumentationFiles('docs')];
+    const emptySections: string[] = [];
+    for (const file of files) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, index) => {
+        const heading = /^(#{2,3}) /.exec(line);
+        if (!heading) return;
+        let next = index + 1;
+        while (next < lines.length && lines[next]!.trim() === '') next += 1;
+        if (next >= lines.length) return;
+        const following = /^(#{1,6}) /.exec(lines[next]!);
+        if (following && following[1]!.length <= heading[1]!.length) {
+          emptySections.push(`${file}:${index + 1} "${line}" is immediately followed by "${lines[next]}"`);
+        }
+      });
+    }
+    expect(emptySections).toEqual([]);
+  });
 });

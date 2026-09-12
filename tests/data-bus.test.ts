@@ -1952,6 +1952,21 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 2_000, maxMs: 1_000 } })).toThrow(
       'dedup.adaptiveTtl bounds are invalid.'
     );
+    // Non-finite bounds previously slipped through the plain `<=` comparisons
+    // (`NaN <= 0` and `maxMs < NaN` are both false), leaving `currentTtl()`
+    // returning NaN and silently disabling expiry instead of failing loudly.
+    for (const adaptiveTtl of [
+      { minMs: NaN, maxMs: 1_000 },
+      { minMs: 100, maxMs: NaN },
+      { minMs: NaN, maxMs: NaN },
+      { minMs: 100, maxMs: Infinity },
+      { minMs: Infinity, maxMs: Infinity }
+    ]) {
+      expect(
+        () => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl }),
+        `adaptiveTtl ${JSON.stringify(adaptiveTtl)} must be rejected`
+      ).toThrow('dedup.adaptiveTtl bounds are invalid.');
+    }
     expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 100, maxMs: 1_000 } })).not.toThrow();
   });
 

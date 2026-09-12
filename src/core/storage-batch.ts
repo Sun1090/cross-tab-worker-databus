@@ -21,10 +21,6 @@ const MAX_RETRY_ATTEMPTS = 5;
 /**
  * Coalesces synchronous storage writes and applies them in one pass, with
  * exponential backoff when the underlying storage rejects a write.
- */
-/**
- * Coalesces synchronous storage writes and applies them in one pass, with
- * exponential backoff when the underlying storage rejects a write.
  *
  * Wraps a {@link StorageLike} so callers (WorkerClusterRuntime) see a normal
  * storage interface; reads transparently see pending writes before they flush.

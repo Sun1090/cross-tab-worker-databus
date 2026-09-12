@@ -438,6 +438,13 @@
 - publication metadata 做兼容性归一化：只接受非空 ID 与有限 timestamp。
 - 补充 legacy、嵌套、fallback topic 和坏 metadata 协议夹具测试。
 
+## 0.11.0 已完成范围
+
+- 当持久化适配器支持 `clearBefore` 时，通过 `replay.retentionMs` 自动执行持久化回放留存。
+- 周期性 trace 指标中加入去重接受/抑制计数。
+- 覆盖 WebSocket、Centrifuge、Worker 边界与浏览器 E2E 的 publication metadata 兼容性测试。
+- Service Worker transport 决策：在目标浏览器具备稳定的连接生命周期契约前，刻意保持不实现。
+
 ## 0.20.68 已交付
 
 - 为集群帧和 worker snapshot 增加协议版本元数据，并保持旧版本缺失字段时的兼容处理。
@@ -450,6 +457,11 @@
 4. ~~增加 adaptive dedup、async trace、prune 和长时多 Tab 性能基线。~~ 部分交付：bench 覆盖负载加权评分、`getMetrics`、publishBatch 批次敏感性，以及既有 dedup/async-sink/persistence 用例。
 
 ## 0.13.0 候选
+
+1. 冻结公共导出面与 transport 无关的 publication 信封。
+2. 精确记录 at-least-once 投递与去重保证。
+3. 增加长时浏览器浸泡覆盖：replay 留存、重连、BFCache 与 owner 迁移。
+4. 为 1.0 前的协议别名发布迁移指南与弃用策略。
 
 ## 更长期候选
 

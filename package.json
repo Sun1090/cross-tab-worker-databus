@@ -43,8 +43,10 @@
     "docs/zh/release-checklist.md",
     "docs/zh/roadmap.md",
     "docs/zh/transports.md",
+    "docs/zh/README.md",
     "CHANGELOG.md",
     "README.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "main": "./dist/cjs/index.cjs",

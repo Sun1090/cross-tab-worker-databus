@@ -961,6 +961,60 @@ corroborates the 26-spec collection.)
   the fetch-tags note.
 - 575 unit tests green (574 + 1); typecheck, lint, diff-check green.
 
+## Phase 43 (EN/ZH parity defects, adaptive-dedup validation hole, JSDoc dup)
+
+- Continued the doc audit into cross-language drift. Structural comparison of
+  every localized pair (h2 count, table-row count, list-item count) found five
+  real defects, all in the language that had drifted:
+  - `docs/release-checklist.md` (EN) was missing the whole "Security and
+    dependency scanning" section (CodeQL + Dependabot) that only the Chinese
+    copy carried — EN had 6 h2 sections, ZH 7.
+  - `docs/zh/roadmap.md` had lost the `0.11.0` delivered-scope section
+    entirely (EN 100 h2, ZH 99), and its `0.13.0` candidates section was
+    empty (EN lists four items).
+  - `docs/zh/configuration.md` omitted the `recovery.cooldownMs` and
+    `recovery.maxAttempts` rows that the EN Core-config table documents
+    (39 table rows vs 37).
+  - `docs/zh/README.md`'s demo link text was `../..//examples/demo` (doubled
+    slash); the target was right, the label was not.
+- Five new guards in `tests/documentation.test.ts` pin this class: EN/ZH h2
+  parity, table-row parity, list-item parity, no empty section, and every
+  shipped doc enumerated in `package.json` `files`. All five mutation-checked
+  by reverting the corresponding fix (each fails with a precise message, e.g.
+  `docs/zh/configuration.md has a different number of table rows ... expected
+  37 to be 39`).
+- Real code fix found while reading the dedup path: `assertDedupOptions`
+  accepted non-finite `adaptiveTtl` bounds. `NaN <= 0` and `maxMs < NaN` are
+  both false, so `{ minMs: NaN, maxMs: 1000 }` (or `maxMs: Infinity`) passed
+  construction and left `DedupManager.currentTtl()` returning `NaN`, silently
+  disabling expiry rather than failing loudly. Bounds must now be finite
+  positive numbers with `minMs <= maxMs`; the existing bounds test gained the
+  five non-finite cases.
+- Second code-hygiene fix: `BatchingStorageWriter` carried its class JSDoc
+  twice (the first a truncated copy), so the first block was dead
+  documentation. Removed, with a `tests/regression.test.ts` guard that fails
+  when a JSDoc block is stacked on another whose body it prefixes (a file
+  header followed by a member doc is deliberately allowed). Mutation-checked:
+  re-inserting the duplicate reports
+  `src/core/storage-batch.ts:21 duplicates the JSDoc block at line 25`.
+- Packaging: `package.json` `files` now also enumerates `README.zh.md` and
+  `docs/zh/README.md`, mirroring the already-listed English counterparts.
+  Verified with `npm pack --dry-run --json` that npm auto-includes any
+  `README*` regardless of `files` (a scratch `docs/zh/_scratch-probe.md` is
+  *not* included, so the enumeration guard still has real teeth for
+  non-README docs) — recorded so a future reader does not mistake this for a
+  missing-file fix.
+- 581 unit tests green (575 + 6 new guards); typecheck, lint, build, e2e
+  (27/27), verify:pack, `npm pack --dry-run` (107 files, `docs/zh/README.md`
+  present, no progress.md) green.
+- Sandbox note: this environment cannot run `pnpm` (its global store symlink
+  is broken) or the full suite in one shot — vitest spawns 26 forks and the
+  jsdom files (hooks/vue) intermittently fail to start, and the `dual-format`
+  dist test can time out when the machine is loaded. Run with
+  `./node_modules/.bin/vitest run --maxWorkers=1` and re-run the two jsdom
+  files separately; all 581 pass. `pnpm` can be replaced by
+  `PATH="$PWD/node_modules/.bin:$PATH" node scripts/build.mjs`.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

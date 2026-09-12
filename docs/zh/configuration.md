@@ -12,6 +12,8 @@
 | `transport` | `DataBusTransport<TConfig, TData>` | 必填 | 真实连接和订阅实现 |
 | `initialConfig` | `TConfig` | 无 | 自动启动时传给 transport |
 | `autoStart` | `boolean` | 传入 `initialConfig` 时为 `true` | 是否在创建实例后自动启动 |
+| `recovery.cooldownMs` | `number` | `1000` | 出错后自动重开 transport 前的最小延迟 |
+| `recovery.maxAttempts` | `number` | `Infinity` | 每轮恢复序列的最大自动重开次数；显式订阅需求仍可继续重试 |
 | `storagePrefix` | `string` | `cross-tab-worker-databus` | storage key 和 BroadcastChannel 的命名空间 |
 | `maxActiveWorkers` | `number` | `3` | 可作为 Topic owner 的最大 Worker 数 |
 | `heartbeatIntervalMs` | `number` | `3000` | Worker 心跳间隔 |

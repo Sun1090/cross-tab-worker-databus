@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createOpaqueKey } from '../src/core/hash';
 import { hasActiveOwner, selectLeastLoadedWorker } from '../src/core/routing';
@@ -46,5 +48,52 @@ describe('hash: regression invariants after refactor', () => {
     const key = createOpaqueKey('regression.topic');
     expect(createOpaqueKey('regression.topic')).toBe(key);
     expect(key).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe('source hygiene', () => {
+  const sourceFiles = (): string[] => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap(name => {
+        const child = join(dir, name);
+        return statSync(child).isDirectory() ? walk(child) : child.endsWith('.ts') ? [child] : [];
+      });
+    return walk('src');
+  };
+
+  it('does not leave a duplicated JSDoc block stacked on a declaration', () => {
+    // A copy-paste can leave two JSDoc blocks in a row; only the last one is
+    // attached to the declaration, so the first becomes dead documentation that
+    // silently drifts. (Found: BatchingStorageWriter carried its class doc
+    // twice, the first a truncated copy.) A file-level header followed by a
+    // member's own doc is fine — only a *prefix duplicate* is flagged.
+    const offenders: string[] = [];
+    for (const file of sourceFiles()) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      const blocks: Array<{ start: number; end: number; body: string }> = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        if (lines[index]!.trim() !== '/**') continue;
+        let end = index;
+        while (end < lines.length && lines[end]!.trim() !== '*/') end += 1;
+        if (end >= lines.length) continue;
+        const body = lines
+          .slice(index + 1, end)
+          .map(line => line.replace(/^\s*\*\s?/, '').trimEnd())
+          .join('\n')
+          .trim();
+        blocks.push({ start: index + 1, end: end + 1, body });
+        index = end;
+      }
+      for (let index = 0; index + 1 < blocks.length; index += 1) {
+        const first = blocks[index]!;
+        const second = blocks[index + 1]!;
+        const between = lines.slice(first.end, second.start - 1).join('\n').trim();
+        if (between !== '') continue;
+        if (second.body.startsWith(first.body)) {
+          offenders.push(`${file}:${first.start} duplicates the JSDoc block at line ${second.start}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
