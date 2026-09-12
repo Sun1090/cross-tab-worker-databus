@@ -68,4 +68,10 @@ describe('workflow files', () => {
       );
     }
   });
+
+  it('re-runs lint in the release job before publishing', () => {
+    // A tag may point at a commit that never passed CI's lint step.
+    const workflow = readWorkflow('release.yml');
+    expect(workflow, 'release.yml must lint before publishing').toMatch(/run:\s*pnpm lint/);
+  });
 });

@@ -1377,6 +1377,15 @@ corroborates the 26-spec collection.)
   cannot attribute a topic).
 - 645 unit tests green; typecheck, lint, diff-check green.
 
+## Phase 48 (release gate: lint before publish)
+
+- The `Release` workflow ran `pnpm check` but not `pnpm lint`, so a version
+  tag pointing at a commit that never passed CI's lint job could publish
+  unlinted code. Added the lint step, documented it in both release
+  checklists, and extended tests/workflows.test.ts to assert the step
+  exists (YAML re-validated with PyYAML).
+- 646 unit tests green (645 + 1); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

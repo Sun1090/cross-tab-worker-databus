@@ -30,7 +30,7 @@ The repository runs CodeQL (`javascript-typescript`; on push, on pull request, a
 
 ## Tagged-release workflow
 
-Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=24`, `PUBLISHED_VERIFY_DELAY_MS=5000`). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release and republish the tag after fixing it. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
+Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check` and `pnpm lint` (a tag can point at a commit that never passed CI's lint step), runs `verify:compat` and `verify:pack`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=24`, `PUBLISHED_VERIFY_DELAY_MS=5000`). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release and republish the tag after fixing it. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
 
 ## Publishing
 

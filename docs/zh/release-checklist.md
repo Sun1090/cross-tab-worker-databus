@@ -30,7 +30,7 @@
 
 ## 打 tag 的发布工作流
 
-推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行与手动执行相同预算的**阻塞式**消费者验证（`PUBLISHED_VERIFY_ATTEMPTS=24`、`PUBLISHED_VERIFY_DELAY_MS=5000`）。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败，修复后重新发布该 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
+推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行与手动执行相同预算的**阻塞式**消费者验证（`PUBLISHED_VERIFY_ATTEMPTS=24`、`PUBLISHED_VERIFY_DELAY_MS=5000`）。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败，修复后重新发布该 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
 
 ## 发布（手动场景）
 

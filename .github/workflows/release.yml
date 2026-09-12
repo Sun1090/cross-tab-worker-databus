@@ -55,6 +55,11 @@ jobs:
       - name: Verify (typecheck + build + unit tests)
         run: pnpm check
 
+      - name: Lint
+        # A tag can point at a commit that never passed the CI lint job (e.g.
+        # tagged directly on a branch), so the release gate re-runs it.
+        run: pnpm lint
+
       - name: Public export compatibility
         # Blocking: a release that silently drops a public subpath export or
         # type entry is a breaking change shipped as a patch.
