@@ -92,6 +92,34 @@ describe('source hygiene', () => {
     }
   });
 
+  it('never statically imports dist from a test (tsc runs before the build)', () => {
+    // `pnpm check` is `typecheck && build && test`, so `tsc --noEmit` sees a
+    // fresh checkout with no dist/ and rejects a literal specifier with
+    // TS2307 — which is exactly how a new documentation guard broke CI while
+    // passing locally (where dist/ already existed). Use the non-literal form
+    // instead: `await import(/* @vite-ignore */ `../dist/${'index.js'}`)`.
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap(name => {
+        const child = join(dir, name);
+        return statSync(child).isDirectory() ? walk(child) : /\.tsx?$/.test(child) ? [child] : [];
+      });
+    const offenders: string[] = [];
+    for (const file of walk('tests')) {
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, index) => {
+          const call = /import\(([^)]*)/.exec(line);
+          if (!call) return;
+          // Strip an inline `/* @vite-ignore */` (or any block comment) first.
+          const argument = call[1]!.replace(/\/\*[^]*?\*\//g, '').trim();
+          if (/^['"]\.\.\/dist\//.test(argument)) {
+            offenders.push(`${file}:${index + 1} statically imports dist — use a non-literal specifier`);
+          }
+        });
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('does not leave a duplicated JSDoc block stacked on a declaration', () => {
     // A copy-paste can leave two JSDoc blocks in a row; only the last one is
     // attached to the declaration, so the first becomes dead documentation that

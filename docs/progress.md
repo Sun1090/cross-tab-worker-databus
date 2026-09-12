@@ -1222,6 +1222,27 @@ corroborates the 26-spec collection.)
   aliasing convention that section already uses elsewhere.
 - 615 unit tests, typecheck, lint green; EN/ZH structural parity intact.
 
+## Phase 50 (my own Phase 48 guard broke CI — invisible locally)
+
+- CI failed in 22s on both Phase 48 and Phase 49 while every local gate was
+  green. Root cause: `pnpm check` is `typecheck && build && test`, so
+  `tsc --noEmit` runs against a **fresh checkout with no `dist/`**, and the new
+  documentation guard's literal `import('../dist/index.js')` was rejected with
+  `TS2307: Cannot find module '../dist/index.js'`. Locally `dist/` already
+  existed, so the failure never appeared.
+- This is a known trap in this repo — `tests/dual-format.test.ts` carries a
+  comment explaining that it builds the specifier as a non-literal
+  (`` `../dist/${'index.js'}` ``) precisely so tsc does not statically resolve
+  it. The guard now uses the same form.
+- Reproduced the CI condition locally by `mv dist dist-hidden && tsc --noEmit`
+  (exit 0 after the fix) instead of trusting the local run.
+- Added a source-hygiene guard so the trap cannot return silently: no test file
+  may use a literal dynamic `import()` of `../dist/`. Mutation-checked — it
+  reports `tests/documentation.test.ts:245 statically imports dist — use a
+  non-literal specifier`.
+- Lesson recorded: after adding any test that touches `dist/`, run the *CI
+  sequence* (`tsc --noEmit` **before** the build), not just the test suite.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

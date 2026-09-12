@@ -238,7 +238,11 @@ describe('public documentation', () => {
     // until it is documented, instead of shipping an undocumented public symbol.
     const distIndex = resolve('dist/index.js');
     expect(existsSync(distIndex), 'run the build before the documentation guard (pnpm check does)').toBe(true);
-    const lib = (await import(/* @vite-ignore */ '../dist/index.js')) as Record<string, unknown>;
+    // Built as a non-literal specifier so `tsc --noEmit` does not statically
+    // resolve it: `pnpm check` runs typecheck BEFORE build, so on a fresh
+    // checkout dist/ does not exist yet and a literal specifier fails with
+    // TS2307. (Same pattern as tests/dual-format.test.ts.)
+    const lib = (await import(/* @vite-ignore */ `../dist/${'index.js'}`)) as Record<string, unknown>;
     const names = Object.keys(lib).sort();
     expect(names.length, 'the root entry point must export a public surface').toBeGreaterThan(0);
 
