@@ -935,6 +935,21 @@ corroborates the 26-spec collection.)
   defect before the fix, so both are behaviourally demonstrated.
 - 571 unit tests green (569 + 2 guards); typecheck, lint, diff-check green.
 
+## Phase 41 (release workflow ref bug + workflow guards)
+
+- Real release-automation bug: on `workflow_dispatch`, `GITHUB_REF_NAME` is
+  the selected branch (`main`), not the `tag` input. The release job used it
+  raw, so a manual dispatch would create a GitHub release named `main`,
+  derive the npm version from the branch, and extract notes for `main`
+  (which fails the section check). Fixed by resolving
+  `${ inputs.tag || github.ref_name }` once into a job-level `RELEASE_TAG`
+  and using it in every step.
+- New `tests/workflows.test.ts`: pins the tag derivation, rejects any raw
+  `GITHUB_REF_NAME` in release.yml, sanity-checks every workflow declares
+  name/on/jobs and pins actions, and requires `fetch-depth: 0` wherever
+  `verify:compat` runs. Mutation-checked (reverting to the raw ref fails).
+- 574 unit tests green (571 + 3); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
