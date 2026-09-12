@@ -1073,6 +1073,52 @@ corroborates the 26-spec collection.)
 - 596 unit tests green (587 + 8 + 1); typecheck, lint (now covering scripts),
   build, `verify:compat`, `bench:compare`, idempotent `bench:trend` green.
 
+## Phase 46 (packed-consumer smoke: workspace pollution, temp leak, coverage gap)
+
+- Swept `scripts/verify-packed-consumer.mjs` (run by CI on every push and by the
+  release workflow before publish). Three real defects, all confirmed
+  empirically before the fix:
+  1. **Checkout pollution.** A bare `npm pack` writes
+     `cross-tab-worker-databus-0.20.83.tgz` into the repo root — one stale
+     archive per version, recreated on every push. Its sibling
+     `verify-published-consumer.mjs` already passed `--pack-destination`; this
+     one never did. (Confirmed: a `.tgz` was sitting in the root, and its mtime
+     advanced on each run.)
+  2. **Temp-root leak.** Neither verifier removed its `mkdtempSync` root, so
+     every run left ~3.3 MB of unpacked package behind. Five
+     `cross-tab-databus-pack-*` dirs had accumulated (~16.5 MB) — one per
+     `verify:pack` run.
+  3. **Coverage gap.** The smoke swept only a hardcoded
+     `['.', './hooks', './vue', './centrifuge']` list, so `./centrifuge.worker`
+     and `./centrifuge.shared.worker` — the entry points the built-in Worker
+     factory resolves at runtime — were never checked inside the tarball.
+- Fixes: pack into the temp root; remove it in a `finally` in both scripts;
+  derive the sweep from the packed manifest via a new exported
+  `collectExportTargets(manifest)` (+ `assertPackedExports`), keeping the
+  dual-format `import`/`require` contract as a separate explicit assertion so
+  the intentionally ESM-only worker entries are not mis-flagged. The CLI body is
+  now behind an `import.meta` direct-invocation check (the `bench-trend.mjs`
+  pattern) with `scripts/verify-packed-consumer.d.mts` for typed imports.
+- Guards: new `tests/verify-packed-consumer.test.ts` (9 tests) pins the
+  manifest-derived coverage — including the explicit assertion that every key of
+  the real `package.json` `exports` is swept, which is the regression itself —
+  plus the string-entry flattening, the empty-export rejections, the missing
+  worker target, the lost `require` condition, and the real manifest against the
+  real `dist`. A new `tests/regression.test.ts` case pins the hygiene
+  properties (`--pack-destination`, tarball read back from the temp root,
+  `rmSync` inside a `finally` in both verifiers).
+- Mutation-checked all three guards: (a) reverting the sweep to the hardcoded
+  list fails 4 tests with `export ./centrifuge.worker must be swept by the pack
+  smoke`; (b) dropping `--pack-destination` fails with `npm pack must write into
+  the temp root`; (c) dropping the `finally` fails with
+  `verify-published-consumer.mjs must remove its temp root`. Additionally an
+  end-to-end mutation — pointing `./centrifuge.worker` at a missing file and
+  running the real CLI against a real tarball — now exits 1 with
+  `missing export target ./dist/centrifuge.worker.broken.js for
+  ./centrifuge.worker`, which the old hardcoded sweep could not detect at all.
+- Post-fix CLI smoke: tarball count 0 and temp-dir count unchanged across a run,
+  `[pack] verified ESM/CJS root and subpath consumers` still green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

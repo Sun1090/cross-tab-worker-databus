@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,34 +14,38 @@ const attempts = Number(process.env.PUBLISHED_VERIFY_ATTEMPTS ?? 6);
 const delayMs = Number(process.env.PUBLISHED_VERIFY_DELAY_MS ?? 5_000);
 if (!Number.isSafeInteger(attempts) || attempts <= 0) throw new TypeError('PUBLISHED_VERIFY_ATTEMPTS must be a positive safe integer.');
 if (!Number.isFinite(delayMs) || delayMs < 0) throw new TypeError('PUBLISHED_VERIFY_DELAY_MS must be a non-negative finite number.');
+// Removed in the `finally` below — a release run must not leave the unpacked
+// tarball, its symlinked dependency tree, or the downloaded archive behind.
 const tempRoot = mkdtempSync(join(tmpdir(), 'cross-tab-databus-published-'));
-let packJson;
-let lastError;
-for (let attempt = 1; attempt <= attempts; attempt += 1) {
-  try {
-    packJson = execFileSync('npm', ['pack', `${packageName}@${version}`, '--json', '--ignore-scripts', '--pack-destination', tempRoot, '--registry', 'https://registry.npmjs.org'], { encoding: 'utf8' });
-    break;
-  } catch (error) {
-    lastError = error;
-    if (attempt === attempts) throw error;
-    console.warn(`[npm] ${packageName}@${version} not available yet (attempt ${attempt}/${attempts}); retrying in ${delayMs}ms`);
-    await sleep(delayMs);
-  }
-}
-if (!packJson) throw lastError ?? new Error(`Unable to download ${packageName}@${version}`);
-const [{ filename }] = JSON.parse(packJson);
-const packageDir = join(tempRoot, 'package');
-execFileSync('tar', ['-xzf', join(tempRoot, filename), '-C', tempRoot]);
-const nodeModules = join(tempRoot, 'node_modules');
-mkdirSync(nodeModules);
-symlinkSync(packageDir, join(nodeModules, packageName), 'dir');
-for (const dependency of ['react', 'vue', 'centrifuge']) {
-  const source = join(workspace, 'node_modules', dependency);
-  if (!existsSync(source)) throw new Error(`Missing workspace dependency required by published consumer: ${dependency}`);
-  symlinkSync(source, join(nodeModules, dependency), 'dir');
-}
 
-const consumer = `
+try {
+  let packJson;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      packJson = execFileSync('npm', ['pack', `${packageName}@${version}`, '--json', '--ignore-scripts', '--pack-destination', tempRoot, '--registry', 'https://registry.npmjs.org'], { encoding: 'utf8' });
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) throw error;
+      console.warn(`[npm] ${packageName}@${version} not available yet (attempt ${attempt}/${attempts}); retrying in ${delayMs}ms`);
+      await sleep(delayMs);
+    }
+  }
+  if (!packJson) throw lastError ?? new Error(`Unable to download ${packageName}@${version}`);
+  const [{ filename }] = JSON.parse(packJson);
+  const packageDir = join(tempRoot, 'package');
+  execFileSync('tar', ['-xzf', join(tempRoot, filename), '-C', tempRoot]);
+  const nodeModules = join(tempRoot, 'node_modules');
+  mkdirSync(nodeModules);
+  symlinkSync(packageDir, join(nodeModules, packageName), 'dir');
+  for (const dependency of ['react', 'vue', 'centrifuge']) {
+    const source = join(workspace, 'node_modules', dependency);
+    if (!existsSync(source)) throw new Error(`Missing workspace dependency required by published consumer: ${dependency}`);
+    symlinkSync(source, join(nodeModules, dependency), 'dir');
+  }
+
+  const consumer = `
   import {
     CrossTabDataBus,
     WebSocketTransport,
@@ -77,11 +81,14 @@ const consumer = `
     if (typeof value !== 'function') throw new Error('published consumer export is not callable');
   }
 `;
-try {
-  execFileSync(process.execPath, ['--input-type=module', '-e', consumer], { cwd: tempRoot, stdio: 'inherit' });
-} catch (error) {
-  console.error(`[npm] consumer import failed for ${packageName}@${version}; package=${packageDir}`);
-  console.error(`[npm] dependency links: ${['react', 'vue', 'centrifuge'].map(name => `${name}=${existsSync(join(nodeModules, name))}`).join(', ')}`);
-  throw error;
+  try {
+    execFileSync(process.execPath, ['--input-type=module', '-e', consumer], { cwd: tempRoot, stdio: 'inherit' });
+  } catch (error) {
+    console.error(`[npm] consumer import failed for ${packageName}@${version}; package=${packageDir}`);
+    console.error(`[npm] dependency links: ${['react', 'vue', 'centrifuge'].map(name => `${name}=${existsSync(join(nodeModules, name))}`).join(', ')}`);
+    throw error;
+  }
+  console.log(`[npm] verified published ${packageName}@${version} ESM/CJS consumers`);
+} finally {
+  rmSync(tempRoot, { recursive: true, force: true });
 }
-console.log(`[npm] verified published ${packageName}@${version} ESM/CJS consumers`);

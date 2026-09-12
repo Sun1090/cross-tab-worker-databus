@@ -71,6 +71,27 @@ describe('source hygiene', () => {
     expect(ignores, 'scripts/ must not be in the ESLint ignores list').not.toContain("'scripts/**'");
   });
 
+  it('keeps the consumer verifiers from polluting the checkout or the temp dir', () => {
+    // Both release verifiers unpack a tarball. `verify:pack` used to run a bare
+    // `npm pack`, which writes `cross-tab-worker-databus-*.tgz` into the repo
+    // root — a stale archive per version, left behind on every push because CI
+    // runs the smoke each time. Neither script removed its `mkdtempSync` root,
+    // so each run also leaked ~3 MB of unpacked package into the OS temp dir.
+    const read = (name: string): string => readFileSync(join('scripts', name), 'utf8');
+
+    const packed = read('verify-packed-consumer.mjs');
+    expect(packed, 'npm pack must write into the temp root').toContain("'--pack-destination', tempRoot");
+    expect(packed, 'the tarball must be read back from the temp root').toContain('join(tempRoot, filename)');
+
+    for (const name of ['verify-packed-consumer.mjs', 'verify-published-consumer.mjs']) {
+      const script = read(name);
+      expect(script, `${name} must remove its temp root`).toContain(
+        'rmSync(tempRoot, { recursive: true, force: true })'
+      );
+      expect(script, `${name} must remove it on the failure path too`).toContain('} finally {');
+    }
+  });
+
   it('does not leave a duplicated JSDoc block stacked on a declaration', () => {
     // A copy-paste can leave two JSDoc blocks in a row; only the last one is
     // attached to the declaration, so the first becomes dead documentation that
