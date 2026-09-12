@@ -2359,3 +2359,82 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
     runtime.stop();
   });
 });
+
+describe('WorkerClusterRuntime cluster option validation', () => {
+  // These options were previously accepted unvalidated. Their failure modes are
+  // silent rather than loud: a 0ms heartbeat interval degenerates into a busy
+  // loop (the exact hazard the Centrifuge PING guard exists for), a
+  // non-positive TTL prunes every peer on the first reconcile, and a
+  // non-positive maxActiveWorkers disables ownership entirely.
+  const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'worker' });
+  const build = (options: Record<string, unknown>): (() => WorkerClusterRuntime) => {
+    return () =>
+      new WorkerClusterRuntime({
+        clusterKey: 'validation',
+        environment: env.environment,
+        tabId: 'tab',
+        workerId: 'worker',
+        handlers: { onControl: vi.fn(), onEvent: vi.fn() },
+        ...options
+      } as never);
+  };
+
+  it('rejects a non-positive or non-finite heartbeatIntervalMs', () => {
+    for (const value of [0, -1, NaN, Infinity, '3000']) {
+      expect(build({ heartbeatIntervalMs: value }), `heartbeatIntervalMs: ${String(value)}`).toThrow(
+        /heartbeatIntervalMs must be a positive finite number/
+      );
+    }
+    expect(build({ heartbeatIntervalMs: 3_000 })).not.toThrow();
+  });
+
+  it('rejects a non-positive or non-finite workerTtlMs', () => {
+    for (const value of [0, -1, NaN, Infinity]) {
+      expect(build({ workerTtlMs: value }), `workerTtlMs: ${String(value)}`).toThrow(
+        /workerTtlMs must be a positive finite number/
+      );
+    }
+    expect(build({ workerTtlMs: 10_000 })).not.toThrow();
+  });
+
+  it('rejects a maxActiveWorkers that is not a positive safe integer', () => {
+    for (const value of [0, -1, 1.5, NaN, Infinity]) {
+      expect(build({ maxActiveWorkers: value }), `maxActiveWorkers: ${String(value)}`).toThrow(
+        /maxActiveWorkers must be a positive safe integer/
+      );
+    }
+    expect(build({ maxActiveWorkers: 3 })).not.toThrow();
+  });
+
+  it('rejects a routeOwnerCacheMax that is not a positive safe integer', () => {
+    for (const value of [0, -1, NaN]) {
+      expect(build({ routeOwnerCacheMax: value }), `routeOwnerCacheMax: ${String(value)}`).toThrow(
+        /routeOwnerCacheMax must be a positive safe integer/
+      );
+    }
+    expect(build({ routeOwnerCacheMax: 256 })).not.toThrow();
+  });
+
+  it('rejects a negative or non-finite loadWeighting weight', () => {
+    // A negative weight inverts the documented policy (new routes would favour
+    // the busiest worker) and a non-finite one poisons the score.
+    for (const weight of [-1, NaN, Infinity]) {
+      expect(
+        build({ loadWeighting: { messageRateWeight: weight } }),
+        `messageRateWeight: ${String(weight)}`
+      ).toThrow(/loadWeighting\.messageRateWeight must be a non-negative finite number/);
+    }
+    expect(build({ loadWeighting: { byteRateWeight: -0.5 } })).toThrow(
+      /loadWeighting\.byteRateWeight must be a non-negative finite number/
+    );
+    expect(build({ loadWeighting: { scheduleLagWeight: NaN } })).toThrow(
+      /loadWeighting\.scheduleLagWeight must be a non-negative finite number/
+    );
+    // The documented shape (0 disables a signal) stays accepted.
+    expect(build({ loadWeighting: {} })).not.toThrow();
+    expect(build({ loadWeighting: { messageRateWeight: 0, byteRateWeight: 0, scheduleLagWeight: 0 } })).not.toThrow();
+    expect(
+      build({ loadWeighting: { messageRateWeight: 0.5, byteRateWeight: 0.001, scheduleLagWeight: 2 } })
+    ).not.toThrow();
+  });
+});

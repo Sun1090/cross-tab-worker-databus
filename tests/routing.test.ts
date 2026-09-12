@@ -247,6 +247,59 @@ describe('adaptive load weighting', () => {
     expect(effectiveWorkerLoad(degenerate, { messageRateWeight: 1 })).toBe(2);
   });
 
+  it('effectiveWorkerLoad never returns a non-finite score', () => {
+    // A NaN slips past a bare `<= 0` window check (`NaN <= 0` is false), and a
+    // corrupt sample field read back from a peer's heartbeat record divides
+    // through to NaN. Neither may reach owner selection.
+    const nanWindow = makeWorker({
+      workerId: 'w',
+      load: 2,
+      throughput: { windowMs: NaN, messageCount: 10, byteCount: 0, overrunMs: 0, sampledAt: 0 }
+    });
+    expect(effectiveWorkerLoad(nanWindow, { messageRateWeight: 1 })).toBe(2);
+
+    const nanCount = makeWorker({
+      workerId: 'w',
+      load: 4,
+      throughput: { windowMs: 1_000, messageCount: NaN, byteCount: 0, overrunMs: 0, sampledAt: 0 }
+    });
+    expect(effectiveWorkerLoad(nanCount, { messageRateWeight: 1 })).toBe(4);
+
+    const nanOverrun = makeWorker({
+      workerId: 'w',
+      load: 4,
+      throughput: { windowMs: 1_000, messageCount: 0, byteCount: 0, overrunMs: NaN, sampledAt: 0 }
+    });
+    expect(effectiveWorkerLoad(nanOverrun, { scheduleLagWeight: 1 })).toBe(4);
+
+    // A non-finite weight is also contained here (the constructor rejects it,
+    // but `effectiveWorkerLoad` is a public pure function).
+    const healthy = makeWorker({ workerId: 'w', load: 3, throughput: busySample });
+    expect(effectiveWorkerLoad(healthy, { messageRateWeight: NaN })).toBe(3);
+    expect(effectiveWorkerLoad(healthy, { messageRateWeight: Infinity })).toBe(3);
+  });
+
+  it('selectLeastLoadedWorker picks the same owner regardless of input order when a sample is corrupt', () => {
+    // The regression: with a NaN score, `byLoad !== 0` is true and `NaN < 0` is
+    // false, so the NaN worker wins or loses purely by its index — the same
+    // worker set produced different owners depending on storage listing order.
+    const healthy = makeWorker({
+      workerId: 'healthy',
+      load: 5,
+      throughput: { windowMs: 1_000, messageCount: 0, byteCount: 0, overrunMs: 0, sampledAt: 0 }
+    });
+    const corrupt = makeWorker({
+      workerId: 'corrupt',
+      load: 1,
+      throughput: { windowMs: NaN, messageCount: 5, byteCount: 0, overrunMs: 0, sampledAt: 0 }
+    });
+    const options = { messageRateWeight: 1 };
+    const forward = selectLeastLoadedWorker([healthy, corrupt], undefined, options)?.workerId;
+    const reversed = selectLeastLoadedWorker([corrupt, healthy], undefined, options)?.workerId;
+    expect(forward).toBe('corrupt');
+    expect(reversed).toBe(forward);
+  });
+
   it('selectLeastLoadedWorker stays topic-count-only without options (legacy parity)', () => {
     const heavy = makeWorker({ workerId: 'heavy', load: 5, throughput: { ...busySample, messageCount: 1 } });
     const light = makeWorker({ workerId: 'light', load: 1, throughput: { ...busySample, messageCount: 999 } });

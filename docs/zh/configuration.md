@@ -121,7 +121,7 @@ const bus = createCentrifugeDataBus({
 | `byteRateWeight` | `0` | 同上，针对近似 payload 字节数/秒。 |
 | `scheduleLagWeight` | `0` | 加权调度滞后比率（`overrunMs ÷ windowMs`）。事件循环饥饿会让心跳延迟，从而引导新 route 远离被节流的 Worker。 |
 
-所有权重默认 `0`，保持纯按 Topic 数的 legacy 行为字节级不变。每个 Worker 的采样（`WorkerThroughputSample`）随心跳发布，含 `windowMs`、`messageCount`、`byteCount`、`overrunMs`、`sampledAt`。
+所有权重默认 `0`，保持纯按 Topic 数的 legacy 行为字节级不变。每个权重必须是非负有限数；负数或非有限值会在构造时抛出 `TypeError`，因为负权重会把新 route 导向**最繁忙**的 Worker。每个 Worker 的采样（`WorkerThroughputSample`）随心跳发布，含 `windowMs`、`messageCount`、`byteCount`、`overrunMs`、`sampledAt`。
 
 ## Centrifuge 配置
 

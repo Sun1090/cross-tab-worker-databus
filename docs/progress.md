@@ -1119,6 +1119,51 @@ corroborates the 26-spec collection.)
 - Post-fix CLI smoke: tarball count 0 and temp-dir count unchanged across a run,
   `[pack] verified ESM/CJS root and subpath consumers` still green.
 
+## Phase 47 (non-finite load scores + unvalidated cluster options)
+
+- Found by auditing the option surface against the docs rather than reading
+  prose: `loadWeighting` is a documented, routing-affecting public option with
+  **zero** validation anywhere, and the rest of the cluster options were in the
+  same state. Reproduced five behaviours against the built bundle first:
+  1. `effectiveWorkerLoad` returned `NaN` for a sample with `windowMs: NaN`
+     (`NaN <= 0` is false, so it slipped the "non-positive window" guard).
+  2. `NaN` for a non-finite weight.
+  3. `NaN` for a corrupt sample field (`messageCount`).
+  4. **Order-dependent owner selection.** `selectLeastLoadedWorker` compares
+     `byLoad !== 0` — true for `NaN` — and `NaN < 0` is false, so the `NaN`
+     worker won or lost purely by its array index:
+     `[healthy, corrupt] → healthy` but `[corrupt, healthy] → corrupt`. Worker
+     order comes from storage listing, so the same cluster could pick different
+     owners per tab.
+  5. A negative weight inverts the documented policy: `messageRateWeight: -1`
+     picked the *loud* worker.
+- Fixes:
+  - `src/core/routing.ts` — the score is now total. A non-finite `windowMs`
+    falls back like a non-positive one, and a non-finite weighted sum falls back
+    to the raw topic count, so `NaN` can never reach the comparator.
+  - `src/utils/validation.ts` — new `assertLoadWeightingOptions` (weights must be
+    non-negative finite) and `assertClusterOptions` (`maxActiveWorkers` and
+    `routeOwnerCacheMax` positive safe integers; `heartbeatIntervalMs` and
+    `workerTtlMs` positive finite). Called from the `WorkerClusterRuntime`
+    constructor, so it covers `CrossTabDataBus` and both transport factories.
+    `Infinity` is rejected for the cluster heartbeat (unlike the Centrifuge PING,
+    where it legitimately means "disable"): a Worker that never refreshes its
+    heartbeat is pruned by its own TTL. A `0`/`NaN` heartbeat would degenerate
+    `setInterval` into a 0ms busy loop — the exact hazard the PING guard exists
+    for — and a non-positive TTL pruned every peer on the first reconcile.
+- Tests: 2 in `tests/routing.test.ts` (never non-finite; same owner regardless of
+  input order), 5 in `tests/cluster.test.ts` (one per option group + the
+  `loadWeighting` shape), 1 in `tests/data-bus.test.ts` (the same validation
+  reached through the public bus, which is how the gap was discovered).
+- Mutation-checked all three: removing the `Number.isFinite(weighted)` guard
+  fails with `expected NaN to be 4`; removing both NaN guards fails the
+  order-independence test with `expected 'healthy' to be 'corrupt'`; removing the
+  `assertClusterOptions(options)` call fails all 6 validation tests.
+- Docs: both configuration references now state the weight constraint (EN/ZH
+  parity preserved).
+- 614 unit tests (606 + 8), typecheck, lint, build, verify:compat, verify:pack,
+  bench:compare, and 27/27 browser E2E green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

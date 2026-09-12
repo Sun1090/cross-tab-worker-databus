@@ -12,6 +12,7 @@ import type {
   DataBusPersistenceRetryOptions,
   DataBusReplayOptions
 } from '../core/data-bus';
+import type { LoadWeightingOptions } from '../core/types';
 import { PRUNE_STRATEGY } from './constants';
 
 /** Assert `value` is a positive safe integer. Throws a TypeError otherwise. */
@@ -105,6 +106,59 @@ export function assertRecoveryOptions(recovery: {
   ) {
     throw new TypeError('recovery.maxAttempts must be a positive safe integer.');
   }
+}
+
+/** Validate the adaptive owner-weighting weights.
+ *
+ * Each weight is a non-negative finite number of "topic-equivalents" added per
+ * unit of the sampled signal; `0` (the default) disables that signal. A
+ * negative weight would invert the documented policy — biasing NEW routes
+ * toward the *busiest* Worker instead of the quietest — and a non-finite one
+ * would poison the score, so both are rejected here rather than silently
+ * steering traffic. */
+export function assertLoadWeightingOptions(loadWeighting: LoadWeightingOptions | undefined): void {
+  if (!loadWeighting) return;
+  const weights: Record<string, number | undefined> = {
+    messageRateWeight: loadWeighting.messageRateWeight,
+    byteRateWeight: loadWeighting.byteRateWeight,
+    scheduleLagWeight: loadWeighting.scheduleLagWeight
+  };
+  for (const [name, value] of Object.entries(weights)) {
+    if (value !== undefined) assertNonNegativeFiniteNumber(value, `loadWeighting.${name}`);
+  }
+}
+
+/** Validate the cluster coordination options shared by `WorkerClusterRuntime`
+ * and `CrossTabDataBus`.
+ *
+ * These were previously unvalidated, so a `heartbeatIntervalMs` of `0` or `NaN`
+ * silently turned the heartbeat `setInterval` into a 0ms busy loop (the same
+ * failure the Centrifuge PING guard exists to prevent), a non-positive
+ * `workerTtlMs` pruned every peer on the first reconcile, and a non-positive
+ * `maxActiveWorkers`/`routeOwnerCacheMax` disabled ownership or caching
+ * outright. `Infinity` is rejected for the heartbeat here: unlike the Centrifuge
+ * PING it cannot mean "disable", because a Worker that never refreshes its
+ * heartbeat is pruned by its own TTL. */
+export function assertClusterOptions(options: {
+  maxActiveWorkers?: number;
+  heartbeatIntervalMs?: number;
+  workerTtlMs?: number;
+  routeOwnerCacheMax?: number;
+  loadWeighting?: LoadWeightingOptions;
+}): void {
+  if (options.maxActiveWorkers !== undefined) {
+    assertPositiveSafeInteger(options.maxActiveWorkers, 'maxActiveWorkers');
+  }
+  if (options.heartbeatIntervalMs !== undefined) {
+    assertPositiveFiniteNumber(options.heartbeatIntervalMs, 'heartbeatIntervalMs');
+  }
+  if (options.workerTtlMs !== undefined) {
+    assertPositiveFiniteNumber(options.workerTtlMs, 'workerTtlMs');
+  }
+  if (options.routeOwnerCacheMax !== undefined) {
+    assertPositiveSafeInteger(options.routeOwnerCacheMax, 'routeOwnerCacheMax');
+  }
+  assertLoadWeightingOptions(options.loadWeighting);
 }
 
 /** Validate the SharedWorker PING heartbeat interval. A value of `0`, a negative

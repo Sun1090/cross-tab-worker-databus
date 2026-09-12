@@ -39,6 +39,7 @@ import {
 } from '../utils/constants';
 import { publicationMetadata } from '../utils/metadata';
 import { readAllByPrefix, readJson, writeJson } from '../utils/storage-utils';
+import { assertClusterOptions } from '../utils/validation';
 
 /** Callbacks the cluster invokes to drive the transport and lifecycle. */
 export interface WorkerClusterHandlers {
@@ -207,6 +208,7 @@ export class WorkerClusterRuntime {
   private currentRecord: WorkerRecord;
 
   constructor(options: WorkerClusterOptions) {
+    assertClusterOptions(options);
     this.environment = options.environment ?? createBrowserEnvironment();
     this.handlers = options.handlers;
     this.maxActiveWorkers = options.maxActiveWorkers ?? DEFAULT_MAX_ACTIVE_WORKERS;

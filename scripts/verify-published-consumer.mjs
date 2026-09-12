@@ -90,5 +90,15 @@ try {
   }
   console.log(`[npm] verified published ${packageName}@${version} ESM/CJS consumers`);
 } finally {
-  rmSync(tempRoot, { recursive: true, force: true });
+  // Best-effort: a blocked delete (a locked file, or a sandbox that refuses
+  // bulk deletes) must not turn a successful verification into a failed
+  // release gate. Warn instead of throwing, and never mask the real error.
+  try {
+    rmSync(tempRoot, { recursive: true, force: true });
+  } catch (error) {
+    console.warn(
+      `[npm] could not remove the temp root ${tempRoot}:`,
+      error instanceof Error ? error.message : error
+    );
+  }
 }

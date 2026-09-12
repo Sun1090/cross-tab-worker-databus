@@ -124,6 +124,9 @@ const bus = createCentrifugeDataBus({
 | `scheduleLagWeight` | `0` | Weights the scheduling-lag ratio (`overrunMs ÷ windowMs`). A starved event loop lands heartbeats late, so this steers new routes away from a throttled Worker. |
 
 All weights default to `0`, keeping the legacy pure topic-count behavior byte-identical.
+Each weight must be a non-negative finite number; a negative or non-finite weight throws a
+`TypeError` at construction, since a negative weight would bias new routes toward the
+*busiest* Worker instead.
 The per-Worker sample (`WorkerThroughputSample`) is published with the heartbeat and
 carries `windowMs`, `messageCount`, `byteCount`, `overrunMs`, and `sampledAt`.
 

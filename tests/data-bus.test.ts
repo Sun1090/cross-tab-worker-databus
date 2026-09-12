@@ -1947,6 +1947,37 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(() => makeReplayBus(undefined, { maxEntries: 1, ttlMs: 1_000, sweepMs: 1_000 })).not.toThrow();
   });
 
+  it('rejects invalid cluster options through the public bus, loadWeighting included', () => {
+    // `loadWeighting` is a documented public option that had no validation at
+    // all, so a negative weight silently inverted the routing policy and a
+    // non-finite one silently poisoned the load score. The other cluster
+    // options were equally unguarded.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'cluster-validation' });
+    const build = (options: Record<string, unknown>): (() => CrossTabDataBus<unknown, unknown>) => {
+      return () =>
+        new CrossTabDataBus({
+          autoStart: true,
+          clusterKey: 'cluster-validation',
+          environment: environment.environment,
+          initialConfig: {},
+          transport: new FakeTransport<unknown>(),
+          ...options
+        } as never);
+    };
+    expect(build({ heartbeatIntervalMs: 0 })).toThrow(/heartbeatIntervalMs must be a positive finite number/);
+    expect(build({ workerTtlMs: 0 })).toThrow(/workerTtlMs must be a positive finite number/);
+    expect(build({ maxActiveWorkers: 0 })).toThrow(/maxActiveWorkers must be a positive safe integer/);
+    expect(build({ routeOwnerCacheMax: 0 })).toThrow(/routeOwnerCacheMax must be a positive safe integer/);
+    expect(build({ loadWeighting: { messageRateWeight: -1 } })).toThrow(
+      /loadWeighting\.messageRateWeight must be a non-negative finite number/
+    );
+    // The documented defaults and example weights stay accepted.
+    expect(
+      build({ heartbeatIntervalMs: 3_000, workerTtlMs: 10_000, maxActiveWorkers: 3, routeOwnerCacheMax: 256 })
+    ).not.toThrow();
+    expect(build({ loadWeighting: { messageRateWeight: 0.5, byteRateWeight: 0.001, scheduleLagWeight: 2 } })).not.toThrow();
+  });
+
   it('rejects invalid adaptive dedup TTL bounds with a distinct message', () => {
     expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 0, maxMs: 1_000 } })).toThrow(TypeError);
     expect(() => makeReplayBus(undefined, { ttlMs: 1_000, adaptiveTtl: { minMs: 2_000, maxMs: 1_000 } })).toThrow(

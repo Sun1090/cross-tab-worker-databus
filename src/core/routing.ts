@@ -32,8 +32,12 @@ export function effectiveWorkerLoad(
   const scheduleLagWeight = options?.scheduleLagWeight ?? 0;
   // A missing sample, unset weights, or a non-positive window (no elapsed
   // time to derive a rate from) all fall back to the raw topic count.
+  // `Number.isFinite` rather than a bare `<= 0`: `NaN <= 0` is false, so a
+  // sample with a corrupt `windowMs` (read back from a peer's heartbeat record)
+  // would otherwise divide through to a NaN score.
   if (
     !sample ||
+    !Number.isFinite(sample.windowMs) ||
     sample.windowMs <= 0 ||
     (messageRateWeight === 0 && byteRateWeight === 0 && scheduleLagWeight === 0)
   ) {
@@ -45,12 +49,18 @@ export function effectiveWorkerLoad(
   // Scheduling lag is the ratio of heartbeat overrun to wall time: a Worker
   // whose timers land late (starved event loop) contributes ~overrun/window.
   const scheduleLagRatio = sample.overrunMs / sample.windowMs;
-  return (
+  const weighted =
     worker.load +
     messageRateWeight * messageRate +
     byteRateWeight * byteRate +
-    scheduleLagWeight * scheduleLagRatio
-  );
+    scheduleLagWeight * scheduleLagRatio;
+  // A non-finite score is never ordered: `selectLeastLoadedWorker` compares
+  // `byLoad !== 0`, which is true for NaN, and `NaN < 0` is false — so a NaN
+  // worker wins or loses purely by its index in the input array, making owner
+  // selection depend on storage listing order rather than on load. A corrupt
+  // sample field or a non-finite weight reaches this point, so fall back to
+  // the raw topic count instead of leaking the NaN into routing.
+  return Number.isFinite(weighted) ? weighted : worker.load;
 }
 
 /**
