@@ -1386,6 +1386,22 @@ corroborates the 26-spec collection.)
   exists (YAML re-validated with PyYAML).
 - 646 unit tests green (645 + 1); typecheck, lint, diff-check green.
 
+## Phase 49 (perf-gate variance observation — trend doc not polluted)
+
+- Ran `bench:browser` twice while the dev machine was loaded: the
+  round-trip `publish/dedicated` metric moved +49.7% then -3.7% between
+  consecutive runs, and the in-page databus microbenchmarks drifted
+  ±8–15%. The dedup change from Phase 44 did NOT regress (dedup1000Ms
+  moved down), so this is machine-load noise, not a code regression.
+- Deliberately did not commit the regenerated `docs/benchmarks.md`: with
+  `bench-results/` gitignored the doc is the only record, and enshrining a
+  load spike as the new "latest" would mislead. The 50% gate held.
+- Finding for future: the two-most-recent-report comparison is sensitive
+  to a single noisy run; the databus microbenchmarks are the stable
+  signal, the demo round-trip metric is scheduling-dominated. No code
+  change made (the 50% ceiling already absorbs it, and changing the
+  comparison semantics is a design decision).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
