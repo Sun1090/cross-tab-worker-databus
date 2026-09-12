@@ -1159,6 +1159,29 @@ describe('CentrifugeWorkerTransport edge paths', () => {
     transport.stop();
   });
 
+  it('skips the structured-clone guard when the runtime lacks structuredClone', () => {
+    // Older browsers without window.structuredClone: validation cannot run, so
+    // start() must proceed (the Worker will throw on its own) instead of
+    // failing with a spurious TypeError.
+    const original = globalThis.structuredClone;
+    vi.stubGlobal('structuredClone', undefined);
+    try {
+      const { worker, transport } = makeDedicatedTransport();
+      expect(() =>
+        transport.start(
+          { url: 'wss://example.test/connection/websocket', options: { onOpen: () => {} } as never },
+          { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+        )
+      ).not.toThrow();
+      // The INIT did reach the worker: the guard was skipped, not the start.
+      expect(worker.messages.length).toBeGreaterThan(0);
+      transport.stop();
+    } finally {
+      vi.stubGlobal('structuredClone', original);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('treats a SharedWorker port messageerror as a worker failure', () => {
     // Stub SharedWorker so backend selection keeps 'shared' instead of
     // degrading to the dedicated-worker path in Node.

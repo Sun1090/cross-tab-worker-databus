@@ -1342,6 +1342,29 @@ corroborates the 26-spec collection.)
   `undefined`). 640 unit tests green (638 + 2); typecheck, lint, e2e 27/27,
   pack, compat green.
 
+## Phase 46 (second dead branch, runtime-guard and error-path coverage)
+
+- Removed a second provably-dead branch: `ReplayManager.schedulePersistenceFlush`'s
+  per-message `append` fallback — the only queuer (`record()`) pushes to the
+  batch solely when the backend has `appendBatch`, so the fallback can never
+  run. Batched append is now unconditional there. 643 unit tests unchanged
+  (behaviour-preserving).
+- Added error-path coverage with mutation checks: WebSocket binary publish on
+  a closed socket reports via `onError` (separate framing path), and
+  `assertStructuredCloneable` skips its guard when a runtime lacks
+  `structuredClone` (older browsers proceed instead of a spurious TypeError).
+- `BatchingStorageWriter` single-retry-timer invariant pinned (flush() cancels
+  before re-arming, so it holds independently of scheduleRetry's defensive
+  guard — noted in the test rather than claiming that guard).
+- Noted for future: `scheduleRetry`'s `retryHandle !== null` guard and
+  `scheduleRetentionCleanup`'s `!clearBefore` guard are unreachable given
+  their callers' own guards/ordering; left in place as cheap defensive
+  redundancy rather than removed.
+- Local full e2e initially flaked once (shared-mode session test, 35 s under
+  heavy parallel load; passed in 1.6 s in isolation and 27/27 on the re-run) —
+  the documented local-load flake class, no source coupling.
+- 643 unit green; typecheck, lint, e2e 27/27, pack, compat green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

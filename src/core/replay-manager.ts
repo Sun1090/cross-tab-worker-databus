@@ -312,7 +312,9 @@ export class ReplayManager<TData = unknown> {
   }
 
   /** Coalesce queued persistence appends into a single microtask batch so a
-   * burst of publications does not issue one IndexedDB transaction each. */
+   * burst of publications does not issue one IndexedDB transaction each.
+   * Only reachable when the backend advertises `appendBatch` (the sole queuer,
+   * `record()`, guards on it), so the batched path is unconditional here. */
   private schedulePersistenceFlush(): void {
     if (this.persistenceFlushScheduled) return;
     this.persistenceFlushScheduled = true;
@@ -320,10 +322,8 @@ export class ReplayManager<TData = unknown> {
       this.persistenceFlushScheduled = false;
       const batch = this.pendingReplayPersistence.splice(0);
       if (batch.length === 0 || !this.persistence) return;
-      const operation = this.persistence.appendBatch
-        ? () => this.persistence!.appendBatch!(batch)
-        : () => Promise.all(batch.map(message => this.persistence!.append(message))).then(() => undefined);
-      void this.withPersistenceRetry(PERSISTENCE_OPERATION.APPEND, operation).catch(error => this.onPersistenceError(error));
+      void this.withPersistenceRetry(PERSISTENCE_OPERATION.APPEND, () => this.persistence!.appendBatch!(batch))
+        .catch(error => this.onPersistenceError(error));
     });
   }
 
