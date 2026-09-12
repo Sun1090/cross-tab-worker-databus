@@ -109,4 +109,48 @@ describe('public documentation', () => {
       check();
     }
   });
+
+  it('does not repeat a subheading within one CHANGELOG version section', () => {
+    // The Release workflow extracts a version section verbatim for the
+    // release notes, so a duplicated `### Added` / `### Changed` block reads
+    // as a malformed section. (Found in [Unreleased]: two `### Changed`
+    // headings had accumulated across sessions.)
+    const lines = readFileSync('CHANGELOG.md', 'utf8').split('\n');
+    let section = '(preamble)';
+    const seen = new Map<string, Set<string>>();
+    for (const line of lines) {
+      const sectionMatch = /^## \[?([^\]]+)\]?/.exec(line);
+      if (sectionMatch) {
+        section = sectionMatch[1]!.trim();
+        continue;
+      }
+      const heading = /^### (.+)$/.exec(line);
+      if (heading) {
+        const headings = seen.get(section) ?? new Set<string>();
+        expect(
+          headings.has(heading[1]!),
+          `CHANGELOG.md section "${section}" repeats the "${heading[1]}" subheading`
+        ).toBe(false);
+        headings.add(heading[1]!);
+        seen.set(section, headings);
+      }
+    }
+  });
+
+  it('marks every CHANGELOG version heading as an h2', () => {
+    // The Release workflow finds a release's notes by matching `## [<version>]`.
+    // A version heading at the wrong level (a single `#`) is invisible to that
+    // match, so the release would publish without notes. (Found: 0.20.60 was
+    // an h1, which also made its `### Added` block look like a duplicate of
+    // the previous version's.)
+    const lines = readFileSync('CHANGELOG.md', 'utf8').split('\n');
+    for (const [index, line] of lines.entries()) {
+      const heading = /^(#{1,6}) \[?\d+\.\d+\.\d+\]?/.exec(line);
+      if (!heading) continue;
+      expect(
+        heading[1],
+        `CHANGELOG.md:${index + 1} version heading must use "## " so the Release workflow can match it`
+      ).toBe('##');
+    }
+  });
 });

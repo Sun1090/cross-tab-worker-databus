@@ -922,6 +922,19 @@ corroborates the 26-spec collection.)
   tables affected.
 - 569 unit tests green (568 + 1 guard); typecheck, lint green.
 
+## Phase 40 (CHANGELOG structure defects + release-notes guards)
+
+- Continued the doc audit: the `[Unreleased]` section had two `### Changed`
+  headings (accumulated across sessions), and `[0.20.60]` was an h1 (`#`)
+  instead of h2 (`##`). The latter matters — the Release workflow matches
+  `## [<version>]` to extract notes, so an h1 version would publish without
+  notes (and made its `### Added` look like a duplicate).
+- Fixed both, and added two guards to `tests/documentation.test.ts`: no
+  repeated `### ` subheading within a CHANGELOG version section, and every
+  version heading must be an h2. The first guard actually caught the 0.20.60
+  defect before the fix, so both are behaviourally demonstrated.
+- 571 unit tests green (569 + 2 guards); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

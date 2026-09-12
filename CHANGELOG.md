@@ -37,6 +37,7 @@
 
 ### Fixed
 - The capabilities matrix (English and Chinese) had a broken table row: the "Optional ArrayBuffer Transferable transport" description was orphaned onto the next row, leaving a 3-cell row beside a 5-cell row so the whole matrix rendered with shifted columns. The description is back on its own row, and a new documentation guard now fails the suite whenever a markdown table mixes cell counts (splitting on unescaped pipes only, so `\|` inside a cell is not mistaken for a separator).
+- CHANGELOG structure: the `[Unreleased]` section carried two `### Changed` headings, and the `[0.20.60]` version heading was an h1 (`#`) instead of h2 (`##`) — invisible to the Release workflow's `## [<version>]` notes match. Both fixed, with guards that fail on a repeated subheading within one version section and on any version heading not written as an h2.
 - Vue `useCrossTabDataBus` no longer leaks a bus when the component unmounts inside the async start window. `start()` awaits `stop()` before calling `create()`; an unmount landing in that window ran `stop()` without bumping the lifecycle generation, so the pending continuation still created a bus that nobody owned or stopped. `onBeforeUnmount` now supersedes the pending start. Pinned by a regression test (fails without the fix). The React adapter is unaffected — its `create()` is synchronous inside `useEffect`.
 - Stranded-handoff recovery no longer lets concurrent survivors ping-pong route generations: only the deterministically elected owner performs the re-election (peers stand down and wait for its write), and projected loads spread multi-topic recoveries across survivors like the graceful handoff does. When the elected owner has no local subscription — so it would never reconcile the topic — the recovering peer writes the route and notifies it directly instead of standing down forever. Without this, divergent cross-tab views made survivors rewrite the same route every pass, dropping each other's confirmations and piling topics onto one worker. Covered by distribution and unsubscribed-owner regression tests; the multi-round soak pins convergence.
 - Stranded unconfirmed handoffs no longer stall forever when the previous owner's `ROUTE_RELEASED` never arrives (dropped channel message under load, or a crash between the route write and the ACK): the reconcile loop re-elects a live owner once the previous owner is gone and the handoff has been stuck longer than a worker TTL (10 s default), rewriting the route with a fresh generation and clearing the handoff marker so the normal confirmation path completes. While the previous owner is still alive the new owner keeps waiting, and a fresh handoff is never mistaken for a stranded one (age gate), so the strict handoff keeps its no-overlap guarantee. Pinned by two regression tests (recovery after the TTL vs. continued waiting while the previous owner lives); architecture docs (EN+ZH) updated.
@@ -51,8 +52,6 @@
 - IndexedDB replay persistence coalesces concurrent `appendBatch` calls into a single read-modify-write transaction (regression: ten concurrent batches = one readwrite transaction) while preserving order against `clear`/`clearTopic`/`clearBefore`.
 - The root export surface is pinned by a regression test, making pre-1.0 API additions/removals deliberate.
 - Benchmarks: load-weighting scoring, `getMetrics` snapshot, and `publishBatch` batch-size sensitivity (10/50/100 per call) baselines.
-
-### Changed
 - GitHub Actions bumped to current majors (checkout/setup-node/upload-artifact v4 → v7, pnpm/action-setup v4 → v6), dropping the Node 20 deprecation warning on the forced Node 24 action runtime.
 - Browser E2E handoff tests (owner migration, multi-tab soak, BFCache) wait up to 60 s for a pagehide owner takeover, absorbing shared-runner scheduling jitter.
 - The demo WebSocket hub attributes wire-frame counters per topic (`/debug/wsstats.topics`) so the single-frame `publishBatch` assertion is immune to concurrent tests on a parallel local run.
@@ -229,7 +228,7 @@
 ### Changed
 - `WorkerClusterRuntime.onEvent` handler signature now includes a fourth `originTabId?: string` argument; existing call sites use `toMatchObject` so the extra argument does not break strict equality.
 
-# [0.20.60] - 2026-09-04
+## [0.20.60] - 2026-09-04
 
 ### Added
 - `publishBatch(topic, items)` on both `CrossTabDataBus` and `WorkerClusterRuntime` packs multiple items into a single BroadcastChannel postMessage so the receiving owner can dispatch them in one tick instead of one channel post per item.
