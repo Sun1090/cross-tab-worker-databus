@@ -441,6 +441,10 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 `useCrossTabDataBus` returns a Vue `Ref` that is populated on mount and stopped on unmount. `useCrossTabSubscription` accepts a string or `Ref<string>` topic and rebinds when the bus or topic changes. `useCrossTabStatus` returns a `Ref<WorkerStatus>` synchronized with `bus.onStatus()`.
 
+### `useVueCrossTabHealth(bus, options?)`
+
+The Vue binding of `useCrossTabHealth`: mirrors `bus.getHealthSummary()` into a `Ref<DataBusHealthSummary | null>`. Because the summary is a snapshot rather than an event stream, the composable polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. Returns `null` while the bus has not been created yet.
+
 ## `WorkerClusterRuntime`
 
 Advanced API responsible for Worker registration, heartbeat, visibility, routing, BroadcastChannel protocol, and migration. Business modules should not operate on it directly.

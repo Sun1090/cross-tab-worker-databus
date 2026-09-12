@@ -1197,6 +1197,31 @@ corroborates the 26-spec collection.)
   sections) — the new `###` sections and the one mirrored
   `WorkerClusterRuntime` bullet keep both counts equal.
 
+## Phase 49 (the two adapter entries documented for only one adapter each)
+
+- Spotted while reading the sections Phase 48 pointed at: `### useCrossTabHealth`
+  sat under `## React Hooks` in English but under `## Vue Composables` in
+  Chinese, and `/hooks` and `/vue` export the **same four composable names**
+  (`useCrossTabDataBus`, `useCrossTabSubscription`, `useCrossTabStatus`,
+  `useCrossTabHealth` — verified against `dist/hooks.d.ts` / `dist/vue.d.ts`).
+  So each language documented the health composable for exactly one adapter:
+  EN readers never learned `/vue` exports it, ZH readers never learned `/hooks`
+  does. The Chinese Vue heading also carried the **React** name
+  (`useCrossTabHealth`) over a body describing a Vue `Ref`.
+- This class is invisible to the existing parity guards: both languages have the
+  same h2 count, the same table rows, and the same list items, so only *where* a
+  name lives differs. New guard: split the reference on h2, and require each
+  entry's own section to document every export of that entry (derived from the
+  built declaration files). It failed on the pre-fix docs with exactly
+  `docs/api.md: the /vue section must document every export of that entry:
+  expected [ 'useCrossTabHealth' ]` and then, after fixing EN, the Chinese
+  equivalent for `/hooks` — i.e. it caught both defects independently.
+- Fixes: EN gains `### useVueCrossTabHealth(bus, options?)` in the Vue section;
+  ZH gains the React `### useCrossTabHealth(bus, options?)` section and its Vue
+  heading is corrected to `useVueCrossTabHealth`, matching the `useVue*`
+  aliasing convention that section already uses elsewhere.
+- 615 unit tests, typecheck, lint green; EN/ZH structural parity intact.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

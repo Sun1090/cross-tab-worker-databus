@@ -422,6 +422,10 @@ React（>= 18）是可选 peer 依赖；独立入口保证非 React 消费者不
 
 把 `bus.onStatus()` 镜像为 React 状态，bus 身份变化时同步读取当前值。返回 `'connecting' | 'connected' | 'disconnected' | 'error'`。
 
+### `useCrossTabHealth(bus, options?)`
+
+将 `bus.getHealthSummary()` 镜像为 React 状态（`DataBusHealthSummary | null`）。由于健康摘要是快照而非事件流，该 hook 按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。bus 创建前返回 `null`。
+
 ## Vue Composables（`cross-tab-worker-databus/vue`）
 
 Vue 3.3+ 是可选 peer 依赖；独立入口不会影响核心包。
@@ -434,9 +438,9 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 `useCrossTabDataBus` 返回 Vue `Ref`，在组件挂载时创建 bus、卸载时停止。`useCrossTabSubscription` 接受字符串或 `Ref<string>` topic，在 bus/topic 变化时自动重绑。`useCrossTabStatus` 返回与 `bus.onStatus()` 同步的 `Ref<WorkerStatus>`。
 
-### `useCrossTabHealth(bus, options?)`
+### `useVueCrossTabHealth(bus, options?)`
 
-将 `bus.getHealthSummary()` 镜像为 Vue `Ref<DataBusHealthSummary | null>`。健康摘要是快照而非事件流，因此该组合式函数按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。bus 创建前返回 `null`。
+`useCrossTabHealth` 的 Vue 绑定：将 `bus.getHealthSummary()` 镜像为 Vue `Ref<DataBusHealthSummary | null>`。健康摘要是快照而非事件流，因此该组合式函数按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。bus 创建前返回 `null`。
 
 ## `WorkerClusterRuntime`
 

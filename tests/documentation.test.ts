@@ -249,6 +249,49 @@ describe('public documentation', () => {
     }
   });
 
+  it('documents every adapter export inside that adapter entry own section', () => {
+    // `/hooks` and `/vue` export the *same* four composable names, so a name
+    // appearing somewhere in the reference proves nothing about the section a
+    // reader is in. The health composable was documented under the React
+    // section in English and under the Vue section in Chinese — each language
+    // left the other adapter with no entry for it at all, and the Chinese Vue
+    // heading used the React name while its body described a Vue `Ref`.
+    // Splitting on h2 and requiring each entry's own section to carry every
+    // export of that entry catches this; the h2/row/list parity guards cannot,
+    // because both languages have the same shape.
+    const entryExports = (declaration: string): string[] =>
+      [...readFileSync(declaration, 'utf8').matchAll(/^export (?:declare )?(?:function|const|class) (\w+)/gm)]
+        .map(match => match[1]!)
+        .sort();
+
+    const h2Sections = (text: string): Array<{ title: string; body: string }> => {
+      const sections: Array<{ title: string; body: string }> = [];
+      for (const line of text.split('\n')) {
+        if (line.startsWith('## ')) sections.push({ title: line, body: '' });
+        else if (sections.length > 0) sections[sections.length - 1]!.body += `${line}\n`;
+      }
+      return sections;
+    };
+
+    for (const file of ['docs/api.md', 'docs/zh/api.md']) {
+      const sections = h2Sections(readFileSync(file, 'utf8'));
+      for (const [marker, declaration] of [
+        ['/hooks', 'dist/hooks.d.ts'],
+        ['/vue', 'dist/vue.d.ts']
+      ] as const) {
+        const names = entryExports(declaration);
+        expect(names.length, `${declaration} must export at least one composable`).toBeGreaterThan(0);
+        const section = sections.find(entry => entry.title.includes(marker));
+        expect(section, `${file} must have an h2 section for the ${marker} entry`).toBeDefined();
+        const missing = names.filter(name => !section!.body.includes(name));
+        expect(
+          missing,
+          `${file}: the ${marker} section must document every export of that entry`
+        ).toEqual([]);
+      }
+    }
+  });
+
   it('keeps every localized doc pair at the same list-item count', () => {
     // Bullet and ordered-list items are 1:1 across languages, so a dropped item
     // is a silently lost guarantee/step in one language. (Would have caught the
