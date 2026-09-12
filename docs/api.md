@@ -132,6 +132,19 @@ When supplied, `options.messageId` and `options.timestamp` are propagated throug
 }
 ```
 
+### `publishBatch(topic, items)`
+
+```ts
+publishBatch(
+  topic: string,
+  items: Array<{ data: unknown; messageId?: string; timestamp?: number }>
+): void
+```
+
+Publishes many items to one topic as a single unit of work. The bundled WebSocket transport packs the whole batch into one wire frame (the `publishBatch` op) rather than one frame per item; a transport that does not implement the optional `DataBusTransport.publishBatch` hook falls back to per-item `publish()`, so the call is safe either way.
+
+Per-item `messageId` and `timestamp` survive the wire frame, and dedup, replay, and ordering apply per item in source order. An empty batch is a no-op; a single-item batch delegates to `publish()`. `WorkerClusterRuntime` exposes the same method for callers that coordinate directly.
+
 ### `clearReplay()`
 
 ```ts
@@ -438,6 +451,7 @@ Main methods:
 - `setStatus(status)`
 - `subscribe(topic)` / `unsubscribe(topic)`
 - `publish(topic, data)`
+- `publishBatch(topic, items)`
 - `broadcastEvent(eventType, payload)`
 - `isAssigned(topic)`
 - `isActiveWorker()`
@@ -454,6 +468,12 @@ Generates a stable 128-bit hexadecimal opaque key. Used to avoid writing raw con
 
 Creates a default browser environment adapter, including storage, BroadcastChannel, timers, and page lifecycle events.
 
+### `getOrCreateTabId(environment, key?)`
+
+Returns the stable identity of the current page/tab instance, reading it from session storage and creating one (`tab-<random>`) on first call, so a reloaded tab reclaims its routes instead of looking like a brand new one.
+
+The stored value is deliberately *not* reused when `window.opener` is present: `window.open()` clones the opener's `sessionStorage` into the child, so a blind reuse would make two live tabs share one identity. When storage is unavailable or throws, a fresh ID is generated instead.
+
 ### `selectWorkerBackend(mode, availability?)`
 
 Selects the actual backend based on `WorkerMode` and capability detection, returning `'shared' | 'dedicated' | 'local'`:
@@ -462,6 +482,22 @@ Selects the actual backend based on `WorkerMode` and capability detection, retur
 - `dedicated` (default): Dedicated Worker -> SharedWorker -> local mode
 
 `availability` can explicitly pass `worker` / `sharedWorker` capability flags, for use in SSR, testing, or embedded environments, avoiding access to non-existent global objects.
+
+### `effectiveWorkerLoad(worker, options?)`
+
+The pure scoring function behind least-loaded owner selection: `worker.load` (the owned-Topic count) plus the weighted traffic and scheduling-lag terms when `options` carries the `loadWeighting` weights.
+
+The score is always finite. A Worker with no throughput sample, an unset (all-zero) weight set, a non-positive or non-finite sample window, or a non-finite weighted sum scores as its raw Topic count — a non-finite score would never compare correctly and would make owner selection depend on the order of the Worker array rather than on load. See [configuration.md](./configuration.md#adaptive-owner-weighting) for the weights.
+
+### `approximatePayloadBytes(payload)`
+
+Cheap, allocation-free estimate of a payload's wire size, used for the byte side of an adaptive load sample. It only runs when adaptive routing is enabled, so approximate sizes are fine — the goal is a stable cross-Worker comparison, not an exact byte count.
+
+Sizes: `null`/`undefined` and symbols/functions `0`, booleans `4`, numbers and bigints `8`, strings their length, `ArrayBuffer`s and typed-array views their `byteLength`, arrays an 8-byte header plus their elements, and plain objects the sum of their values.
+
+### `DEFAULT_MAX_ACTIVE_WORKERS`
+
+The default cap on how many Workers may own Topics concurrently (`3`). It bounds fan-out breadth: only that many Workers are eligible to become new-route owners, so a cluster of twenty tabs still concentrates ownership on a few rather than spreading it thin. Override it with the `maxActiveWorkers` cluster option.
 
 ### Routing Functions
 

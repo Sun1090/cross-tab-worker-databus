@@ -229,6 +229,26 @@ describe('public documentation', () => {
     expect(pkg.files, 'the internal progress.md must not be published').not.toContain('docs/progress.md');
   });
 
+  it('documents every public root export in both API references', async () => {
+    // The API reference is the consumer-facing contract, but nothing tied it to
+    // the code, so four of the nineteen root exports (DEFAULT_MAX_ACTIVE_WORKERS,
+    // approximatePayloadBytes, effectiveWorkerLoad, getOrCreateTabId) and the
+    // CrossTabDataBus.publishBatch method were simply absent from it. Deriving
+    // the list from the built entry point makes a new export fail the suite
+    // until it is documented, instead of shipping an undocumented public symbol.
+    const distIndex = resolve('dist/index.js');
+    expect(existsSync(distIndex), 'run the build before the documentation guard (pnpm check does)').toBe(true);
+    const lib = (await import(/* @vite-ignore */ '../dist/index.js')) as Record<string, unknown>;
+    const names = Object.keys(lib).sort();
+    expect(names.length, 'the root entry point must export a public surface').toBeGreaterThan(0);
+
+    for (const file of ['docs/api.md', 'docs/zh/api.md']) {
+      const content = readFileSync(file, 'utf8');
+      const missing = names.filter(name => !content.includes(name));
+      expect(missing, `${file} must document every public root export`).toEqual([]);
+    }
+  });
+
   it('keeps every localized doc pair at the same list-item count', () => {
     // Bullet and ordered-list items are 1:1 across languages, so a dropped item
     // is a silently lost guarantee/step in one language. (Would have caught the

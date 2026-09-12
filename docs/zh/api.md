@@ -130,6 +130,19 @@ publish(
 }
 ```
 
+### `publishBatch(topic, items)`
+
+```ts
+publishBatch(
+  topic: string,
+  items: Array<{ data: unknown; messageId?: string; timestamp?: number }>
+): void
+```
+
+把多条 item 作为一个工作单元发布到同一个 topic。内置 WebSocket transport 会把整个 batch 打包成**一帧**（`publishBatch` op），而不是逐条一帧；未实现可选钩子 `DataBusTransport.publishBatch` 的 transport 会自动回退逐条 `publish()`，因此两种情况下调用都安全。
+
+每条 item 的 `messageId` 与 `timestamp` 在传输后保留，dedup、replay 与顺序都按 item 维度、以源顺序生效。空 batch 为 no-op；单 item batch 直接委托给 `publish()`。直接操作协调层的调用方可用 `WorkerClusterRuntime` 上的同名方法。
+
 ### `clearReplay()`
 
 ```ts
@@ -435,6 +448,7 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 - `setStatus(status)`
 - `subscribe(topic)` / `unsubscribe(topic)`
 - `publish(topic, data)`
+- `publishBatch(topic, items)`
 - `broadcastEvent(eventType, payload)`
 - `isAssigned(topic)`
 - `isActiveWorker()`
@@ -451,6 +465,12 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 创建默认浏览器环境适配器，包含 storage、BroadcastChannel、定时器和页面生命周期事件。
 
+### `getOrCreateTabId(environment, key?)`
+
+返回当前页面/标签页实例的稳定标识：优先从 sessionStorage 读取，首次调用时创建（`tab-<random>`）并写回，因此刷新后的标签页会认领原有 route，而不是被当成一个全新标签页。
+
+存在 `window.opener` 时**刻意不**复用已存储的值：`window.open()` 会把 opener 的 `sessionStorage` 克隆给子页面，盲目复用会让两个存活的标签页共用一个身份。storage 不可用或抛错时改为生成新 ID。
+
 ### `selectWorkerBackend(mode, availability?)`
 
 按 `WorkerMode` 和能力检测选择实际后端，返回 `'shared' | 'dedicated' | 'local'`：
@@ -459,6 +479,22 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 - `dedicated`（默认）：Dedicated Worker → SharedWorker → 本地模式
 
 `availability` 可显式传入 `worker` / `sharedWorker` 能力标记，用于 SSR、测试或嵌入环境，避免访问不存在的全局对象。
+
+### `effectiveWorkerLoad(worker, options?)`
+
+最少负载 owner 选择背后的纯打分函数：`worker.load`（拥有的 Topic 数）加上 `options` 中 `loadWeighting` 权重对应的流量与调度滞后项。
+
+打分结果始终是有限值。没有吞吐采样、权重全为 0（未启用）、采样窗口非正或非有限、或加权和为非有限时，都退回原始 Topic 数——非有限分数永远无法正确比较，会让 owner 选择取决于 Worker 数组顺序而非负载。权重含义见 [configuration.md](./configuration.md#自适应-owner-加权)。
+
+### `approximatePayloadBytes(payload)`
+
+低成本、零分配的 payload 线长估算，用于自适应负载采样的字节侧。仅在启用自适应路由时运行，因此近似值足够——目标是跨 Worker 的稳定比较，而非精确字节数。
+
+尺寸规则：`null`/`undefined` 与 symbol/function 为 `0`，boolean 为 `4`，number 与 bigint 为 `8`，字符串为长度，`ArrayBuffer` 与 TypedArray 视图为 `byteLength`，数组为 8 字节头部加各元素之和，普通对象为各值之和。
+
+### `DEFAULT_MAX_ACTIVE_WORKERS`
+
+同时拥有 Topic 的 Worker 数上限默认值（`3`）。它限制 fan-out 广度：只有这么多 Worker 有资格成为新 route 的 owner，因此二十个标签页的集群仍会把所有权集中在少数几个上，而不是摊薄。可通过集群选项 `maxActiveWorkers` 覆盖。
 
 ### 路由选择函数
 

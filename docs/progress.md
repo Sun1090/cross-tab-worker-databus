@@ -1164,6 +1164,39 @@ corroborates the 26-spec collection.)
 - 614 unit tests (606 + 8), typecheck, lint, build, verify:compat, verify:pack,
   bench:compare, and 27/27 browser E2E green.
 
+## Phase 48 (the API reference drifted behind the public surface)
+
+- Continued the Phase 47 method — audit the *documented* surface against the
+  *actual* one — and pointed it at the API reference. Derived the 19 root
+  exports from the built entry point and checked each against `docs/api.md`:
+  - `DEFAULT_MAX_ACTIVE_WORKERS`, `approximatePayloadBytes`,
+    `effectiveWorkerLoad`, `getOrCreateTabId` were **absent from the API
+    reference entirely** (the first three also from every other shipped doc;
+    `effectiveWorkerLoad` only appeared in architecture.md).
+  - `CrossTabDataBus.publishBatch` — a headline public method — had no entry;
+    only the *transport-side* optional `publishBatch?` hook was described. The
+    `WorkerClusterRuntime` "Main methods" list omitted it too.
+  - Self-correction: an initial heading-only grep suggested `clearReplayTopic`,
+    `clearReplayBefore`, `getDedupStats` and `resetDedup` were also missing.
+    They are documented as prose paragraphs under `### clearReplay()`, so the
+    heading list was the wrong instrument — checked before claiming anything.
+- Documented all five in both languages (EN + ZH), including the two
+  non-obvious guarantees that were only in the source: `getOrCreateTabId`
+  deliberately does **not** reuse the stored value when `window.opener` is
+  present (`window.open()` clones the opener's `sessionStorage`, so a blind
+  reuse would give two live tabs one identity), and `effectiveWorkerLoad` is
+  total — a non-finite window/result falls back to the raw Topic count so owner
+  selection stays order-independent.
+- New guard in `tests/documentation.test.ts`: derives the export list from
+  `dist/index.js` and asserts every name appears in *both* `docs/api.md` and
+  `docs/zh/api.md`. A new public export now fails the suite until documented, so
+  the reference cannot silently drift behind the code again. Mutation-checked
+  (renaming the `DEFAULT_MAX_ACTIVE_WORKERS` heading fails with
+  `docs/api.md must document every public root export: expected [ 'DEFAULT_MAX_ACTIVE_WORKERS' ]`).
+- EN/ZH structural parity preserved (h2 count, table rows, list items, no empty
+  sections) — the new `###` sections and the one mirrored
+  `WorkerClusterRuntime` bullet keep both counts equal.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
