@@ -1299,6 +1299,25 @@ corroborates the 26-spec collection.)
   while every later run (5x) shows 32 / 627 green. Unexplained transient;
   recorded here rather than ignored. Ground truth is the repeated 32/627.
 
+## Phase 44 (real defect: adaptive dedup TTL inert on the hot path)
+
+- Found by reading `DedupManager` against its contract: the hot-path
+  expiry used the fixed `ttlMs` while the sweep and `getStats()` used the
+  adaptive window. A burst shrinking the effective TTL toward `minMs`
+  changed nothing where nearly all traffic flows (e.g. 60 s fixed vs
+  100 ms effective). One-line fix to expire against `currentTtl()`;
+  no behavior change when no adaptive bounds are configured.
+- New direct suite `tests/dedup-manager.test.ts` (11 tests, mirrors the
+  replay-manager pattern): acceptance/suppression + trace event, TTL
+  expiry, FIFO eviction, reset, sweep lifecycle via timer counts, adaptive
+  shrink/relax/window-reset. Mutation-checked (fixed TTL restored → the
+  adaptive test fails, other 10 pass; fix restored → 11 pass).
+- Decided against splitting `getStats()` off a pure TTL computation:
+  the window-reset-on-read is provably unobservable from outside (any
+  sequence yields identical accept/suppress/stats either way), so changing
+  it would be churn, not a fix.
+- 638 unit tests green (627 + 11); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

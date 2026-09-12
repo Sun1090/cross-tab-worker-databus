@@ -97,8 +97,12 @@ export class DedupManager {
     if (!this.enabled || !messageId) return false;
     const now = this.now();
     // Opportunistic expiry on the hot path keeps the map bounded between sweeps.
+    // This must use the effective (adaptive) TTL, not the fixed one: otherwise
+    // a burst that shrinks the window toward minMs would still retain IDs for
+    // the full fixed ttlMs here while the sweep prunes them early.
+    const ttlMs = this.currentTtl();
     for (const [id, timestamp] of this.seenMessageIds) {
-      if (now - timestamp > this.ttlMs) this.seenMessageIds.delete(id);
+      if (now - timestamp > ttlMs) this.seenMessageIds.delete(id);
     }
     if (this.seenMessageIds.has(messageId)) {
       this.suppressed += 1;
