@@ -1015,6 +1015,31 @@ corroborates the 26-spec collection.)
   files separately; all 581 pass. `pnpm` can be replaced by
   `PATH="$PWD/node_modules/.bin:$PATH" node scripts/build.mjs`.
 
+## Phase 44 (deterministic generated benchmark doc + testable generator)
+
+- Found while checking whether the shipped trend doc was stale: regenerating
+  `docs/benchmarks.md` on a day with no new archived report produced a diff —
+  the stamp was `new Date()`, so the doc changed daily and claimed data it did
+  not have. (Running it on 09-12 rewrote the line to "Auto-generated
+  2026-09-12" while the newest report was still 09-11.)
+- Two real defects in `scripts/bench-trend.mjs`:
+  - non-deterministic stamp (above); now derived from the latest report's
+    `generatedAt`, falling back to the `browser-<ISO>.json` filename date, so
+    regeneration is a no-op diff when nothing new was archived.
+  - the generated header claimed "prose is maintained by hand" while the script
+    overwrites the entire file — corrected in both the script and both docs.
+- Refactored the script so the renderer is a pure exported `buildDocs(entries)`
+  (+ `readReports`), with `scripts/bench-trend.d.mts` for type-checked imports
+  (the existing `demo-*.d.mts` pattern), and the CLI body behind an
+  `import.meta` direct-invocation check.
+- New `tests/bench-trend.test.ts` (6 tests): the stamp is the report date and
+  never the wall clock (the explicit regression assertion), byte-determinism
+  across calls, the report count, delta + all-time-best math in both
+  directions, the filename-date fallback, and rejection of a <2-report archive.
+  Mutation-checked: restoring `new Date()` fails two tests with
+  "expected ... to contain 'Data through 2020-01-02'".
+- 587 unit tests green (581 + 6); typecheck, lint, build green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

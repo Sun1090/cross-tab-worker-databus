@@ -1,12 +1,12 @@
-<!-- 由 scripts/bench-trend.mjs 生成 —— BEGIN/END 标记之间的表格为机器再生成，文字部分人工维护。 -->
+<!-- 由 scripts/bench-trend.mjs 生成 —— 整个文件均为机器生成，请修改脚本而非本文档。 -->
 
 # 浏览器基准趋势
 
-> 2026-09-11 自动生成，基于 12 份归档的 `bench-results/browser-*.json` 报告（运行 `pnpm bench:browser` 追加一份；用 `node scripts/bench-trend.mjs` 重新生成本文档）。
+> 数据截至 2026-09-11，基于 12 份归档的 `bench-results/browser-*.json` 报告（运行 `pnpm bench:browser` 追加一份；用 `node scripts/bench-trend.mjs` 重新生成本文档）。
 
 发布门禁的对比基线是最近两份报告之间的 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的噪声）。本文记录长期趋势：数值为逐指标延迟，越低越好；历史最优为本机观察到的最健康一次运行。
 
-<!-- BENCH-TREND:BEGIN (machine-generated) -->
+<!-- BENCH-TREND:BEGIN (machine-generated table) -->
 | 指标 | 上次 (ms) | 本次 (ms) | Δ | 历史最优 (ms) |
 |---|---|---|---|---|
 | publish per-message (ms, lower is better) — dedicated | 43.8388 | 40.8227 | -3.02 | 40.8227 |
