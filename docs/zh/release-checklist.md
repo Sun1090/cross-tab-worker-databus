@@ -18,7 +18,7 @@
 ## 打 tag 前
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
-2. 运行 `pnpm check`、`pnpm lint`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS）。
+2. 运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS。`verify:compat` 从最近的发布 tag 解析基线，因此浅克隆或缺少 tag 的克隆需先执行 `git fetch --tags`，否则会以 "no version tag found" 失败）。
 3. 依赖安全门禁：`pnpm audit --registry=https://registry.npmjs.org`（配置的镜像 registry 缺少 audit 端点；CI 在 verify job 中于公共 registry 运行）。任一已知漏洞公告即视为发布失败；`pnpm-workspace.yaml` overrides 钉住补丁版本。
 4. 浏览器基准回归门禁：运行两次 `pnpm bench:browser` 后执行 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的无关噪声，参见已知的共享 runner 抖动说明）；基线迁移（例如某指标从空操作变为真实路径）属预期内的一次性失败。用 `pnpm bench:trend` 刷新长期趋势文档，表格变化时一并提交。
 5. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。

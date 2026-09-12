@@ -73,6 +73,17 @@ describe('public documentation', () => {
     }
   });
 
+  it('keeps both release checklists aligned with the CI gate set', () => {
+    // The Before-tagging steps must mirror what CI enforces, in both
+    // languages, or a local dry run silently skips a blocking gate.
+    for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
+      const content = readFileSync(file, 'utf8');
+      for (const gate of ['test:coverage', 'verify:compat', 'verify:pack', 'bench:compare', 'fetch --tags']) {
+        expect(content, `${file} must document the ${gate} gate`).toContain(gate);
+      }
+    }
+  });
+
   it('keeps every markdown table rectangular', () => {
     // A cell containing an unescaped pipe silently splits the row and shifts
     // every following column, so the table renders wrong (a real defect found

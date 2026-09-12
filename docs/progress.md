@@ -950,6 +950,17 @@ corroborates the 26-spec collection.)
   `verify:compat` runs. Mutation-checked (reverting to the raw ref fails).
 - 574 unit tests green (571 + 3); typecheck, lint, diff-check green.
 
+## Phase 42 (release-checklist parity with the CI gates)
+
+- The Before-tagging steps lagged the CI gate set: they omitted
+  `pnpm test:coverage`, and did not warn that `verify:compat` needs
+  `git fetch --tags` in a shallow clone (it resolves the baseline from the
+  latest release tag). Updated both languages and pinned parity: a
+  documentation test now asserts each checklist documents
+  `test:coverage`, `verify:compat`, `verify:pack`, `bench:compare`, and
+  the fetch-tags note.
+- 575 unit tests green (574 + 1); typecheck, lint, diff-check green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
