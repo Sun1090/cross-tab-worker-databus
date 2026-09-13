@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- Replay history is now bounded when `pruneStrategy: 'age'` is set without a `retentionMs`: neither the age pass nor the count cap applied, so the in-memory ring (and the persisted topic record) grew without limit while delivery stayed capped by `maxPerTopic`. The count cap now applies whenever there is no retention window to prune by. Pinned in both the in-memory manager and the IndexedDB adapter (mutation-checked).
 - `serializeError` now guarantees its documented structured-cloneable result: a non-Error value was attached verbatim as `context`, so a function/symbol (or an object holding one) made the serialised error itself uncloneable and `postMessage` threw `DataCloneError` while reporting the original failure. Non-cloneable contexts are dropped (cloneable ones are still kept for diagnostics). Pinned by regression + property-suite cloneability invariants.
 - `approximatePayloadBytes` no longer overflows the stack on deeply nested or cyclic payloads. Structured clone preserves cycles, so a cyclic publication can legitimately reach the replay-buffer byte estimate (`getDiagnostics().replay.bytes`) and the adaptive-load sampler; unbounded recursion there threw a `RangeError` and took down the diagnostics/reconcile path. The estimate is now depth-bounded (shallow results unchanged), pinned by a cycle/deep-nesting regression plus a finiteness invariant in the seeded property suite.
 

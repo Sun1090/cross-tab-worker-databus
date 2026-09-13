@@ -121,11 +121,15 @@ export class ReplayManager<TData = unknown> {
     // Preserve the public message shape for legacy adapters. Retention pruning
     // applies to messages that carry an explicit producer timestamp.
     buffer.push(message);
-    if (this.pruneStrategy !== PRUNE_STRATEGY.AGE) {
+    // The count cap is the only bound when the strategy is not AGE, and also
+    // when AGE is requested without a retention window: there is no age to
+    // prune by, so skipping the cap would let the ring grow without bound.
+    const ageBounded = this.pruneStrategy !== PRUNE_STRATEGY.COUNT && this.retentionMs !== undefined;
+    if (this.pruneStrategy !== PRUNE_STRATEGY.AGE || !ageBounded) {
       while (buffer.length > this.maxPerTopic) buffer.shift();
     }
-    if (this.pruneStrategy !== PRUNE_STRATEGY.COUNT && this.retentionMs !== undefined) {
-      const cutoff = this.now() - this.retentionMs;
+    if (ageBounded) {
+      const cutoff = this.now() - this.retentionMs!;
       while (buffer.length > 0) {
         const first = buffer[0];
         if (!first || first.timestamp === undefined || first.timestamp >= cutoff) break;

@@ -46,9 +46,13 @@ fake tasks; each item is verified locally before being marked done.
   `DataCloneError` at the Worker boundary — breaking its documented contract.
   Non-cloneable contexts are now dropped; cloneable ones preserved.
   Mutation-checked + property-suite invariant.
-- Verification: 655 unit / 34 files, lint, typecheck, diff-check green.
-- Next: commit task 2 → push (updates PR #12) → CI → rebase-merge; then next
-  robustness item.
+- Task 3 (DONE): `pruneStrategy: 'age'` without `retentionMs` applied neither
+  the age pass nor the count cap — the ring buffered 5000 messages against
+  `maxPerTopic: 4` (memory unbounded; delivery was capped). Count cap now
+  applies whenever no retention window exists, in both the in-memory manager
+  and the IndexedDB adapter. Mutation-checked.
+- Verification: 657 unit / 34 files, lint, typecheck, diff-check green.
+- Next: commit task 3 → push/PR → rebase-merge; then next robustness item.
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 

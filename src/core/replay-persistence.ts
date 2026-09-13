@@ -138,11 +138,15 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
           request.onsuccess = () => {
             if (hasError) return;
             let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
-            if (pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined) {
+            // Mirrors ReplayManager: an AGE strategy with no retention window
+            // has nothing to prune by, so the count cap still applies (else the
+            // stored topic record would grow without bound).
+            const ageBounded = pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined;
+            if (ageBounded) {
               const cutoff = Date.now() - retentionMs;
               history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
             }
-            if (pruneStrategy !== PRUNE_STRATEGY.AGE) history = history.slice(-maxPerTopic);
+            if (pruneStrategy !== PRUNE_STRATEGY.AGE || !ageBounded) history = history.slice(-maxPerTopic);
             store.put({ topic, messages: history });
           };
           request.onerror = () => {
