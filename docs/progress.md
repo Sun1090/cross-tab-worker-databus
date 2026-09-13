@@ -10,40 +10,36 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
-## RELEASE_FREEZE — milestone ready, tagging left to the maintainer
+## RELEASE_FREEZE — 0.20.84 prepared locally (permission boundary: push/PR/merge/tag-push)
 
-- Status: DONE (all local work and all gates green); BLOCKED_EXTERNAL for the
-  tag/publish step only (needs the maintainer's release decision + npm token).
-- Milestone / release target: the accumulated `[Unreleased]` line on top of
-  `0.20.83` (pre-1.0; no required public-API additions, so a patch release
-  `0.20.84` fits semver — the maintainer chooses the exact number).
-- Branch / PR: `main` (repo norm in this project is direct-to-main after a
-  fully green local battery; no `feat/*` flow is configured).
-- Local commits: see `git log 0.20.83..HEAD`; latest `65db0da`.
-- Target: close the reliability/observability hardening line and ship it.
-- Completed: stranded-handoff recovery (single-writer + projected loads +
-  TTL-gated re-election), `route_migration_recovery` reliability trace op,
-  adaptive dedup TTL hot-path fix, dead-branch removals (wildcard publish
-  cache, replay flush fallback), Vue unmount leak fix, CI gate enforcement
-  (coverage/compat/pack/lint), vitest 5 + @eslint/js 10 upgrades, demo
-  reliability + chaos observability + a11y, README/capabilities/CHANGELOG.
-- Changed files: library (`src/`), tests (646 unit + 27 e2e), workflows,
-  docs (en+zh), examples/demo, scripts.
-- Verification commands & results: `pnpm check` 646/33 green; `pnpm lint`
-  clean; `pnpm test:e2e` 27/27; `pnpm bench` + `bench:compare --fail-above-pct
-  50` green; `pnpm verify:compat` (v0.20.71) green; `pnpm verify:pack` green;
-  `pnpm audit` clean; `npm pack --dry-run` 107 files (no progress.md);
-  `git diff --check` clean; CI (verify incl. coverage/compat/pack + browser +
-  CodeQL) green on every push.
-- Blockers: none technical.
-- Risk & rollback: all changes are additive or fix-only; rollback is
-  `git revert` of the commit range, or re-tag from the previous tag.
-- Next: maintainer release steps — (1) move `[Unreleased]` in `CHANGELOG.md`
-  under `## [0.20.84] - <date>` and bump `package.json`; (2) update both
-  roadmap files; (3) `git tag v0.20.84 && git push origin main --tags`;
-  (4) the `Release` workflow runs check+lint+compat+pack, opens the GitHub
-  release, and publishes to npm only if `NPM_TOKEN` is set; (5) verify
-  `verify:published`. Nothing further is executable without that decision.
+- Status: DONE locally, then BLOCKED_EXTERNAL for push/PR/merge/tag — the
+  current agent permission is local-only (no push, no PR, no merge, no deploy).
+- Version: **0.20.84** (pre-1.0; no required public-API addition → patch).
+- Branch: `feat/release-0.20.84` off `origin/main` (`74c041a`); not pushed.
+- Included tasks: phases 34–51 (release-gate enforcement, stranded-handoff
+  recovery hardening, adaptive dedup TTL fix, Vue unmount leak fix,
+  observability/demo/a11y, coverage + toolchain).
+- Base SHA: `74c041ab0868e93d35e631ddebe88339a16eb6e7`.
+- Merge method: rebase into `origin/main` once authorized (`gh pr merge --rebase`).
+- Tag/release: prepared only — do NOT create the local tag before the rebase
+  merge (the rebase rewrites the SHA). After merge: `git tag v0.20.84 &&
+  git push origin v0.20.84`, which triggers the Release workflow.
+- Deployment: none (library package; npm publish happens only via the Release
+  workflow with `NPM_TOKEN`).
+- Smoke: local full battery (below). Published-consumer smoke runs post-publish.
+- Rollback: `git revert` the release commit on main, or re-tag from `v0.20.83`;
+  the package version is additive/fix-only so a rollback patch is safe.
+- Artifacts updated: `package.json` (0.20.84), `CHANGELOG.md` ([Unreleased]
+  moved under `## [0.20.84] - 2026-09-13`, fresh empty `[Unreleased]`),
+  `docs/roadmap.md` + `docs/zh/roadmap.md` (0.20.84 delivered scope, parity).
+- Local verification (on the feat branch): `pnpm check` 646 unit / 33 files;
+  `pnpm lint` clean; `pnpm test:e2e` 27/27; `pnpm bench` green; `bench:compare`
+  50% gate green; `pnpm verify:compat` ("0.20.84 preserves … from v0.20.71");
+  `pnpm verify:pack` ("cross-tab-worker-databus-0.20.84.tgz"); `pnpm audit`
+  clean; `npm pack --dry-run` = 0.20.84, 107 files, no `progress.md`;
+  `git diff --check` clean.
+- Next milestone: not started until 0.20.84 lands (candidates recorded under
+  "Next candidates" below).
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 

@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.84] - 2026-09-13
+
 ### Added
 - CI now enforces three gates that were documented but ran nowhere: `pnpm test:coverage` (the `vitest.config.ts` floors), `pnpm verify:compat`, and `pnpm verify:pack`. The `Release` workflow also runs `verify:compat` + `verify:pack` before publishing. Both workflows check out with `fetch-depth: 0` + `fetch-tags: true`, without which `verify:compat` fails to resolve its release-tag baseline. Documented in both release checklists.
 - Focused `ReplayManager` unit suite (`tests/replay-manager.test.ts`): the disabled no-op contract, count/age/both pruning, wildcard replay fan-out, hydration with retention pre-pruning, append batch coalescing, `clear*` durable-failure propagation, retention-sweep coalescing and idempotence, and the persistence retry/backoff plus suspend-cancellation loop (86.95% -> 97.10% statements, 81.60% -> 96.00% branches).

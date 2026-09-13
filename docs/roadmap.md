@@ -1,6 +1,14 @@
 # Roadmap
 
-0.20.83 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.84 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.84 delivered scope
+
+- Release/CI gates are enforced instead of advisory: `pnpm test:coverage`, `pnpm verify:compat`, and `pnpm verify:pack` run in the CI verify job, the Release workflow re-runs lint + compat + pack before publishing, and both checkouts fetch full history and tags so the compat baseline resolves.
+- Coordination recovery hardening: a lost handoff ACK, a crashed owner, or the previous owner's departure now recovers through a worker-TTL-gated re-election with a single writer and projected-load spreading, and each route acknowledgment / migration / recovery is observable as a bounded `reliability` trace event.
+- Two real correctness fixes: the Vue `useCrossTabDataBus` unmount leak (a pending start could create a bus with no owner) and the adaptive dedup TTL not taking effect on the hot path.
+- Product-demo observability: the event feed renders reliability / subscription / coordination trace events, chaos toggles exercise the dropped-ACK and crash recovery paths in a real browser, and the config panel shows the active chaos mode.
+- Coverage and toolchain: direct `ReplayManager` / `DedupManager` suites, transport error-isolation and partial-metadata coverage, vitest 5 (benchmark API migrated) and the eslint 10 lint config, with TypeScript 7 deferred until typescript-eslint supports it.
 
 ## 0.20.83 delivered scope
 
