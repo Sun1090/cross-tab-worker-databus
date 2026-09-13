@@ -79,6 +79,21 @@ export function effectiveWorkerLoad(
  * 8-byte header plus elements, plain objects the sum of their values.
  */
 export function approximatePayloadBytes(payload: unknown): number {
+  return estimatePayloadBytes(payload, 0);
+}
+
+/**
+ * Depth cap for the recursive size estimate. Real payloads are shallow, and a
+ * cap makes the function total against deeply nested or *cyclic* object graphs
+ * — structured clone preserves cycles, so a cyclic publication can legitimately
+ * reach the replay buffer (`getDiagnostics().replay.bytes`) and the adaptive
+ * load sampler. Without the cap that recurred until the stack overflowed
+ * (RangeError), taking the whole diagnostics/reconcile path down. Beyond the
+ * cap the contribution is treated as 0 (it is an approximation either way).
+ */
+const MAX_PAYLOAD_DEPTH = 6;
+
+function estimatePayloadBytes(payload: unknown, depth: number): number {
   if (payload === null || payload === undefined) return 0;
   switch (typeof payload) {
     case 'boolean':
@@ -94,16 +109,17 @@ export function approximatePayloadBytes(payload: unknown): number {
     case 'object':
       break;
   }
+  if (depth >= MAX_PAYLOAD_DEPTH) return 0;
   if (payload instanceof ArrayBuffer) return payload.byteLength;
   if (ArrayBuffer.isView(payload)) return payload.byteLength;
   if (Array.isArray(payload)) {
     let sum = 8;
-    for (const item of payload) sum += approximatePayloadBytes(item);
+    for (const item of payload) sum += estimatePayloadBytes(item, depth + 1);
     return sum;
   }
   let sum = 0;
   for (const value of Object.values(payload as Record<string, unknown>)) {
-    sum += approximatePayloadBytes(value);
+    sum += estimatePayloadBytes(value, depth + 1);
   }
   return sum;
 }

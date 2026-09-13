@@ -10,36 +10,39 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
-## RELEASE_FREEZE — 0.20.84 prepared locally (permission boundary: push/PR/merge/tag-push)
+## 0.20.84 RELEASED to main (tag/publish left to maintainer)
 
-- Status: DONE locally, then BLOCKED_EXTERNAL for push/PR/merge/tag — the
-  current agent permission is local-only (no push, no PR, no merge, no deploy).
-- Version: **0.20.84** (pre-1.0; no required public-API addition → patch).
-- Branch: `feat/release-0.20.84` off `origin/main` (`74c041a`); not pushed.
-- Included tasks: phases 34–51 (release-gate enforcement, stranded-handoff
+- Status: DONE. Version **0.20.84** merged to `origin/main`.
+- Branch/PR: `feat/release-0.20.84` → **PR #11**, merged with `--rebase`
+  (branch deleted). base `74c041a` → merge head `1aac9d9`.
+- Included tasks: phases 34–53 (release-gate enforcement, stranded-handoff
   recovery hardening, adaptive dedup TTL fix, Vue unmount leak fix,
-  observability/demo/a11y, coverage + toolchain).
-- Base SHA: `74c041ab0868e93d35e631ddebe88339a16eb6e7`.
-- Merge method: rebase into `origin/main` once authorized (`gh pr merge --rebase`).
-- Tag/release: prepared only — do NOT create the local tag before the rebase
-  merge (the rebase rewrites the SHA). After merge: `git tag v0.20.84 &&
-  git push origin v0.20.84`, which triggers the Release workflow.
-- Deployment: none (library package; npm publish happens only via the Release
-  workflow with `NPM_TOKEN`).
-- Smoke: local full battery (below). Published-consumer smoke runs post-publish.
-- Rollback: `git revert` the release commit on main, or re-tag from `v0.20.83`;
-  the package version is additive/fix-only so a rollback patch is safe.
-- Artifacts updated: `package.json` (0.20.84), `CHANGELOG.md` ([Unreleased]
-  moved under `## [0.20.84] - 2026-09-13`, fresh empty `[Unreleased]`),
-  `docs/roadmap.md` + `docs/zh/roadmap.md` (0.20.84 delivered scope, parity).
-- Local verification (on the feat branch): `pnpm check` 646 unit / 33 files;
-  `pnpm lint` clean; `pnpm test:e2e` 27/27; `pnpm bench` green; `bench:compare`
-  50% gate green; `pnpm verify:compat` ("0.20.84 preserves … from v0.20.71");
-  `pnpm verify:pack` ("cross-tab-worker-databus-0.20.84.tgz"); `pnpm audit`
-  clean; `npm pack --dry-run` = 0.20.84, 107 files, no `progress.md`;
-  `git diff --check` clean.
-- Next milestone: not started until 0.20.84 lands (candidates recorded under
-  "Next candidates" below).
+  `effectiveWorkerLoad` corrupt-load finiteness fix, property suite, demo
+  observability/a11y, coverage + toolchain).
+- Verification: local full battery on the PR head + green CI on the PR
+  (verify incl. coverage/compat/pack + browser + CodeQL). Post-merge CI on
+  `1aac9d9` tracked.
+- Tag/release: NOT pushed. Per `docs/release-checklist.md` the assistant does
+  not run the final npm publish; the maintainer tags/publishes:
+  `git tag v0.20.84 && git push origin v0.20.84` (Release workflow creates the
+  GitHub release and publishes only when `NPM_TOKEN` is set), then confirms
+  `verify:published`.
+- Deploy: none. Smoke: local + CI. Rollback: `git revert` the merge commits on
+  main, or re-tag from `v0.20.83` (additive/fix-only, safe).
+- Next milestone: **0.20.85** (in progress below) — continue reliability/
+  robustness hardening and adversarially-test the remaining pure helpers.
+
+## Milestone 0.20.85 — adversarial robustness (in progress)
+
+- `feat/payload-depth-hardening` off `origin/main` (`1aac9d9`).
+- Task 1 (DONE, uncommitted→committing): `approximatePayloadBytes` stack
+  overflow on cyclic/deeply nested payloads (structured clone preserves
+  cycles → reachable via `getDiagnostics().replay.bytes` and the adaptive-load
+  sampler). Depth-bounded the internal recursion; shallow results unchanged.
+  Pinned by a cycle/deep-nesting regression (mutation-checked: cap removed →
+  RangeError) and a finiteness invariant in the property suite.
+- Verification: 653 unit / 34 files, lint, typecheck, diff-check green.
+- Next: commit → PR → rebase-merge; then continue the next robustness item.
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 

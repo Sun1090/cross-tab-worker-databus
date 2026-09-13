@@ -385,4 +385,26 @@ describe('approximatePayloadBytes', () => {
   it('sums object values recursively', () => {
     expect(approximatePayloadBytes({ a: 'x', b: { c: 3 } })).toBe(1 + 8);
   });
+
+  it('terminates on cyclic and deeply nested payloads instead of overflowing the stack', () => {
+    // Structured clone preserves cycles, so a cyclic publication can reach the
+    // replay buffer (`getDiagnostics().replay.bytes`) and the adaptive-load
+    // sampler. The estimate must return a finite number rather than recurse
+    // until a RangeError takes down the diagnostics/reconcile path.
+    const cyclicObject: Record<string, unknown> = { name: 'a' };
+    cyclicObject.self = cyclicObject;
+    const cyclicArray: unknown[] = [1, 'x'];
+    cyclicArray.push(cyclicArray);
+
+    expect(Number.isFinite(approximatePayloadBytes(cyclicObject))).toBe(true);
+    expect(Number.isFinite(approximatePayloadBytes(cyclicArray))).toBe(true);
+    expect(approximatePayloadBytes(cyclicObject)).toBeGreaterThan(0);
+
+    let deep: Record<string, unknown> = { leaf: 'value' };
+    for (let i = 0; i < 200; i += 1) deep = { nested: deep };
+    expect(Number.isFinite(approximatePayloadBytes(deep))).toBe(true);
+
+    // The cap must not change the shallow results the estimator is used for.
+    expect(approximatePayloadBytes({ a: 'x', b: { c: 3 } })).toBe(9);
+  });
 });
