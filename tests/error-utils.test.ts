@@ -76,4 +76,27 @@ describe('error-utils', () => {
     expect(restored.name).toBe('Error');
     expect(restored.message).toBe('round trip');
   });
+
+  it('always yields a structured-cloneable result, dropping a non-cloneable context', () => {
+    // The whole point of serializeError is to make a postMessage payload. A
+    // function/symbol (or an object holding one) used as context would make the
+    // serialised error itself uncloneable, so reporting the failure would throw
+    // DataCloneError at the Worker boundary.
+    const nonCloneable: unknown[] = [
+      () => undefined,
+      Symbol('s'),
+      { fn: () => undefined },
+      [() => undefined],
+      new Map([['k', () => undefined]])
+    ];
+    for (const value of nonCloneable) {
+      const serialized = serializeError(value);
+      expect(() => structuredClone(serialized), `context leaked for ${String(value)}`).not.toThrow();
+      expect(serialized).not.toHaveProperty('context');
+    }
+
+    // Cloneable contexts are still preserved for diagnostics.
+    expect(serializeError({ code: 42 })).toMatchObject({ context: { code: 42 } });
+    expect(serializeError('boom')).toMatchObject({ context: 'boom' });
+  });
 });

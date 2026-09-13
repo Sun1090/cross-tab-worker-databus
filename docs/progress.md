@@ -34,15 +34,21 @@ fake tasks; each item is verified locally before being marked done.
 
 ## Milestone 0.20.85 — adversarial robustness (in progress)
 
-- `feat/payload-depth-hardening` off `origin/main` (`1aac9d9`).
-- Task 1 (DONE, uncommitted→committing): `approximatePayloadBytes` stack
-  overflow on cyclic/deeply nested payloads (structured clone preserves
-  cycles → reachable via `getDiagnostics().replay.bytes` and the adaptive-load
-  sampler). Depth-bounded the internal recursion; shallow results unchanged.
-  Pinned by a cycle/deep-nesting regression (mutation-checked: cap removed →
-  RangeError) and a finiteness invariant in the property suite.
-- Verification: 653 unit / 34 files, lint, typecheck, diff-check green.
-- Next: commit → PR → rebase-merge; then continue the next robustness item.
+- `feat/payload-depth-hardening` off `origin/main` (`1aac9d9`), PR #12.
+- Task 1 (DONE): `approximatePayloadBytes` stack overflow on cyclic/deeply
+  nested payloads (structured clone preserves cycles → reachable via
+  `getDiagnostics().replay.bytes` and the adaptive-load sampler). Depth-bounded
+  the internal recursion; shallow results unchanged. Pinned by a
+  cycle/deep-nesting regression (mutation-checked: cap removed → RangeError)
+  and a finiteness invariant in the property suite.
+- Task 2 (DONE): `serializeError` could return a non-cloneable object (raw
+  non-Error value as `context`), so the error report itself threw
+  `DataCloneError` at the Worker boundary — breaking its documented contract.
+  Non-cloneable contexts are now dropped; cloneable ones preserved.
+  Mutation-checked + property-suite invariant.
+- Verification: 655 unit / 34 files, lint, typecheck, diff-check green.
+- Next: commit task 2 → push (updates PR #12) → CI → rebase-merge; then next
+  robustness item.
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 

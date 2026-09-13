@@ -21,6 +21,7 @@ import {
 } from '../src/core/routing';
 import type { LoadWeightingOptions, WorkerRecord } from '../src/core/types';
 import { parseDataBusPublication } from '../src/core/publication';
+import { serializeError } from '../src/utils/error-utils';
 import { createOpaqueKey } from '../src/core/hash';
 import { TAB_VISIBILITY, WORKER_ROLE, WORKER_STATUS } from '../src/utils/constants';
 
@@ -216,6 +217,18 @@ describe('topicMatchesPattern invariants', () => {
     expect(topicMatchesPattern('*', '')).toBe(false);
     // Segment boundary: `chat.*` must not match `chatter.1`.
     expect(topicMatchesPattern('chat.*', 'chatter.1')).toBe(false);
+  });
+});
+
+describe('serializeError is always structured-cloneable', () => {
+  it('survives structuredClone for arbitrary values, including functions and symbols', () => {
+    const random = rng(0xe44);
+    const extras: unknown[] = [() => undefined, Symbol('s'), { fn: () => undefined }];
+    for (let i = 0; i < 1_000; i += 1) {
+      const value = i % 5 === 0 ? extras[i % extras.length] : arbitraryValue(random);
+      const serialized = serializeError(value);
+      expect(() => structuredClone(serialized), `uncloneable serialization for ${String(value)}`).not.toThrow();
+    }
   });
 });
 
