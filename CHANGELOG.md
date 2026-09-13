@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.85] - 2026-09-13
+
 ### Added
 - Seeded property suite (`tests/property.test.ts`) for the pure hot-path helpers and the stateful managers: `effectiveWorkerLoad`/`selectLeastLoadedWorker` totality and order-independence, `approximatePayloadBytes` finiteness (cycles included), `parseDataBusPublication` topic validity, `topicMatchesPattern` segment-boundary invariants, `serializeError` cloneability, `createOpaqueKey` shape, and `DedupManager`/`ReplayManager` bound invariants under long random operation sequences. Deterministic (fixed seeds), so failures reproduce and the suite is not flaky.
 

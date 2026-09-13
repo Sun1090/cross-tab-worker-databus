@@ -1,6 +1,14 @@
 # 路线图
 
-0.20.84 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.85 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.85 已完成范围
+
+- 新增固定种子的属性测试套件（`tests/property.test.ts`）：针对纯热路径函数与有状态管理器，覆盖有限性/全函数性、与顺序无关的选择、循环安全的大小估算、publication topic/元数据有效性、`serializeError` 可克隆性，以及长时间随机操作序列下的 dedup/replay 上界。
+- `effectiveWorkerLoad` 对损坏的存储基础负载保持全函数性——非有限值（JSON `1e999` → `Infinity`）不再泄漏进 owner 选择并重新引入数组顺序依赖。
+- `approximatePayloadBytes` 增加深度上界，循环 payload（structured clone 会保留循环）不再使回放字节占用或自适应负载采样栈溢出。
+- `serializeError` 始终产出可结构化克隆的结果；不可克隆的 context（函数/Symbol）会被丢弃，而不是让错误上报本身抛出 `DataCloneError`。
+- 当 `pruneStrategy: 'age'` 未配置 `retentionMs` 时，回放历史重新受上界约束：内存环与 IndexedDB 记录均应用数量上限。
 
 ## 0.20.84 已完成范围
 
