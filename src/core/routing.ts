@@ -26,6 +26,13 @@ export function effectiveWorkerLoad(
   worker: WorkerRecord,
   options?: LoadWeightingOptions
 ): number {
+  // The base topic count must itself be finite before it is used as the
+  // fallback. A corrupt `load` read back from a peer's stored record (JSON
+  // `1e999` parses to Infinity; a malformed record can carry null/NaN) would
+  // otherwise leak a non-finite score straight through the fallback branches,
+  // re-introducing the order-dependent owner selection this function is meant
+  // to be total against.
+  const baseLoad = Number.isFinite(worker.load) ? worker.load : 0;
   const sample = worker.throughput;
   const messageRateWeight = options?.messageRateWeight ?? 0;
   const byteRateWeight = options?.byteRateWeight ?? 0;
@@ -41,7 +48,7 @@ export function effectiveWorkerLoad(
     sample.windowMs <= 0 ||
     (messageRateWeight === 0 && byteRateWeight === 0 && scheduleLagWeight === 0)
   ) {
-    return worker.load;
+    return baseLoad;
   }
   const windowSeconds = sample.windowMs / 1000;
   const messageRate = sample.messageCount / windowSeconds;
@@ -50,7 +57,7 @@ export function effectiveWorkerLoad(
   // whose timers land late (starved event loop) contributes ~overrun/window.
   const scheduleLagRatio = sample.overrunMs / sample.windowMs;
   const weighted =
-    worker.load +
+    baseLoad +
     messageRateWeight * messageRate +
     byteRateWeight * byteRate +
     scheduleLagWeight * scheduleLagRatio;
@@ -60,7 +67,7 @@ export function effectiveWorkerLoad(
   // selection depend on storage listing order rather than on load. A corrupt
   // sample field or a non-finite weight reaches this point, so fall back to
   // the raw topic count instead of leaking the NaN into routing.
-  return Number.isFinite(weighted) ? weighted : worker.load;
+  return Number.isFinite(weighted) ? weighted : baseLoad;
 }
 
 /**
