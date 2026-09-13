@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Added
+- Property invariants for `selectActiveWorkers` / `selectRebalanceTarget`: the returned worker set is always a subset of the input, active selection stays within `maxActiveWorkers` and non-empty for a non-empty input, and neither helper throws on arbitrary corrupt worker records.
+
 ## [0.20.85] - 2026-09-13
 
 ### Added
