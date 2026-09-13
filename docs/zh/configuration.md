@@ -56,6 +56,27 @@ const bus = new CrossTabDataBus({
 
 `replay.persistenceRetry` 可选地控制瞬时持久化失败的恢复。`maxAttempts` 是总尝试次数（默认 `1`），`backoffMs` 是首次重试前的延迟（默认 `50`）；延迟会指数增长并封顶。最终失败仍沿用现有 `onError` 和 reliability 行为。
 
+### Replay 选项
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `maxPerTopic` | `number` | `100` | 每个 topic 最多缓冲的 publication 数；超出时先淘汰最旧条目（正安全整数） |
+| `persistence` | `DataBusReplayPersistence` | — | 可选持久化后端（`createIndexedDbReplayPersistence`）；省略则历史仅存内存 |
+| `retentionMs` | `number` | — | 生产者时间戳保留窗口；早于 cutoff 的历史通过适配器的 `clearBefore` 清理 |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` 按 `maxPerTopic` 截断；`age` 按 `retentionMs` 清理；`both` 两者都应用。`age` 未配置 `retentionMs` 时无 age 可依，回退为数量上限 |
+| `retentionSweepMs` | `number` | — | 面向安静 topic 的周期性 durable retention sweep；需要 `retentionMs` 与实现 `clearBefore` 的适配器 |
+| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | 瞬时持久化失败的有界重试；延迟指数增长并封顶 |
+
+### 去重选项
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `maxEntries` | `number` | `1000` | 记忆的 message ID 上限，超出时先淘汰最旧（FIFO）条目（正安全整数） |
+| `ttlMs` | `number` | `60000` | 记忆 ID 抑制重复的时长（正有限值） |
+| `sweepMs` | `number` | — | 可选的周期性清理，使安静 ID 过期；默认关闭 |
+| `now` | `() => number` | `Date.now` | 可注入时钟，便于确定性 TTL 测试与非墙钟宿主 |
+| `adaptiveTtl` | `{ minMs, maxMs }` | — | 可选有界自适应 TTL：近期消息速率高时窗口向 `minMs` 收紧，安静时放宽到 `maxMs`（两者必须同时提供，且 `minMs <= maxMs`） |
+
 启用 trace 后，每次在最终尝试之前发生的重试都会发出有界 `reliability` 事件：`operation: persistence_retry`，并包含 `persistenceOperation`（`load`、`append`、`clear`、`clearTopic` 或 `clearBefore`）和失败的尝试次数。不包含 payload、URL、凭证或错误正文。
 
 WebSocket 二进制帧可能以 `ArrayBuffer` 或浏览器 `Blob` 到达；两者使用相同的紧凑二进制 publication 格式。Blob 转换是异步的，转换失败会通过 transport error handler 报告。

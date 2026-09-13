@@ -121,6 +121,34 @@ describe('public documentation', () => {
     }
   });
 
+  it('documents every replay/dedup option field in both configuration references', () => {
+    // The interface is the public contract, but nothing tied its fields to the
+    // docs — `pruneStrategy` was shipped with no reference entry at all. Read
+    // the field list from the built declaration so a new option fails the suite
+    // until it is documented in both languages.
+    const interfaces: Array<{ file: string; name: string }> = [
+      { file: join('dist', 'core', 'data-bus.d.ts'), name: 'DataBusReplayOptions' },
+      { file: join('dist', 'core', 'dedup-manager.d.ts'), name: 'DataBusDedupOptions' }
+    ];
+
+    for (const { file, name } of interfaces) {
+      const declaration = readFileSync(file, 'utf8');
+      const start = declaration.indexOf(`interface ${name}`);
+      expect(start, `${name} must be present in the built declarations`).toBeGreaterThan(-1);
+      const body = declaration.slice(start, declaration.indexOf('\n}', start));
+      // Top-level members are indented four spaces in the emitted declaration;
+      // deeper matches are nested inline object fields.
+      const fields = [...body.matchAll(/^ {4}(\w+)\??:/gm)].map(match => match[1]!);
+      expect(fields.length).toBeGreaterThan(0);
+
+      for (const doc of ['docs/configuration.md', 'docs/zh/configuration.md']) {
+        const content = readFileSync(doc, 'utf8');
+        const missing = fields.filter(field => !content.includes(`\`${field}\``));
+        expect(missing, `${doc} must document every ${name} field`).toEqual([]);
+      }
+    }
+  });
+
   it('does not repeat a subheading within one CHANGELOG version section', () => {
     // The Release workflow extracts a version section verbatim for the
     // release notes, so a duplicated `### Added` / `### Changed` block reads

@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Added
+- The configuration reference now documents the full public option surface: `replay.pruneStrategy` (previously absent entirely) and the replay options table (`maxPerTopic`, `persistence`, `retentionMs`, `pruneStrategy`, `retentionSweepMs`, `persistenceRetry`), plus a deduplication options table (`maxEntries`, `ttlMs`, `sweepMs`, `now`, `adaptiveTtl`) — in both languages. A guard derives the field list from the built declarations and fails when a `DataBusReplayOptions`/`DataBusDedupOptions` field is undocumented in either configuration reference. The `pruneStrategy` JSDoc no longer claims a default of `'both'` (the actual default is `'count'`).
 - Property invariants for `selectActiveWorkers` / `selectRebalanceTarget`: the returned worker set is always a subset of the input, active selection stays within `maxActiveWorkers` and non-empty for a non-empty input, and neither helper throws on arbitrary corrupt worker records.
 
 ## [0.20.85] - 2026-09-13
