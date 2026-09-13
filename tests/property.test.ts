@@ -11,7 +11,7 @@
  *
  * The PRNG is seeded, so failures are reproducible and the suite is not flaky.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   approximatePayloadBytes,
   effectiveWorkerLoad,
@@ -26,6 +26,7 @@ import { DedupManager } from '../src/core/dedup-manager';
 import { ReplayManager } from '../src/core/replay-manager';
 import { DataBusTraceReporter } from '../src/core/trace';
 import { PRUNE_STRATEGY } from '../src/utils/constants';
+import { BatchingStorageWriter } from '../src/core/storage-batch';
 import { createOpaqueKey } from '../src/core/hash';
 import { TAB_VISIBILITY, WORKER_ROLE, WORKER_STATUS } from '../src/utils/constants';
 
@@ -196,6 +197,25 @@ describe('parseDataBusPublication never throws and yields a valid topic', () => 
   });
 });
 
+describe('parseDataBusPublication metadata normalization', () => {
+  it('only ever emits a non-empty string messageId and a finite timestamp', () => {
+    const random = rng(0x0b1e);
+    for (let i = 0; i < 2_000; i += 1) {
+      const value = arbitraryValue(random);
+      const result = parseDataBusPublication(value, 'fallback.topic');
+      if (!result) continue;
+      if ('messageId' in result) {
+        expect(typeof result.messageId).toBe('string');
+        expect((result.messageId as string).length).toBeGreaterThan(0);
+      }
+      if ('timestamp' in result) {
+        expect(typeof result.timestamp).toBe('number');
+        expect(Number.isFinite(result.timestamp as number)).toBe(true);
+      }
+    }
+  });
+});
+
 describe('topicMatchesPattern invariants', () => {
   const topics = ['', 'a', 'a.b', 'a.b.c', 'chat', 'chat.room', 'chat.room.1', 'chatter.1', 'x.y.z'] as const;
   const patterns = ['', '*', 'a', 'a.*', 'chat.*', 'chat.room.*', 'chatter.*', 'x.*'] as const;
@@ -287,6 +307,42 @@ describe('ReplayManager ring invariants under random sequences', () => {
       }
       // Three possible topics, each bounded by maxPerTopic.
       expect(manager.getStats().messages).toBeLessThanOrEqual(3 * maxPerTopic);
+    }
+  });
+});
+
+describe('BatchingStorageWriter drains under random storage failures', () => {
+  it('never throws, stays bounded, and drops every stuck key', async () => {
+    vi.useFakeTimers();
+    try {
+      const random = rng(0x51ab);
+      for (let round = 0; round < 25; round += 1) {
+        const failProbability = random();
+        const backing = {
+          length: 0,
+          getItem: () => null,
+          key: () => null,
+          setItem: () => {
+            if (random() < failProbability) throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+          },
+          removeItem: () => {
+            if (random() < failProbability) throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+          },
+          clear: () => {}
+        };
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const writer = new BatchingStorageWriter(backing);
+        const keyCount = 1 + Math.floor(random() * 5);
+        for (let key = 0; key < keyCount; key += 1) writer.setItem(`k${key}`, String(key));
+        expect(() => writer.flush()).not.toThrow();
+        expect(writer.pendingSize).toBeLessThanOrEqual(keyCount);
+        await vi.advanceTimersByTimeAsync(60_000);
+        // Every key either landed or was dropped after MAX_RETRY_ATTEMPTS.
+        expect(writer.pendingSize, `pending stuck for failProbability=${failProbability}`).toBe(0);
+        warn.mockRestore();
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
