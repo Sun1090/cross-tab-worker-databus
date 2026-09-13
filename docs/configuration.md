@@ -56,6 +56,27 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 
 `replay.persistenceRetry` optionally controls transient persistence recovery. `maxAttempts` is the total number of attempts (default `1`), and `backoffMs` is the initial delay before retry (default `50`). Delays grow exponentially and are capped; final failures retain the existing `onError` and reliability behavior.
 
+### Replay Options
+
+| Config | Type | Default | Description |
+|---|---|---|---|
+| `maxPerTopic` | `number` | `100` | Maximum buffered publications per topic; oldest are evicted first (positive safe integer) |
+| `persistence` | `DataBusReplayPersistence` | — | Optional durable backend (`createIndexedDbReplayPersistence`); omitted keeps history in memory only |
+| `retentionMs` | `number` | — | Producer-timestamp retention window; history older than the cutoff is pruned through the adapter's `clearBefore` |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` caps each topic at `maxPerTopic`; `age` prunes by `retentionMs`; `both` applies both. `age` without `retentionMs` has nothing to prune by and falls back to the count cap |
+| `retentionSweepMs` | `number` | — | Periodic durable-retention sweep for quiet topics; requires `retentionMs` and a `clearBefore` adapter |
+| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | Bounded retry for transient persistence failures; delays grow exponentially and are capped |
+
+### Deduplication Options
+
+| Config | Type | Default | Description |
+|---|---|---|---|
+| `maxEntries` | `number` | `1000` | Remembered message IDs before the oldest (FIFO) entry is evicted (positive safe integer) |
+| `ttlMs` | `number` | `60000` | How long a remembered ID suppresses a repeat (positive finite) |
+| `sweepMs` | `number` | — | Optional periodic sweep that expires quiet IDs; disabled by default |
+| `now` | `() => number` | `Date.now` | Injectable clock for deterministic TTL tests and non-wall-clock hosts |
+| `adaptiveTtl` | `{ minMs, maxMs }` | — | Optional bounded adaptive TTL: a high recent message rate shortens the window toward `minMs`, a quiet period relaxes it to `maxMs` (both required, `minMs <= maxMs`) |
+
 When tracing is enabled, each retry before the final attempt emits a bounded `reliability` event with `operation: persistence_retry`, `persistenceOperation` (`load`, `append`, `clear`, `clearTopic`, or `clearBefore`), and the failed attempt number. No payload, URL, credential, or error body is included.
 
 WebSocket binary frames may arrive as either `ArrayBuffer` or browser `Blob`; both use the same compact binary publication format. Blob conversion is asynchronous and conversion failures are reported through the transport error handler.
