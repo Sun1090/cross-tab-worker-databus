@@ -19,7 +19,11 @@ export interface SerializedWorkerError {
   context?: unknown;
 }
 
-/** Convert an arbitrary error into a structured-cloneable form for postMessage. */
+/** Convert an arbitrary error into a structured-cloneable form for postMessage.
+ * A non-Error value is attached as `context`, but only when it is itself
+ * structured-cloneable: a function, symbol, or an object/map holding one would
+ * otherwise make the serialised error unserializable, so `postMessage` would
+ * throw `DataCloneError` while reporting the original failure. */
 export function serializeError(error: unknown): SerializedWorkerError {
   if (error instanceof Error) {
     return {
@@ -28,11 +32,25 @@ export function serializeError(error: unknown): SerializedWorkerError {
       ...(error.stack ? { stack: error.stack } : {})
     };
   }
+  const context = error === undefined ? undefined : error;
   return {
     name: 'CentrifugeError',
     message: typeof error === 'string' ? error : 'Centrifuge worker operation failed.',
-    ...(error === undefined ? {} : { context: error })
+    ...(context === undefined || !isStructuredCloneable(context) ? {} : { context })
   };
+}
+
+/** True when `value` survives a structured clone. When the runtime has no
+ * `structuredClone`, cloneability cannot be checked and the value is kept
+ * (best effort); the eventual postMessage would fail either way. */
+function isStructuredCloneable(value: unknown): boolean {
+  if (typeof structuredClone !== 'function') return true;
+  try {
+    structuredClone(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Reconstruct an Error instance from its serialised form. */
