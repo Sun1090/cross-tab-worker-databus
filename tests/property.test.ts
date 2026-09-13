@@ -16,7 +16,9 @@ import {
   approximatePayloadBytes,
   effectiveWorkerLoad,
   isWildcardTopic,
+  selectActiveWorkers,
   selectLeastLoadedWorker,
+  selectRebalanceTarget,
   topicMatchesPattern
 } from '../src/core/routing';
 import type { LoadWeightingOptions, WorkerRecord } from '../src/core/types';
@@ -111,6 +113,39 @@ function arbitraryValue(random: () => number, depth = 0): unknown {
   }
   return obj;
 }
+
+describe('selectActiveWorkers invariants', () => {
+  it('returns a non-empty subset of the input, bounded by maxActiveWorkers, and never throws', () => {
+    const random = rng(0xac71);
+    for (let i = 0; i < 500; i += 1) {
+      const size = Math.floor(random() * 8);
+      const workers = Array.from({ length: size }, () => arbitraryWorker(random));
+      const max = 1 + Math.floor(random() * 5);
+      let active: WorkerRecord[] = [];
+      expect(() => {
+        active = selectActiveWorkers(workers, max);
+      }).not.toThrow();
+      expect(active.length).toBeLessThanOrEqual(max);
+      for (const worker of active) expect(workers).toContain(worker);
+      if (size > 0) expect(active.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('selectRebalanceTarget invariants', () => {
+  it('returns a member of the input or null, and never throws', () => {
+    const random = rng(0x2e6b);
+    for (let i = 0; i < 500; i += 1) {
+      const size = 1 + Math.floor(random() * 6);
+      const workers = Array.from({ length: size }, () => arbitraryWorker(random));
+      let target: WorkerRecord | null = null;
+      expect(() => {
+        target = selectRebalanceTarget(workers, workers[0]!.workerId);
+      }).not.toThrow();
+      if (target !== null) expect(workers).toContain(target);
+    }
+  });
+});
 
 describe('approximatePayloadBytes is a total function', () => {
   it('returns a non-negative finite estimate for arbitrary values, including cycles', () => {
