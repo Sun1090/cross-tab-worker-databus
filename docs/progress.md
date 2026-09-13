@@ -52,7 +52,11 @@ fake tasks; each item is verified locally before being marked done.
   applies whenever no retention window exists, in both the in-memory manager
   and the IndexedDB adapter. Mutation-checked.
 - Verification: 657 unit / 34 files, lint, typecheck, diff-check green.
-- Next: commit task 3 → push/PR → rebase-merge; then next robustness item.
+- Task 4 (DONE): extended the seeded property suite to the stateful managers
+  (`DedupManager` bound + accepted/suppressed accounting; `ReplayManager`
+  per-topic ring bound under 100 random 60-step sequences). No violations —
+  test-strengthening only (659 unit / 34 files).
+- Next: commit task 3+4 → PR #13 → rebase-merge; then next robustness item.
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 
