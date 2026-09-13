@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  approximatePayloadBytes,
   effectiveWorkerLoad,
   isWildcardTopic,
   selectLeastLoadedWorker,
@@ -104,6 +105,23 @@ function arbitraryValue(random: () => number, depth = 0): unknown {
   }
   return obj;
 }
+
+describe('approximatePayloadBytes is a total function', () => {
+  it('returns a non-negative finite estimate for arbitrary values, including cycles', () => {
+    const random = rng(0xbeef);
+    for (let i = 0; i < 1_000; i += 1) {
+      const value = arbitraryValue(random);
+      const estimate = approximatePayloadBytes(value);
+      expect(Number.isFinite(estimate), `non-finite estimate for ${JSON.stringify(value)}`).toBe(true);
+      expect(estimate).toBeGreaterThanOrEqual(0);
+    }
+    // Structured clone preserves cycles, so a cyclic payload can reach the
+    // estimator through the replay buffer and the adaptive-load sampler.
+    const cyclic: Record<string, unknown> = { value: 1 };
+    cyclic.self = cyclic;
+    expect(Number.isFinite(approximatePayloadBytes(cyclic))).toBe(true);
+  });
+});
 
 describe('effectiveWorkerLoad is a total function', () => {
   it('always returns a finite score for arbitrary (corrupt) worker records and weights', () => {

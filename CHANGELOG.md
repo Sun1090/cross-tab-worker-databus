@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Fixed
+- `approximatePayloadBytes` no longer overflows the stack on deeply nested or cyclic payloads. Structured clone preserves cycles, so a cyclic publication can legitimately reach the replay-buffer byte estimate (`getDiagnostics().replay.bytes`) and the adaptive-load sampler; unbounded recursion there threw a `RangeError` and took down the diagnostics/reconcile path. The estimate is now depth-bounded (shallow results unchanged), pinned by a cycle/deep-nesting regression plus a finiteness invariant in the seeded property suite.
+
 ## [0.20.84] - 2026-09-13
 
 ### Added
