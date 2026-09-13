@@ -45,6 +45,17 @@ describe('createIndexedDbReplayPersistence', () => {
     expect((await persistence.load()).map(item => item.data.value)).toEqual([2, 3, 4]);
   });
 
+  it('still caps persisted history when the age strategy has no retention window', async () => {
+    // `pruneStrategy: 'age'` without `retentionMs` has nothing to prune by, so
+    // the count cap must still apply to the stored topic record.
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 3,
+      pruneStrategy: 'age'
+    });
+    for (let index = 0; index < 6; index += 1) await persistence.append(message('t', index));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([3, 4, 5]);
+  });
+
   it('trims history by age when retention is configured', async () => {
     // Timestamps relative to the real clock: the adapter cuts off at
     // Date.now() - retentionMs, so anything older than 1s is pruned.

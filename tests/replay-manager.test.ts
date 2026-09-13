@@ -195,6 +195,18 @@ describe('ReplayManager — in-memory ring semantics', () => {
     expect(received).toEqual([2, 3]);
   });
 
+  it('still caps the ring when the age strategy has no retention window', () => {
+    // `pruneStrategy: 'age'` without `retentionMs` leaves nothing to prune by,
+    // so the count cap must still bound the ring (otherwise it grows without
+    // limit while delivery stays capped by maxPerTopic).
+    const { manager } = createManager({ pruneStrategy: PRUNE_STRATEGY.AGE, maxPerTopic: 4 });
+    for (let index = 0; index < 100; index += 1) manager.record(message('t', index));
+    expect(manager.getStats().messages).toBe(4);
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    expect(received).toEqual([96, 97, 98, 99]);
+  });
+
   it('applies both count and age trimming under the both strategy', () => {
     const { manager } = createManager({
       pruneStrategy: PRUNE_STRATEGY.BOTH,
