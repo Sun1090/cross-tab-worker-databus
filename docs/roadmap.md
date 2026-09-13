@@ -1,6 +1,14 @@
 # Roadmap
 
-0.20.84 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.85 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.85 delivered scope
+
+- A seeded property suite (`tests/property.test.ts`) for the pure hot-path helpers and the stateful managers: finiteness/totality, order-independent selection, cycle-safe sizing, publication topic/metadata validity, `serializeError` cloneability, and dedup/replay bounds under long random operation sequences.
+- `effectiveWorkerLoad` is total against a corrupt stored base load — a non-finite value (JSON `1e999` → `Infinity`) can no longer leak into owner selection and re-introduce array-order dependence.
+- `approximatePayloadBytes` is depth-bounded, so a cyclic payload (structured clone preserves cycles) can no longer overflow the stack in the replay-buffer footprint or the adaptive-load sampler.
+- `serializeError` always produces a structured-cloneable result; a non-cloneable context (function/symbol) is dropped instead of making the error report itself throw `DataCloneError`.
+- Replay history is bounded when `pruneStrategy: 'age'` is set without a `retentionMs`: the count cap now applies in both the in-memory ring and the IndexedDB record.
 
 ## 0.20.84 delivered scope
 

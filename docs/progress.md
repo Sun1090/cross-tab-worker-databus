@@ -32,31 +32,28 @@ fake tasks; each item is verified locally before being marked done.
 - Next milestone: **0.20.85** (in progress below) — continue reliability/
   robustness hardening and adversarially-test the remaining pure helpers.
 
-## Milestone 0.20.85 — adversarial robustness (in progress)
+## Milestone 0.20.85 — adversarial robustness (release prepared)
 
-- `feat/payload-depth-hardening` off `origin/main` (`1aac9d9`), PR #12.
-- Task 1 (DONE): `approximatePayloadBytes` stack overflow on cyclic/deeply
-  nested payloads (structured clone preserves cycles → reachable via
-  `getDiagnostics().replay.bytes` and the adaptive-load sampler). Depth-bounded
-  the internal recursion; shallow results unchanged. Pinned by a
-  cycle/deep-nesting regression (mutation-checked: cap removed → RangeError)
-  and a finiteness invariant in the property suite.
-- Task 2 (DONE): `serializeError` could return a non-cloneable object (raw
-  non-Error value as `context`), so the error report itself threw
-  `DataCloneError` at the Worker boundary — breaking its documented contract.
-  Non-cloneable contexts are now dropped; cloneable ones preserved.
-  Mutation-checked + property-suite invariant.
-- Task 3 (DONE): `pruneStrategy: 'age'` without `retentionMs` applied neither
-  the age pass nor the count cap — the ring buffered 5000 messages against
-  `maxPerTopic: 4` (memory unbounded; delivery was capped). Count cap now
-  applies whenever no retention window exists, in both the in-memory manager
-  and the IndexedDB adapter. Mutation-checked.
-- Verification: 657 unit / 34 files, lint, typecheck, diff-check green.
-- Task 4 (DONE): extended the seeded property suite to the stateful managers
-  (`DedupManager` bound + accepted/suppressed accounting; `ReplayManager`
-  per-topic ring bound under 100 random 60-step sequences). No violations —
-  test-strengthening only (659 unit / 34 files).
-- Next: commit task 3+4 → PR #13 → rebase-merge; then next robustness item.
+- Branch `feat/release-0.20.85` off `origin/main`; version **0.20.85** (patch).
+- Merged into the milestone:
+  - PR #12 (`feat/payload-depth-hardening`): `approximatePayloadBytes`
+    depth-bounded for cyclic/deeply nested payloads; `serializeError` kept
+    structured-cloneable for any input.
+  - PR #13 (`feat/replay-age-bound`): replay history bounded when
+    `pruneStrategy: 'age'` has no `retentionMs` (in-memory + IndexedDB);
+    seeded property suite extended to stateful manager invariants.
+  - This branch: randomized `BatchingStorageWriter` drain property +
+    `parseDataBusPublication` metadata-normalization property; version bump
+    (`package.json` 0.20.85, `[Unreleased]` moved to `[0.20.85]`, both
+    roadmaps updated with parity).
+- Verification (release head): `pnpm check` 661 unit / 34 files; lint; e2e
+  27/27; bench; `verify:compat` ("0.20.85 preserves … from v0.20.71");
+  `verify:pack` (0.20.85 tgz); audit clean; `npm pack --dry-run` = 0.20.85,
+  107 files, no `progress.md`; `git diff --check`.
+- Tag/publish: NOT pushed (project policy: the assistant does not run the npm
+  publish). Maintainer: `git tag v0.20.85 && git push origin v0.20.85`.
+- Next milestone: continue adversarial testing of remaining surfaces
+  (transport lifecycles, environment probes) and release when warranted.
 
 ## Baseline (2026-09-06, main @ 06dcc25)
 
