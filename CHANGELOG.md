@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Added
+- Seeded property suite (`tests/property.test.ts`) for the pure hot-path helpers and the stateful managers: `effectiveWorkerLoad`/`selectLeastLoadedWorker` totality and order-independence, `approximatePayloadBytes` finiteness (cycles included), `parseDataBusPublication` topic validity, `topicMatchesPattern` segment-boundary invariants, `serializeError` cloneability, `createOpaqueKey` shape, and `DedupManager`/`ReplayManager` bound invariants under long random operation sequences. Deterministic (fixed seeds), so failures reproduce and the suite is not flaky.
+
 ### Fixed
 - Replay history is now bounded when `pruneStrategy: 'age'` is set without a `retentionMs`: neither the age pass nor the count cap applied, so the in-memory ring (and the persisted topic record) grew without limit while delivery stayed capped by `maxPerTopic`. The count cap now applies whenever there is no retention window to prune by. Pinned in both the in-memory manager and the IndexedDB adapter (mutation-checked).
 - `serializeError` now guarantees its documented structured-cloneable result: a non-Error value was attached verbatim as `context`, so a function/symbol (or an object holding one) made the serialised error itself uncloneable and `postMessage` threw `DataCloneError` while reporting the original failure. Non-cloneable contexts are dropped (cloneable ones are still kept for diagnostics). Pinned by regression + property-suite cloneability invariants.

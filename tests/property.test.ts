@@ -22,6 +22,10 @@ import {
 import type { LoadWeightingOptions, WorkerRecord } from '../src/core/types';
 import { parseDataBusPublication } from '../src/core/publication';
 import { serializeError } from '../src/utils/error-utils';
+import { DedupManager } from '../src/core/dedup-manager';
+import { ReplayManager } from '../src/core/replay-manager';
+import { DataBusTraceReporter } from '../src/core/trace';
+import { PRUNE_STRATEGY } from '../src/utils/constants';
 import { createOpaqueKey } from '../src/core/hash';
 import { TAB_VISIBILITY, WORKER_ROLE, WORKER_STATUS } from '../src/utils/constants';
 
@@ -228,6 +232,61 @@ describe('serializeError is always structured-cloneable', () => {
       const value = i % 5 === 0 ? extras[i % extras.length] : arbitraryValue(random);
       const serialized = serializeError(value);
       expect(() => structuredClone(serialized), `uncloneable serialization for ${String(value)}`).not.toThrow();
+    }
+  });
+});
+
+describe('DedupManager invariants under random sequences', () => {
+  it('never exceeds maxEntries and keeps accepted+suppressed accounting exact', () => {
+    const random = rng(0xdead);
+    for (let round = 0; round < 200; round += 1) {
+      const maxEntries = 1 + Math.floor(random() * 8);
+      let now = 0;
+      const manager = new DedupManager({
+        enabled: true,
+        maxEntries,
+        ttlMs: 1 + Math.floor(random() * 1_000),
+        now: () => now,
+        trace: new DataBusTraceReporter()
+      });
+      let calls = 0;
+      for (let step = 0; step < 100; step += 1) {
+        now += Math.floor(random() * 50);
+        manager.isDuplicate(`m-${Math.floor(random() * 12)}`, 't');
+        calls += 1;
+        const stats = manager.getStats();
+        expect(stats.tracked, `tracked ${stats.tracked} > maxEntries ${maxEntries}`).toBeLessThanOrEqual(maxEntries);
+        expect(stats.accepted + stats.suppressed).toBe(calls);
+      }
+    }
+  });
+});
+
+describe('ReplayManager ring invariants under random sequences', () => {
+  it('never exceeds the per-topic cap and never throws', () => {
+    const random = rng(0xfeed);
+    for (let round = 0; round < 100; round += 1) {
+      const maxPerTopic = 1 + Math.floor(random() * 5);
+      const manager = new ReplayManager<number>({
+        enabled: true,
+        maxPerTopic,
+        pruneStrategy: PRUNE_STRATEGY.COUNT,
+        persistenceRetryMaxAttempts: 1,
+        persistenceRetryBackoffMs: 0,
+        now: () => 0,
+        trace: new DataBusTraceReporter(),
+        onPersistenceError: () => {},
+        onDispatchError: () => {}
+      });
+      for (let step = 0; step < 60; step += 1) {
+        const topic = `t-${Math.floor(random() * 3)}`;
+        manager.record({ topic, data: step });
+        const received: number[] = [];
+        manager.deliverReplay(topic, true, item => received.push(item.data));
+        expect(received.length).toBeLessThanOrEqual(maxPerTopic);
+      }
+      // Three possible topics, each bounded by maxPerTopic.
+      expect(manager.getStats().messages).toBeLessThanOrEqual(3 * maxPerTopic);
     }
   });
 });
