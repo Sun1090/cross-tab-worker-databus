@@ -6,7 +6,7 @@
 
 - 发布/CI 门禁由“文档约定”变为强制执行：`pnpm test:coverage`、`pnpm verify:compat`、`pnpm verify:pack` 进入 CI verify job，Release 工作流在发布前重跑 lint + compat + pack，两个 checkout 均拉取完整历史与 tag 以便解析 compat 基线。
 - 协调恢复加固：交接 ACK 丢失、owner 崩溃或前任 owner 退出后，均由 worker-TTL 门禁的重新选举恢复，采用单写者与投影负载分摊；每次路由确认 / 迁移 / 恢复都会发出有界的 `reliability` trace 事件。
-- 两个真实正确性修复：Vue `useCrossTabDataBus` 卸载泄漏（pending start 可能创建无人拥有的 bus）与自适应 dedup TTL 未在热路径生效。
+- 三个真实正确性修复：Vue `useCrossTabDataBus` 卸载泄漏（pending start 可能创建无人拥有的 bus）、自适应 dedup TTL 未在热路径生效，以及 `effectiveWorkerLoad` 会把损坏的存储 load 造成的非有限评分泄漏回 owner 选择。
 - 产品 demo 可观测性：事件流渲染 reliability / subscription / coordination trace 事件，混沌开关在真实浏览器中演练丢 ACK 与崩溃恢复路径，配置面板显示当前混沌模式。
 - 覆盖与工具链：`ReplayManager` / `DedupManager` 直接测试套件、transport 错误隔离与部分元数据覆盖、vitest 5（基准 API 已迁移）与 eslint 10 lint 配置；TypeScript 7 因 typescript-eslint 未支持而继续递延。
 
