@@ -10,6 +10,26 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 line (post-0.20.85, in progress)
+
+- PR #15 (merged): seeded property invariants for `selectActiveWorkers` /
+  `selectRebalanceTarget` (subset / max-bound / non-empty / totality).
+- PR #16 (merged): documented the full public option surface —
+  `replay.pruneStrategy` (was absent), the replay options table
+  (`maxPerTopic`, `persistence`, `retentionMs`, `pruneStrategy`,
+  `retentionSweepMs`, `persistenceRetry`), and a deduplication options table
+  (`maxEntries`, `ttlMs`, `sweepMs`, `now`, `adaptiveTtl`) — in both
+  languages, plus a guard deriving the field list from the built declarations
+  (mutation-checked). Corrected the `pruneStrategy` JSDoc default (`count`).
+- CI infra incident: the CodeQL job on the PR #16 main push failed with
+  "improved incremental analysis did not complete successfully" (disk space);
+  the analysis itself succeeded and the failure was recorded in the Actions
+  cache. Deleted the poisoned `codeql-overlay-status-*` cache entry so the
+  next run analyzes without incremental mode. This progress commit re-triggers
+  CodeQL on main to confirm.
+- Verification (each PR): `pnpm check` (664 unit / 34 files), lint,
+  e2e 27/27, `verify:pack`, `git diff --check`; PR checks green.
+
 ## 0.20.84 RELEASED to main (tag/publish left to maintainer)
 
 - Status: DONE. Version **0.20.84** merged to `origin/main`.
