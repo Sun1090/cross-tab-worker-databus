@@ -54,6 +54,13 @@ fake tasks; each item is verified locally before being marked done.
 - Rebased the active feature branch onto updated `origin/main` (`0fe251a`).
 - No application behavior changes; dependency update is covered by the existing CI gates.
 - Next: continue the observability/parity audit with a concrete reliability or coverage improvement.
+## 0.20.86 audit checkpoint (2026-09-14)
+
+- Branch: `feat/0.20.86-audit`; working tree verified clean before generated benchmark refresh.
+- Verification: `pnpm typecheck`, `pnpm test` (664 tests / 34 files), `pnpm test:coverage` (97.26% statements, 92.71% branches), `pnpm lint`, `pnpm build`, `pnpm test:e2e` (27/27), `pnpm bench` (25/25), `pnpm verify:compat`, and `pnpm verify:pack` all pass.
+- `pnpm bench:trend` regenerated English and Chinese benchmark trend reports from 14 archived browser reports.
+- No code defects or release-blocking failures found in this audit. The optional `--reporter=text` Vitest invocation is invalid in Vitest 5 (it treats `text` as a custom reporter); the documented `pnpm test:coverage` command remains green.
+- Next: continue the release-readiness dry run and select a concrete verification/deepening item before the 0.20.86 release decision.
 
 ## 0.20.86 line (post-0.20.85, in progress)
 
