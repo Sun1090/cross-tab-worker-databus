@@ -10,6 +10,13 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.85 publication confirmed (2026-09-14)
+
+- npm registry now serves `cross-tab-worker-databus@0.20.85`; `latest` points to 0.20.85.
+- GitHub Release workflow run `34792598054` passed after a transient npm registry propagation failure on the first attempt.
+- Release tag `v0.20.85` is present on `origin`; release verification completed successfully.
+- Next milestone: continue 0.20.86 observability/parity audit with a concrete code or test deepening task; do not republish 0.20.85.
+
 ## 0.20.86 line (post-0.20.85, in progress)
 
 - PR #15 (merged): seeded property invariants for `selectActiveWorkers` /
