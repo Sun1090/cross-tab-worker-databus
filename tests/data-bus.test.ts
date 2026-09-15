@@ -1749,8 +1749,40 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('performs a fresh stop when the previous stop gate is settled but not yet cleared', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-stop-gate' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stale-stop-gate',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
 
+    const firstStop = bus.stop();
+    // Two microtask turns: performStop() finishes its teardown (stopping === false)
+    // while the settlement handler that clears stopPromise has not run yet.
+    await Promise.resolve();
+    await Promise.resolve();
 
+    // start() reopens the transport while the previous stop gate is still
+    // retained; the following stop() must not reuse that settled gate.
+    const restarted = bus.start({});
+    const secondStop = bus.stop();
+    await secondStop;
+    await Promise.resolve();
+    await restarted;
+
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: false,
+      state: 'stopped',
+      transport: { ready: false }
+    });
+    expect(transport.stopCalls).toBe(2);
+    await Promise.allSettled([firstStop]);
+  });
 
   it('keeps a queued resume owned by the bus when a superseded initial open fails', async () => {
     const storage = new MemoryStorage();
