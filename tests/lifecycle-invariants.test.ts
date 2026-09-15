@@ -104,6 +104,8 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('CrossTabDataBus lifecycle invariants', () => {
+  // V8 coverage instrumentation roughly doubles this fuzzer's runtime. Keep all
+  // 1,500 seeds and give the release gate an explicit budget instead of shrinking it.
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
     for (let seed = 1; seed <= 1_500 && failures.length < 5; seed += 1) {
@@ -253,5 +255,5 @@ describe('CrossTabDataBus lifecycle invariants', () => {
       }
     }
     expect(failures).toEqual([]);
-  });
+  }, 30_000);
 });
