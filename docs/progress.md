@@ -1,3 +1,18 @@
+## 0.20.89 stale stop gate reuse (2026-09-16)
+
+- 状态：已完成并提交，等待 0.20.89 发布冻结。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `4feed32`。
+- 复现场景：`bus.stop()` 在 teardown 完成后立刻 `bus.start({})` 再 `bus.stop()`。第一次 `performStop()` 已跑完并把 `stopping` 置回 false，但清空 `stopPromise` 的 settle handler 还没执行；第二次 `stop()` 命中 `if (this.stopPromise) return this.stopPromise;`，直接返回已 settle 的旧 promise，完全跳过 teardown，bus 停在 `started: true` / `state: 'healthy'`，而调用方以为已停止。
+- 根因：`stopPromise` 既是"共享在途 stop 门"又被当作"是否仍在停止中"的判据，但两者的生命周期不同——promise settle 与字段清空之间隔了一个微任务；`stopping` 才是在 `performStop()` finally 中原子翻转的权威信号。
+- 修复：`stop()` 的复用条件收紧为 `if (this.stopPromise && this.stopping)`，已 settle 但尚未清空的陈旧门会 fall through 到全新 `performStop()`。随机交织 fuzz（600 seeds × 40 步的 start/stop/ready/pageHide/pageShow/stopGate 组合）在修复前约 2/120 seeds 出现"最终 stop 后仍 started"，修复后 600 seeds 全绿。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `performs a fresh stop when the previous stop gate is settled but not yet cleared`（两轮微任务精确构造 settle-but-not-cleared 窗口，断言最终 `started: false` / `state: 'stopped'` / `transport.ready: false` 且 `transport.stopCalls === 2`）。mutation check 回退该行后最小复现失败（观察到 `started: true`），恢复后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（141/141）、`pnpm check`（35 files，728/728）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.42% branches / 96.51% functions / 98.46% lines）、`pnpm build` + `pnpm test:e2e`（27/27）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅收紧 `stop()` 的门复用条件；并发 stop 仍在 `stopping` 为 true 时共享同一 promise，语义不变。无 public export、存储 schema、存储键或线协议变更。若出现兼容性回归，可 revert 该修复提交。
+- 下一项：继续审计 `ready()` 排队 start 失败后的状态保留与 `initialConfig` 边界，以及最终 stop 后 trace/dedup/replay 定时器与微任务残留。
+- 更新时间：2026-09-16。
+
 ## 0.20.89 queued replay batch isolation (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
