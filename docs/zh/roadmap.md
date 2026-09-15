@@ -512,7 +512,7 @@
 ## 0.13.0 候选
 
 1. 冻结公共导出面与 transport 无关的 publication 信封。
-2. 精确记录 at-least-once 投递与去重保证。
+2. ~~精确记录 at-least-once 投递与去重保证。~~ 已交付：architecture/API/capability 文档现在明确区分「每条已接受 transport publication 的本地至多一次扇出」与端到端投递，记录 transport/服务端的丢失与重复投递，并说明有界、可选 `messageId` 去重的边界，不再宣称 at-least-once 或 exactly-once。
 3. 增加长时浏览器浸泡覆盖：replay 留存、重连、BFCache 与 owner 迁移。
 4. 为 1.0 前的协议别名发布迁移指南与弃用策略。
 

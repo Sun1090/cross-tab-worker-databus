@@ -483,7 +483,7 @@ The SDK intentionally does not host a real-time transport in a Service Worker. S
 
 ### Dispatch flow: three gates
 
-Every publication from the transport goes through three checks before reaching the application handler:
+After the optional `messageId` deduplication gate, every accepted publication from the transport goes through three checks before reaching the application handler:
 
 1. **`isAssigned(topic)`** — called on the owning Worker when a transport message arrives (`handleTransportMessage`). If the topic is no longer assigned to this worker (e.g. a stale message from a previous ownership window), the message is dropped immediately. This is the outer gate: it prevents a non-owner from broadcasting.
 
@@ -491,10 +491,12 @@ Every publication from the transport goes through three checks before reaching t
 
 3. **`hasLocalSubscriber(topic)`** — called on each tab receiving the `EVENT`. Only tabs that have a local subscriber record for this topic invoke the registered handler. Tabs without a local subscription drop the message silently.
 
-These three checks ensure **exactly-once dispatch per subscriber**:
+These three checks provide **at-most-once fan-out per accepted transport publication**:
 - The outer gate (`isAssigned`) prevents duplicate broadcasts from a stale owner.
 - The inner gate (`hasLocalSubscriber`) prevents a tab from dispatching a topic it never subscribed to.
 - BroadcastChannel never echoes to its sender, so the owner does not receive its own `EVENT` — its local dispatch is the only local delivery.
+
+This is a local fan-out guarantee, not an end-to-end delivery guarantee. A transport or server can redeliver a publication, a disconnected or suspended tab can miss the `EVENT`, and BroadcastChannel fan-out has no application-level acknowledgment. Opt-in `dedup` can suppress repeated `messageId` values within its bounded per-bus window, but it is best-effort, per-instance, and reset by `stop()`. The SDK therefore does not provide end-to-end at-least-once or exactly-once delivery; applications that cannot tolerate duplicates or gaps must use idempotent handlers and the transport/server guarantees appropriate for their workload.
 
 ```text
 Transport message → isAssigned(topic)? → Yes → broadcastEvent(EVENT)
@@ -529,7 +531,7 @@ When an abnormal exit cannot execute the `pagehide` cleanup, other Runtimes scan
 
 If a Tab still subscribed to a Topic finds that the owner Worker has departed or expired, it selects a new owner and increments the route `generation`. Normal `pagehide` handoff is strict: the new route records `handoffFromWorkerId`, the old owner unsubscribes from transport first, then sends `ROUTE_RELEASED(generation)`, and only the matching new owner ACK handler sends `SUBSCRIBE`. If the old Worker has already disappeared, the new owner takes over immediately. A refreshed Tab that rejoins afterward records itself as a subscriber and reuses the replacement owner instead of taking the route back.
 
-This process prevents overlap during graceful owner handoff while retaining availability during failure recovery; it does not guarantee exactly-once delivery.
+This process prevents overlap during graceful owner handoff while retaining availability during failure recovery; it does not turn the local fan-out guarantee into end-to-end at-least-once or exactly-once delivery.
 
 ## Stability Invariants
 

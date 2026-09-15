@@ -28,7 +28,7 @@
 | 性能 | 协调元数据批量写入 + 退避重试 | ✅ 已实现 | 心跳、路由和 subscriber 写入合并后在微任务中 flush；失败时指数退避；`pagehide` / `stop()` 同步 flush |
 | 性能 | 可选 ArrayBuffer Transferable 传输 | ✅ 已实现 | 开启 `transferable: true` 后，二进制 publish/receive 跳过 structured clone 复制；对象消息 API 不变 |
 | 性能 | 可选 `DataBusTransport.publishBatch` 单帧突发发布 | ✅ 已实现 | 内置 WebSocket transport 将多条消息合并为一帧（`publishBatch` op，demo server 已支持）；无批量能力的 transport 回退逐条 `publish` |
-| 消息语义 | exactly-once 投递 | 未实现 | 正常交接会避免重叠，但异常恢复和 transport/服务端行为仍不提供 exactly-once 保证 |
+| 消息语义 | 端到端 at-least-once 或 exactly-once 投递 | 未实现 | 每条被接受的 transport publication 只会扇出一次，每个匹配的本地 handler 至多分发一次；但 transport/服务端仍可能重复或丢失，断连/挂起期间跨 Tab 事件也可能丢失，按实例有界的可选 `messageId` 去重仍不足以提供端到端 at-least-once 或 exactly-once 保证 |
 | 消息语义 | 可插拔的 publication 去重 | ✅ 已实现 | 按 `DataBusMessage.messageId` 做可选有界入站抑制；默认关闭，ID 仍由调用方/服务端控制 |
 | 认证 | Worker 内异步凭证刷新桥接 | ✅ 已实现 | `createCentrifugeDataBus` 的可选 `credentialProvider`（`getToken` / `getChannelToken`）。Worker 配置保持结构化可克隆；Worker 通过 TOKEN_REQUEST / TOKEN_RESPONSE 交换向主线程请求每个新凭证，由 provider 从应用上下文提供 |
 | 负载策略 | 按消息速率、字节数或调度滞后自适应加权 | ✅ 已实现 | 可选的 `loadWeighting`（`messageRateWeight`、`byteRateWeight`、`scheduleLagWeight`）：Workers 按窗口采样自身 fan-out 流量与心跳调度超时并随记录发布；新 route 的 owner 选择在 Topic 数之上加入归一化速率与滞后比率。默认（未设置）保持纯按 Topic 数；已有 route 保持 sticky |
