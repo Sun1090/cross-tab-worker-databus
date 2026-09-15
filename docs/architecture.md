@@ -567,6 +567,7 @@ The built-in Centrifuge transport also retains its own Subscriptions and perform
 | `stopPromise` | `Promise \| null` | Shared gate for an explicit `stop()` and any restart queued behind it |
 | `queuedStart` | `Promise \| null` | One fresh start waiting for an in-flight explicit stop to settle |
 | `pendingStop` | `Promise \| null` | Gate for async `transport.stop()`; shared by suspend and failure paths |
+| `lifecycleEpoch` | `number` | Monotonic ownership token; invalidates callbacks and cleanup from superseded opens |
 
 ### State transitions
 
@@ -599,6 +600,7 @@ The built-in Centrifuge transport also retains its own Subscriptions and perform
 - **Concurrent start**: If `start()` is called while a real transport opening is in flight, the second call returns the same promise. Only one transport open is in flight at a time. A page-hide stop can also occupy `startPromise`; `start()` recognizes that `startPromise === pendingStop` and queues a reopen behind the stop rather than returning the cleanup promise as if it were a successful start.
 - **Start during explicit stop**: `stop()` publishes a shared `stopPromise` for concurrent callers. A `start()` received while it is settling stores one `queuedStart`; after the stop's `finally` clears the lifecycle state, the queued start performs a fresh lifecycle with the new config. Repeated calls during that window share both the stop and queued-start promises.
 - **Suspend during start**: If `pagehide` fires while `openTransport` is in flight, `suspendTransport()` sets `suspended = true` and chains a `transport.stop()` after the in-flight start. The `openTransport` catch path detects `suspended` and abandons the open without treating it as a failure.
+- **Superseded open invalidation**: Every fresh start, reopen, suspend, and stop advances `lifecycleEpoch`. An open captures its epoch, ignores stale status/message/error callbacks, and neither marks the transport ready nor performs failure cleanup after a newer transition owns the lifecycle. `stop()` therefore waits for pending opens/reopens and prevents a superseded open from becoming ready after the stop completes.
 - **Recovery cooldown**: When the transport reports `error` while `started` is true and `stopping` is false, `updateStatus` schedules an automatic `reopenTransport()` after `RECOVERY_COOLDOWN_MS` (1000 ms). A second error within the cooldown window is suppressed to prevent a tight retry loop.
 - **Stop during suspend**: `stop()` sets `stopping = true`, which prevents `suspendTransport()` from running. The cleanup awaits `startPromise` and `pendingStop` to ensure any in-flight open or stop completes before the final `transport.stop()`.
 

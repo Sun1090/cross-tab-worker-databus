@@ -1155,6 +1155,57 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('keeps a queued resume owned by the bus when a superseded initial open fails', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-open-resume' });
+    let releaseStart!: () => void;
+    let releaseStop!: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const transport = new FakeTransport<number>(startGate);
+    transport.startShouldFail = true;
+    transport.stopGate = stopGate;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stale-open-resume',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await vi.waitFor(() => expect(transport.startCalls).toBe(1));
+
+    // Queue a resume while the initial open is still pending, then let that
+    // superseded open fail. The resume must remain part of the lifecycle.
+    environment.pageHide();
+    environment.pageShow();
+    releaseStart();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    expect(transport.startCalls).toBe(1);
+
+    const stopping = bus.stop();
+    let settled = false;
+    void stopping.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    transport.startShouldFail = false;
+    releaseStop();
+    await stopping;
+    await Promise.resolve();
+    expect(transport.startCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: false,
+      state: 'stopped',
+      transport: { ready: false }
+    });
+  });
+
   it('waits for an async transport stop before automatic recovery reopens', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

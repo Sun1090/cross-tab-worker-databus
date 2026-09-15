@@ -290,7 +290,7 @@ Low-frequency event types include `lifecycle`, `status`, `subscription`, `coordi
 stop(): Promise<void>
 ```
 
-Permanently destroys the current instance: cleans up handlers, cluster registration, routes, Workers, and transport. Normal page hide and restore do not require calling this method.
+Permanently destroys the current instance: cleans up handlers, cluster registration, routes, Workers, and transport. If a transport open or reopen is still settling, `stop()` waits for it and invalidates its result so it cannot become ready after the stop. Normal page hide and restore do not require calling this method.
 
 ## `DataBusTransport<TConfig, TData>`
 
