@@ -1,10 +1,14 @@
 ## [Unreleased]
 
+## [0.20.90] - 2026-09-16
+
 ### Fixed
 - The `Release` workflow's blocking published-consumer gate no longer fails on ordinary npm CDN propagation lag. The 0.20.89 tag run published successfully and then still failed the gate because `npm pack cross-tab-worker-databus@0.20.89` kept returning `ETARGET` for the whole 24 x 5 s (2 min) budget; the budget is now 48 x 7.5 s (6 min). A genuinely missing or unimportable published package still exhausts the budget and fails the gate.
+- The coverage gate no longer false-fails when V8 instrumentation pushes the 1,500-seed lifecycle fuzzer past Vitest's 5-second default. The fuzzer keeps every seed and now carries an explicit 30-second test budget.
 
 ### Changed
 - Delivery semantics are now documented consistently: one accepted transport publication is fanned out once and dispatches at most once per matching local handler, but transport/server redelivery or loss and the bounded per-bus opt-in `messageId` dedup window still mean the SDK does not provide end-to-end at-least-once or exactly-once delivery. The architecture docs no longer claim exactly-once dispatch per subscriber, and the Chinese API reference now includes the deduplication boundary already documented in English.
+- The browser benchmark trend docs were refreshed through the latest two-run release gate (23 archived reports). The final comparison found no metric regression above the 50% ceiling; full round-trip publish latency improved in both worker modes.
 
 ## [0.20.89] - 2026-09-16
 
