@@ -1,3 +1,18 @@
+## 0.20.90 release verify budget (2026-09-16)
+
+- 状态：已完成，待提交。
+- 分支 / commit：`feat/release-verify-budget`；基线 `origin/main` = `77d5d4c`。
+- 复现场景：0.20.89 的 tag 首发 Release workflow（run 35031801806）在 `Publish to npm` 成功之后，`Verify published npm consumers` 仍失败——`npm pack cross-tab-worker-databus@0.20.89` 在旧预算 24 × 5 s（120 s）内始终返回 `ETARGET: No matching version found`。`npm view ...@0.20.89 version` 与本地 `PUBLISHED_VERSION=0.20.89 pnpm verify:published` 随后立即通过，`workflow_dispatch` 重跑全绿，确认是 npm CDN 传播延迟而非产物缺陷。
+- 根因：门禁本身正确（已发布包必须能被干净消费者导入），但它把「版本元数据可见」与「tarball 在所有边缘可下载」当成同一时刻；npm 会先提供版本元数据，tarball 仍可能在一段时间内报 `ETARGET`。2 分钟上限对正常传播延迟留白不足，导致一次健康的发布被记为失败发布。
+- 修复：`.github/workflows/release.yml` 的阻塞式 published-consumer 预算提升为 `PUBLISHED_VERIFY_ATTEMPTS=48` × `PUBLISHED_VERIFY_DELAY_MS=7500`（2 min → 6 min），并加注释说明 0.20.89 的真实触发；真正缺失或不可导入的包仍会耗尽预算并失败。中英文 release checklist 同步更新该预算与其理由。
+- 变更文件：`.github/workflows/release.yml`、`tests/workflows.test.ts`、`docs/release-checklist.md`、`docs/zh/release-checklist.md`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：`tests/workflows.test.ts` — `keeps enough published-consumer retry budget for npm propagation`，断言两个 env 值为正数且总等待不低于 5 分钟下限。mutation check：把 attempts 回退为 24（总 180 s）后该测试以 "only waits 180s; keep at least a 5-minute ceiling" 失败，恢复后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/workflows.test.ts`（5/5）、`pnpm check`（35 files，730/730）、`pnpm lint`、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整 CI 等待预算与文档，不改变运行时行为、public export 或线协议；最坏情况是一个真正缺失的版本需要 6 分钟才失败。回滚 = revert 该提交并恢复 24 × 5 s。
+- 下一项：继续 lifecycle/adapter 异步回调隔离审计；评估 `verify:published` 是否应改为先轮询 `npm view` 再取 tarball 以缩短正常路径等待。
+- 更新时间：2026-09-16。
+
 ## 0.20.89 RELEASED (2026-09-16)
 
 - 状态：已发布。版本 **0.20.89** 已合并到 `origin/main`，tag 为 `v0.20.89`；npm `latest` 指向该版本，GitHub Release、Release workflow 与已发布包消费者 smoke test 均通过。

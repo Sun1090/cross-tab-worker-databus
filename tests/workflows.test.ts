@@ -74,4 +74,26 @@ describe('workflow files', () => {
     const workflow = readWorkflow('release.yml');
     expect(workflow, 'release.yml must lint before publishing').toMatch(/run:\s*pnpm lint/);
   });
+
+  it('keeps enough published-consumer retry budget for npm propagation', () => {
+    // The 0.20.89 tag run published successfully and then failed the blocking
+    // `verify:published` gate because `npm pack` still returned ETARGET for the
+    // entire old 24 x 5 s (2 min) budget. Registry lag must not turn a good
+    // release red, so pin a floor on the total wait and on each number being
+    // positive. A genuinely missing package still exhausts the budget.
+    const workflow = readWorkflow('release.yml');
+    const attempts = Number(
+      /PUBLISHED_VERIFY_ATTEMPTS:\s*(\d+)/.exec(workflow)?.[1]
+    );
+    const delayMs = Number(
+      /PUBLISHED_VERIFY_DELAY_MS:\s*(\d+)/.exec(workflow)?.[1]
+    );
+    expect(Number.isSafeInteger(attempts) && attempts > 0, 'PUBLISHED_VERIFY_ATTEMPTS must be a positive integer').toBe(true);
+    expect(Number.isFinite(delayMs) && delayMs > 0, 'PUBLISHED_VERIFY_DELAY_MS must be a positive number').toBe(true);
+    const totalMs = attempts * delayMs;
+    expect(
+      totalMs,
+      `release.yml: the published-consumer gate only waits ${totalMs / 1000}s; keep at least a 5-minute ceiling so npm CDN lag cannot fail a good release`
+    ).toBeGreaterThanOrEqual(5 * 60 * 1000);
+  });
 });

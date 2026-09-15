@@ -112,8 +112,14 @@ jobs:
         id: verify_published
         env:
           PUBLISHED_VERSION: ${{ env.RELEASE_TAG }}
-          PUBLISHED_VERIFY_ATTEMPTS: 24
-          PUBLISHED_VERIFY_DELAY_MS: 5000
+          # npm's CDN can serve version metadata before the tarball is fetchable
+          # from every edge. The 0.20.89 run published successfully and then
+          # still failed this blocking gate: `npm pack <name>@<version>` kept
+          # returning ETARGET for the whole old 24 x 5 s (2 min) budget. The
+          # budget is now 48 x 7.5 s (6 min) so registry lag cannot turn a good
+          # release red, while a genuinely missing package still exhausts it.
+          PUBLISHED_VERIFY_ATTEMPTS: 48
+          PUBLISHED_VERIFY_DELAY_MS: 7500
         run: pnpm verify:published
 
       - name: Record release verification context
