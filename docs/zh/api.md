@@ -301,7 +301,7 @@ trace: {
 stop(): Promise<void>
 ```
 
-永久销毁当前实例：清理 handler、集群注册、路由、Worker 和 transport。若 transport open/reopen 仍在收敛，`stop()` 会等待它结束并使该结果失效，确保它不会在 stop 后变为 ready。普通页面隐藏和恢复不需要调用。
+永久销毁当前实例：清理 handler、集群注册、路由、Worker 和 transport。若 transport open/reopen 仍在收敛，`stop()` 会等待它结束并使该结果失效，确保它不会在 stop 后变为 ready。普通页面隐藏和恢复不需要调用。teardown 对故障容错：即使 transport 自身的 `stop()` reject（或同步抛错），`stop()` 仍会在实例销毁完成后 resolve，并通过 `onError` 与统一的 `lastFailure` 记录上报该失败，而不是让 `stop()` 变成 rejected；因此 React / Vue adapter 中 fire-and-forget 的卸载路径不会产生 unhandled rejection。实例之后仍可重新 start。
 
 ## `DataBusTransport<TConfig, TData>`
 

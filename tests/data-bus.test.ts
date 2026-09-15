@@ -1455,6 +1455,45 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('resolves stop() and reports through onError when the transport stop rejects', async () => {
+    // The React/Vue adapters tear the bus down with a fire-and-forget
+    // `void bus.stop()`. A transport whose stop() rejects must therefore not
+    // reject the shared stop promise, or every unmount could surface an
+    // unhandled rejection even though the bus is fully torn down. The failure
+    // is routed through the same ledger/onError channel that suspendTransport()
+    // and createStopPromise() already use.
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-failure' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-failure',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+    transport.stopShouldFail = true;
+
+    await expect(bus.stop()).resolves.toBeUndefined();
+    expect(transport.stopCalls).toBe(1);
+    expect(errors.map(String).some(message => message.includes('transport stop failed'))).toBe(true);
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: false,
+      state: 'stopped',
+      lastFailure: { source: 'transport', message: 'transport stop failed' },
+      transport: { ready: false }
+    });
+
+    // A failed teardown must still leave the instance restartable.
+    transport.stopShouldFail = false;
+    await bus.start({});
+    await expect(bus.ready()).resolves.toBeUndefined();
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
   it('waits for an async transport stop before automatic recovery reopens', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

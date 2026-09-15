@@ -303,7 +303,7 @@ Low-frequency event types include `lifecycle`, `status`, `subscription`, `coordi
 stop(): Promise<void>
 ```
 
-Permanently destroys the current instance: cleans up handlers, cluster registration, routes, Workers, and transport. If a transport open or reopen is still settling, `stop()` waits for it and invalidates its result so it cannot become ready after the stop. Normal page hide and restore do not require calling this method.
+Permanently destroys the current instance: cleans up handlers, cluster registration, routes, Workers, and transport. If a transport open or reopen is still settling, `stop()` waits for it and invalidates its result so it cannot become ready after the stop. Normal page hide and restore do not require calling this method. Teardown is fault-tolerant: if the transport's own `stop()` rejects (or throws), `stop()` still resolves once the bus is destroyed and reports the failure through `onError` and the unified `lastFailure` record instead of rejecting, so the fire-and-forget unmount path in the React and Vue adapters cannot produce an unhandled rejection. The instance remains restartable afterwards.
 
 ## `DataBusTransport<TConfig, TData>`
 

@@ -193,6 +193,8 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   startShouldFail = false;
   /** When set, stop() waits for this promise before completing. */
   stopGate?: Promise<void>;
+  /** When true, stop() returns a rejected promise instead of completing. */
+  stopShouldFail = false;
   /** Only assigned when the transport is constructed with batch support, so
    * consumers see the same `typeof transport.publishBatch === 'function'`
    * distinction real batch-capable transports present. */
@@ -245,6 +247,7 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     this.stopCalls += 1;
     this.handlers = null;
     this.subscribed.clear();
+    if (this.stopShouldFail) return Promise.reject(new Error('transport stop failed'));
     if (this.stopGate) return this.stopGate;
   }
 
