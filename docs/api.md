@@ -68,6 +68,8 @@ Waits for the current transport's `start` to complete. The Promise rejects when 
 
 While an explicit `stop()` is settling, `ready()` rejects unless a `start()` has queued a restart behind that stop. It never resolves against a transport that is already being torn down. Wait for `stop()` to settle, then call `start()` before awaiting `ready()` again.
 
+If a later `stop()` cancels that queued restart, the queued `start()` Promise still resolves without opening a transport, but `ready()` rejects with a lifecycle error rather than reporting a stopped bus as ready.
+
 If that queued restart fails during transport startup, `ready()` rejects with the underlying startup error even when no `initialConfig` was supplied. The failure is retained for explicit recovery rather than being replaced by the generic missing-configuration error.
 
 When no `initialConfig` is provided and `start(config)` has not been called, `ready()` returns a rejected Promise instead of throwing synchronously, so callers can attach `.catch` and decide whether to start explicitly.

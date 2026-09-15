@@ -10,6 +10,35 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 canceled restart readiness rejection (2026-09-16)
+
+- Status: implementation complete on `feat/queued-restart-failure-cleanup`;
+  atomic code commit `385d82e` (`fix(data-bus): reject readiness for canceled
+  restarts`).
+- Completed content: `start()` intentionally resolves when a later `stop()`
+  cancels a queued restart without opening a transport, but `ready()` returned
+  that same promise and therefore reported a stopped bus as ready. `ready()`
+  now uses a lazy, cancellation-aware readiness view keyed by the queued
+  restart token: successful queued starts resolve normally, startup failures
+  still reject with the underlying error, and canceled intents reject with a
+  clear lifecycle error while `start()` retains its documented behavior.
+  Concurrent `ready()` calls for the same queued intent share the readiness
+  promise.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`, `docs/progress.md`.
+- Verification: the new regression failed before the fix (readiness resolved
+  after the queued restart was canceled) and passes after;
+  `tests/data-bus.test.ts` 121/121; `pnpm test` 686/686 (34 files);
+  `pnpm typecheck`; `pnpm build`; `pnpm lint`; `git diff --check`.
+- Blockers: none. No schema migration, public API shape change, or version bump.
+- Risk / rollback: callers that observed `ready()` resolving after a canceled
+  restart now receive a rejection and must call `start()` again after the stop
+  settles. `start()` semantics are unchanged. Roll back with `git revert
+  385d82e` plus the documentation commit.
+- Next: continue the lifecycle-contract audit around readiness and explicit
+  stop/restart combinations, prioritizing reproducible failing sequences.
+
 ## 0.20.86 failed queued-restart error retention (2026-09-16)
 
 - Status: implementation complete on `feat/queued-restart-failure-cleanup`;

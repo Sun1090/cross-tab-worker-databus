@@ -68,6 +68,8 @@ ready(): Promise<void>
 
 显式 `stop()` 尚未 settle 时，`ready()` 会 reject，除非此前已有 `start()` 在该 stop 之后排队重启；它绝不会针对正在拆除的 transport 报告 ready。调用方应等待 `stop()` settle，再调用 `start()` 后重新 await `ready()`。
 
+若后续 `stop()` 取消了该排队重启，排队 `start()` Promise 仍按既定语义 resolve 且不会打开 transport，但 `ready()` 会以生命周期错误 reject，而不会把已停止的 bus 报告为 ready。
+
 若该排队重启在 transport 启动阶段失败，即使未传入 `initialConfig`，`ready()` 也会以底层启动错误 reject。该失败会保留给显式恢复，而不会被通用的「缺少配置」错误掩盖。
 
 未传入 `initialConfig` 且未显式调用 `start(config)` 时，`ready()` 返回 rejected Promise 而不是同步抛出，调用方可以统一通过 `.catch` 处理并决定是否显式启动。
