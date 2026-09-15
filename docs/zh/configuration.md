@@ -54,7 +54,7 @@ const bus = new CrossTabDataBus({
 
 `replay.retentionSweepMs` 可选地按周期触发同一清理逻辑。它适合安静 topic 的 durable 旧记录也需要过期的场景；需要同时配置 `retentionMs` 和实现 `clearBefore()` 的持久化适配器。定时器遵循页面可见性和生命周期切换，默认关闭。
 
-`replay.persistenceRetry` 可选地控制瞬时持久化失败的恢复。`maxAttempts` 是总尝试次数（默认 `1`），`backoffMs` 是首次重试前的延迟（默认 `50`）；延迟会指数增长并封顶。最终失败仍沿用现有 `onError` 和 reliability 行为。
+`replay.persistenceRetry` 可选地控制瞬时持久化失败的恢复。`maxAttempts` 是总尝试次数（默认 `1`），`backoffMs` 是首次重试前的延迟（默认 `50`）；延迟会指数增长并封顶。最终失败仍沿用现有 `onError` 和 reliability 行为。bus 挂起或停止时仍排队在微任务中的批量 flush 会随其生命周期代际一起丢弃，不会在 teardown 后启动 durable append。
 
 ### Replay 选项
 

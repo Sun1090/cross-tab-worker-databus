@@ -44,7 +44,7 @@
 | 不变量 | 领域 | 被回归固化的保证 |
 |---|---|---|
 | 交接 ACK 有效性 | 协调 | 仅当 route 仍指向接收方、释放方匹配 `handoffFromWorkerId`、且 ACK 代数 ≥ 存储 route 代数时才接受 `ROUTE_RELEASED`——更早交接轮次的过期 ACK（如 a↔b 乒乓）会被丢弃 |
-| 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目）；已清历史不会被进行中的 flush 重新追加 |
+| 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 丢弃整个待写批次）；已清或已停止会话的历史不会被进行中的 flush 重新追加 |
 | 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）而不阻塞其他排队键；队列清空或 `clear()` 取消后退避重置 |
 | 传输恢复预算 | 生命周期 | 自动恢复由冷却间隔节流、以 `recovery.maxAttempts` 为界，预算耗尽时报 `exhausted`；成功重开后重置尝试计数与 exhausted，断线传输上的显式 `subscribe` 仍可手动恢复 |
 | BFCache 挂起 | 生命周期 | 隐藏页面停掉传输并静默取消进行中的持久化重试；pageshow 重开传输并每个周期恰好一次重建订阅 |

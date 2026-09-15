@@ -267,6 +267,10 @@ export class ReplayManager<TData = unknown> {
    * or stopped bus does not keep hammering the store) and stop the sweep. */
   suspend(): void {
     this.retryGeneration += 1;
+    this.pendingReplayPersistence = [];
+    // A flush that has not reached persistence yet belongs to the session being
+    // suspended. Dropping it prevents the queued microtask from starting under
+    // the next lifecycle generation and resurrecting stopped-session history.
     // A cutoff queued behind an in-flight cleanup belongs to the session that
     // is being suspended. Drop it so the loop cannot issue another transaction
     // after teardown has started.
