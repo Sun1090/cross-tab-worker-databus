@@ -210,7 +210,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`.
+`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. Calling `start()` again while degraded keeps the cluster, subscriptions, and replay buffers intact, resets the failure/recovery ledger, and reopens the transport; subscribe and publish also trigger the same reopen path. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`.
 
 ### `getRecoveryStats()` / `getPersistenceStats()`
 
