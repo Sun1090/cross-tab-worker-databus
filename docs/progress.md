@@ -1,3 +1,17 @@
+## 0.20.89 RELEASED (2026-09-16)
+
+- 状态：已发布。版本 **0.20.89** 已合并到 `origin/main`，tag 为 `v0.20.89`；npm `latest` 指向该版本，GitHub Release、Release workflow 与已发布包消费者 smoke test 均通过。
+- 分支 / PR：`feat/lifecycle-stop-resume-race` → PR #52，rebase merge 并删除远端分支；release commit `8f33fa7`，合并后 main commit `77d5d4c`，tag 指向 `77d5d4c3b5ee41ebc4d31c9b7431faff1340c9fd`。
+- 完成内容：版本从 0.20.87 线累积后升至 0.20.89；`[Unreleased]` 固化为 `## [0.20.89] - 2026-09-16`；中英文 roadmap 记录 8 项异步回调隔离修复（stale stop gate 复用、stopping 期间 health verdict、微任务排队 replay batch、retention cleanup、durable hydration 取消、trace 会话边界、Centrifuge credential/session 回调、WebSocket Blob 帧）与 1_500 交织 lifecycle fuzzer 回归安全网。
+- 变更文件（release commit）：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 发布结果：GitHub Release <https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.89>；tag 首次触发的 Release workflow <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35031801806> 在 `Verify published npm consumers` 步骤失败，`workflow_dispatch` 重跑 <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35032115955> 全绿；npm 确认 `0.20.89` 为 `latest`，integrity 为 `sha512-PPq/XeH+kIN+szw8blm2gwXRLsbh3HplzOngpc+RP4+h1+xVAvP7qfBWSM5Pv8L5yE9d8hgPQRky79tA37X1Bg==`。
+- 验证命令与结果：`pnpm check`（35 files，729/729）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.43% branches / 96.51% functions / 98.46% lines）、`pnpm bench`（25/25）、`pnpm bench:browser` ×2 + `pnpm bench:compare --fail-above-pct 50`（OK）、`pnpm test:e2e`（27/27）、`pnpm verify:pack`、`pnpm verify:compat`、`npm pack --dry-run`（109 files）、`pnpm audit --registry=https://registry.npmjs.org`（clean）、`git diff --check` 均通过；发布后 `PUBLISHED_VERSION=0.20.89 pnpm verify:published`（ESM + CJS consumers verified）。
+- 阻塞：无。
+- 风险 / 回滚：纯 patch 发布，无 public export、存储 schema/键或线协议变更，`verify:compat` 确认向后兼容。回滚 = 撤回 tag 并 revert release commit；npm 已发布版本不可覆盖，只能 `npm deprecate cross-tab-worker-databus@0.20.89` 或补发下一个 patch。
+- 已知问题：`verify:published` 的默认 24 次 × 5 s（120 s）npm CDN 传播预算在本次真实触发不足——publish 已成功但 `npm pack` 在 120 s 内仍报 `ETARGET`。该门禁本身正确，仅传播等待过短，需在下一开发线加固。
+- 下一项：进入 0.20.90 开发线——加固 Release 工作流的已发布包消费者传播预算，然后继续 lifecycle/adapter 异步隔离审计与 1.0.0 稳定性冻结准备。
+- 更新时间：2026-09-16。
+
 ## 0.20.89 RELEASE_FREEZE (2026-09-16)
 
 - 状态：发布前置冻结完成，待提交 → 推送分支 → PR → rebase merge → 打 tag → 触发 Release 工作流。
