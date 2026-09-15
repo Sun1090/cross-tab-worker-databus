@@ -317,4 +317,43 @@ describe('useCrossTabHealth edge cases', () => {
     vi.useRealTimers();
   });
 });
+
+  it('keeps unmount fire-and-forget when the transport close throws', async () => {
+    // The hook cleanup is `void instance.stop()`. A transport whose close()
+    // throws must be reported through the bus instead of turning every unmount
+    // into an unhandled rejection; the bus is still fully torn down either way.
+    const sockets: FakeWebSocket[] = [];
+    let created: ReturnType<typeof createWebSocketDataBus> | null = null;
+    function Demo() {
+      const bus = useCrossTabDataBus(() => {
+        created = createWebSocketDataBus({
+          connection: {
+            url: 'wss://example.test/ws',
+            webSocketFactory: () => {
+              const socket = new FakeWebSocket();
+              sockets.push(socket);
+              return socket;
+            }
+          }
+        });
+        return created;
+      });
+      return <span data-testid="status">{bus ? 'mounted' : 'idle'}</span>;
+    }
+
+    const view = render(<Demo />);
+    await waitFor(() => expect(sockets.length).toBe(1));
+    sockets[0]!.open();
+    sockets[0]!.close = () => {
+      throw new Error('close boom');
+    };
+
+    view.unmount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(created!.getHealthSummary().state).toBe('stopped'));
+    // The failure is observable through the unified ledger rather than lost.
+    await waitFor(() => expect(created!.getHealthSummary().lastFailure?.message).toBe('close boom'));
+  });
 });

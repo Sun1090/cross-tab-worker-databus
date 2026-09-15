@@ -962,6 +962,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       const pendingStop = this.pendingStop;
       if (pendingStop) await pendingStop.catch(() => undefined);
       else await this.transport.stop();
+    } catch (error) {
+      // A transport whose stop() rejects must not reject stop() itself: the
+      // finally below completes the teardown either way, concurrent/repeated
+      // callers share this one promise, and the React/Vue adapters legitimately
+      // fire-and-forget `void bus.stop()`, where a rejection would surface as
+      // an unhandled rejection. Route the failure through the same
+      // ledger/onError channel suspendTransport() and createStopPromise() use.
+      this.reportError(error);
     } finally {
       this.transportSubscribedTopics.clear();
       this.resetDedup();
