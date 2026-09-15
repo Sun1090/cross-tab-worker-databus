@@ -576,11 +576,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (!this.pendingStop) {
           this.pendingStop = this.createStopPromise();
         }
-        this.updateStatus(WORKER_STATUS.ERROR);
-        this.reportError(error);
-        this.lastError = error;
-        this.lastErrorAt = this.now();
         this.transportReady = false;
+        this.updateStatus(WORKER_STATUS.ERROR);
+        // reportError() records lastError/lastErrorAt for transport failures;
+        // sampling the clock again here would give the recovery ledger and the
+        // unified lastFailure record different timestamps for one failure.
+        this.reportError(error);
         if (stopClusterOnFailure) {
           this.stopping = true;
           this.cluster.stop();

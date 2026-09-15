@@ -1,5 +1,53 @@
 # Development Progress
 
+## 0.20.87 transport failure ledger stamping (2026-09-16)
+
+- Status: implementation, regression tests, and docs complete; PR pending CI.
+- Completed content: a failed transport open sampled the injected clock twice for
+  one failure, so `getRecoveryStats().errorAt` and `getHealthSummary()
+  .lastFailure.at` could describe the same failure with two different
+  timestamps. The open-failure path now stamps the failure once (through
+  `reportError()`) and clears `transportReady` before notifying status/error
+  handlers, so a health snapshot taken inside an error callback can never report
+  `transport.ready: true` for a transport whose open just failed. A page-hide
+  round trip over a still-pending open is now pinned end to end: the superseded
+  open settling must neither abort the queued resume nor clear the ready state
+  the resume establishes.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/progress.md`.
+- Verification: the ledger-stamping regression fails against the previous code
+  (`expected 5003 to be 5002` with an advancing clock) and passes after the fix;
+  `pnpm exec vitest run tests/data-bus.test.ts` 127/127.
+- Blockers: none. No storage-key, schema, or public API shape change.
+- Risk / rollback: only diagnostic timestamp equality and the ordering of the
+  internal ready flag inside the failure block changed; readiness verdicts and
+  recovery pacing are untouched. Revert the fix commit to restore the previous
+  behavior.
+- Audited and intentionally unchanged (2026-09-16):
+  - The unconditional `transportReady = false` at the top of `openTransport()`
+    cannot clobber a newer lifecycle. `start()` assigns it synchronously under a
+    freshly incremented epoch, and every reopen is *chained* after the previous
+    `startPromise`/`pendingStop`, so a newer open can never complete before an
+    older (superseded) open body begins. The new page-hide/page-show regression
+    exercises the interleaving (async start gate + async stop gate) and confirms
+    the newer lifecycle ends `state: 'healthy'`, `transport.ready: true`. The
+    epoch guard inside the chain remains the load-bearing protection.
+  - `ready()` still resolves while a runtime transport `error`/`disconnected`
+    status is being auto-recovered (`transportReady` stays set until the
+    recovery open begins). This is deliberate: the documented contract is that
+    readiness tracks the installed transport's open, not protocol connectivity
+    (`ready()` is explicitly "not equivalent to the server being connected"),
+    and the recovery may swap in a healthy transport without a lifecycle
+    transition. Clearing the flag on `error` would change `runTransport()` from
+    "send to the current transport" to "kick an immediate reopen", bypassing the
+    recovery cooldown and risking a retry loop driven by caller traffic. A
+    narrow fix (defer transport operations to the scheduled recovery without
+    reopening) is a separate design decision, not a drop-in change.
+- Next: continue the lifecycle audit with stop-time boundary semantics
+  (`transport.stop()` rejection during an explicit `stop()`, repeated stop, and
+  queued restart interaction), then React/Vue adapter parity. Updated:
+  2026-09-16.
+
 ## 0.20.87 runtime transport recovery ledger (2026-09-16)
 
 - Status: implementation, tests, docs, and CI complete; merged to `main` as
