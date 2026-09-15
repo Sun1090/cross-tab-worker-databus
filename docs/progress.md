@@ -1,5 +1,39 @@
 # Development Progress
 
+## 0.20.87 runtime transport recovery ledger (2026-09-16)
+
+- Status: implementation, tests, docs, and CI complete; merged to `main` as
+  `4417953` (`fix(data-bus): record runtime transport errors in the recovery
+  ledger`) via **PR #34** (`feat/recovery-ledger-runtime-errors`, rebase-merged,
+  branch deleted).
+- Completed content: transport failures reported through runtime `onError` now
+  update both the unified `lastFailure` record and the transport recovery
+  ledger. Previously a successful open followed by a runtime failure could make
+  one `getHealthSummary()` snapshot report `state: 'recovering'` together with
+  `recovery.hasError: false`, `errorMessage: null`, and `errorAt: null`.
+  Persistence and dispatch failures intentionally remain outside the transport
+  recovery ledger; they stay visible through `lastFailure` and, where
+  applicable, `getPersistenceStats()`.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `tests/fakes.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/api.md`,
+  `docs/zh/api.md`.
+- Verification: the focused regression failed before the fix
+  (`recovery.hasError: false`, `errorMessage: null`) and passes after it; a
+  companion regression proves handler/dispatch failures do not pollute the
+  transport ledger. `pnpm test` 689/689 across 34 files, `pnpm typecheck`,
+  `pnpm lint`, `pnpm build`, `pnpm verify:compat`, `pnpm verify:pack`,
+  `pnpm test:coverage` 97.17% statements / 92.32% branches / 96.57% functions /
+  98.64% lines, and `git diff --check` all pass. PR #34 CI: `verify`, `browser`,
+  `analyze`, and CodeQL all passed.
+- Blockers: none. No schema migration, storage-key change, or public API shape
+  change.
+- Risk / rollback: consumers that inspect both health ledgers now see the same
+  transport failure consistently; non-transport failures retain prior behavior.
+  Roll back with `git revert 4417953`.
+- Next: audit stale asynchronous transport opens so an older open cannot clear
+  the ready state of a newer lifecycle, then continue React/Vue adapter parity
+  and stop-time lifecycle boundary checks. Updated: 2026-09-16.
+
 ## 0.20.87 BFCache readiness rejection (2026-09-16)
 
 - Status: implementation, docs, and verification complete; merged to `main` as
