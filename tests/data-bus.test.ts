@@ -1155,6 +1155,88 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('cancels a queued restart when stop() arrives before it can run', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-cancels-queued-start' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-cancels-queued-start',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    // A resume queues a fresh start behind the in-flight stop...
+    const restarting = bus.start({});
+    await Promise.resolve();
+    expect(transport.startCalls).toBe(1);
+
+    // ...but a subsequent stop() is the latest lifecycle intent and must
+    // cancel the queued restart instead of letting it reopen afterwards.
+    const canceling = bus.stop();
+    releaseStop();
+    await stopping;
+    await canceling;
+    await restarting;
+    expect(transport.startCalls).toBe(1);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: false,
+      state: 'stopped',
+      transport: { ready: false }
+    });
+  });
+
+  it('lets a start() issued after a canceling stop() queue a fresh restart', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'restart-after-cancel' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'restart-after-cancel',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    // stop -> start -> stop -> start: the final intent is to be running, so the
+    // canceled queue slot must be reusable by the second start().
+    const canceledRestart = bus.start({});
+    expect(bus.stop()).toBe(stopping);
+    const finalRestart = bus.start({});
+    expect(finalRestart).not.toBe(canceledRestart);
+    await Promise.resolve();
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await stopping;
+    await canceledRestart;
+    await finalRestart;
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ started: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
+
+
+
   it('keeps a queued resume owned by the bus when a superseded initial open fails', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-open-resume' });
