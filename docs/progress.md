@@ -10,16 +10,18 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
-## 0.20.86 RELEASE_FREEZE (2026-09-16)
+## 0.20.86 RELEASED (2026-09-16)
 
-- Status: release candidate prepared on `feat/0.20.86-release`; patch release from merged PR #29 lifecycle fixes plus the 0.20.86 replay/lifecycle hardening already on `main`.
+- Status: RELEASED. Version **0.20.86** is merged to `origin/main`, tagged, and published to npm as `latest`; the tag-triggered Release workflow and published-consumer verification both passed.
+- Branch/PR: `feat/0.20.86-release` → **PR #30**, merged with `--rebase` (branch deleted); base `79131eb` → release commit `4863640`.
 - Completed content: version bumped to 0.20.86; `[Unreleased]` promoted to `[0.20.86] - 2026-09-16`; English and Chinese roadmap sections summarize the delivered lifecycle, replay, and documentation work.
 - Release scope: queued-restart start/stop/readiness correctness and stop-time operation errors; replay transaction-abort settlement and unified age pruning; explicit post-exhaustion recovery; public replay/dedup option documentation plus property invariants.
 - Migration: none. No public export removal or storage schema change; `verify:compat` confirms the v0.20.85 public surface is preserved.
 - Verification: `pnpm check` (686/686, 34 files), lint clean, coverage 97.16% statements / 92.30% branches / 96.57% functions / 98.64% lines, `pnpm bench` 25/25, E2E 27/27, two browser benchmark runs with `bench:compare --fail-above-pct 50` green (largest observed delta +29.4%), compat from v0.20.85 green, packed ESM/CJS consumer green, public-registry audit clean, `npm pack --dry-run` 109 files (no `docs/progress.md`), and `git diff --check` clean.
+- Release result: tag `v0.20.86`; GitHub release <https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.86>; Release workflow <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000351855> passed; npm verified `0.20.86` with `latest` pointing to it. Post-merge CI run <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000325037> and CodeQL run <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000325051> passed.
 - Blockers: none.
-- Risk / rollback: roll back the release branch before merge, or revert the release commit after merge; npm publication can only be superseded by the next patch because versions are immutable.
-- Next: commit and push the release branch, open and verify the release PR, merge with rebase, tag `v0.20.86`, monitor the Release workflow, and record the outcome.
+- Risk / rollback: npm versions are immutable. If a defect is found, installers can pin `0.20.85`, then publish a corrective `0.20.87` patch; a non-published regression can be reverted with `git revert 4863640`. Do not delete or move the published tag.
+- Next milestone: **0.20.87** — continue the lifecycle/observability and adapter-parity audit, starting with the next reproducible contract gap or uncovered failure transition. Updated: 2026-09-16.
 
 ## 0.20.86 canceled restart readiness rejection (2026-09-16)
 
