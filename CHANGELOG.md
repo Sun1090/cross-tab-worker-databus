@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.89] - 2026-09-16
+
 ### Fixed
 - `getHealthSummary()` no longer reports `healthy` while an explicit `stop()` is still tearing down. The transport can keep reporting `connected` until its asynchronous `stop()` settles, so the verdict previously contradicted the stopping bus's own behavior: `publish()`/`subscribe()` were already routed through `onError`, and `ready()` already rejected. An in-flight stop is now surfaced as `state: 'stopped'` with `healthy: false`, matching the other lifecycle APIs; a restart queued behind that stop is reported as `starting` once it owns the lifecycle.
 - A settled `stop()` gate can no longer swallow a subsequent teardown. `stop()` reused `stopPromise` whenever it was non-null, but that field is cleared in a microtask *after* `performStop()` has already finished and flipped `stopping` back to false. A `start()`/`stop()` issued inside that window therefore received the old settled promise, skipped teardown, and left the restarted bus running while `stop()` resolved. The in-flight gate is now reused only while `stopping` is true, so a stale gate falls through to a fresh stop.

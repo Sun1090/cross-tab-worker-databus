@@ -1,10 +1,10 @@
 # Roadmap
 
-0.20.88 is released. 0.20.89 is the current development line, continuing the lifecycle/readiness and adapter-parity audit before a 1.0.0 stability freeze.
+0.20.89 is released. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
-## 0.20.89 in progress
+## 0.20.89 delivered scope
 
-Not yet released. The line continues the async-callback isolation audit: every fix below binds a callback, queued microtask, or promise continuation to the lifecycle generation that created it, so a superseded session cannot write into its replacement.
+The line continues the async-callback isolation audit: every fix below binds a callback, queued microtask, or promise continuation to the lifecycle generation that created it, so a superseded session cannot write into its replacement.
 
 - Async teardown and restart boundaries: a settled `stop()` gate can no longer swallow a later teardown (`stop → start → stop` now ends stopped), and `getHealthSummary()` reports `state: 'stopped'` for a stopping bus instead of contradicting the `publish()` / `subscribe()` / `ready()` rejections it is already issuing.
 - Replay persistence isolation: microtask-queued batch flushes and a queued retention cleanup are discarded once `suspend()` / `stop()` supersedes their generation, so stopped-session history cannot be appended to the durable store.

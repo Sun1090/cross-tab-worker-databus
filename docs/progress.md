@@ -1,3 +1,14 @@
+## 0.20.89 RELEASE_FREEZE (2026-09-16)
+
+- 状态：发布前置冻结完成，待提交 → 推送分支 → PR → rebase merge → 打 tag → 触发 Release 工作流。
+- 分支：`feat/lifecycle-stop-resume-race`（基线 `origin/main` = `ea80d08`，ahead 17）。
+- 完成内容：`package.json` 0.20.88 → 0.20.89；将 `[Unreleased]` 固化为 `## [0.20.89] - 2026-09-16` 并保留新的空 `[Unreleased]`；中英文 roadmap 把「0.20.89 in progress / 进行中」提升为「delivered scope / 已完成范围」。本 patch 发布汇总 8 项异步回调隔离修复（stale stop gate 复用、stopping 期间 health verdict、微任务排队 replay batch、retention cleanup、durable hydration 取消、trace 会话边界、Centrifuge credential/session 回调、WebSocket Blob 帧）以及 1_500 交织的 lifecycle fuzzer 回归安全网。
+- 变更文件：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 验证命令与结果：`pnpm check`（35 files，729/729）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.43% branches / 96.51% functions / 98.46% lines）、`pnpm bench`（25/25）、`pnpm bench:browser` ×2 + `pnpm bench:compare --fail-above-pct 50`（OK：无指标回归超过 50%）、`pnpm test:e2e`（27/27）、`pnpm verify:pack`（packed tarball 的 ESM + CJS root 及全部 subpath 可导入）、`pnpm verify:compat`（0.20.89 preserves public exports and type metadata from v0.20.88）、`npm pack --dry-run --json`（109 files / 880 kB packed，仅含预期产物）、`pnpm audit --registry=https://registry.npmjs.org`（No known vulnerabilities）、`git diff --check` 均通过。
+- 阻塞：无。本地 `npm whoami` 无凭证，但 0.20.88 已由 Release workflow 用仓库 `NPM_TOKEN` 成功发布，因此发布路径不依赖本地 npm 登录。
+- 风险 / 回滚：纯 patch 发布，无 public export、存储 schema/键或线协议变更，`verify:compat` 已确认向后兼容。回滚方式为 revert release commit 并删除/移动 tag；已发布到 npm 的版本不可覆盖，只能 `npm deprecate` 或补发下一个 patch。
+- 下一项：提交 release commit，推送分支，创建并 rebase-merge PR；在合并后的 main commit 上打 `v0.20.89` tag 触发 Release 工作流，监控 npm 发布与 GitHub Release，运行 `pnpm verify:published` smoke test，然后回填 `0.20.89 RELEASED` 记录并进入下一 milestone。
+
 ## 0.20.89 stale stop gate reuse (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
