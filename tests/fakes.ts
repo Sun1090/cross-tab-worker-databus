@@ -260,4 +260,9 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   setStatus(status: (typeof WORKER_STATUS)[keyof typeof WORKER_STATUS]): void {
     this.handlers?.onStatus(status);
   }
+
+  /** Report an asynchronous runtime failure (as opposed to start() failing). */
+  emitError(error: unknown): void {
+    this.handlers?.onError(error);
+  }
 }

@@ -232,7 +232,7 @@ getRecoveryStats(): { attempt; exhausted; maxAttempts; hasError; errorMessage; e
 getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
 ```
 
-`recovery.generation` increments on every successful transport open (initial start and each recovery); `lastSuccessAt` is the timestamp of that open (`null` before the first one). Persistence counters cover the optional replay persistence backend only.
+`recovery.generation` increments on every successful transport open (initial start and each recovery); `lastSuccessAt` is the timestamp of that open (`null` before the first one). `recovery.hasError` / `errorMessage` / `errorAt` describe the most recent retained *transport* failure — from a transport open or a runtime `onError` — and share the lifetime of the unified `lastFailure` ledger: a successful recovery keeps the last failure visible, and only an explicit `start()` clears it. Non-transport failures (`persistence`, `dispatch`) never flip the recovery ledger; they stay visible through `lastFailure` (and `getPersistenceStats()` for the replay backend). Persistence counters cover the optional replay persistence backend only.
 
 ### `getDiagnostics()`
 

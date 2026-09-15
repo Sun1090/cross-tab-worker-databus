@@ -788,11 +788,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return this.status;
   }
 
-  /** Return the current automatic transport recovery state. `hasError` means a transport error is currently retained. */
   /** Return the current automatic transport recovery state plus diagnostics.
-   * `generation` increments on every successful transport open (initial start
-   * and every recovery); `lastSuccessAt` is the timestamp of the most recent
-   * successful open, or `null` until the transport reaches `ready`. */
+   * `hasError`/`errorMessage`/`errorAt` describe the most recent retained
+   * *transport* failure — from a transport open or a runtime `onError`. They
+   * share the lifetime of the unified `lastFailure` ledger: a successful
+   * recovery keeps the last failure visible, and only an explicit `start()`
+   * clears it. `generation` increments on every successful transport open
+   * (initial start and every recovery); `lastSuccessAt` is the timestamp of
+   * the most recent successful open, or `null` until the transport reaches
+   * `ready`. */
   getRecoveryStats(): {
     attempt: number;
     exhausted: boolean;
@@ -1073,10 +1077,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   private reportError(error: unknown, source: DataBusFailureSource = FAILURE_SOURCE.TRANSPORT): void {
+    const at = this.now();
+    // Transport failures must land in *both* ledgers. lastFailure is the
+    // unified record exposed by getHealthSummary(); lastError/lastErrorAt are
+    // the transport-failure ledger behind getRecoveryStats().hasError and
+    // ready()'s "surface the last failure" path. Recording only lastFailure
+    // let a single health snapshot report a retained transport failure while
+    // recovery claimed hasError: false / errorMessage: null.
+    if (source === FAILURE_SOURCE.TRANSPORT) {
+      this.lastError = error;
+      this.lastErrorAt = at;
+    }
     this.lastFailure = {
       source,
       message: error instanceof Error ? error.message : String(error),
-      at: this.now()
+      at
     };
     if (source === FAILURE_SOURCE.PERSISTENCE) {
       this.persistenceFailureCount += 1;

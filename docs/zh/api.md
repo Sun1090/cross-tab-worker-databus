@@ -240,7 +240,7 @@ getRecoveryStats(): { attempt; exhausted; maxAttempts; hasError; errorMessage; e
 getPersistenceStats(): { failures; lastFailureAt; lastErrorMessage }
 ```
 
-`recovery.generation` 在每次 transport 成功打开时递增（首次启动与每次恢复）；`lastSuccessAt` 是该次成功的时间戳（首次成功前为 `null`）。持久化计数仅覆盖可选的 replay 持久化后端。
+`recovery.generation` 在每次 transport 成功打开时递增（首次启动与每次恢复）；`lastSuccessAt` 是该次成功的时间戳（首次成功前为 `null`）。`recovery.hasError` / `errorMessage` / `errorAt` 描述最近一次被保留的 **transport** 失败——无论是 transport 打开失败还是运行期 `onError`——并与统一的 `lastFailure` 账本具有相同的生命周期：恢复成功后最后一次失败仍然可见，只有显式 `start()` 会清除它。非 transport 失败（`persistence`、`dispatch`）不会改动 recovery 账本，仍可通过 `lastFailure`（以及 replay 后端的 `getPersistenceStats()`）观察。持久化计数仅覆盖可选的 replay 持久化后端。
 
 ### `getDiagnostics()`
 
