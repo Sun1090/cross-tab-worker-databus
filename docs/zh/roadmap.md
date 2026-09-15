@@ -1,6 +1,13 @@
 # 路线图
 
-0.20.86 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.87 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.87 已完成范围
+
+- transport 恢复与就绪加固：原生 WebSocket 后端现在遵守 `DataBusTransport.start()` 契约（仅在 `open` 后 resolve，握手失败或超过 `connectTimeoutMs` 时 reject），自动恢复会真正创建替代 socket，`getHealthSummary()` 跟随 live transport 状态而不是 `transportReady` 诊断标记。
+- 不再把操作写进已经消失的连接：恢复门会把 `subscribe()` / `publish()` 停放在自动与按需重开之后（包括自动尝试失败但仍保留预算的情况）；在真实连接之后出现的干净 `disconnected` 现在会触发一次按需重开，而不是交给已关闭的 socket；而异步上报连接状态的 worker 型后端仍保有其「尚未连接」窗口，不会被动重开。
+- 生命周期与 `ready()` 边界修复：BFCache 挂起期间 `ready()` 会 reject；transport 自身 `stop()` reject 或抛错时 `stop()` 仍能 resolve；一次打开失败在两个恢复账本中只打一次时间戳；运行期 transport 错误会进入恢复账本；被取代的异步打开不再拆除更新的 suspend/resume 转换。
+- 适配器与工具链：React/Vue `useCrossTabHealth` 在 `intervalMs` 变化时无需重建 bus 即可生效；`vitest` 及其 coverage-v8 provider 升级到 5.0.1 补丁版。
 
 ## 0.20.86 已完成范围
 

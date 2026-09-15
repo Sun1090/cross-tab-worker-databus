@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.86 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.87 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.87 delivered scope
+
+- Transport recovery/readiness hardening: the native WebSocket backend now honors the `DataBusTransport.start()` contract (resolves only after `open`, rejects on a failed handshake or `connectTimeoutMs`), automatic recovery actually creates a replacement socket after a failure, and `getHealthSummary()` follows the live transport status instead of the `transportReady` diagnostic flag.
+- No operation is written to a connection that is gone. A recovery gate parks `subscribe()` / `publish()` through automatic and on-demand reopens (including an automatic attempt that failed but left the budget open), and a clean `disconnected` after a real connection now demands exactly one on-demand reopen instead of being handed to a closed socket — while a worker-style backend that reports the connection asynchronously keeps its pre-connect window unreopened.
+- Lifecycle/`ready()` boundary fixes: `ready()` rejects while the tab is BFCache-suspended, `stop()` resolves even when the transport's own `stop()` rejects or throws, a failed open is stamped once across both recovery ledgers, runtime transport errors land in the recovery ledger, and superseded asynchronous opens can no longer tear down a newer suspend/resume transition.
+- Adapter and toolchain: React/Vue `useCrossTabHealth` apply `intervalMs` changes without recreating the bus, and `vitest` and its coverage-v8 provider moved to the 5.0.1 patch.
 
 ## 0.20.86 delivered scope
 
