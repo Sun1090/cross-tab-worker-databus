@@ -1,3 +1,19 @@
+## 0.20.88 explicit start() resumes paused background resources (2026-09-16)
+
+- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第三项。
+- 分支：`feat/lifecycle-audit-3`（基线 `origin/main` = `c238b48`）。
+- 复现场景：Tab 启用 replay retention sweep（或 trace metrics / dedup expiry sweep）后执行 `pagehide`，不等待 `pageshow`，直接调用 `bus.start({})` 恢复。
+- 现象（修复前）：bus 与 cluster 都能恢复为 `healthy`，transport 也会重新连接，但 `onSuspend()` 在此前已暂停 trace、dedup sweep 与 replay retention sweep；显式 `start()` 只重开了 transport 和 cluster，没有执行 `onResume()` 中的资源恢复，因此 bus 在健康状态下永久不再 flush trace metrics，也不再执行周期性的 dedup/retention 清理。
+- 根因：原生恢复路径 `cluster.handlePageShow()` 会先调用 `handlers.onResume()`，再由 `onResume()` 恢复 trace、dedup 与 replay；显式 `start()` 的挂起快速路径绕过了 cluster 的 pageshow 回调，只手工重开 transport 和调用 `cluster.start()`。
+- 修复：提取 `resumeSuspendedResources()` 作为统一恢复入口，原生 `onResume()` 与显式 `start()` 的挂起分支共同调用，恢复 trace metrics、dedup expiry sweep 与 replay retention sweep；显式路径仍保持先恢复资源、再安装 transport opening、最后恢复 cluster 的顺序。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `resumes replay retention sweeps when an explicit start() leaves BFCache suspension`。修复前 retention sweep 在显式恢复后推进 1000ms 仍为 0 次调用；修复后按 `retentionSweepMs` 恢复。测试同时断言显式恢复发出 `lifecycle/resume` trace 事件。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（137/137）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`pnpm check`（35 files，713/713）、`pnpm lint`、`pnpm test:e2e`（27/27）均通过；`git diff --check` 干净。
+- 阻塞：无。
+- 风险 / 回滚：纯主线程生命周期修复，无 public export / storage schema / 线协议变更。若引入回归，revert 本次 commit 即可。
+- 下一项：继续审计 `start()` / in-flight `startPromise` / `onError` 重试与 `openTransport()` 状态清理边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 explicit start() cluster resume after BFCache (2026-09-16)
 
 - 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第二项。

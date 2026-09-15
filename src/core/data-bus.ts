@@ -368,10 +368,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.suspendTransport();
         },
         onResume: () => {
-          this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
-          this.trace.start();
-          this.startDedupSweep();
-          this.replayManager.start();
+          this.resumeSuspendedResources();
           this.resumeTransport();
         },
         onDiagnostic: event => {
@@ -423,6 +420,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // re-subscription traffic parks behind it instead of hitting the stopped
       // transport; cluster.start() is idempotent and a no-op when not paused.
       const resumingFromSuspend = this.suspended;
+      if (resumingFromSuspend) this.resumeSuspendedResources();
       const opening = this.reopenTransport();
       if (resumingFromSuspend) this.cluster.start();
       return opening;
@@ -1297,6 +1295,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         }
       }
     }
+  }
+
+  /** Resume the resources paused by a pagehide suspension. Both the native
+   * pageshow path and explicit start() must run this so an explicit resume
+   * cannot leave trace metrics and periodic cleanup timers permanently off. */
+  private resumeSuspendedResources(): void {
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
+    this.trace.start();
+    this.startDedupSweep();
+    this.replayManager.start();
   }
 
   /**

@@ -455,6 +455,42 @@ describe('CrossTabDataBus', () => {
     await Promise.all([busA.stop(), busB.stop()]);
   });
 
+  it('resumes replay retention sweeps when an explicit start() leaves BFCache suspension', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'explicit-start-retention' });
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore: vi.fn(async (_timestamp: number) => undefined)
+    };
+    const traceEvents: DataBusTraceEvent[] = [];
+    const bus = new CrossTabDataBus({
+      clusterKey: 'explicit-start-retention',
+      environment: environment.environment,
+      initialConfig: {},
+      replay: { retentionMs: 60_000, retentionSweepMs: 1_000, persistence },
+      trace: { enabled: true, sink: event => traceEvents.push(event) },
+      transport: new FakeTransport<number>()
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    persistence.clearBefore.mockClear();
+
+    environment.pageHide();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(persistence.clearBefore).not.toHaveBeenCalled();
+
+    await bus.start({});
+    await bus.ready();
+    expect(traceEvents.some(event => event.type === 'lifecycle' && event.action === 'resume')).toBe(true);
+    persistence.clearBefore.mockClear();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(persistence.clearBefore).toHaveBeenCalledOnce();
+
+    await bus.stop();
+  });
+
   it('aggregates message metrics at the configured interval without leaking content', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
