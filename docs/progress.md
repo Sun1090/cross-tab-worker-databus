@@ -1,3 +1,14 @@
+## 0.20.87 Vitest patch update and clean-close audit (2026-09-16)
+
+- Status: implementation and verification complete on `feat/vitest-5.0.1`.
+- Completed content: updated `vitest` and `@vitest/coverage-v8` from `5.0.0` to the current `5.0.1` patch release, including the lockfile and transitive Rollup patch refresh. The suite still runs under the pinned package-manager workflow with unchanged coverage floors and no source/API changes.
+- Audited and intentionally unchanged: a WebSocket clean `close` maps to `disconnected`, while automatic DataBus recovery remains scoped to `error`. This is the documented transport contract (`disconnected` means clean close or intentional suspension; `error` is the recoverable runtime failure signal). DataBus-level reopening is transport-agnostic, so treating every `disconnected` as a failure would also force a redundant reopen around Centrifuge's protocol-level reconnect path. A clean socket close still reopens on explicit `start()`, page restore, or later transport demand as documented.
+- Changed files: `package.json`, `pnpm-lock.yaml`, `docs/progress.md`.
+- Verification: `pnpm check` (34 files, 699/699), `pnpm lint`, `pnpm test:coverage` (97.18% statements, 92.41% branches, 96.57% functions, 98.65% lines), `pnpm verify:compat`, `pnpm verify:pack`, `pnpm test:e2e` (27/27), and `git diff --check` all pass.
+- Blockers: none. No runtime dependency, public API, storage-key, schema, or wire-protocol change.
+- Risk / rollback: the patch-level test-runner update can change Vitest diagnostics or coverage internals only; all coverage floors and suites passed. Roll back by restoring `vitest` / `@vitest/coverage-v8` to `5.0.0` and regenerating the lockfile.
+- Next: continue the lifecycle/`ready()` boundary and replacement-window publication audit. Updated: 2026-09-16.
+
 ## 0.20.87 WebSocket automatic recovery reopen (2026-09-16)
 
 - Status: implementation, regressions, and documentation complete on
