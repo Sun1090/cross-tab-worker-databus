@@ -118,6 +118,8 @@ Published data must satisfy the serialization constraints of the underlying tran
 
 When the owning Worker is a remote Tab and the publish control message cannot be posted (for example the BroadcastChannel fails to clone the payload), `publish()` reports the failure through `onError` instead of silently dropping it.
 
+Calling `publish()` while `stop()` is still settling reports through `onError` and routes nothing; the message is not deferred until a later start. Publications issued earlier and still queued behind an in-flight transport open are canceled by the stop.
+
 Incoming messages may include a caller/server supplied `messageId`. Enable bounded duplicate suppression with `dedup: { maxEntries, ttlMs }`; repeated IDs within the window are ignored. This is disabled by default and does not provide an exactly-once server guarantee. Tests and hosts with a custom time source may provide `dedup.now`. A full `stop()` clears the remembered ID window; a later `start()` begins a fresh dedup session.
 
 When supplied, `options.messageId` and `options.timestamp` are propagated through cross-tab routing, Worker boundaries, and supported transports. The server must echo or otherwise preserve them for inbound deduplication and replay retention.
@@ -144,6 +146,8 @@ publishBatch(
 Publishes many items to one topic as a single unit of work. The bundled WebSocket transport packs the whole batch into one wire frame (the `publishBatch` op) rather than one frame per item; a transport that does not implement the optional `DataBusTransport.publishBatch` hook falls back to per-item `publish()`, so the call is safe either way.
 
 Per-item `messageId` and `timestamp` survive the wire frame, and dedup, replay, and ordering apply per item in source order. An empty batch is a no-op; a single-item batch delegates to `publish()`. `WorkerClusterRuntime` exposes the same method for callers that coordinate directly.
+
+A non-empty batch issued while `stop()` is still settling reports through `onError` and sends nothing; an empty batch remains a no-op.
 
 ### `clearReplay()`
 

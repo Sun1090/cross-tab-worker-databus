@@ -118,6 +118,8 @@ publish(
 
 当 owner 是远端 Tab、且发布控制消息无法投递时（例如 BroadcastChannel 无法克隆 payload），`publish()` 会通过 `onError` 上报失败，而不是静默丢弃。
 
+在 `stop()` 尚未 settle 时调用 `publish()` 会通过 `onError` 上报且不路由任何消息；消息不会延迟到之后的 start。更早发出、仍排队等待 transport open 的发布会被 stop 取消。
+
 传入 `options.messageId` 和 `options.timestamp` 后，元数据会穿过跨 Tab 路由、Worker 边界和支持的 transport。服务端必须回显或以其他方式保留它们，入站去重和 replay retention 才能使用。
 
 `DataBusMessage` 与 `DataBusPublication` 暴露相同的可选元数据。
@@ -142,6 +144,8 @@ publishBatch(
 把多条 item 作为一个工作单元发布到同一个 topic。内置 WebSocket transport 会把整个 batch 打包成**一帧**（`publishBatch` op），而不是逐条一帧；未实现可选钩子 `DataBusTransport.publishBatch` 的 transport 会自动回退逐条 `publish()`，因此两种情况下调用都安全。
 
 每条 item 的 `messageId` 与 `timestamp` 在传输后保留，dedup、replay 与顺序都按 item 维度、以源顺序生效。空 batch 为 no-op；单 item batch 直接委托给 `publish()`。直接操作协调层的调用方可用 `WorkerClusterRuntime` 上的同名方法。
+
+在 `stop()` 尚未 settle 时提交非空 batch 会通过 `onError` 上报且不发送任何内容；空 batch 仍为 no-op。
 
 ### `clearReplay()`
 

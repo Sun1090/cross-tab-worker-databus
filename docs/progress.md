@@ -10,6 +10,37 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 stop-time publish rejection (2026-09-16)
+
+- Status: implementation complete on `feat/stop-publish-rejection`; atomic code
+  commit `517b14e` (`fix(data-bus): reject publishes during stop`).
+- Completed content: `publish()` and non-empty `publishBatch()` calls made while
+  an explicit `stop()` is still settling used to return successfully without
+  routing anything: `cluster.publish()` reached the local `onControl(PUBLISH)`
+  path, but `runTransport()` dropped the operation because `stopping` was set.
+  The DataBus now checks the teardown gate at the publish boundary and surfaces
+  a clear `onError` failure instead; empty batches stay no-ops. Publications
+  queued before the stop remain canceled by the stop (latest intent wins), and
+  BFCache suspension keeps its documented no-defer semantics.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`.
+- Verification: two focused regressions failed before the fix (no error was
+  reported for `publish()` or a two-item `publishBatch()` during a gated
+  `stop()`) and pass after; `pnpm check` (683 unit tests / 34 files);
+  `pnpm lint`; `pnpm test:coverage` (97.25% statements, 92.44% branches,
+  96.55% functions, 98.76% lines); `pnpm test:e2e` 27/27; `pnpm verify:compat`;
+  `pnpm verify:pack`; `git diff --check`.
+- Blockers: none. No schema migration, version bump, or public API shape change
+  (the failure is delivered through the existing `onError` channel).
+- Risk / rollback: stop-time publications now produce an error callback instead
+  of being silently dropped; callers that relied on the old silent behavior
+  should wait for `stop()` to settle. Empty batches and suspend behavior are
+  unchanged. Roll back with `git revert 517b14e`.
+- Next: push the branch, open a PR, wait for all CI checks, rebase-merge, then
+  continue the lifecycle audit (stop-time `subscribe()` handler/subscription
+  consistency, then queued-restart failure cleanup).
+
 ## 0.20.86 stop cancels queued restart (2026-09-16)
 
 - Status: implementation complete on `feat/stop-cancels-queued-restart`; atomic
