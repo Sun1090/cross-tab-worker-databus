@@ -1,3 +1,18 @@
+## 0.20.89 Centrifuge replacement callback isolation (2026-09-16)
+
+- 状态：已完成并提交，等待 0.20.89 发布冻结。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `d7a4ba7`。
+- 复现场景：三处 `stop()` / `start()` 替换窗口均可在旧后端仍持有异步回调时把结果泄漏给新后端。其一，旧 Centrifuge Worker 的异步 `credentialProvider` 仍 pending，替换 Worker 的请求 ID 又从 1 开始；旧 token 完成时会错误回应新 Worker 的同号请求。其二，主线程 local fallback 的旧 `publish()` 在替换 session 后 reject，旧错误会进入新 session 的 `onError`。其三，旧 client 在 `STOP` 与再次 `INIT` 后仍发出 `connected` / `error` / `publication`，会伪装成新 session 的事件。
+- 根因：异步回调未绑定创建它的 Worker / port / local session 或 `CentrifugeSession` 生命周期；请求 ID 在重建后复用，使迟到的 token 回复无法仅靠 requestId 区分。local fallback 事件监听器也未在替换时失效，且 `stop()` 与 `init()` 之间没有单调代际标识。
+- 修复：`src/centrifuge.ts` 在调用 credential provider 前捕获 `generation`、worker、port 与 local session 身份，异步 resolve/reject 及同步 throw 均只在后端仍为当前实例时回发 `TOKEN_RESPONSE` / `TOKEN_ERROR`。`src/centrifuge-session.ts` 新增生命周期代际：每次 `initialize()` / `stop()` 递增；client 状态、错误、publication 回调、subscription 回调以及 local publish rejection 都捕获创建时代际，只在仍匹配时上报或修改订阅表；`requestToken()` 在注册前也会拒绝已失效代际。
+- 变更文件：`src/centrifuge.ts`、`src/centrifuge-session.ts`、`tests/centrifuge.test.ts`、`tests/centrifuge-session.test.ts`、`CHANGELOG.md`。
+- 新增测试：`tests/centrifuge.test.ts` — `does not deliver a stale credential reply to a replacement worker`、`converts a synchronously throwing credential provider into TOKEN_ERROR`、`drops a rejected local publish from a replaced session`；`tests/centrifuge-session.test.ts` — `drops events from a stopped client after the session is reinitialized`。mutation check 确认旧实现分别会把 stale token、旧 publish rejection、旧 client 事件泄漏到替换 session，修复后全部通过。
+- 验证命令与结果：`pnpm exec vitest run tests/centrifuge.test.ts tests/centrifuge-session.test.ts tests/websocket.test.ts`（130/130）、`pnpm check`（35 files，720/720）、`pnpm lint`、`pnpm test:e2e`（27/27）、`pnpm test:coverage`（96.96% statements / 92.42% branches / 96.51% functions / 98.45% lines）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅收紧 Centrifuge Worker / local session 回调的身份校验，未改变 public export、存储 schema、存储键或线协议。若出现兼容性回归，可 revert `d7a4ba7`。
+- 下一项：继续审计 `ready()` 排队 start/stop 与取消启动、最终 stop 后 trace/dedup/replay 定时器残留，以及其他异步发起的订阅/发布回调是否能跨越 runtime 替换窗口。
+- 更新时间：2026-09-16。
+
 ## 0.20.89 WebSocket Blob stale delivery race (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
