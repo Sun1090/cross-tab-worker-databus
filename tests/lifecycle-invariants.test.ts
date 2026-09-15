@@ -25,7 +25,14 @@ import { WORKER_STATUS } from '../src/utils/constants';
  *   3. a sequence whose last explicit lifecycle intent was `stop()` settles in
  *      `started === false` / `state === 'stopped'` with no live transport, even
  *      when a fresh `start()` was issued before the teardown completed. This is
- *      the invariant the settle-but-not-cleared stop gate violated.
+ *      the invariant the settle-but-not-cleared stop gate violated; and
+ *   4. no chaotic interleaving leaves the bus unable to restart. After the
+ *      sequence is fully torn down, a fresh transport behind an explicit
+ *      `start()` must reach `healthy` and resolve `ready()`, so a stranded
+ *      recovery gate, queued start, or stale stop promise cannot survive the
+ *      chaos undetected. (Mutations to the queued-start cancellation are
+ *      already caught by invariant 3; this one guards the residual hand-off
+ *      window between a settled stop gate and the next lifecycle.)
  *
  * Seeds are fixed, so a failure is always reproducible.
  */
@@ -217,6 +224,30 @@ describe('CrossTabDataBus lifecycle invariants', () => {
           }
         }
         await bus.stop().catch(() => undefined);
+
+        // Invariant 4: the chaos must not leave the bus unrestartable. Let the
+        // same transport settle immediately again so a stranded gate or queued
+        // start surfaces as a start that never reaches `healthy` / ready().
+        transport.autoSettle = true;
+        void bus.start({}).catch(() => undefined);
+        await flushMicrotasks();
+        const restarted = bus.getHealthSummary();
+        if (restarted.state !== 'healthy') {
+          failures.push(
+            `${context}: expected a restart to reach healthy, got state=${restarted.state} ` +
+            `started=${restarted.started} transportReady=${restarted.transport.ready}`
+          );
+        } else {
+          let restartError: unknown = null;
+          try {
+            await bus.ready();
+          } catch (error) {
+            restartError = error;
+          }
+          if (restartError !== null) {
+            failures.push(`${context}: restarted bus rejected ready(), error=${String(restartError)}`);
+          }
+        }
       } finally {
         vi.useRealTimers();
       }

@@ -13,6 +13,20 @@
 - 下一项：继续审计 `ready()` 排队 start 失败后的状态保留与 `initialConfig` 边界，以及最终 stop 后 trace/dedup/replay 定时器与微任务残留。
 - 更新时间：2026-09-16。
 
+## 0.20.89 lifecycle fuzzer restart invariant (2026-09-16)
+
+- 状态：已完成，待提交。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；提交待生成。
+- 完成内容：`tests/lifecycle-invariants.test.ts` 新增第 4 条不变式——任意交织序列完全 teardown 之后，`start({})` 必须重新达到 `healthy` 且 `ready()` resolve。该检查覆盖「已 settle 的 stop 门到下一次生命周期」的残留交接窗口，与已提交的第 3 条（最后一次意图为 stop 则必须 `state === 'stopped'`）互补。同步把 `docs/roadmap.md` 新增的 0.20.89 in-progress 章节镜像到 `docs/zh/roadmap.md`，满足本地化文档的 h2/列表项计数守卫。
+- 变更文件：`tests/lifecycle-invariants.test.ts`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 验证命令与结果：`pnpm exec vitest run tests/lifecycle-invariants.test.ts`（1/1，1_500 seeds）、`pnpm check`（35 files，729/729）通过。
+- mutation check：移除 `stop()` 中的 queued-restart 取消逻辑后，fuzzer 在 seed 64/470/686 报出 `expected a stopped bus, got started=true`，确认 fuzzer 对生命周期 barrier 破坏敏感；恢复后通过。第 4 条不变式本身针对的是残留交接窗口，未单独构造可复现的针对性 mutation，保留为低成本的额外安全网。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档；无运行时行为变化。
+- 下一项：继续审计 transport/adapter 快速替换时的异步回调隔离，以及 0.20.89 是否达到发布冻结条件。
+- 更新时间：2026-09-16。
+
+
 ## 0.20.89 stopping health verdict (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。

@@ -2,6 +2,17 @@
 
 0.20.88 已发布。0.20.89 正在推进，继续 lifecycle/readiness 与适配器 parity 审计，之后再进入 1.0.0 稳定性冻结。
 
+## 0.20.89 进行中
+
+尚未发布。本开发线延续异步回调隔离审计：以下每一项修复都把回调、排队微任务或 Promise 续体绑定到创建它的生命周期 generation，使被取代的会话无法写入其替代者。
+
+- 异步 teardown 与重启边界：已 settle 的 `stop()` gate 不再吞掉后续 teardown（`stop → start → stop` 现在以停止态结束）；`getHealthSummary()` 对正在停止的 bus 报告 `state: 'stopped'`，不再与其已经发出的 `publish()` / `subscribe()` / `ready()` 拒绝语义自相矛盾。
+- replay 持久化隔离：微任务排队的 batch flush 与被排队的 retention cleanup 会在 `suspend()` / `stop()` 取代其 generation 后被丢弃，已停止会话的历史无法再写入 durable store。
+- durable hydration 取消：在 `suspend()` 或 `stop()` 之后才 resolve 的 `load()` 不再向 teardown 已清空的缓冲区追加数据，并按生命周期取消上报，而不是记为持久化失败。
+- trace 会话隔离：已停止的 trace reporter 保持惰性——旧会话排队中的 `asyncSink` 事件被丢弃，显式重启会清除停止标记，使其重新发出生命周期 `start`。
+- transport 与 Worker 回调隔离：Centrifuge credential-provider 结果绑定到发起请求的确切 Worker/port/session；`CentrifugeSession` 的异步 client/subscription 回调在 `STOP` 或重新初始化后被忽略；来自已替换 WebSocket 连接的 `Blob` 二进制帧不再被当作新连接的帧派发。
+- 回归安全网：seeded lifecycle fuzzer 现在覆盖 1_500 种交织，并断言最后一次显式意图为 `stop()` 的序列会以 `state: 'stopped'` 且无 live transport 结束。
+
 ## 0.20.88 已完成范围
 
 - 启动失败恢复现在可重入：transport 在初始 `openTransport()` 尚未结算时同步上报 `error`，调用方可以从 `onStatus('error')` 或 `onError` 回调立即重试。失败 open 会先完成清理，重试建立新的生命周期，旧 rejection 不会重新污染已重置的失败账本。
