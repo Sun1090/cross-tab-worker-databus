@@ -1,6 +1,6 @@
 # Roadmap
 
-0.20.88 is the current development line. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.88 is released. 0.20.89 is the current development line, continuing the lifecycle/readiness and adapter-parity audit before a 1.0.0 stability freeze.
 
 ## 0.20.88 delivered scope
 
