@@ -3223,4 +3223,75 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     releaseStop();
     await stopping;
   });
+  it('subscribe() during an in-flight stop reports an error and leaves no latent subscription', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-subscribe' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>();
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-subscribe',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+    bus.subscribe('before', vi.fn());
+    expect(transport.subscribeCalls).toEqual(['before']);
+
+    const stopping = bus.stop();
+    const lateHandler = vi.fn();
+    const offLate = bus.subscribe('late', lateHandler);
+
+    expect(offLate).toBeTypeOf('function');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect((errors[0] as Error).message).toMatch(/stopping/i);
+    expect((errors[0] as Error).message).toMatch(/subscribe/i);
+    expect(bus.getClusterSnapshot().subscribedTopics).not.toContain('late');
+    expect(transport.subscribeCalls).toEqual(['before']);
+
+    releaseStop();
+    await stopping;
+    offLate();
+    expect(bus.getClusterSnapshot().subscribedTopics).toEqual([]);
+
+    // A later restart must not resurrect the rejected registration.
+    await bus.start({});
+    await bus.ready();
+    expect(bus.getClusterSnapshot().subscribedTopics).toEqual([]);
+    expect(transport.subscribeCalls).toEqual(['before']);
+    transport.emit('late', 1);
+    await Promise.resolve();
+    expect(lateHandler).not.toHaveBeenCalled();
+    await bus.stop();
+  });
+
+  it('ready() during an in-flight stop rejects instead of reporting the stopping transport as ready', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-ready' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>();
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-ready',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    await bus.ready();
+
+    const stopping = bus.stop();
+    await expect(bus.ready()).rejects.toThrow(/stopping/i);
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await stopping;
+  });
 });
