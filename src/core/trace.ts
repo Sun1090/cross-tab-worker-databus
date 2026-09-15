@@ -216,8 +216,9 @@ export class DataBusTraceReporter {
   /** Start the periodic metrics flush interval. No-op when mode is 'events'
    * (no metrics to emit), when disabled, or when already running. */
   start(): void {
-    if (!this.enabled || this.intervalHandle || this.mode === TRACE_MODE.EVENTS) return;
+    if (!this.enabled) return;
     this.stopped = false;
+    if (this.intervalHandle || this.mode === TRACE_MODE.EVENTS) return;
     this.intervalStartedAt = this.now();
     this.intervalHandle = setInterval(() => this.flush(), this.metricsIntervalMs);
   }
@@ -232,6 +233,9 @@ export class DataBusTraceReporter {
 
   stop(): void {
     this.stopped = true;
+    // Events produced before stop are part of the old session and must not
+    // leak through the queued async-sink microtask after teardown.
+    this.pendingEvents = [];
     this.pause();
   }
 
@@ -244,7 +248,7 @@ export class DataBusTraceReporter {
 
   /** Record an instantaneous trace event (lifecycle, status, error, etc.). */
   event(event: DataBusTraceEventInput): void {
-    if (!this.enabled || this.mode === TRACE_MODE.METRICS) return;
+    if (!this.enabled || this.stopped || this.mode === TRACE_MODE.METRICS) return;
     this.emit({ ...event, timestamp: this.now() } as DataBusTraceEvent);
   }
 
@@ -339,7 +343,7 @@ export class DataBusTraceReporter {
    * Extracted so the four record / flush methods share one guard expression
    * instead of repeating `!this.enabled || this.mode === 'events'` at each. */
   private get metricsActive(): boolean {
-    return this.enabled && this.mode !== TRACE_MODE.EVENTS;
+    return this.enabled && !this.stopped && this.mode !== TRACE_MODE.EVENTS;
   }
 
   /** Emit the accumulated metrics snapshot if the interval is active. */

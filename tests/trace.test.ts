@@ -313,6 +313,31 @@ describe('DataBusTraceReporter', () => {
     eventsOnly.stop();
   });
 
+  it('stays silent after stop and resets for an explicitly restarted session', async () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      mode: 'events',
+      asyncSink: true,
+      sink: collect(events)
+    });
+
+    reporter.start();
+    reporter.event({ type: 'lifecycle', action: 'stop' });
+    reporter.stop();
+    await Promise.resolve();
+    expect(events).toHaveLength(0);
+
+    reporter.event({ type: 'lifecycle', action: 'start' });
+    await Promise.resolve();
+    expect(events).toHaveLength(0);
+
+    reporter.start();
+    reporter.event({ type: 'lifecycle', action: 'start' });
+    await Promise.resolve();
+    expect(events.map(event => event.type === 'lifecycle' ? event.action : event.type)).toEqual(['start']);
+  });
+
   it('getSinkState reports async mode and the queued event depth', async () => {
     const sync = new DataBusTraceReporter({ enabled: true, sink: () => {} });
     expect(sync.getSinkState()).toEqual({ asyncSink: false, pendingEvents: 0 });

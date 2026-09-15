@@ -432,8 +432,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // A fresh start begins a new failure ledger so health consumers correlate
     // failures with the current session, not the previous one.
     this.resetFailureState();
-    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
     this.trace.start();
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
     this.startDedupSweep();
     this.replayManager.start();
     this.updateStatus(WORKER_STATUS.CONNECTING);
@@ -1326,8 +1326,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * pageshow path and explicit start() must run this so an explicit resume
    * cannot leave trace metrics and periodic cleanup timers permanently off. */
   private resumeSuspendedResources(): void {
-    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
     this.trace.start();
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
     this.startDedupSweep();
     this.replayManager.start();
   }

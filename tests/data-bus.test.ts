@@ -3275,6 +3275,38 @@ describe('CrossTabDataBus diagnostics', () => {
     await bus.stop();
   });
 
+  it('restarts trace event delivery after an explicit stop', async () => {
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'trace-restart' });
+    const transport = new FakeTransport<number>();
+    const events: DataBusTraceEvent[] = [];
+    const bus = new CrossTabDataBus({
+      clusterKey: 'trace-restart',
+      environment: env.environment,
+      transport,
+      trace: {
+        enabled: true,
+        mode: 'events',
+        asyncSink: true,
+        sink: event => events.push(event)
+      }
+    });
+
+    await bus.start({});
+    await bus.ready();
+    await Promise.resolve();
+    events.length = 0;
+
+    await bus.stop();
+    await Promise.resolve();
+    expect(events).toEqual([]);
+
+    await bus.start({});
+    await bus.ready();
+    await Promise.resolve();
+    expect(events[0]).toMatchObject({ type: 'lifecycle', action: 'start' });
+    await bus.stop();
+  });
+
   it('getMetrics returns null when trace metrics are disabled', async () => {
     const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'metrics-off' });
     const transport = new FakeTransport<number>();
