@@ -10,6 +10,32 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 failed queued-restart error retention (2026-09-16)
+
+- Status: implementation complete on `feat/queued-restart-failure-cleanup`;
+  atomic code commit `f363ccb` (`fix(data-bus): surface queued restart startup
+  failures`).
+- Completed content: a `start(config)` queued behind an in-flight `stop()` that
+  then failed during transport startup cleared `started` as intended, but its
+  failed lifecycle promise was no longer available to a later `ready()` call.
+  With no `initialConfig`, `ready()` therefore fell through to the generic
+  "requires initialConfig" error and hid the real transport failure. The ready
+  contract now gives `lastError` precedence when an explicit start failed and no
+  configuration is available to retry implicitly.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`, `docs/progress.md`.
+- Verification: focused regression passes; `tests/data-bus.test.ts` 121/121;
+  `pnpm test` 686/686 (34 files); `pnpm typecheck`; `pnpm lint`; `git diff
+  --check`.
+- Blockers: none. No schema migration, public API shape change, or version bump;
+  the failure remains on the existing `ready()` rejection channel.
+- Risk / rollback: callers that previously saw the generic config error now see
+  the actual startup failure, and explicit retry behavior is unchanged. Roll
+  back with `git revert f363ccb` plus the documentation commit.
+- Next: audit readiness after a queued restart is canceled by a newer stop, then
+  continue the lifecycle-contract edge sweep.
+
 ## 0.20.86 stop-time lifecycle operation rejection (2026-09-16)
 
 - Status: implementation complete on `feat/stop-lifecycle-boundaries`; atomic
