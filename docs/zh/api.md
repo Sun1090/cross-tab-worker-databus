@@ -208,7 +208,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。
+`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。处于 degraded 时再次调用 `start()` 会保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本后重新打开 transport；subscribe 与 publish 也走同一恢复路径。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。
 
 ### `getMetrics()`
 

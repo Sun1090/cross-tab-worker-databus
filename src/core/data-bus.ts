@@ -354,18 +354,26 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    */
   start(config: TConfig): Promise<void> {
     if (this.startPromise) return this.startPromise;
-    if (this.started) return Promise.resolve();
+    if (this.started) {
+      const transportDown =
+        !this.transportReady ||
+        this.status === WORKER_STATUS.ERROR ||
+        this.status === WORKER_STATUS.DISCONNECTED;
+      if (!transportDown) return Promise.resolve();
+      // An explicit start() is a manual recovery path after the automatic
+      // recovery budget is exhausted. Keep the cluster and subscriptions
+      // intact, but begin a fresh failure/recovery ledger before reopening.
+      this.activeConfig = config;
+      this.resetFailureState();
+      return this.reopenTransport();
+    }
     this.started = true;
     this.stopping = false;
     this.suspended = false;
     this.activeConfig = config;
-    this.lastError = null;
     // A fresh start begins a new failure ledger so health consumers correlate
     // failures with the current session, not the previous one.
-    this.lastFailure = null;
-    this.persistenceFailureCount = 0;
-    this.persistenceLastFailureAt = null;
-    this.persistenceLastErrorMessage = null;
+    this.resetFailureState();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
     this.trace.start();
     this.startDedupSweep();
@@ -402,6 +410,19 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       }
     );
     return opening;
+  }
+
+  /** Reset failure and recovery diagnostics for a new explicit start session. */
+  private resetFailureState(): void {
+    this.lastError = null;
+    this.lastErrorAt = null;
+    this.lastFailure = null;
+    this.persistenceFailureCount = 0;
+    this.persistenceLastFailureAt = null;
+    this.persistenceLastErrorMessage = null;
+    this.recoveryAttempt = 0;
+    this.recoveryExhausted = false;
+    this.lastRecoveryAt = 0;
   }
 
   /**
