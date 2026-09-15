@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.20.86] - 2026-09-16
 
 ### Added
 - The configuration reference now documents the full public option surface: `replay.pruneStrategy` (previously absent entirely) and the replay options table (`maxPerTopic`, `persistence`, `retentionMs`, `pruneStrategy`, `retentionSweepMs`, `persistenceRetry`), plus a deduplication options table (`maxEntries`, `ttlMs`, `sweepMs`, `now`, `adaptiveTtl`) — in both languages. A guard derives the field list from the built declarations and fails when a `DataBusReplayOptions`/`DataBusDedupOptions` field is undocumented in either configuration reference. The `pruneStrategy` JSDoc no longer claims a default of `'both'` (the actual default is `'count'`).
