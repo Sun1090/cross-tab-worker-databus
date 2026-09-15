@@ -1,10 +1,10 @@
 # 路线图
 
-0.20.88 已发布。0.20.89 正在推进，继续 lifecycle/readiness 与适配器 parity 审计，之后再进入 1.0.0 稳定性冻结。
+0.20.89 已发布。项目会先持续完成生命周期/就绪与适配器 parity 审计，再进入 1.0.0 稳定性冻结。
 
-## 0.20.89 进行中
+## 0.20.89 已完成范围
 
-尚未发布。本开发线延续异步回调隔离审计：以下每一项修复都把回调、排队微任务或 Promise 续体绑定到创建它的生命周期 generation，使被取代的会话无法写入其替代者。
+本开发线延续异步回调隔离审计：以下每一项修复都把回调、排队微任务或 Promise 续体绑定到创建它的生命周期 generation，使被取代的会话无法写入其替代者。
 
 - 异步 teardown 与重启边界：已 settle 的 `stop()` gate 不再吞掉后续 teardown（`stop → start → stop` 现在以停止态结束）；`getHealthSummary()` 对正在停止的 bus 报告 `state: 'stopped'`，不再与其已经发出的 `publish()` / `subscribe()` / `ready()` 拒绝语义自相矛盾。
 - replay 持久化隔离：微任务排队的 batch flush 与被排队的 retention cleanup 会在 `suspend()` / `stop()` 取代其 generation 后被丢弃，已停止会话的历史无法再写入 durable store。
