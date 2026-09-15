@@ -210,6 +210,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // separate from startPromise because stop()'s finally block clears the
   // ordinary lifecycle gate before the queued start is allowed to run.
   private queuedStart: Promise<void> | null = null;
+  // The queued continuation is chained to the stop promise and cannot be
+  // un-scheduled once scheduled. A later stop() therefore invalidates the
+  // current intent by recording its token; a subsequent start() issues a
+  // higher token so the latest lifecycle request still wins.
+  private queuedStartToken = 0;
+  private canceledQueuedStartToken = 0;
   // Timestamp of the last automatic transport recovery attempt.
   // Used to avoid a tight retry loop when the transport fails repeatedly.
   private lastRecoveryAt = 0;
@@ -359,9 +365,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    *
    * The first call starts the cluster and opens the transport. Concurrent calls
    * during an in-flight open return the same promise. A call received while an
-   * explicit stop() is settling queues one fresh start after cleanup. Once an
-   * operation settles (success or failure) its promise gate is cleared so a
-   * subsequent start() or resumeTransport() can open a fresh lifecycle.
+   * explicit stop() is settling queues one fresh start after cleanup; a later
+   * stop() before that queued start runs cancels it, so the latest lifecycle
+   * intent wins. Once an operation settles (success or failure) its promise
+   * gate is cleared so a subsequent start() or resumeTransport() can open a
+   * fresh lifecycle.
    */
   start(config: TConfig): Promise<void> {
     if (this.queuedStart) return this.queuedStart;
@@ -439,11 +447,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private queueStartAfterStop(config: TConfig): Promise<void> {
     if (this.queuedStart) return this.queuedStart;
     const stop = this.stopPromise ?? Promise.resolve();
+    const token = ++this.queuedStartToken;
     const queued = stop
       .catch(() => undefined)
       .then(() => {
         // Clear before invoking start(), which installs its own startPromise.
         if (this.queuedStart === queued) this.queuedStart = null;
+        // stop() may have arrived after this restart was queued. The queued
+        // continuation still runs (it is already chained), but it must not
+        // reopen the transport: the latest lifecycle intent was a stop.
+        if (token <= this.canceledQueuedStartToken) return;
         return this.start(config);
       });
     this.queuedStart = queued;
@@ -824,9 +837,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /**
    * Gracefully stop the DataBus: unsubscribe all topics, stop the cluster,
    * and close the transport. Concurrent and repeated calls share the in-flight
-   * stop promise. A start() received while stopping runs after this completes.
+   * stop promise. A start() received while stopping runs after this completes,
+   * unless another stop() arrives first and cancels that queued restart.
    */
   stop(): Promise<void> {
+    // A restart queued behind an in-flight stop is stale as soon as another
+    // stop() is requested. Invalidate it and release the single queue slot so
+    // a later start() can still queue a fresh restart with a higher token.
+    if (this.queuedStart) {
+      this.canceledQueuedStartToken = this.queuedStartToken;
+      this.queuedStart = null;
+    }
     if (this.stopPromise) return this.stopPromise;
     if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
       return Promise.resolve();
