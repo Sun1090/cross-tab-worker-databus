@@ -1,6 +1,12 @@
 # Roadmap
 
-0.20.89 is released. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.89 is released. 0.20.90 is the current development line, continuing the reliability audit before a 1.0.0 stability freeze.
+
+## 0.20.90 in progress
+
+Not yet released. The line hardens the release pipeline uncovered by the 0.20.89 tag run and continues the async-callback isolation audit.
+
+- Release-gate propagation budget: the blocking published-consumer verification now waits 48 x 7.5 s (6 min) instead of 24 x 5 s (2 min). The 0.20.89 tag run published successfully and then still failed the gate because `npm pack` returned `ETARGET` for the whole old budget; a genuinely missing package still exhausts the budget.
 
 ## 0.20.89 delivered scope
 

@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Fixed
+- The `Release` workflow's blocking published-consumer gate no longer fails on ordinary npm CDN propagation lag. The 0.20.89 tag run published successfully and then still failed the gate because `npm pack cross-tab-worker-databus@0.20.89` kept returning `ETARGET` for the whole 24 x 5 s (2 min) budget; the budget is now 48 x 7.5 s (6 min). A genuinely missing or unimportable published package still exhausts the budget and fails the gate.
+
 ## [0.20.89] - 2026-09-16
 
 ### Fixed

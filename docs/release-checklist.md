@@ -30,7 +30,7 @@ The repository runs CodeQL (`javascript-typescript`; on push, on pull request, a
 
 ## Tagged-release workflow
 
-Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check` and `pnpm lint` (a tag can point at a commit that never passed CI's lint step), runs `verify:compat` and `verify:pack`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=24`, `PUBLISHED_VERIFY_DELAY_MS=5000`). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release and republish the tag after fixing it. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
+Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check` and `pnpm lint` (a tag can point at a commit that never passed CI's lint step), runs `verify:compat` and `verify:pack`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=48`, `PUBLISHED_VERIFY_DELAY_MS=7500`, a 6-minute ceiling). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release and republish the tag after fixing it. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
 
 ## Publishing
 
@@ -42,4 +42,4 @@ For a manual release (no `NPM_TOKEN` in the workflow), run `npm publish --access
 2. Install the published tarball or version in a clean consumer and import the root plus every public subpath.
 3. Record the result in the release notes. Do not advance to `1.0.0` until the public API and protocol deprecation policy are explicitly frozen.
 
-The tagged-release workflow already ran the consumer verification above. Run `PUBLISHED_VERSION=<version> pnpm verify:published` by hand only when you need an offline repeat. Tune `PUBLISHED_VERIFY_ATTEMPTS` and `PUBLISHED_VERIFY_DELAY_MS` only for unusually slow mirrors.
+The tagged-release workflow already ran the consumer verification above. Run `PUBLISHED_VERSION=<version> pnpm verify:published` by hand only when you need an offline repeat. The workflow's 6-minute ceiling absorbs normal npm CDN propagation lag (the 0.20.89 tag run exhausted the older 2-minute budget after a successful publish); raise `PUBLISHED_VERIFY_ATTEMPTS` / `PUBLISHED_VERIFY_DELAY_MS` further only for unusually slow mirrors.
