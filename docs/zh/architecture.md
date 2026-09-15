@@ -534,6 +534,8 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 | `suspended` | `boolean` | Tab 已隐藏；transport 被有意暂停 |
 | `transportReady` | `boolean` | transport 已上报 `connected`，可接受操作 |
 | `startPromise` | `Promise \| null` | 并发 `start()` 调用的 gate；操作完成后清除 |
+| `stopPromise` | `Promise \| null` | 显式 `stop()` 及其后排队的 restart 共享的 gate |
+| `queuedStart` | `Promise \| null` | 等待进行中的显式 stop 完成后执行的一次全新 start |
 | `pendingStop` | `Promise \| null` | 异步 `transport.stop()` 的 gate；由 suspend 和故障路径共享 |
 
 ### 状态转换
@@ -564,7 +566,8 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 
 **关键行为：**
 
-- **并发 start**：`startPromise` 非空时第二次调用 `start()` 返回同一个 promise。任何时候只有一个 transport open 在飞行中。
+- **并发 start**：真实 transport open 在飞行中时，第二次调用 `start()` 返回同一个 promise，任何时候只有一个 transport open 在飞行中。pagehide 产生的 stop 也可能占用 `startPromise`；`start()` 会识别 `startPromise === pendingStop`，把 reopen 排在该 stop 之后，而不是把清理 promise 当作成功启动返回。
+- **显式 stop 期间 start**：`stop()` 用共享的 `stopPromise` 服务并发调用者。若 `start()` 在该 stop settle 期间到达，只保存一个 `queuedStart`；stop 的 `finally` 清理生命周期状态后，排队的 start 使用新配置开启全新生命周期。此窗口内的重复调用共享 stop 和 queued-start promise。
 - **启动期间隐藏**：`pagehide` 在 `openTransport` 飞行中触发时，`suspendTransport()` 设置 `suspended = true`，并在飞行中的 start 之后链式执行 `transport.stop()`。`openTransport` 的 catch 路径检测到 `suspended` 后放弃本次 open，不视为失败。
 - **恢复冷却**：transport 上报 `error` 且 `started` 为 true、`stopping` 为 false 时，`updateStatus` 在 `RECOVERY_COOLDOWN_MS`（1000 ms）后调度自动 `reopenTransport()`。冷却窗口内的第二次错误被抑制，防止紧循环重试。
 - **暂停期间停止**：`stop()` 设置 `stopping = true`，阻止 `suspendTransport()` 执行。清理过程会 await `startPromise` 和 `pendingStop`，确保任何飞行中的 open 或 stop 完成后才执行最终的 `transport.stop()`。

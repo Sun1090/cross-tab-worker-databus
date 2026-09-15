@@ -56,7 +56,7 @@ new CrossTabDataBus<TConfig, TData>(options)
 start(config: TConfig): Promise<void>
 ```
 
-启动集群协调和 transport。首次调用真正启动 transport；启动过程中并发调用共享同一个启动 Promise，不重复创建 transport。启动成功或失败后，内部 gate 会重置：之后再次调用是已启动的空操作（立即 resolve），不会重复启动；`stop()` 之后可重新调用再次启动。
+启动集群协调和 transport。首次调用真正启动 transport；打开过程尚未结束时，并发调用共享同一个启动 Promise，不重复创建 transport。对健康且已启动的实例调用是立即 resolve 的空操作。若 transport 已断开，`start()` 作为显式手动恢复：保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本并重新打开 transport。若显式 `stop()` 尚未完成，`start()` 会在清理之后排队一次全新启动，并返回随重启完成而 settle 的 Promise；`stop()` 完成后也可正常再次调用 `start()` 重启。
 
 ### `ready()`
 
