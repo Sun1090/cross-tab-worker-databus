@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Fixed
+- A bus whose initial transport open is still pending now recovers from repeated BFCache `pagehide`/`pageshow` cycles. Each suspend used to return early whenever a `pendingStop` gate existed, but a queued resume opening could already sit behind an older stop gate, so `startPromise` and `pendingStop` stopped being the same promise; the next `pageshow` then reused that superseded opening and the bus stayed suspended forever. `suspendTransport()` now reuses the gate only when it still represents this suspend, and otherwise chains a fresh serial `transport.stop()` that restores the `startPromise === pendingStop` invariant, so the following reopen actually restarts the transport.
+
 ## [0.20.87] - 2026-09-16
 
 ### Fixed

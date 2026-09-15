@@ -1664,6 +1664,50 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('reopens after repeated hide/show cycles that all precede a pending initial open', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'repeated-suspend-open' });
+    let releaseStart!: () => void;
+    let releaseStop!: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const transport = new FakeTransport<number>(startGate);
+    transport.stopGate = stopGate;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'repeated-suspend-open',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await vi.waitFor(() => expect(transport.startCalls).toBe(1));
+
+    // Both pagehide/pageShow rounds happen while the initial open is pending.
+    // The second pageShow must supersede the superseded resume opening rather
+    // than returning its promise and leaving the bus suspended forever.
+    environment.pageHide();
+    environment.pageShow();
+    environment.pageHide();
+    environment.pageShow();
+
+    releaseStart();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    releaseStop();
+    await vi.waitFor(() => expect(transport.startCalls).toBe(2));
+    await bus.ready();
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: true,
+      state: 'healthy',
+      suspended: false,
+      transport: { ready: true }
+    });
+    await bus.stop();
+  });
+
   it('resolves stop() and reports through onError when the transport stop rejects', async () => {
     // The React/Vue adapters tear the bus down with a fire-and-forget
     // `void bus.stop()`. A transport whose stop() rejects must therefore not

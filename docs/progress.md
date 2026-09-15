@@ -1,3 +1,18 @@
+## 0.20.88 repeated BFCache hide/show during startup (2026-09-16)
+
+- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第一项。
+- 分支：`feat/lifecycle-replacement-audit`（基线 `origin/main` = `8c59c26`）。
+- 复现场景：初始 transport 打开尚未完成时连续执行 `pagehide → pageshow → pagehide → pageshow`，修复前最终 `transport.startCalls` 停留在 `1`，恢复未真正重开 transport。
+- 根因：`suspendTransport()` 之前只要 `pendingStop` 非空就直接返回。重复 hide/show 后 `startPromise` 可能已经是排队中的 resume opening，而 `pendingStop` 仍是旧 stop gate，二者失去「挂起时相同 promise」的关键不变量；下一次 `pageshow` 复用了已被 lifecycle epoch 淘汰的 opening，bus 永久保持挂起。
+- 修复：`suspendTransport()`（`src/core/data-bus.ts`）只在 `pendingStop` 仍代表本次挂起（`startPromise === null || startPromise === pendingStop`）时复用它；否则串行地在当前 `startPromise` / `pendingStop` 之后链式创建新的 `transport.stop()`，恢复 `startPromise === pendingStop` 不变量，使后续 `pageshow` 真正重开 transport。失败 open 的 stop cleanup 仍会被复用，不会重复 `transport.stop()`。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `reopens after repeated hide/show cycles that all precede a pending initial open`（修复前 `expected 1 to be 2`，修复后通过）。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts` 135/135 通过；`pnpm check`（34 files，710/710）通过；`pnpm lint` 干净；`pnpm exec vitest run tests/documentation.test.ts` 16/16 通过；`pnpm test:e2e` 27/27 通过；`git diff --check` 干净。
+- 阻塞：无。
+- 风险 / 回滚：纯主线程生命周期状态机修复，无 public export / storage schema / 线协议变更。若引入回归，可 revert 本次 commit。
+- 下一项：运行剩余门禁，原子提交并推送，创建 PR 并 rebase-merge；随后继续 lifecycle / `ready()` / async transport replacement / stop-resume 交错审计。
+- 更新时间：2026-09-16。
+
 ## 0.20.87 RELEASED (2026-09-16)
 
 - 状态：已发布。版本 **0.20.87** 已合并到 `origin/main`，tag 为 `v0.20.87`，npm `latest` 已指向该版本；tag-triggered Release workflow 与已发布包消费者验证均通过。
