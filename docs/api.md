@@ -76,7 +76,7 @@ If that queued restart fails during transport startup, `ready()` rejects with th
 
 When no `initialConfig` is provided and `start(config)` has not been called, `ready()` returns a rejected Promise instead of throwing synchronously, so callers can attach `.catch` and decide whether to start explicitly.
 
-`ready()` is not equivalent to the server being connected; protocol connection status is obtained via `onStatus`.
+`ready()` resolves when the current transport satisfies its `start()` contract; it is not a guarantee that the remote server is ready to serve application traffic. For the built-in WebSocket backend, `start()` waits for the socket handshake and rejects on a pre-open `error`, a pre-open `close`, or `connectTimeoutMs` expiry, so `ready()` cannot resolve against a `CONNECTING` socket. Protocol-level connection status remains available through `onStatus`.
 
 ### `subscribe(topic, handler)`
 
@@ -210,7 +210,7 @@ Compact readiness verdict for dashboards, readiness probes, and support bundles.
 
 ```ts
 interface DataBusHealthSummary {
-  healthy: boolean;   // started, not suspended, transport ready
+  healthy: boolean;   // started, not suspended, live transport status is 'connected'
   state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
   status: WorkerStatus;
   sdkVersion: string;
@@ -225,7 +225,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. Calling `start()` again while degraded keeps the cluster, subscriptions, and replay buffers intact, resets the failure/recovery ledger, and reopens the transport; subscribe and publish also trigger the same reopen path. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`.
+`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. Calling `start()` again while degraded keeps the cluster, subscriptions, and replay buffers intact, resets the failure/recovery ledger, and reopens the transport; subscribe and publish also trigger the same reopen path. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`. The `healthy` verdict follows the live transport status; `transport.ready` is diagnostic and can remain `false` for the brief window between a transport reporting `connected` and its `start()` Promise settling, during which operations are queued behind that in-flight start rather than dropped.
 
 ### `getRecoveryStats()` / `getPersistenceStats()`
 
@@ -402,13 +402,14 @@ const bus = createWebSocketDataBus({
 new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 ```
 
-Implements `DataBusTransport`. Connection lifecycle maps to the DataBus status vocabulary: socket `open` → `connected`, `close` → `disconnected`, `error` → `error` (which triggers DataBus auto-recovery). Subscriptions are re-asserted when a socket reopens in place. When the bus reopens after a failed socket — automatic recovery after `error`, or an explicit `start()`/page restore after `close` — `start()` creates a replacement socket and ignores late lifecycle or message callbacks from the superseded one. Frames dropped while the socket is not open are reported via `handlers.onError`; the replacement re-sends subscribe frames.
+Implements `DataBusTransport`. `start()` settles only after the socket handshake completes: it resolves on `open` and rejects when the attempt errors, closes before opening, or exceeds `connectTimeoutMs`. Connection lifecycle maps to the DataBus status vocabulary: socket `open` → `connected`, `close` → `disconnected`, `error` → `error` (which triggers DataBus auto-recovery). Subscriptions are re-asserted when a socket reopens in place. When the bus reopens after a failed socket — automatic recovery after `error`, or an explicit `start()`/page restore after `close` — `start()` creates a replacement socket and ignores late lifecycle or message callbacks from the superseded one, including a late `open` from a timed-out attempt. Frames dropped while the socket is not open are reported via `handlers.onError`; the replacement re-sends subscribe frames.
 
 `WebSocketDataBusConfig` fields:
 
 - `url` — WebSocket endpoint.
 - `protocols` — optional subprotocol(s) for the handshake.
 - `webSocketFactory` — optional factory `(url, protocols) => WebSocketLike` for tests and non-browser runtimes (defaults to the global `WebSocket`).
+- `connectTimeoutMs` — optional handshake budget in milliseconds. Defaults to `30000`; `0` or `Infinity` waits indefinitely. On expiry the attempt reports `error` and rejects `start()` (and therefore `ready()`), then closes the half-open socket.
 
 ### Wire protocol
 

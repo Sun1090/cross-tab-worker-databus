@@ -1,3 +1,42 @@
+## 0.20.87 WebSocket start/ready handshake gate (2026-09-16)
+
+- 状态：实现、回归测试与文档已完成，位于 `feat/websocket-connect-gate`，待 commit。
+- 完成内容：让原生 WebSocket transport 真正遵守 `DataBusTransport.start()` 的
+  「连接成功后 resolve / 失败时 reject」契约。此前 `start()` 同步返回，socket 仍处于
+  `CONNECTING` 时 `createWebSocketDataBus()` 的 `ready()` 就会 resolve；随后立刻
+  `publish()` 会被 `sendFrame` 的 not-open 守卫丢弃。现在 `start()` 返回一个握手 gate：
+  `onopen` 后才 resolve，握手前 `error`/`close` 则 reject；新增
+  `connectTimeoutMs`（默认 30s，`0`/`Infinity` 表示无限等待），超时会报告 `error`、
+  reject `start()` 并关闭半开 socket，之后迟到的 `open` 不会复活该尝试。已成功握手的
+  socket 原地 close/reopen 仍会重发订阅帧；`stop()` 会 settle 在途 gate，避免拆除挂死。
+  连带修正 `getHealthSummary()`：transport 报告 `connected` 的事件会早于 start gate
+  settle，因此 health 现在以 live status 判定，而不是要求 `transportReady` 已为 true；
+  否则 `useCrossTabHealth({ intervalMs: 0 })` 会被卡在 `starting`/`recovering`。
+  `transportReady` 仍保留为诊断字段，窗口期操作会排在在途 start 之后。
+- 新增回归测试：`tests/websocket.test.ts` 由 38 增至 42，覆盖 ①`start()` 在 `open`
+  前不 settle，②握手超时 reject + `error` 上报 + 迟到 open 被忽略，③握手前 close
+  reject 且状态为 `disconnected`，④DataBus 层 `ready()` 在握手完成前保持 pending，
+  并且 open 后立即 `publish()` 能发出。变异验证：把 `start()` 回退为立即 resolve 时，
+  3 个新契约测试失败；确认测试确实钉住新行为。hooks 集成测试同时覆盖了 connected 后
+  事件驱动 health 必须变为 `healthy` 的回归。
+- 变更文件：`src/websocket.ts`、`src/core/data-bus.ts`、`tests/websocket.test.ts`、`CHANGELOG.md`、
+  `docs/api.md`、`docs/zh/api.md`、`docs/transports.md`、`docs/zh/transports.md`、
+  `docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 验证命令与结果：`pnpm exec vitest run tests/websocket.test.ts`（42/42）、
+  `pnpm exec vitest run tests/data-bus.test.ts tests/websocket.test.ts tests/centrifuge.test.ts`
+  （229/229）、`pnpm typecheck` 通过。`pnpm check`（34 files，707/707）、`pnpm lint`、
+  `pnpm test:coverage`（97.17% statements、92.40% branches、96.66% functions、
+  98.62% lines）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm test:e2e`
+  （27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：这是 transport 启动契约修复；`ready()` 语义随之更严格，调用方若依赖
+  「socket 尚未 open 但 ready 已 resolve」的行为会看到更晚的就绪时机，但旧行为会让
+  紧随其后的 publish 丢失，属于需要修复的契约违背。超时新增默认可避免握手永久挂起；
+  `0`/`Infinity` 保留旧的无超时等待能力。回滚方式：revert 本 commit 即恢复此前
+  `start()` 在 `CONNECTING` 阶段提前返回的行为。
+- 下一项：继续 lifecycle / `ready()` 边界与 replacement-window 发布审计。
+- 更新时间：2026-09-16。
+
 ## 0.20.87 runtime transport recovery gate (2026-09-16)
 
 - 状态：实现、回归测试与文档已完成，位于 `feat/readiness-transport-status`，

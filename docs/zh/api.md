@@ -76,7 +76,7 @@ Tab 处于 BFCache 挂起态时（`pagehide` 之后、`pageshow` 之前），`re
 
 未传入 `initialConfig` 且未显式调用 `start(config)` 时，`ready()` 返回 rejected Promise 而不是同步抛出，调用方可以统一通过 `.catch` 处理并决定是否显式启动。
 
-`ready()` 不等价于服务端已连接，协议连接状态通过 `onStatus` 获取。
+`ready()` 会在当前 transport 满足其 `start()` 契约时 resolve；它不保证远端服务端已能处理应用流量。内置 WebSocket 后端的 `start()` 会等待 socket 握手：握手前发生 `error`、`close`，或超过 `connectTimeoutMs` 时都会 reject，因此 `ready()` 不会在 socket 仍处于 `CONNECTING` 时报告就绪。协议连接状态仍通过 `onStatus` 获取。
 
 ### `subscribe(topic, handler)`
 
@@ -208,7 +208,7 @@ getHealthSummary(): DataBusHealthSummary
 
 ```ts
 interface DataBusHealthSummary {
-  healthy: boolean;   // 已启动、未挂起、transport 就绪
+  healthy: boolean;   // 已启动、未挂起、transport 实时状态为 connected
   state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
   status: WorkerStatus;
   sdkVersion: string;
@@ -223,7 +223,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。处于 degraded 时再次调用 `start()` 会保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本后重新打开 transport；subscribe 与 publish 也走同一恢复路径。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。
+`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。处于 degraded 时再次调用 `start()` 会保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本后重新打开 transport；subscribe 与 publish 也走同一恢复路径。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。`healthy` 依据 transport 的实时状态判定；`transport.ready` 是诊断字段，在 transport 已报告 `connected`、但其 `start()` Promise 尚未 settle 的短暂窗口内可能仍为 `false`，此时操作会排队等待该在途 start，而不会丢失。
 
 ### `getMetrics()`
 
@@ -399,13 +399,14 @@ const bus = createWebSocketDataBus({
 new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 ```
 
-实现 `DataBusTransport`。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；当 bus 在 socket 失败后重新打开时（`error` 触发自动恢复，或 `close` 后显式 `start()` / 页面恢复），`start()` 会创建替代 socket，并忽略被取代 socket 的迟到生命周期与消息回调；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，替代 socket 打开后自动补发订阅帧。
+实现 `DataBusTransport`。`start()` 只在 socket 握手完成后 settle：`open` 时 resolve；握手前发生 `error`、`close`，或超过 `connectTimeoutMs` 时 reject。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；当 bus 在 socket 失败后重新打开时（`error` 触发自动恢复，或 `close` 后显式 `start()` / 页面恢复），`start()` 会创建替代 socket，并忽略被取代 socket 的迟到生命周期与消息回调（包括超时尝试之后迟到的 `open`）；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，替代 socket 打开后自动补发订阅帧。
 
 `WebSocketDataBusConfig` 字段：
 
 - `url` — WebSocket 端点。
 - `protocols` — 可选的握手子协议。
 - `webSocketFactory` — 可选工厂 `(url, protocols) => WebSocketLike`，用于测试与非浏览器运行时（默认使用全局 `WebSocket`）。
+- `connectTimeoutMs` — 可选握手预算（毫秒），默认 `30000`；传 `0` 或 `Infinity` 表示无限等待。超时会通过 `error` 上报并 reject `start()`（也就是 `ready()`），随后关闭半开 socket。
 
 ### 线协议
 

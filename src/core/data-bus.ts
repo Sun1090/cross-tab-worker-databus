@@ -892,10 +892,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * unified failure ledger and recovery context that explains the verdict. */
   getHealthSummary(): DataBusHealthSummary {
     const transport = this.transport;
-    // A transport can report 'error'/'disconnected' while transportReady is
-    // still set (the flag only resets via the open/failure paths), so the
-    // live status must participate in the verdict.
-    const transportDown = !this.transportReady || this.status === WORKER_STATUS.ERROR || this.status === WORKER_STATUS.DISCONNECTED;
+    // The live transport status is the source of truth for serviceability. A
+    // transport that reports 'connected' is healthy even during the short
+    // window before start() settles and the DataBus sets transportReady:
+    // operations are queued behind that in-flight start promise rather than
+    // dropped. `transportReady` stays in the snapshot as a diagnostic.
+    const transportDown = this.status !== WORKER_STATUS.CONNECTED;
     const state: DataBusHealthSummary['state'] =
       !this.started
         ? HEALTH_STATE.STOPPED
