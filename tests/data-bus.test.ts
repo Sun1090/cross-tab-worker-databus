@@ -1034,6 +1034,54 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('clears the ready flag before reporting a failed recovery open', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'failed-reopen-ready' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'failed-reopen-ready', environment: environment.environment, initialConfig: {}, transport,
+      recovery: { cooldownMs: 100, maxAttempts: 1 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(bus.getHealthSummary()).toMatchObject({ state: 'healthy', transport: { ready: true } });
+
+    const snapshots: Array<ReturnType<typeof bus.getHealthSummary>> = [];
+    bus.onError(() => snapshots.push(bus.getHealthSummary()));
+
+    // The live transport dies, then the automatic recovery open fails. The
+    // error callback must observe the failed open — not the `ready` flag left
+    // over from the transport instance the recovery replaced.
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots[0]).toMatchObject({
+      transport: { ready: false },
+      recovery: { hasError: true }
+    });
+    await bus.stop();
+  });
+
+  it('stamps one failed open once across both failure ledgers', async () => {
+    // A clock that advances on every read exposes any path that samples `now()`
+    // twice for a single failure. `getRecoveryStats().errorAt` and
+    // `getHealthSummary().lastFailure.at` describe the same failure and must
+    // agree.
+    let clock = 5_000;
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'single-failure-stamp' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'single-failure-stamp', environment: environment.environment, transport,
+      dedup: { now: () => clock++ }
+    });
+    await expect(bus.start({})).rejects.toThrow('Transport failed during startup.');
+    const recovery = bus.getRecoveryStats();
+    expect(recovery.errorAt).toBe(bus.getHealthSummary().lastFailure?.at);
+    await bus.stop();
+  });
+
   it('exposes generation and lastSuccessAt that increment on each successful open', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-gen' });
@@ -1364,6 +1412,47 @@ describe('CrossTabDataBus', () => {
       state: 'stopped',
       transport: { ready: false }
     });
+  });
+
+  it('ends a page-hide/page-show round trip over a pending open with a ready transport', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'superseded-open-ready' });
+    let releaseStart!: () => void;
+    let releaseStop!: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const transport = new FakeTransport<number>(startGate);
+    transport.stopGate = stopGate;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'superseded-open-ready',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await vi.waitFor(() => expect(transport.startCalls).toBe(1));
+
+    // Hide and show while the first open is still pending. That pending open is
+    // superseded: when it settles, its continuation must neither abort the
+    // queued resume nor clear the ready state the resume establishes.
+    environment.pageHide();
+    environment.pageShow();
+    releaseStart();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    releaseStop();
+    await vi.waitFor(() => expect(transport.startCalls).toBe(2));
+    await bus.ready();
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: true,
+      state: 'healthy',
+      suspended: false,
+      transport: { ready: true }
+    });
+    await bus.stop();
   });
 
   it('waits for an async transport stop before automatic recovery reopens', async () => {
