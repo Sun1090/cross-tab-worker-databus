@@ -17,6 +17,13 @@ fake tasks; each item is verified locally before being marked done.
 - Release tag `v0.20.85` is present on `origin`; release verification completed successfully.
 - Next milestone: continue 0.20.86 observability/parity audit with a concrete code or test deepening task; do not republish 0.20.85.
 
+## 0.20.86 dependency maintenance (2026-09-15)
+
+- Merged Dependabot PR #18 (`@types/node` 26.5.0 → 26.5.1) after verify, browser, and CodeQL checks passed.
+- Rebased the active feature branch onto updated `origin/main` (`0fe251a`).
+- No application behavior changes; dependency update is covered by the existing CI gates.
+- Next: continue the observability/parity audit with a concrete reliability or coverage improvement.
+
 ## 0.20.86 line (post-0.20.85, in progress)
 
 - PR #15 (merged): seeded property invariants for `selectActiveWorkers` /
