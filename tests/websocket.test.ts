@@ -322,6 +322,48 @@ describe('WebSocketTransport', () => {
     expect(Array.from(new Uint8Array(onMessage.mock.calls.at(-1)![0].data))).toEqual([6, 7]);
   });
 
+  it('ignores a Blob frame that resolves after the socket is replaced', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    transport.start(
+      { url: 'wss://example.test/ws' },
+      { onMessage: vi.fn(), onStatus: () => {}, onError: () => {} }
+    );
+    const first = sockets[0]!;
+    first.open();
+
+    let resolveFrame!: (buffer: ArrayBuffer) => void;
+    const pending = new Blob([new Uint8Array([1])]);
+    Object.defineProperty(pending, 'arrayBuffer', {
+      value: () => new Promise<ArrayBuffer>(resolve => { resolveFrame = resolve; })
+    });
+    first.onmessage?.({ data: pending });
+
+    // Replace the connection while the Blob conversion is still pending.
+    transport.stop();
+    const onMessage = vi.fn();
+    const onError = vi.fn();
+    transport.start(
+      { url: 'wss://example.test/ws' },
+      { onMessage, onStatus: () => {}, onError }
+    );
+    sockets[1]!.open();
+
+    const bytes = new Uint8Array([0xc7, 0, 9, ...new TextEncoder().encode('bin.topic'), 8, 9]);
+    resolveFrame(bytes.buffer);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('isolates a conversion failure inside a Blob binary frame through onError', async () => {
     const { sockets, onMessage, onError } = makeTransport();
     const socket = sockets[0]!;
