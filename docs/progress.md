@@ -1,9 +1,58 @@
 # Development Progress
 
+## 0.20.87 stop() tolerates a failing transport stop (2026-09-16)
+
+- Status: implementation, regression tests, and docs complete; PR
+  `feat/stop-failure-tolerance` (commit `e8d9001`) open and awaiting CI.
+- Completed content: `performStop()` awaited `transport.stop()` without a guard,
+  so a transport whose `stop()` rejected (or threw synchronously) turned the
+  shared `stop()` promise into a rejection. Every consumer of the fire-and-forget
+  teardown then saw an unhandled rejection — most visibly the React adapter's
+  `void instance.stop()` on unmount and the Vue adapter's `void stop()` in the
+  `onBeforeUnmount`/recreate path — even though the `finally` block had already
+  destroyed the bus. The failure is now routed through `reportError()`, the same
+  ledger/`onError` channel that `suspendTransport()` and `createStopPromise()`
+  already use for their stop cleanup, so `stop()` always resolves and the bus is
+  still fully torn down. This also makes the internal paths consistent: only the
+  explicit `stop()` path propagated a teardown failure.
+- Reproduction: `FakeTransport` gained `stopShouldFail`; the new
+  `CrossTabDataBus` regression asserted `await expect(bus.stop()).resolves
+  .toBeUndefined()` and failed against the previous code with
+  `promise rejected "Error: transport stop failed" instead of resolving`. The
+  companion React-hooks regression (a `FakeWebSocket.close` that throws during
+  unmount) failed before the fix because `lastFailure` stayed `undefined`.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `tests/fakes.ts`, `tests/hooks.test.tsx`, `CHANGELOG.md`, `docs/api.md`,
+  `docs/zh/api.md`, `docs/progress.md`.
+- Verification: focused regressions fail before and pass after the fix;
+  `pnpm test` 694/694 (34 files, +2 tests); `pnpm typecheck`, `pnpm lint`,
+  `pnpm build`, `pnpm verify:compat`, `pnpm verify:pack`, and
+  `git diff --check` all pass.
+- Blockers: none. No storage-key, schema, protocol, or public API shape change.
+- Risk / rollback: the only behavior change is that an explicit `stop()` no
+  longer rejects when the transport's own teardown fails; the bus state, the
+  teardown ordering, and restartability are unchanged, and the failure stays
+  observable through `onError` and `getHealthSummary().lastFailure`. Roll back
+  with `git revert e8d9001`.
+- Audited and intentionally unchanged (2026-09-16):
+  - `stop()`'s shared-promise cleanup still clears `this.stopPromise` from both
+    the resolve and reject handlers. With the rejection path now unreachable for
+    transport-stop failures the reject handler is defensive only, and a repeated
+    `stop()` after teardown remains the documented no-op
+    (`Promise.resolve()`), including when the first stop reported a failure.
+  - A restart queued behind an in-flight `stop()` still runs: `queueStartAfterStop()`
+    chains with `.catch(() => undefined)`, so the new fault tolerance does not
+    change `stop → start` ordering or the cancellation token behavior.
+- Next: React/Vue adapter parity (suspension/recreation races beyond the
+  stop-failure path), then the remaining `ready()` boundary branches. Updated:
+  2026-09-16.
+
 ## 0.20.87 transport failure ledger stamping (2026-09-16)
 
-- Status: implementation, regression tests, and docs complete; **PR #36**
-  (`feat/lifecycle-ledger-consistency`, commit `43d6d35`) open and awaiting CI.
+- Status: merged to `main` as `8adbc11` (`fix(data-bus): stamp a failed transport
+  open once`) via **PR #36** (`feat/lifecycle-ledger-consistency`,
+  rebase-merged, branch deleted); all checks green (`analyze`, `verify`,
+  `browser`, `CodeQL`).
 - Completed content: a failed transport open sampled the injected clock twice for
   one failure, so `getRecoveryStats().errorAt` and `getHealthSummary()
   .lastFailure.at` could describe the same failure with two different
@@ -43,10 +92,8 @@
     recovery cooldown and risking a retry loop driven by caller traffic. A
     narrow fix (defer transport operations to the scheduled recovery without
     reopening) is a separate design decision, not a drop-in change.
-- Next: continue the lifecycle audit with stop-time boundary semantics
-  (`transport.stop()` rejection during an explicit `stop()`, repeated stop, and
-  queued restart interaction), then React/Vue adapter parity. Updated:
-  2026-09-16.
+- Next: the stop-time boundary semantics noted below were picked up in the next
+  section. Updated: 2026-09-16.
 
 ## 0.20.87 runtime transport recovery ledger (2026-09-16)
 
