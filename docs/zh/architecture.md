@@ -522,6 +522,8 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 
 内置 Centrifuge transport 也会保留自己的 Subscriptions 并做协议层重连。两层恢复都要求 `subscribe` / `unsubscribe` 幂等。
 
+运行期 `error` 会有意保留 `transportReady`：该标记记录「本次会话中已安装的 transport 曾成功打开」，使 `ready()` 跟随 transport 而不是随协议连接抖动。transport 的*操作*由独立的恢复门（recovery gate）控制：当自动或按需重开尚未完成时，`runTransport()` 会把新的 `subscribe` / `publish` 挂在该门之后，而不是写入刚刚上报 `error` 的连接；门只在重开成功（或 transport 自愈回到 `connected`）后释放，此时所有挂起的操作才在可用 transport 上执行。自动尝试失败后门保持关闭，但下一次显式操作可以立即触发按需重开，而不必再等一个冷却周期；当 `recovery.maxAttempts` 耗尽，或被 `stop()` / 页面隐藏取代时，门会被释放，使文档化的显式重试路径与挂起丢弃语义继续成立。`disconnected` 是干净关闭而非可恢复失败：它不会调度 DataBus 重开，只有显式 `start()`、页面恢复或 transport 自身的重连才会回到 `connected`。
+
 ## 生命周期状态机
 
 `CrossTabDataBus` 使用多个布尔标志和 Promise gate 来串行化生命周期转换。它们之间的交互是 DataBus 层最复杂的部分。
@@ -533,7 +535,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 | `started` | `boolean` | `start()` 已被调用，且之后没有 `stop()` 完成 |
 | `stopping` | `boolean` | `stop()` 正在执行中；阻止新操作 |
 | `suspended` | `boolean` | Tab 已隐藏；transport 被有意暂停 |
-| `transportReady` | `boolean` | transport 已上报 `connected`，可接受操作 |
+| `transportReady` | `boolean` | 本次会话中 transport 已成功打开；运行期 `error` 后会保留，使 `ready()` 继续跟随已安装的 transport（待执行操作由恢复门而非该标记控制） |
 | `startPromise` | `Promise \| null` | 并发 `start()` 调用的 gate；操作完成后清除 |
 | `stopPromise` | `Promise \| null` | 显式 `stop()` 及其后排队的 restart 共享的 gate |
 | `queuedStart` | `Promise \| null` | 等待进行中的显式 stop 完成后执行的一次全新 start |
@@ -579,6 +581,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 - **启动期间隐藏**：`pagehide` 在 `openTransport` 飞行中触发时，`suspendTransport()` 设置 `suspended = true`，并在飞行中的 start 之后链式执行 `transport.stop()`。`openTransport` 的 catch 路径检测到 `suspended` 后放弃本次 open，不视为失败。
 - **被取代 open 失效**：每次全新 start、reopen、suspend 和 stop 都会推进 `lifecycleEpoch`。open 会捕获自己的 epoch；一旦更新的转换接管生命周期，旧 open 的 status/message/error 回调会被忽略，也不会再把 transport 标记为 ready 或执行失败清理。因此 `stop()` 会等待未完成的 open/reopen，并阻止被取代的 open 在 stop 完成后变为 ready。
 - **恢复冷却**：transport 上报 `error` 且 `started` 为 true、`stopping` 为 false 时，`updateStatus` 在 `RECOVERY_COOLDOWN_MS`（1000 ms）后调度自动 `reopenTransport()`。冷却窗口内的第二次错误被抑制，防止紧循环重试。
+- **传输恢复门**：调度重开的同时会抬起恢复门，使冷却期间发起的 `subscribe` / `publish` 无法到达失效连接，等重开成功后才释放。自动尝试失败后门刻意保持关闭：下一次显式操作会立即触发按需重开，而不是等待下一个限速尝试，挂起的操作则在该次成功后一并 flush。`recovery.maxAttempts` 耗尽，或被 `stop()` / `suspendTransport()` 取代时释放门，从而保留显式重试路径与挂起丢弃语义。运行期 `error` 不会清除 `transportReady`——清除它会让调用方流量绕过冷却重开，并在连接尚未承载数据时报告 ready。
 - **暂停期间停止**：`stop()` 设置 `stopping = true`，阻止 `suspendTransport()` 执行。清理过程会 await `startPromise` 和 `pendingStop`，确保任何飞行中的 open 或 stop 完成后才执行最终的 `transport.stop()`。
 
 ## 降级

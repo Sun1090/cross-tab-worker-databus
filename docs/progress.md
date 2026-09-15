@@ -1,3 +1,44 @@
+## 0.20.87 runtime transport recovery gate (2026-09-16)
+
+- 状态：实现、回归测试与文档已完成，位于 `feat/readiness-transport-status`，
+  待 commit。`transportReady` 在 runtime `error` 后**有意保持 true**（`ready()`
+  跟踪的是“已安装的 transport”，不等价于协议连接可用）；本轮未采用“ERROR 时清
+  `transportReady`”的方案。
+- 完成内容：修复 runtime transport `error` 之后的操作语义。此前 `error` 只在
+  `transportReady === true` 的情况下调度自动 reopen，冷却窗口内到达的
+  `subscribe()` / `publish()` 会走 `runTransport()` 的 ready 快速路径，被写到刚
+  刚失败的连接上并丢失。现在 `runTransport()` 增加一个 `recoveryGate`：自动或按需
+  reopen 挂起期间，`subscribe()` / `publish()` 会被停放在 gate 上，只有 reopen 成功
+  （或 transport 自愈回到 `CONNECTED`）后才释放并继续执行。自动尝试失败后 gate 保持
+  关闭但打开 `recoveryDemandAllowed`，让下一个显式操作立即触发一次按需 reopen，而不是
+  再等一个冷却周期；被停放的操作为这次成功之后统一 flush。`recovery.maxAttempts`
+  耗尽、或 `stop()` / page hide 覆盖当前等待时，gate 会被释放，从而保持既有“显式重试
+  路径”和“挂起即丢弃发布”的契约不变。干净的 `disconnected` 依旧**不会**触发 DataBus
+  自动 reopen。
+- 新增回归测试：`tests/data-bus.test.ts` 由 129 增至 132，新增/覆盖
+  ①runtime recovery 冷却期间停放操作，②自动尝试失败后由显式操作驱动立即 reopen，
+  ③失败的自动 reopen 之后排队操作一直停放到按需 reopen 成功，④干净 `disconnected`
+  不自动 reopen。变异验证：将 `src/core/data-bus.ts` 回退到 HEAD 时 4 个新测试中 2 个
+  失败；把 `recoveryDemandAllowed = true` 改成 `false` 时 7 个测试失败，确认新测试确实
+  钉住了新行为。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、
+  `docs/architecture.md`、`docs/zh/architecture.md`、`docs/api.md`、`docs/zh/api.md`、
+  `docs/progress.md`。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（132/132）、
+  `pnpm exec vitest run tests/data-bus.test.ts tests/websocket.test.ts tests/centrifuge.test.ts`
+  （225/225）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、
+  `pnpm check`（typecheck + build，34 files，703/703）、`pnpm lint`、`pnpm test:coverage`
+  （97.16% statements、92.42% branches、96.63% functions、98.68% lines）、
+  `pnpm verify:compat`、`pnpm verify:pack`、`pnpm test:e2e`（27/27）、`git diff --check`
+  全部通过。
+- 阻塞：无。
+- 风险 / 回滚：改动仅限 DataBus 内部恢复路径与文档，无 public API、存储键、schema 或
+  线协议变化。风险点是 gate 释放时机若遗漏会导致操作挂起；已由“成功释放 / 失败按需 /
+  覆盖等待释放 / 未参与恢复的 error 释放”四条路径覆盖。回滚方式：revert 本 commit 即
+  恢复旧的“error 后直接调用 transport”的行为。
+- 下一项：继续 lifecycle / `ready()` 边界与 replacement-window 发布审计。
+- 更新时间：2026-09-16。
+
 ## 0.20.87 Vitest patch update and clean-close audit (2026-09-16)
 
 - Status: implementation and verification complete on `feat/vitest-5.0.1`.

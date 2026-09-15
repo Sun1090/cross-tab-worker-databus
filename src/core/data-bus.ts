@@ -228,6 +228,19 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // a transport reopen succeeds so traces can correlate repeated failures.
   private recoveryAttempt = 0;
   private recoveryExhausted = false;
+  // Gate that holds transport operations issued after a runtime `error` until
+  // the scheduled recovery attempt has actually run. Without it, a dead
+  // transport still has `transportReady === true` during the cooldown, so
+  // publishes/subscribes would be written to the failed connection and lost.
+  private recoveryGate: Promise<void> | null = null;
+  private recoveryGateRelease: (() => void) | null = null;
+  private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private recoveryTimerToken = 0;
+  // Once an automatic attempt fails, an explicit transport operation may
+  // recover immediately instead of waiting for the next paced attempt. The
+  // gate still stays closed so the operation cannot reach the failed
+  // transport; it is released by the successful on-demand reopen.
+  private recoveryDemandAllowed = false;
   /** Monotonic generation incremented on every successful transport open.
    * Stays in lockstep with `lastSuccessAt` so callers can detect that the
    * transport has been reopened even if the timestamp window is short. */
@@ -493,8 +506,47 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return queued;
   }
 
+  /** Release every operation waiting on the scheduled recovery attempt. */
+  private releaseRecoveryGate(): void {
+    const release = this.recoveryGateRelease;
+    this.recoveryGate = null;
+    this.recoveryGateRelease = null;
+    this.recoveryDemandAllowed = false;
+    release?.();
+  }
+
+  /** Cancel a pending automatic retry when an explicit lifecycle transition
+   * supersedes it. The released gate re-enters runTransport(), which then
+   * follows the newest start/stop/suspend intent. */
+  private cancelScheduledRecovery(): void {
+    this.recoveryTimerToken += 1;
+    if (this.recoveryTimer !== null) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+    this.releaseRecoveryGate();
+  }
+
+  /** Keep the recovery gate closed after a failed attempt while allowing the
+   * next explicit transport operation to start an immediate on-demand reopen.
+   * If no gate/successor retry remains, release any waiters. */
+  private allowDemandRecovery(): void {
+    if (
+      this.recoveryGate !== null &&
+      this.started &&
+      !this.stopping &&
+      !this.suspended &&
+      this.status === WORKER_STATUS.ERROR
+    ) {
+      this.recoveryDemandAllowed = true;
+      return;
+    }
+    this.releaseRecoveryGate();
+  }
+
   /** Reset failure and recovery diagnostics for a new explicit start session. */
   private resetFailureState(): void {
+    this.cancelScheduledRecovery();
     this.lastError = null;
     this.lastErrorAt = null;
     this.lastFailure = null;
@@ -559,6 +611,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
             this.recoveryGeneration += 1;
             this.lastSuccessAt = this.now();
             this.transportReady = true;
+            // Release operations held during an automatic or on-demand reopen
+            // only after the ready flag is visible. Releasing inside the
+            // CONNECTED callback would make those operations bounce off the
+            // still-clearing startPromise and can let ready() win the race.
+            this.releaseRecoveryGate();
           }
         });
       })
@@ -948,6 +1005,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private async performStop(): Promise<void> {
     this.lifecycleEpoch += 1;
     this.stopping = true;
+    this.cancelScheduledRecovery();
     this.replayManager.suspend();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.STOP });
     this.trace.stop();
@@ -1053,6 +1111,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (status === WORKER_STATUS.DISCONNECTED || status === WORKER_STATUS.ERROR) this.transportSubscribedTopics.clear();
     // Re-subscribe assigned topics when the transport reconnects.
     if (status === WORKER_STATUS.CONNECTED && previousStatus !== WORKER_STATUS.CONNECTED) {
+      // A transport may recover itself without a DataBus reopen (for example a
+      // protocol-level reconnect). In that case the installed transport is
+      // already ready and can drain operations held during recovery. During a
+      // DataBus reopen transportReady is false until openTransport succeeds;
+      // that success path releases the gate after publishing the ready state.
+      if (this.transportReady) this.releaseRecoveryGate();
       for (const topic of this.cluster.getSnapshot().assignedTopics) this.subscribeTransport(topic);
     }
     // Auto-recover from a runtime transport failure (e.g. a crashed Worker)
@@ -1070,17 +1134,42 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
             this.recoveryExhausted = true;
             this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: this.recoveryMaxAttempts, outcome: RECOVERY_OUTCOME.EXHAUSTED });
           }
+          // No automatic attempt is left. Release demand-driven operations so
+          // subscribe/publish can still start an explicit manual recovery.
+          this.releaseRecoveryGate();
           return;
         }
         this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt, outcome: RECOVERY_OUTCOME.SCHEDULED });
-        setTimeout(() => {
-          if (this.stopping || !this.started || this.suspended) return;
-          // An explicit resume or subscribe already recovered the transport
-          // (or is in flight), so this stale timer must not open it again.
-          if (this.status !== WORKER_STATUS.ERROR) return;
-          void this.reopenTransport(attempt);
+        // Arm the gate before the timer so operations arriving in the
+        // cooldown window cannot slip past onto the failed connection.
+        if (this.recoveryGate === null) {
+          let release!: () => void;
+          this.recoveryGate = new Promise<void>(resolve => {
+            release = resolve;
+          });
+          this.recoveryGateRelease = release;
+        }
+        this.recoveryDemandAllowed = false;
+        const timerToken = ++this.recoveryTimerToken;
+        this.recoveryTimer = setTimeout(() => {
+          if (timerToken !== this.recoveryTimerToken) return;
+          this.recoveryTimer = null;
+          if (this.stopping || !this.started || this.suspended || this.status !== WORKER_STATUS.ERROR) {
+            this.releaseRecoveryGate();
+            return;
+          }
+          this.recoveryDemandAllowed = false;
+          const opening = this.reopenTransport(attempt);
+          void opening.then(
+            () => this.releaseRecoveryGate(),
+            () => this.allowDemandRecovery()
+          );
         }, this.recoveryCooldownMs);
       }
+    } else if (status === WORKER_STATUS.ERROR) {
+      // An error outside an active recovery sequence (for example after an
+      // initial start failure) must not leave demand-driven operations gated.
+      this.releaseRecoveryGate();
     }
     this.invokeHandlers(this.statusHandlers, handler => handler(status));
   }
@@ -1194,6 +1283,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.stopping) return;
     this.lifecycleEpoch += 1;
     this.suspended = true;
+    this.cancelScheduledRecovery();
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
     this.updateStatus(WORKER_STATUS.DISCONNECTED);
@@ -1296,7 +1386,32 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // re-established by the cluster on resume, and publications must not be
     // sent to a stopped transport.
     if (this.suspended) return;
-    if (this.transportReady && !this.stopping) {
+    // Automatic recovery is scheduled but has not run yet. Hold the operation
+    // until that attempt settles instead of writing it to the connection that
+    // just reported `error`.
+    if (this.recoveryGate && !this.stopping) {
+      // A failed automatic attempt leaves the gate closed but enables explicit
+      // demand recovery. The first transport operation starts that reopen once;
+      // every waiter remains queued behind the gate and runs after success.
+      if (this.recoveryDemandAllowed && this.status === WORKER_STATUS.ERROR && !this.suspended) {
+        this.recoveryDemandAllowed = false;
+        const opening = this.reopenTransport();
+        void opening.then(
+          () => this.releaseRecoveryGate(),
+          () => this.allowDemandRecovery()
+        );
+      }
+      const gate = this.recoveryGate;
+      void gate.then(() => {
+        if (this.stopping || this.suspended) return;
+        this.runTransport(operation);
+      });
+      return;
+    }
+    // `transportReady` is intentionally retained through a runtime error so
+    // ready() keeps tracking the installed transport. Operations, however,
+    // must never be written to a transport whose live status is `error`.
+    if (this.transportReady && this.status !== WORKER_STATUS.ERROR && !this.stopping) {
       try {
         void Promise.resolve(operation()).catch(error => this.reportError(error));
       } catch (error) {
