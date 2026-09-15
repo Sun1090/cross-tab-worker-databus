@@ -32,6 +32,10 @@ interface DataBusTransportHandlers<TData = unknown> {
 三个回调。连接状态变化时调 `onStatus`；收到 publication 时调 `onMessage`；
 非致命错误调 `onError`（DataBus 有恢复冷却窗口，避免抖动连接死循环重试）。
 
+`start()` MUST 在后端真正连接后才 settle 返回的 Promise；尝试失败时必须 reject。
+DataBus 把这个 settlement 当作就绪与恢复边界：处于 `CONNECTING` 的 socket 不算
+就绪，握手成功前不能释放排队操作。可能长期卡住的后端应自行设置握手超时并 reject。
+
 ## 架构分层
 
 ```
@@ -140,6 +144,10 @@ envelope，避免丢失 `messageId` 与 `timestamp`。
 Centrifuge session 遵循同一个传输无关契约：不带 metadata 的 payload 保持原始
 形状；带 metadata 的 publish 使用 `{ data, messageId?, timestamp? }`，入站还接受
 标准嵌套 `DataBusPublicationEnvelope`。
+
+`start()` 只在 `open` 后 resolve；握手前发生 error、close，或超过
+`connectTimeoutMs` 时 reject（默认 `30000` ms；`0` / `Infinity` 表示无限等待）。
+超时的 socket 会被关闭，该尝试之后迟到的 `open` 会被忽略。
 
 生命周期映射：`open` → `connected`，`close` → `disconnected`，`error` → `error`
 （触发 DataBus 自动恢复）。socket 原地重连时自动重发订阅帧。成功的重开既可以

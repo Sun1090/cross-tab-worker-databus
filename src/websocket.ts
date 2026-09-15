@@ -48,6 +48,13 @@ export interface WebSocketDataBusConfig {
   /** Custom socket factory. Defaults to the global `WebSocket`; injectable
    * for tests and non-browser runtimes. */
   webSocketFactory?: (url: string, protocols?: string | string[]) => WebSocketLike;
+  /** Milliseconds to wait for the handshake before reporting `error` and
+   * failing the start. Defaults to 30000 ms; pass
+   * `0` or `Infinity` to wait indefinitely. The timeout exists because
+   * `start()` resolves on connect, so a socket that never opens and never
+   * errors would otherwise leave the DataBus start gate (and every operation
+   * queued behind it) pending forever. */
+  connectTimeoutMs?: number;
 }
 
 /** Options for creating a fully-configured CrossTabDataBus with a WebSocket transport. */
@@ -61,6 +68,11 @@ export interface CreateWebSocketDataBusOptions<TData = unknown>
   /** Cluster key for cross-tab coordination. Defaults to the connection URL. */
   clusterKey?: string;
 }
+
+/** Default handshake budget. A socket that never opens and never fires
+ * error/close would otherwise keep a started transport stuck in `connecting`
+ * forever, with every queued operation parked behind an unsettled `start()`. */
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
 const WS_OPEN = 1;
 
@@ -78,13 +90,28 @@ export class WebSocketTransport<TData = unknown>
   private socketActive = false;
   private handlers: DataBusTransportHandlers<TData> | null = null;
   private readonly subscribedTopics = new Set<string>();
+  // Handshake gate for the current start(). Resolves once the socket opens,
+  // rejects when the attempt fails, so the DataBus start Promise — and every
+  // operation parked behind it — settles at the real connection boundary.
+  private connectPromise: Promise<void> | null = null;
+  private connectResolve: (() => void) | null = null;
+  private connectReject: ((error: unknown) => void) | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly connection: WebSocketDataBusConfig) {}
 
-  /** Open the WebSocket and wire lifecycle listeners. A factory failure is
-   * reported through `onStatus('error')` so the DataBus can recover. */
+  /** Open the WebSocket and wire lifecycle listeners. Resolves once the
+   * handshake completes and rejects when the attempt fails, matching the
+   * `DataBusTransport.start` contract ("resolves on connect or rejects on
+   * failure"). A factory failure is reported through `onStatus('error')` so
+   * the DataBus can recover. */
   start(config: WebSocketDataBusConfig, handlers: DataBusTransportHandlers<TData>): MaybePromise<void> {
-    if (this.socket && this.socketActive) return;
+    if (this.socket && this.socketActive) {
+      // Reuse the live socket instead of orphaning it. While the first
+      // attempt is still connecting, share its handshake gate so a duplicate
+      // start() cannot report readiness before the socket is usable.
+      return this.connectPromise ?? undefined;
+    }
     // A failed or closed socket is one-shot; retain its object only long
     // enough for a transparent same-object reopen to fire, but replace it
     // whenever start() is called again. Clearing the reference here also
@@ -104,33 +131,75 @@ export class WebSocketTransport<TData = unknown>
       handlers.onError(error);
       return;
     }
-    socket.onopen = () => {
-      if (this.socket !== socket || this.handlers !== handlers) return;
+    const opening = new Promise<void>((resolve, reject) => {
+      this.connectResolve = resolve;
+      this.connectReject = reject;
+      // Per-attempt handshake state. A socket that opens, then closes and
+      // re-opens in place (a protocol-level recovery) may reuse the same
+      // attempt; a timeout or a close/error before the first open permanently
+      // invalidates it so a late onopen cannot report readiness.
+      let handshakeCompleted = false;
+      let handshakeFailed = false;
+      const timeoutMs =
+        config.connectTimeoutMs ?? this.connection.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+        this.connectTimer = setTimeout(() => {
+          if (this.socket !== socket || this.handlers !== handlers || handshakeCompleted) return;
+          handshakeFailed = true;
+          this.connectTimer = null;
+          this.socketActive = false;
+          const error = new Error(`WebSocket did not open within ${timeoutMs}ms.`);
+          handlers.onStatus(WORKER_STATUS.ERROR);
+          handlers.onError(error);
+          this.failConnect(error);
+          // Abort the half-open handshake so the timed-out attempt cannot
+          // linger in CONNECTING or deliver a late onopen.
+          socket.close();
+        }, timeoutMs);
+      }
+      socket.onopen = () => {
+        if (this.socket !== socket || this.handlers !== handlers || handshakeFailed) return;
+        this.socketActive = true;
+        this.clearConnectTimer();
+        // Re-assert every topic so a reopened socket (recovery path) restores
+        // the server-side subscriptions without DataBus involvement.
+        for (const topic of this.subscribedTopics) {
+          this.sendFrame({ op: WS_OP.SUBSCRIBE, topic });
+        }
+        handlers.onStatus(WORKER_STATUS.CONNECTED);
+        if (!handshakeCompleted) {
+          handshakeCompleted = true;
+          this.settleConnect();
+        }
+      };
+      socket.onclose = () => {
+        if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
+        this.socketActive = false;
+        handlers.onStatus(WORKER_STATUS.DISCONNECTED);
+        if (!handshakeCompleted) {
+          handshakeFailed = true;
+          this.failConnect(new Error('WebSocket closed before the handshake completed.'));
+        }
+      };
+      socket.onerror = () => {
+        if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
+        this.socketActive = false;
+        handlers.onStatus(WORKER_STATUS.ERROR);
+        if (!handshakeCompleted) {
+          handshakeFailed = true;
+          this.failConnect(new Error('WebSocket failed to open.'));
+        }
+      };
+      socket.onmessage = event => {
+        if (this.socket === socket && this.handlers === handlers && this.socketActive) {
+          void this.handleMessage(event.data);
+        }
+      };
+      this.socket = socket;
       this.socketActive = true;
-      // Re-assert every topic so a reopened socket (recovery path) restores
-      // the server-side subscriptions without DataBus involvement.
-      for (const topic of this.subscribedTopics) {
-        this.sendFrame({ op: WS_OP.SUBSCRIBE, topic });
-      }
-      handlers.onStatus(WORKER_STATUS.CONNECTED);
-    };
-    socket.onclose = () => {
-      if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
-      this.socketActive = false;
-      handlers.onStatus(WORKER_STATUS.DISCONNECTED);
-    };
-    socket.onerror = () => {
-      if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
-      this.socketActive = false;
-      handlers.onStatus(WORKER_STATUS.ERROR);
-    };
-    socket.onmessage = event => {
-      if (this.socket === socket && this.handlers === handlers && this.socketActive) {
-        void this.handleMessage(event.data);
-      }
-    };
-    this.socket = socket;
-    this.socketActive = true;
+    });
+    this.connectPromise = opening;
+    return opening;
   }
 
   /** Idempotent: re-subscribing an active topic re-sends the frame but does
@@ -198,7 +267,39 @@ export class WebSocketTransport<TData = unknown>
     this.socketActive = false;
     this.handlers = null;
     this.subscribedTopics.clear();
+    // Settle an in-flight handshake gate: a DataBus stop() awaits the start
+    // Promise, so leaving it pending would hang teardown. Resolving (rather
+    // than rejecting) keeps an intentional stop from surfacing as an error.
+    this.settleConnect();
+    this.connectPromise = null;
     if (shouldClose) socket?.close();
+  }
+
+  /** Resolve the in-flight handshake gate. Idempotent: once the socket has
+   * opened (or a newer attempt replaced it) later calls are no-ops. */
+  private settleConnect(): void {
+    this.clearConnectTimer();
+    const resolve = this.connectResolve;
+    this.connectResolve = null;
+    this.connectReject = null;
+    resolve?.();
+  }
+
+  /** Reject the in-flight handshake gate. Idempotent on the same terms as
+   * {@link settleConnect}. */
+  private failConnect(error: unknown): void {
+    this.clearConnectTimer();
+    const reject = this.connectReject;
+    this.connectResolve = null;
+    this.connectReject = null;
+    reject?.(error);
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
   }
 
   /** Send one JSON frame. Frames are dropped with an `onError` report when

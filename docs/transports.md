@@ -35,6 +35,12 @@ connection state changes; call `onMessage` for each inbound publication; call
 `onError` for non-fatal errors (the DataBus applies a recovery cooldown so a
 flapping connection does not retry-loop).
 
+`start()` MUST settle its returned promise only once the backend is connected,
+and reject it when the attempt fails. The DataBus uses that settlement as its
+readiness and recovery boundary: a `CONNECTING` socket is not ready, and queued
+operations must not be released until the handshake succeeds. A backend that
+can stall should enforce its own handshake timeout and reject.
+
 ## Architectural layers
 
 ```
@@ -153,6 +159,11 @@ The Centrifuge session applies the same transport-neutral contract. Payloads
 without metadata keep their original shape. Metadata-bearing publishes use
 `{ data, messageId?, timestamp? }`, while inbound publications additionally
 accept the canonical nested `DataBusPublicationEnvelope`.
+
+`start()` resolves only after `open` and rejects when the handshake errors,
+closes before opening, or exceeds `connectTimeoutMs` (default `30000` ms; `0`
+or `Infinity` waits indefinitely). A timed-out socket is closed and a late
+`open` from that attempt is ignored.
 
 Lifecycle mapping: `open` → `connected`, `close` → `disconnected`,
 `error` → `error` (DataBus auto-recovery). Subscribe frames are re-sent when

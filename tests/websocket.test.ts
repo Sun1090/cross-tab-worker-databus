@@ -66,6 +66,12 @@ function makeTransport(factory?: (url: string) => FakeWebSocket) {
   return { sockets, transport, onMessage, onStatus, onError };
 }
 
+/** Let the DataBus lifecycle gate reach transport.start(), whose socket
+ * factory runs after a couple of chained microtasks. */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) await Promise.resolve();
+}
+
 describe('WebSocketTransport', () => {
   it('maps socket lifecycle to the DataBus status vocabulary', () => {
     const { sockets, onStatus } = makeTransport();
@@ -567,6 +573,102 @@ describe('WebSocketTransport', () => {
     );
   });
 
+  it('resolves start() only after the socket handshake completes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const onStatus = vi.fn();
+    let settled = false;
+    const startPromise = Promise.resolve(
+      transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus, onError: () => {} }
+      )
+    ).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(sockets).toHaveLength(1);
+    expect(settled).toBe(false);
+    expect(onStatus).not.toHaveBeenCalledWith('connected');
+
+    sockets[0]!.open();
+    await startPromise;
+    expect(settled).toBe(true);
+    expect(onStatus).toHaveBeenCalledWith('connected');
+    transport.stop();
+  });
+
+  it('rejects start() and reports an error when the handshake times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeWebSocket[] = [];
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => {
+          const socket = new FakeWebSocket(url);
+          sockets.push(socket);
+          return socket;
+        }
+      });
+      const onStatus = vi.fn();
+      const onError = vi.fn();
+      const rejection = Promise.resolve(
+        transport.start(
+          { url: 'wss://example.test/ws', connectTimeoutMs: 25 },
+          { onMessage: () => {}, onStatus, onError }
+        )
+      ).then(() => null, error => error);
+
+      await vi.advanceTimersByTimeAsync(25);
+      const error = await rejection;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('25ms');
+      expect(onStatus).toHaveBeenCalledWith('error');
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('25ms') })
+      );
+
+      // A late open from the timed-out socket must not resurrect readiness.
+      sockets[0]!.open();
+      expect(onStatus).not.toHaveBeenCalledWith('connected');
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects start() when the socket closes before the handshake completes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const onStatus = vi.fn();
+    const rejection = Promise.resolve(
+      transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus, onError: () => {} }
+      )
+    ).then(() => null, error => error);
+
+    sockets[0]!.close();
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('closed before the handshake');
+    expect(onStatus).toHaveBeenCalledWith('disconnected');
+  });
+
   it('reports a throwing factory through onStatus(error) instead of throwing', () => {
     const transport = new WebSocketTransport({
       url: 'wss://example.test/ws',
@@ -622,6 +724,38 @@ describe('WebSocketTransport', () => {
 });
 
 describe('createWebSocketDataBus', () => {
+  it('keeps ready() pending until the WebSocket handshake completes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const bus = createWebSocketDataBus<number>({
+      connection: {
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => {
+          const socket = new FakeWebSocket(url);
+          sockets.push(socket);
+          return socket;
+        }
+      }
+    });
+    await flushMicrotasks();
+    const socket = sockets[0]!;
+    let readyResolved = false;
+    const ready = bus.ready().then(() => {
+      readyResolved = true;
+    });
+    await flushMicrotasks();
+    expect(readyResolved).toBe(false);
+
+    socket.open();
+    await ready;
+    expect(readyResolved).toBe(true);
+
+    bus.publish('demo.topic', 7);
+    expect(socket.sent.at(-1)).toBe(
+      JSON.stringify({ op: 'publish', topic: 'demo.topic', data: 7 })
+    );
+    await bus.stop();
+  });
+
   it('automatically reopens and re-subscribes after a socket error', async () => {
     vi.useFakeTimers();
     try {
@@ -646,10 +780,12 @@ describe('createWebSocketDataBus', () => {
       });
       const received: number[] = [];
       bus.subscribe('demo.topic', message => received.push(message.data));
-      await bus.ready();
-
+      // createWebSocketDataBus() chains transport.start() behind its lifecycle
+      // gate, so the socket factory runs a couple of microtasks later.
+      await flushMicrotasks();
       const first = sockets[0]!;
       first.open();
+      await bus.ready();
       first.onerror?.();
       expect(bus.getStatus()).toBe('error');
 
@@ -684,10 +820,10 @@ describe('createWebSocketDataBus', () => {
     });
     const received: Array<{ topic: string; data: { hello: string } }> = [];
     bus.subscribe('demo.topic', message => received.push(message));
-    await bus.ready();
-
+    await flushMicrotasks();
     const socket = sockets[0]!;
     socket.open();
+    await bus.ready();
     socket.serverFrame({ topic: 'demo.topic', data: { hello: 'world' } });
     expect(received[0]).toMatchObject({ topic: 'demo.topic', data: { hello: 'world' } });
 
@@ -717,6 +853,8 @@ describe('createWebSocketDataBus factory', () => {
       loadWeighting: { messageRateWeight: 1 }
     });
     bus.subscribe('demo.topic', () => undefined);
+    await flushMicrotasks();
+    socket.open();
     await bus.ready();
     now += 3_000;
     environment.runIntervals();
