@@ -1,3 +1,18 @@
+## 0.20.89 WebSocket Blob stale delivery race (2026-09-16)
+
+- 状态：已完成并提交，等待 0.20.89 发布冻结。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `74c50c0`。
+- 复现场景：旧 WebSocket 收到 Blob 二进制帧后执行 `stop()` 并重新 `start()`；旧帧的 `arrayBuffer()` 在新连接与 handlers 安装后才解析完成，修复前会被当作新连接收到的消息分发给新 `onMessage`。
+- 根因：`handleMessage()` 对 Blob 的异步转换没有绑定接收时的 socket / handlers；转换完成后的空窗期无法判断连接是否已被替换，转换失败也会通过新 handlers 上报。
+- 修复：`src/websocket.ts` 在 Blob 转换前捕获当前 socket 与 handlers，转换完成后仅在三者仍一致且 socket 处于 active 状态时继续解析；失败分支同样受该身份校验保护。旧连接迟到帧和迟到转换错误均被静默丢弃。
+- 变更文件：`src/websocket.ts`、`tests/websocket.test.ts`、`CHANGELOG.md`。
+- 新增测试：`tests/websocket.test.ts` — `ignores a Blob frame that resolves after the socket is replaced`；mutation check 确认旧实现失败（新 `onMessage` 被错误调用 1 次），修复实现通过。
+- 验证命令与结果：`pnpm exec vitest run tests/websocket.test.ts tests/data-bus.test.ts`（182/182）、`pnpm lint`、`pnpm check`（35 files，716/716）、`pnpm test:coverage`（97.17% statements / 92.75% branches / 96.50% functions / 98.51% lines）、`pnpm test:e2e`（27/27）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅收紧 WebSocket 消息分发身份校验，无 public export、存储 schema 或线协议变更。若出现兼容性回归，可 revert `74c50c0`。
+- 下一项：继续审计 Centrifuge / session 的异步回调替换窗口、`ready()` 排队 start/stop 边界和生命周期定时器残留；优先完成可复现验证后再决定 0.20.89 发布范围。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 RELEASED (2026-09-16)
 
 - 状态：已发布。版本 **0.20.88** 已合并到 `origin/main`，tag 为 `v0.20.88`；npm `latest` 指向该版本，GitHub Release、Release workflow 与已发布包消费者 smoke test 均通过。
