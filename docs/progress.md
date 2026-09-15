@@ -1,6 +1,7 @@
 ## 0.20.87 WebSocket start/ready handshake gate (2026-09-16)
 
-- 状态：实现、回归测试与文档已完成，位于 `feat/websocket-connect-gate`，待 commit。
+- 状态：已合并。PR #42（`feat/websocket-connect-gate`），合并后 main commit `def6b68`；
+  CI analyze / verify / browser / CodeQL 全绿，rebase merge 并删除远端分支。
 - 完成内容：让原生 WebSocket transport 真正遵守 `DataBusTransport.start()` 的
   「连接成功后 resolve / 失败时 reject」契约。此前 `start()` 同步返回，socket 仍处于
   `CONNECTING` 时 `createWebSocketDataBus()` 的 `ready()` 就会 resolve；随后立刻
@@ -34,6 +35,49 @@
   紧随其后的 publish 丢失，属于需要修复的契约违背。超时新增默认可避免握手永久挂起；
   `0`/`Infinity` 保留旧的无超时等待能力。回滚方式：revert 本 commit 即恢复此前
   `start()` 在 `CONNECTING` 阶段提前返回的行为。
+- 下一项：继续 lifecycle / `ready()` 边界与 replacement-window 发布审计。
+- 更新时间：2026-09-16。
+
+## 0.20.87 clean-disconnected demand reopen (2026-09-16)
+
+- 状态：实现、回归测试与文档已完成，位于 `feat/disconnected-demand-reopen`，待 commit。
+- 完成内容：修复干净 `disconnected` 之后的操作丢失。`runTransport()` 原本只把
+  `error` 视为「不可用」，因此在 transport 干净 `close`（状态映射为 `disconnected`）
+  之后到达的 `subscribe()` / `publish()` 会走 ready 快速路径，被直接写进已关闭的连接；
+  WebSocket 后端的 not-open 守卫只能上报丢帧，无法真正发出。现在新增
+  `transportHasConnected` 标记（在 transport 首次上报 `connected` 时置位，在
+  `openTransport()` 安装新 transport 时清零），快速路径在「曾经 connected 过、当前为
+  `disconnected`」时被拒绝，操作落到按需 reopen 分支：clean `disconnected` 仍然不调度
+  后台自动恢复（保持既有契约），但下一次显式 transport 操作会驱动一次按需 reopen，并把
+  该操作挂在恢复门之后，重开成功后 flush。
+  关键取舍：条件不能简单收紧成「必须 `connected`」。worker 型后端
+  （`CentrifugeWorkerTransport`）在 worker 创建后即 resolve `start()`，连接状态随后才
+  异步上报，因此 `ready()` 之后仍有一段 `disconnected`（尚未连接）的窗口；简单收紧会
+  让该窗口内的 publish 触发一次多余的 reopen（终止并重建 worker）。用「是否曾经
+  connected」区分「尚未连接」与「已断开的可用连接」，既修掉 WebSocket 丢帧，又保持
+  worker 型后端的既有行为。
+- 新增回归测试：`tests/data-bus.test.ts` 由 132 增至 134。①「clean `disconnected` 后
+  显式操作触发一次重开并 flush」（连接过再断开）；②「resolve `start()` 但尚未上报
+  `connected` 的 transport 仍直接收到操作、不触发多余重开」（worker 型窗口）。变异验证：
+  去掉「曾经 connected」判定时测试 ① 失败（`expected 1 to be 2`），确认测试钉住新行为；
+  测试 ② 防止把条件收得过紧。`tests/centrifuge.test.ts`（55/55）同时作为 worker 型后端
+  的集成回归。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、
+  `docs/architecture.md`、`docs/zh/architecture.md`、`docs/api.md`、`docs/zh/api.md`、
+  `docs/transports.md`、`docs/zh/transports.md`、`docs/progress.md`。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（134/134）、
+  `pnpm exec vitest run tests/centrifuge.test.ts tests/data-bus.test.ts`（189/189）、
+  `pnpm exec vitest run tests/documentation.test.ts tests/data-bus.test.ts`（150/150）、
+  `pnpm check`（typecheck + build，34 files，709/709）、`pnpm lint`、`pnpm test:coverage`
+  （97.18% statements、92.42% branches、96.66% functions、98.63% lines）、
+  `pnpm verify:compat`、`pnpm verify:pack`、`pnpm test:e2e`（27/27）、`git diff --check`
+  全部通过。
+- 阻塞：无。
+- 风险 / 回滚：改动仅限 `runTransport()` 的就绪判定、一个新内部标记与文档，无 public API、
+  存储键、schema 或线协议变化。风险点是「曾经 connected 后断开」的判定若过宽会让自愈型
+  transport（如 Centrifuge 协议级重连）吃到多余 reopen；因此判定刻意保留「尚未 connected」
+  的宽松路径，且只在显式操作到达时才按需重开一次，不引入后台重试循环。回滚方式：revert
+  本 commit 即恢复「clean `disconnected` 后操作直接写入已关闭连接」的旧行为。
 - 下一项：继续 lifecycle / `ready()` 边界与 replacement-window 发布审计。
 - 更新时间：2026-09-16。
 

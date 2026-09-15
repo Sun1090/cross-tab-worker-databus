@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataBusTraceReporter } from '../src/core/trace';
 import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
-import type { WorkerClusterMessage } from '../src/core/types';
+import type { DataBusTransport, WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
 import { CLUSTER_MESSAGE_TYPE } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
@@ -910,6 +910,73 @@ describe('CrossTabDataBus', () => {
     expect(transport.startCalls).toBe(2);
     await bus.stop();
     vi.useRealTimers();
+  });
+
+  it('reopens a cleanly disconnected transport when an explicit operation demands it', async () => {
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'disconnect-demand'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'disconnect-demand',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    // A clean close does not schedule background recovery, but the next
+    // operation must not be written to the disconnected connection. It should
+    // demand one reopen and flush only after the replacement is connected.
+    transport.setStatus('disconnected');
+    bus.publish('topic', 42);
+
+    await vi.waitFor(() => expect(transport.startCalls).toBe(2));
+    expect(transport.publishCalls).toEqual([{ topic: 'topic', data: 42 }]);
+    await bus.stop();
+  });
+
+  it('keeps handing operations to a transport that resolves start() before reporting connected', async () => {
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'pre-connect-window'
+    });
+    // Worker-style backends resolve start() once the worker is spawned and
+    // report the connection asynchronously, so a publish can arrive while the
+    // live status is still the initial `disconnected`. That is "not connected
+    // yet", not a lost connection, and must not trigger a redundant reopen.
+    const published: Array<{ topic: string; data: unknown }> = [];
+    let startCalls = 0;
+    const workerStyle: DataBusTransport<object, number> = {
+      start: () => {
+        startCalls += 1;
+      },
+      subscribe: () => undefined,
+      unsubscribe: () => undefined,
+      publish: (topic, data) => {
+        published.push({ topic, data });
+      },
+      stop: () => undefined
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'pre-connect-window',
+      environment: environment.environment,
+      initialConfig: {},
+      transport: workerStyle
+    });
+
+    await bus.start({});
+    await bus.ready();
+    bus.publish('topic', 7);
+
+    expect(published).toEqual([{ topic: 'topic', data: 7 }]);
+    expect(startCalls).toBe(1);
+    await bus.stop();
   });
 
   it('traces scheduled, failed, and successful transport recovery outcomes', async () => {

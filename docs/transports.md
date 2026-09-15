@@ -170,9 +170,11 @@ Lifecycle mapping: `open` → `connected`, `close` → `disconnected`,
 the socket reopens in place. A successful reopen can either reuse the same
 socket object or create a replacement through the factory; callbacks from the
 superseded socket are ignored, so a late close or message from the failed
-connection cannot pollute the recovered one. A pattern-aware server may tag
-publications with the concrete topic — see wildcard subscriptions in
-[api.md](./api.md).
+connection cannot pollute the recovered one. A clean `disconnected` schedules no
+background recovery, but the next `subscribe()` / `publish()` demands one reopen
+and flushes behind it, so a post-close operation is never sent to the closed
+socket. A pattern-aware server may tag publications with the concrete topic —
+see wildcard subscriptions in [api.md](./api.md).
 
 ## Factory entry point
 
