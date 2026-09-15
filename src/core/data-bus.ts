@@ -1298,16 +1298,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
     this.updateStatus(WORKER_STATUS.DISCONNECTED);
-    // A failed open already owns a stop cleanup; reuse it so the suspend does
-    // not stop an already-stopped transport. Resume/reopen chain after the
-    // same pendingStop gate. Without this guard, suspendTransport would issue
-    // a second transport.stop() that races with the failed-open cleanup.
-    if (this.pendingStop) return;
+    // Repeated hide/show rounds can leave a resume opening queued behind an
+    // older stop gate. If this suspend is already represented by that gate,
+    // reuse it. Otherwise the current startPromise is a newer opening (which
+    // may already have called transport.start), so chain a fresh idempotent
+    // stop after it. This restores the invariant that startPromise and
+    // pendingStop are the same promise while suspended; without it a later
+    // pageShow reuses the now-superseded opening and the bus stays hidden.
+    if (this.pendingStop && (this.startPromise === null || this.startPromise === this.pendingStop)) {
+      // A failed open may already own the stop cleanup; reuse it instead of
+      // issuing a redundant idempotent stop. Restore the suspended invariant
+      // so a later pageshow/start chains its reopen behind this same gate.
+      this.startPromise = this.pendingStop;
+      return;
+    }
     // Chain the stop after any in-flight start so an async open settles first.
-    // startPromise and pendingStop MUST be the same promise so reopenTransport's
-    // `startPromise !== pendingStop` check can distinguish a suspend-stop gate
-    // from a resume opening — do not wrap one without wrapping the other.
-    const pending = this.startPromise ?? Promise.resolve();
+    const pending = this.startPromise ?? this.pendingStop ?? Promise.resolve();
     const stopping = pending
       .catch(() => undefined)
       .then(() => this.transport.stop())
