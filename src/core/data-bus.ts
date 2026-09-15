@@ -203,6 +203,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // Gate that serialises start/stop/suspend/resume — only one lifecycle
   // transition at a time. Resets to null once the operation settles.
   private startPromise: Promise<void> | null = null;
+  // Gate for an explicit stop(). Concurrent stop() calls share it, and a
+  // start() received while stopping chains a fresh start after it.
+  private stopPromise: Promise<void> | null = null;
+  // A start() requested while an explicit stop() is still settling. Kept
+  // separate from startPromise because stop()'s finally block clears the
+  // ordinary lifecycle gate before the queued start is allowed to run.
+  private queuedStart: Promise<void> | null = null;
   // Timestamp of the last automatic transport recovery attempt.
   // Used to avoid a tight retry loop when the transport fails repeatedly.
   private lastRecoveryAt = 0;
@@ -348,12 +355,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * Start the DataBus with the given transport config.
    *
    * The first call starts the cluster and opens the transport. Concurrent calls
-   * during an in-flight start return the same promise. Once the operation
-   * settles (success or failure) the promise gate is cleared so a subsequent
-   * start() or resumeTransport() can open a fresh lifecycle.
+   * during an in-flight open return the same promise. A call received while an
+   * explicit stop() is settling queues one fresh start after cleanup. Once an
+   * operation settles (success or failure) its promise gate is cleared so a
+   * subsequent start() or resumeTransport() can open a fresh lifecycle.
    */
   start(config: TConfig): Promise<void> {
-    if (this.startPromise) return this.startPromise;
+    if (this.queuedStart) return this.queuedStart;
+    if (this.stopping) return this.queueStartAfterStop(config);
+    // A suspended transport uses the same promise for startPromise and
+    // pendingStop. Treat it as a stop gate here so an explicit start() queues a
+    // real reopen instead of returning a promise that only waits for cleanup.
+    if (this.startPromise && this.startPromise !== this.pendingStop) return this.startPromise;
     if (this.started) {
       const transportDown =
         !this.transportReady ||
@@ -410,6 +423,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       }
     );
     return opening;
+  }
+
+  /** Queue exactly one fresh start after an in-flight explicit stop settles. */
+  private queueStartAfterStop(config: TConfig): Promise<void> {
+    if (this.queuedStart) return this.queuedStart;
+    const stop = this.stopPromise ?? Promise.resolve();
+    const queued = stop
+      .catch(() => undefined)
+      .then(() => {
+        // Clear before invoking start(), which installs its own startPromise.
+        if (this.queuedStart === queued) this.queuedStart = null;
+        return this.start(config);
+      });
+    this.queuedStart = queued;
+    return queued;
   }
 
   /** Reset failure and recovery diagnostics for a new explicit start session. */
@@ -508,6 +536,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     } catch (error) {
       return Promise.reject(error);
     }
+    if (this.queuedStart) return this.queuedStart;
     if (this.startPromise) return this.startPromise;
     if (this.transportReady) return Promise.resolve();
     // Surface the last failure so callers can distinguish a transient retry
@@ -772,10 +801,26 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /**
    * Gracefully stop the DataBus: unsubscribe all topics, stop the cluster,
-   * and close the transport. Idempotent.
+   * and close the transport. Concurrent and repeated calls share the in-flight
+   * stop promise. A start() received while stopping runs after this completes.
    */
-  async stop(): Promise<void> {
-    if (!this.started) return;
+  stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (!this.started) return Promise.resolve();
+    const stopPromise = this.performStop();
+    this.stopPromise = stopPromise;
+    void stopPromise.then(
+      () => {
+        if (this.stopPromise === stopPromise) this.stopPromise = null;
+      },
+      () => {
+        if (this.stopPromise === stopPromise) this.stopPromise = null;
+      }
+    );
+    return stopPromise;
+  }
+
+  private async performStop(): Promise<void> {
     this.stopping = true;
     this.replayManager.suspend();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.STOP });

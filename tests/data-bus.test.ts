@@ -1087,6 +1087,74 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('explicit start() reopens after an in-flight suspend stop settles', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'start-during-suspend' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'start-during-suspend',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+
+    environment.pageHide();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    const restarting = bus.start({});
+    await Promise.resolve();
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await restarting;
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
+  it('explicit start() waits for an in-flight stop() and restarts', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'start-during-stop' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'start-during-stop',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+
+    const stopping = bus.stop();
+    expect(bus.stop()).toBe(stopping);
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    const restarting = bus.start({});
+    expect(bus.start({})).toBe(restarting);
+    expect(bus.ready()).toBe(restarting);
+    await Promise.resolve();
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await stopping;
+    await restarting;
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
   it('waits for an async transport stop before automatic recovery reopens', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
