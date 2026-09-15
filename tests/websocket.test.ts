@@ -76,6 +76,16 @@ describe('WebSocketTransport', () => {
     socket.onerror?.();
     expect(onStatus).toHaveBeenCalledWith('error');
     socket.close();
+    // A close often follows an error. It must not overwrite the error status
+    // that scheduled DataBus automatic recovery.
+    expect(onStatus).not.toHaveBeenCalledWith('disconnected');
+  });
+
+  it('maps a clean socket close to the disconnected status', () => {
+    const { sockets, onStatus } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+    socket.close();
     expect(onStatus).toHaveBeenCalledWith('disconnected');
   });
 
@@ -173,6 +183,35 @@ describe('WebSocketTransport', () => {
     // the existing socket rather than orphaning it.
     transport.start({ url: 'wss://example.test/other' }, { onMessage, onStatus, onError });
     expect(sockets).toHaveLength(1);
+  });
+
+  it('opens a replacement socket after the current connection fails or closes', () => {
+    const { sockets, transport, onMessage, onStatus, onError } = makeTransport();
+    const handlers = { onMessage, onStatus, onError };
+    const first = sockets[0]!;
+    first.open();
+
+    first.onerror?.();
+    expect(onStatus).toHaveBeenLastCalledWith('error');
+    transport.start({ url: 'wss://example.test/ws' }, handlers);
+    expect(sockets).toHaveLength(2);
+
+    const second = sockets[1]!;
+    second.open();
+    expect(onStatus).toHaveBeenLastCalledWith('connected');
+
+    // A late error/close/message from the failed connection must not affect
+    // the replacement socket or its handlers.
+    first.onerror?.();
+    first.onclose?.();
+    first.serverFrame({ topic: 'stale', data: 1 });
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onStatus).toHaveBeenLastCalledWith('connected');
+
+    second.onclose?.();
+    expect(onStatus).toHaveBeenLastCalledWith('disconnected');
+    transport.start({ url: 'wss://example.test/ws' }, handlers);
+    expect(sockets).toHaveLength(3);
   });
 
   it('ignores a non-string, non-binary server frame', () => {
@@ -583,6 +622,54 @@ describe('WebSocketTransport', () => {
 });
 
 describe('createWebSocketDataBus', () => {
+  it('automatically reopens and re-subscribes after a socket error', async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeWebSocket[] = [];
+      const environment = createFakeEnvironment({
+        storage: new MemoryStorage(),
+        hub: new ChannelHub(),
+        now: () => 1_000,
+        randomId: 'ws-recovery'
+      });
+      const bus = createWebSocketDataBus<number>({
+        connection: {
+          url: 'wss://example.test/ws',
+          webSocketFactory: url => {
+            const socket = new FakeWebSocket(url);
+            sockets.push(socket);
+            return socket;
+          }
+        },
+        environment: environment.environment,
+        recovery: { cooldownMs: 100 }
+      });
+      const received: number[] = [];
+      bus.subscribe('demo.topic', message => received.push(message.data));
+      await bus.ready();
+
+      const first = sockets[0]!;
+      first.open();
+      first.onerror?.();
+      expect(bus.getStatus()).toBe('error');
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(sockets).toHaveLength(2);
+      const second = sockets[1]!;
+      second.open();
+
+      expect(bus.getStatus()).toBe('connected');
+      expect(second.sent).toContain(JSON.stringify({ op: 'subscribe', topic: 'demo.topic' }));
+      first.serverFrame({ topic: 'demo.topic', data: 1 });
+      second.serverFrame({ topic: 'demo.topic', data: 2 });
+      expect(received).toEqual([2]);
+
+      await bus.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('wires a WebSocket transport into an auto-starting CrossTabDataBus', async () => {
     const sockets: FakeWebSocket[] = [];
     const bus = createWebSocketDataBus<{ hello: string }>({
