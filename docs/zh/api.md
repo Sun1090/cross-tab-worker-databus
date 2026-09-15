@@ -288,7 +288,7 @@ trace: {
 stop(): Promise<void>
 ```
 
-永久销毁当前实例：清理 handler、集群注册、路由、Worker 和 transport。普通页面隐藏和恢复不需要调用。
+永久销毁当前实例：清理 handler、集群注册、路由、Worker 和 transport。若 transport open/reopen 仍在收敛，`stop()` 会等待它结束并使该结果失效，确保它不会在 stop 后变为 ready。普通页面隐藏和恢复不需要调用。
 
 ## `DataBusTransport<TConfig, TData>`
 

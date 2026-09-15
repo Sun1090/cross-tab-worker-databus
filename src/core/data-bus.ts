@@ -232,6 +232,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // surfaces a failure while later opens and automatic recovery wait for the
   // stop to settle.
   private pendingStop: Promise<void> | null = null;
+  // Ownership token for asynchronous transport opens. Every lifecycle
+  // transition invalidates callbacks and failure cleanup from older opens.
+  private lifecycleEpoch = 0;
   // Minimum interval in ms between automatic recovery attempts.
   private readonly recoveryCooldownMs: number;
   private readonly recoveryMaxAttempts: number;
@@ -396,7 +399,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // Establish the opening before replaying topicHandlers: cluster.subscribe()
     // can synchronously invoke onControl for self-owned topics, and those
     // callbacks would otherwise see startPromise=null and open a second transport.
-    const opening = this.openTransport(config, this.pendingStop ?? Promise.resolve(), true);
+    const lifecycleEpoch = ++this.lifecycleEpoch;
+    const opening = this.openTransport(
+      config,
+      this.pendingStop ?? Promise.resolve(),
+      true,
+      lifecycleEpoch
+    );
     this.startPromise = opening;
     // Replay subscriptions that were registered before start() or that were lost
     // during a previous failure recovery. The cluster.stop() call in the failure
@@ -411,12 +420,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // clobbering a promise that suspend/resume may have already swapped in.
     void opening.then(
       () => {
+        if (this.startPromise !== opening) return;
         // Emit the coordination snapshot only after the transport has opened
         // and the just-issued subscriptions have flushed, so the routes list
         // (and the role/assignment picture) is populated rather than always
         // empty — the synchronous pre-open snapshot would see no routes.
         this.emitCoordinationTrace();
-        if (this.startPromise === opening) this.startPromise = null;
+        this.startPromise = null;
       },
       () => {
         if (this.startPromise === opening) this.startPromise = null;
@@ -461,17 +471,20 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private openTransport(
     config: TConfig,
     before: Promise<unknown>,
-    stopClusterOnFailure: boolean
+    stopClusterOnFailure: boolean,
+    lifecycleEpoch: number
   ): Promise<void> {
     this.transportReady = false;
     const chainedPendingStop = this.pendingStop;
+    const isCurrentLifecycle = () => lifecycleEpoch === this.lifecycleEpoch;
     return before
       .catch(() => undefined)
       .then(() => {
-        // stop() or suspendTransport() may have arrived while this opening was
-        // queued behind a pending stop. Abandon the open and keep the settled
-        // stop gate visible so stop() does not issue a second transport.stop().
-        if (this.stopping || this.suspended) return;
+        // stop(), suspendTransport(), or a newer reopen may have arrived while
+        // this opening was queued behind a pending stop. Abandon the open and
+        // keep the settled stop gate visible so stop() does not issue a second
+        // transport.stop().
+        if (!isCurrentLifecycle() || this.stopping || this.suspended) return;
         // A stop we actually chained after has settled; this opening now owns
         // the lifecycle. A stop created concurrently (e.g. by suspendTransport)
         // is a different promise and must stay visible to later catch/resume
@@ -479,11 +492,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         if (this.pendingStop === chainedPendingStop) this.pendingStop = null;
         return Promise.resolve(
           this.transport.start(config, {
-            onMessage: message => this.handleTransportMessage(message),
-            onStatus: status => this.updateStatus(status),
-            onError: error => this.reportError(error)
+            onMessage: message => {
+              if (isCurrentLifecycle()) this.handleTransportMessage(message);
+            },
+            onStatus: status => {
+              if (isCurrentLifecycle()) this.updateStatus(status);
+            },
+            onError: error => {
+              if (isCurrentLifecycle()) this.reportError(error);
+            }
           })
         ).then(() => {
+          if (!isCurrentLifecycle()) return;
           // A transport may report 'error' synchronously during start() (e.g. a
           // Worker that fails to boot) while still returning normally. Treat that
           // as a startup failure instead of marking the transport ready, so a
@@ -500,6 +520,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         });
       })
       .catch(error => {
+        // A newer suspend/resume/stop owns the lifecycle now. Do not let this
+        // superseded open tear down the newer operation or clear its gate.
+        if (!isCurrentLifecycle()) throw error;
         // Reset started before reporting so an initial-start failure does not
         // schedule automatic recovery; only the caller can retry a first start.
         if (stopClusterOnFailure) this.started = false;
@@ -520,7 +543,6 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.cluster.stop();
           this.stopping = false;
         }
-        this.startPromise = null;
         throw error;
       });
   }
@@ -806,7 +828,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    */
   stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
-    if (!this.started) return Promise.resolve();
+    if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
+      return Promise.resolve();
+    }
     const stopPromise = this.performStop();
     this.stopPromise = stopPromise;
     void stopPromise.then(
@@ -821,6 +845,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   private async performStop(): Promise<void> {
+    this.lifecycleEpoch += 1;
     this.stopping = true;
     this.replayManager.suspend();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.STOP });
@@ -1047,6 +1072,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    */
   private suspendTransport(): void {
     if (this.stopping) return;
+    this.lifecycleEpoch += 1;
     this.suspended = true;
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
@@ -1110,23 +1136,27 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.started = true;
     this.suspended = false;
     this.updateStatus(WORKER_STATUS.CONNECTING);
+    const lifecycleEpoch = ++this.lifecycleEpoch;
     const pending = this.startPromise ?? this.pendingStop ?? Promise.resolve();
     const opening = pending
       .catch(() => undefined)
-      .then(() => this.openTransport(config, Promise.resolve(), false));
+      .then(() => this.openTransport(config, Promise.resolve(), false, lifecycleEpoch));
     this.startPromise = opening;
     // Reset the gate on success too, so a later runtime failure can schedule a
     // fresh reopen instead of reusing this settled promise.
     void opening.then(
       () => {
+        if (this.startPromise === opening) this.startPromise = null;
+        if (lifecycleEpoch !== this.lifecycleEpoch) return;
         if (traceAttempt !== undefined) {
           this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: traceAttempt, outcome: RECOVERY_OUTCOME.SUCCEEDED });
           this.recoveryAttempt = 0;
           this.recoveryExhausted = false;
         }
-        if (this.startPromise === opening) this.startPromise = null;
       },
       () => {
+        if (this.startPromise === opening) this.startPromise = null;
+        if (lifecycleEpoch !== this.lifecycleEpoch) return;
         if (traceAttempt !== undefined) {
           this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: traceAttempt, outcome: RECOVERY_OUTCOME.FAILED });
         }
