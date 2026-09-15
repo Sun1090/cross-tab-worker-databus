@@ -650,6 +650,37 @@ describe('ReplayManager — retention sweep', () => {
     expect(Math.max(...persistence.clearBeforeCalls)).toBe(10_000);
   });
 
+  it('does not run a queued cleanup after suspend()', async () => {
+    let releaseSecondCleanup!: () => void;
+    const clearBefore = vi.fn(async () => {
+      // Hydration performs the first cleanup. Block the first publication
+      // cleanup so a newer cutoff can queue behind it before suspension.
+      if (clearBefore.mock.calls.length === 2) {
+        await new Promise<void>(resolve => {
+          releaseSecondCleanup = resolve;
+        });
+      }
+    });
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore
+    };
+    const harness = createManager({ persistence, retentionMs: 1_000, maxPerTopic: 10 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    harness.manager.record(message('t', 1, 10_000));
+    harness.advance(500);
+    harness.manager.record(message('t', 2, 10_500));
+    expect(clearBefore).toHaveBeenCalledTimes(2);
+
+    harness.manager.suspend();
+    releaseSecondCleanup();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(clearBefore).toHaveBeenCalledTimes(2);
+  });
+
   it('reports a sweep failure without stopping the loop', async () => {
     const persistence = new FakePersistence({ clearBefore: true });
     const harness = createManager({ persistence, retentionMs: 1_000, retentionSweepMs: 100 });

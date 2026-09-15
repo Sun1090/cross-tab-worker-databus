@@ -267,6 +267,10 @@ export class ReplayManager<TData = unknown> {
    * or stopped bus does not keep hammering the store) and stop the sweep. */
   suspend(): void {
     this.retryGeneration += 1;
+    // A cutoff queued behind an in-flight cleanup belongs to the session that
+    // is being suspended. Drop it so the loop cannot issue another transaction
+    // after teardown has started.
+    this.retentionCutoff = null;
     this.stop();
   }
 
@@ -372,19 +376,20 @@ export class ReplayManager<TData = unknown> {
       this.retentionCutoff = cutoff;
     }
     if (this.retentionCleanup) return;
+    const generation = this.retryGeneration;
     this.retentionCleanup = (async () => {
-      while (this.retentionCutoff !== null) {
+      while (this.retentionCutoff !== null && generation === this.retryGeneration) {
         const nextCutoff = this.retentionCutoff;
         this.retentionCutoff = null;
         try {
           await this.persistence!.clearBefore!(nextCutoff);
         } catch (error) {
-          this.onPersistenceError(error);
+          if (generation === this.retryGeneration) this.onPersistenceError(error);
         }
       }
     })().finally(() => {
       this.retentionCleanup = null;
-      if (this.retentionCutoff !== null) {
+      if (this.retentionCutoff !== null && generation === this.retryGeneration) {
         this.scheduleRetentionCleanup(this.retentionCutoff);
       }
     });
