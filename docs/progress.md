@@ -1,3 +1,19 @@
+## 0.20.88 synchronous start() retry from startup-failure onError (2026-09-16)
+
+- 状态：实现、回归测试与双语文档已完成，待全量验证后 commit；0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第四项。
+- 分支：`feat/lifecycle-audit-3`（基线 `origin/main` = `c238b48`）。
+- 复现场景：首次 transport open 失败后，调用方在 `onError` 回调中同步调用 `bus.start({})` 重试。
+- 现象（修复前）：回调拿到的仍是刚刚失败的同一个 `startPromise`，`transport.startCalls` 始终停留在 1；重试没有开启新生命周期，只会再次抛出同一个启动错误。
+- 根因：`openTransport()` 的 catch 在清理失败状态后先调用 `reportError()`，此时 `startPromise` 仍指向正在拒绝的旧 open。`start()` 的并发 open guard 因而返回旧 Promise；随后的 catch 才完成 cluster 清理并重新抛出。
+- 修复：`openTransport()` 在通知 `onError` 前先完成初始启动失败所需的 cluster 清理，并清除当前失败的 `startPromise`。回调中的同步 `start()` 因而安装真正的新生命周期，并等待失败 open 的 transport stop gate 后再启动；旧 open 的 settle handler 只会在仍拥有 gate 时清除字段，不会误杀重试。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/api.md`、`docs/zh/api.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `starts a fresh lifecycle when start() retries from the failure onError callback`。使用 stop gate 断言重试不会与失败 open 的清理重叠；修复前 `transport.startCalls` 为 1，修复后 release stop gate 后第二次启动成功，`ready()` 与 health summary 均恢复健康。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（138/138）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`pnpm check`（35 files，714/714）、`pnpm lint`、`pnpm test:e2e`（27/27）均通过；`git diff --check` 干净。
+- 阻塞：无。
+- 风险 / 回滚：仅改变失败通知时的内部 gate 顺序；真实 open 飞行中的普通并发 start 仍共享同一 Promise。无 public export、存储 schema 或线协议变化。若引入生命周期回归，revert 本 commit 即可。
+- 下一项：完成全量验证并提交本项，然后继续审计 `openTransport()` 顶部 `transportReady = false` 对 superseded open 的影响及 React/Vue suspend/resume parity。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 explicit start() resumes paused background resources (2026-09-16)
 
 - 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第三项。

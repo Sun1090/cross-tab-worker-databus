@@ -654,15 +654,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         }
         this.transportReady = false;
         this.updateStatus(WORKER_STATUS.ERROR);
-        // reportError() records lastError/lastErrorAt for transport failures;
-        // sampling the clock again here would give the recovery ledger and the
-        // unified lastFailure record different timestamps for one failure.
-        this.reportError(error);
         if (stopClusterOnFailure) {
           this.stopping = true;
           this.cluster.stop();
           this.stopping = false;
         }
+        // Make the failed opening observable as settled before notifying error
+        // handlers. An onError callback can legitimately retry with start();
+        // leaving the old rejecting promise in startPromise would make that
+        // retry return the failure it is reacting to instead of opening a new
+        // lifecycle. startPromise's settlement handler only clears this field
+        // when it still owns the gate, so a reentrant retry remains installed.
+        this.startPromise = null;
+        // reportError() records lastError/lastErrorAt for transport failures;
+        // sampling the clock again here would give the recovery ledger and the
+        // unified lastFailure record different timestamps for one failure.
+        this.reportError(error);
         throw error;
       });
   }

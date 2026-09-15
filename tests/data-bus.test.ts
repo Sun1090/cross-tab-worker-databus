@@ -1476,6 +1476,43 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('starts a fresh lifecycle when start() retries from the failure onError callback', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'onerror-retry' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'onerror-retry',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    let retry: Promise<void> | null = null;
+    bus.onError(() => {
+      if (retry) return;
+      transport.startShouldFail = false;
+      retry = bus.start({});
+    });
+    bus.subscribe('topic', vi.fn());
+
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+    expect(retry).not.toBeNull();
+    // The retry must not overlap the failed open's transport.stop() cleanup.
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await retry;
+    expect(transport.startCalls).toBe(2);
+    await expect(bus.ready()).resolves.toBeUndefined();
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, started: true, transport: { ready: true } });
+    await bus.stop();
+  });
+
   it('does not deliver transport operations while suspended during an async start', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'suspend-async' });
