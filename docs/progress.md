@@ -2,7 +2,8 @@
 
 ## 0.20.87 transport failure ledger stamping (2026-09-16)
 
-- Status: implementation, regression tests, and docs complete; PR pending CI.
+- Status: implementation, regression tests, and docs complete; **PR #36**
+  (`feat/lifecycle-ledger-consistency`, commit `43d6d35`) open and awaiting CI.
 - Completed content: a failed transport open sampled the injected clock twice for
   one failure, so `getRecoveryStats().errorAt` and `getHealthSummary()
   .lastFailure.at` could describe the same failure with two different
@@ -21,8 +22,7 @@
 - Blockers: none. No storage-key, schema, or public API shape change.
 - Risk / rollback: only diagnostic timestamp equality and the ordering of the
   internal ready flag inside the failure block changed; readiness verdicts and
-  recovery pacing are untouched. Revert the fix commit to restore the previous
-  behavior.
+  recovery pacing are untouched. Roll back with `git revert 43d6d35`.
 - Audited and intentionally unchanged (2026-09-16):
   - The unconditional `transportReady = false` at the top of `openTransport()`
     cannot clobber a newer lifecycle. `start()` assigns it synchronously under a
