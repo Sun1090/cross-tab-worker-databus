@@ -134,6 +134,12 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
           grouped.set(message.topic, [...(grouped.get(message.topic) ?? []), message]);
         }
         let hasError = false;
+        const fail = (error: unknown): void => {
+          if (hasError) return;
+          hasError = true;
+          invalidate(db);
+          reject(error);
+        };
         for (const [topic, topicMessages] of grouped) {
           const request = store.get(topic);
           request.onsuccess = () => {
@@ -144,22 +150,16 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
             );
             store.put({ topic, messages: history });
           };
-          request.onerror = () => {
-            if (hasError) return;
-            hasError = true;
-            invalidate(db);
-            reject(request.error ?? new Error('Failed to read replay history.'));
-          };
+          request.onerror = () => fail(request.error ?? new Error('Failed to read replay history.'));
         }
         transaction.oncomplete = () => {
           if (!hasError) resolve();
         };
-        transaction.onerror = () => {
-          if (hasError) return;
-          hasError = true;
-          invalidate(db);
-          reject(transaction.error ?? new Error('Failed to persist replay history.'));
-        };
+        transaction.onerror = () => fail(transaction.error ?? new Error('Failed to persist replay history.'));
+        // A connection loss can abort a transaction without first dispatching a
+        // request error. Without this path, the serialized mutation queue would
+        // stay blocked forever after the promise never settles.
+        transaction.onabort = () => fail(transaction.error ?? new Error('Failed to persist replay history.'));
       });
     })();
   const open = (): Promise<IDBDatabase> => {
@@ -193,19 +193,34 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     async load() {
       const db = await open();
       return new Promise((resolve, reject) => {
+        let transaction: IDBTransaction;
         let request: IDBRequest;
         try {
-          request = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+          transaction = db.transaction(storeName, 'readonly');
+          request = transaction.objectStore(storeName).getAll();
         } catch (error) {
           invalidate(db);
           reject(error);
           return;
         }
-        request.onsuccess = () => resolve((request.result as Array<{ messages: DataBusMessage<TData>[] }>).flatMap(record => record.messages));
-        request.onerror = () => {
+        let settled = false;
+        const fail = (error: unknown): void => {
+          if (settled) return;
+          settled = true;
           invalidate(db);
-          reject(request.error ?? new Error('Failed to load replay history.'));
+          reject(error);
         };
+        let records: Array<{ messages: DataBusMessage<TData>[] }> = [];
+        request.onsuccess = () => {
+          records = request.result as Array<{ messages: DataBusMessage<TData>[] }>;
+        };
+        request.onerror = () => fail(request.error ?? new Error('Failed to load replay history.'));
+        transaction.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve(records.flatMap(record => record.messages));
+        };
+        transaction.onabort = () => fail(transaction.error ?? new Error('Failed to load replay history.'));
       });
     },
     append(message) {
@@ -224,9 +239,17 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
+        let settled = false;
+        const fail = (error: unknown): void => {
+          if (settled) return;
+          settled = true;
+          invalidate(db);
+          reject(error);
+        };
         transaction.objectStore(storeName).clear();
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear replay history.')); };
+        transaction.oncomplete = () => { settled = true; resolve(); };
+        transaction.onerror = () => fail(transaction.error ?? new Error('Failed to clear replay history.'));
+        transaction.onabort = () => fail(transaction.error ?? new Error('Failed to clear replay history.'));
         });
         })()
       });
@@ -240,9 +263,17 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
+        let settled = false;
+        const fail = (error: unknown): void => {
+          if (settled) return;
+          settled = true;
+          invalidate(db);
+          reject(error);
+        };
         transaction.objectStore(storeName).delete(topic);
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to clear topic replay history.')); };
+        transaction.oncomplete = () => { settled = true; resolve(); };
+        transaction.onerror = () => fail(transaction.error ?? new Error('Failed to clear topic replay history.'));
+        transaction.onabort = () => fail(transaction.error ?? new Error('Failed to clear topic replay history.'));
         });
         })()
       });
@@ -256,6 +287,13 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         let transaction: IDBTransaction;
         try { transaction = db.transaction(storeName, 'readwrite'); }
         catch (error) { invalidate(db); reject(error); return; }
+        let settled = false;
+        const fail = (error: unknown): void => {
+          if (settled) return;
+          settled = true;
+          invalidate(db);
+          reject(error);
+        };
         const store = transaction.objectStore(storeName);
         const request = store.getAll();
         request.onsuccess = () => {
@@ -265,9 +303,10 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
             else if (messages.length !== record.messages.length) store.put({ topic: record.topic, messages });
           }
         };
-        request.onerror = () => { invalidate(db); reject(request.error ?? new Error('Failed to read replay history.')); };
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => { invalidate(db); reject(transaction.error ?? new Error('Failed to prune replay history.')); };
+        request.onerror = () => fail(request.error ?? new Error('Failed to read replay history.'));
+        transaction.oncomplete = () => { settled = true; resolve(); };
+        transaction.onerror = () => fail(transaction.error ?? new Error('Failed to prune replay history.'));
+        transaction.onabort = () => fail(transaction.error ?? new Error('Failed to prune replay history.'));
         });
         })()
       });

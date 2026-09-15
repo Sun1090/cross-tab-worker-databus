@@ -190,13 +190,16 @@ describe('createIndexedDbReplayPersistence', () => {
   /** Wrap the real fake-indexeddb factory so the adapter's DB surface fails
    * in scripted ways. The open() stub resolves with a proxied IDBDatabase:
    * 'transaction-throws' breaks transaction construction, 'request-fails'
-   * makes store requests error, 'transaction-aborts' constructs a healthy
-   * transaction whose own onerror fires after the reads succeed. Only exists
-   * to drive the adapter's error/invalidation paths that a healthy
-   * fake-indexeddb cannot reach. */
+   * makes store requests error, 'request-then-success' lets a later grouped
+   * read succeed before the transaction itself errors,
+   * 'transaction-errors' constructs a healthy transaction whose own onerror
+   * fires after the reads succeed, and 'transaction-aborts' does the same via
+   * onabort. Only exists to drive the adapter's error/invalidation paths that
+   * a healthy fake-indexeddb cannot reach. */
   function makeBrokenFactory(
-    mode: 'transaction-throws' | 'request-fails' | 'transaction-aborts',
-    abortError: Error | null = new Error('transaction aborted')
+    mode: 'transaction-throws' | 'request-fails' | 'request-then-success' | 'transaction-errors' | 'transaction-aborts',
+    abortError: Error | null = new Error('transaction aborted'),
+    requestError: Error | null = new Error('request failed')
   ) {
     // The adapter captures the factory at creation time, so recovery must go
     // through the same factory; `disabled` switches it back to healthy.
@@ -231,26 +234,43 @@ describe('createIndexedDbReplayPersistence', () => {
                 }
                 return (storeNames: string, txMode: IDBTransactionMode) => {
                   const tx = target.transaction(storeNames, txMode);
-                  if (mode === 'request-fails') {
+                  if (mode === 'request-fails' || mode === 'request-then-success') {
                     const originalStore = tx.objectStore(storeNames);
+                    let requestCount = 0;
                     const failingRequest = () => {
                       const requestStub: {
                         onsuccess: ((event: unknown) => void) | null;
                         onerror: ((event: unknown) => void) | null;
                         result: undefined;
-                        error: Error;
+                        error: Error | null;
                         readyState: string;
-                      } = { onsuccess: null, onerror: null, result: undefined, error: new Error('request failed'), readyState: 'done' };
+                      } = { onsuccess: null, onerror: null, result: undefined, error: requestError, readyState: 'done' };
                       queueMicrotask(() => requestStub.onerror?.({ target: requestStub }));
                       return requestStub;
                     };
+                    const succeedingRequest = () => {
+                      const requestStub: {
+                        onsuccess: ((event: unknown) => void) | null;
+                        onerror: ((event: unknown) => void) | null;
+                        result: undefined;
+                        error: null;
+                        readyState: string;
+                      } = { onsuccess: null, onerror: null, result: undefined, error: null, readyState: 'done' };
+                      queueMicrotask(() => requestStub.onsuccess?.({ target: requestStub }));
+                      return requestStub;
+                    };
+                    const request = () => (
+                      mode === 'request-then-success' && requestCount++ > 0
+                        ? succeedingRequest()
+                        : failingRequest()
+                    );
                     // The adapter attaches oncomplete/onerror on the
                     // transaction it got from db.transaction(); forward those
                     // to the real transaction so completion actually fires.
                     return {
                       objectStore: () => ({
-                        get: failingRequest,
-                        getAll: failingRequest,
+                        get: request,
+                        getAll: request,
                         put: originalStore.put.bind(originalStore),
                         delete: originalStore.delete.bind(originalStore),
                         clear: originalStore.clear.bind(originalStore)
@@ -258,10 +278,16 @@ describe('createIndexedDbReplayPersistence', () => {
                       get oncomplete() { return tx.oncomplete; },
                       set oncomplete(value) { tx.oncomplete = value; },
                       get onerror() { return tx.onerror; },
-                      set onerror(value) { tx.onerror = value; }
+                      set onerror(value) {
+                        tx.onerror = value;
+                        if (mode === 'request-then-success') {
+                          const fire = value as unknown as ((event: unknown) => void) | null;
+                          queueMicrotask(() => fire?.({ target: { error: new Error('transaction failed') } }));
+                        }
+                      }
                     };
                   }
-                  if (mode === 'transaction-aborts') {
+                  if (mode === 'transaction-errors' || mode === 'transaction-aborts') {
                     // A quota-exceeded `put` aborts the whole transaction
                     // without any request the adapter attached a handler to
                     // erroring first, so `transaction.onerror` is the only
@@ -278,21 +304,39 @@ describe('createIndexedDbReplayPersistence', () => {
                           queueMicrotask(() => requestStub.onsuccess?.({ target: requestStub }));
                           return requestStub;
                         },
+                        getAll: () => {
+                          const requestStub: { onsuccess: ((event: unknown) => void) | null; onerror: ((event: unknown) => void) | null; result: unknown[] } = {
+                            onsuccess: null,
+                            onerror: null,
+                            result: []
+                          };
+                          queueMicrotask(() => requestStub.onsuccess?.({ target: requestStub }));
+                          return requestStub;
+                        },
                         put: () => {},
                         delete: () => {},
                         clear: () => {}
                       }),
                       get oncomplete() { return tx.oncomplete; },
                       set oncomplete(value) { tx.oncomplete = value; },
-                      get onerror() { return tx.onerror; },
-                      set onerror(value) {
+                      set onerror(value: IDBTransaction['onerror']) {
                         tx.onerror = value;
-                        // Fired after the per-topic reads above, so the abort
-                        // is not masked by the request-error early return.
-                        // Called with a void receiver: the stub only records
-                        // the handler, it never runs it as a method.
-                        const fire = value as unknown as ((event: unknown) => void) | null;
-                        queueMicrotask(() => fire?.({ target: { error: abortError } }));
+                        if (mode === 'transaction-errors') {
+                          // Fired after the per-topic reads above, so the error
+                          // is not masked by a request-error early return.
+                          const fire = value as unknown as ((event: unknown) => void) | null;
+                          queueMicrotask(() => fire?.({ target: { error: abortError } }));
+                        }
+                      },
+                      set onabort(value: IDBTransaction['onabort']) {
+                        if (mode === 'transaction-aborts') {
+                          // A connection loss can abort without onerror. Fire
+                          // only this handler so the test proves onabort settles
+                          // each operation rather than relying on the onerror
+                          // path as an accidental substitute.
+                          const fire = value as unknown as ((event: unknown) => void) | null;
+                          queueMicrotask(() => fire?.({ target: { error: abortError } }));
+                        }
                       },
                       // The adapter reads `transaction.error` when building the
                       // rejection, so the wrapper must surface it too.
@@ -417,14 +461,14 @@ describe('createIndexedDbReplayPersistence', () => {
     expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
   });
 
-  it('rejects and invalidates when the transaction aborts with no request error', async () => {
+  it('rejects and invalidates when the transaction errors with no request error', async () => {
     // A quota-exceeded `put` aborts the entire transaction. The adapter only
     // attaches handlers to its `get` requests, so nothing it listens to errors
     // — `transaction.onerror` is the sole signal. Without it the append never
     // rejects: a real error-caused abort fires `onabort`, not `oncomplete`, so
     // the replay queue would hang (this stub completes instead, which is why
     // the guard fails as "promise resolved instead of rejecting").
-    const broken = makeBrokenFactory('transaction-aborts');
+    const broken = makeBrokenFactory('transaction-errors');
     (globalThis as { indexedDB?: unknown }).indexedDB = broken;
     const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
 
@@ -435,6 +479,94 @@ describe('createIndexedDbReplayPersistence', () => {
     broken.disable();
     await persistence.append(message('a', 9));
     expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
+  });
+
+  it('rejects and invalidates when onabort fires without a preceding request error', async () => {
+    // Connection loss may dispatch only `onabort`; the serialized mutation
+    // queue must settle or every later append would remain permanently queued.
+    const broken = makeBrokenFactory('transaction-aborts');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    await expect(persistence.appendBatch!([message('a', 1), message('b', 2)])).rejects.toThrow('transaction aborted');
+
+    broken.disable();
+    await persistence.append(message('a', 9));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
+  });
+
+  it('rejects load and invalidates the connection when onabort fires', async () => {
+    const broken = makeBrokenFactory('transaction-aborts');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    await expect(persistence.load()).rejects.toThrow('transaction aborted');
+
+    broken.disable();
+    await persistence.append(message('t', 7));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([7]);
+  });
+
+  it('falls back to a generic message when opening fails without an error object', async () => {
+    const flakyFactory = {
+      open() {
+        const request = { error: null, onerror: null } as unknown as IDBOpenDBRequest;
+        queueMicrotask(() => request.onerror?.call(request, { target: request } as unknown as Event));
+        return request;
+      }
+    };
+    (globalThis as { indexedDB?: unknown }).indexedDB = flakyFactory;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    await expect(persistence.append(message('t', 1))).rejects.toThrow('Failed to open replay database.');
+  });
+
+  it('falls back to generic request messages when IndexedDB requests carry no error', async () => {
+    const broken = makeBrokenFactory('request-fails', undefined, null);
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    await expect(persistence.load()).rejects.toThrow('Failed to load replay history.');
+    await expect(persistence.append(message('t', 1))).rejects.toThrow('Failed to read replay history.');
+    await expect(persistence.clearBefore!(1_000)).rejects.toThrow('Failed to read replay history.');
+  });
+
+  it('keeps the first grouped-read failure authoritative after a later read succeeds and the transaction errors', async () => {
+    const broken = makeBrokenFactory('request-then-success');
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+
+    await expect(
+      persistence.appendBatch!([message('a', 1), message('b', 2)])
+    ).rejects.toThrow('request failed');
+
+    broken.disable();
+    await persistence.append(message('a', 9));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
+  });
+
+  it('uses domain fallback messages when clear mutations abort without an error', async () => {
+    const cases = [
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clear!(),
+        message: 'Failed to clear replay history.'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearTopic!('t'),
+        message: 'Failed to clear topic replay history.'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearBefore!(1_000),
+        message: 'Failed to prune replay history.'
+      }
+    ];
+
+    for (const testCase of cases) {
+      const broken = makeBrokenFactory('transaction-aborts', null);
+      (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+      const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+      await expect(testCase.run(persistence)).rejects.toThrow(testCase.message);
+    }
   });
 
   it('falls back to a generic message when an aborted transaction carries no error', async () => {
