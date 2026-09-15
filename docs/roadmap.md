@@ -2,6 +2,17 @@
 
 0.20.88 is released. 0.20.89 is the current development line, continuing the lifecycle/readiness and adapter-parity audit before a 1.0.0 stability freeze.
 
+## 0.20.89 in progress
+
+Not yet released. The line continues the async-callback isolation audit: every fix below binds a callback, queued microtask, or promise continuation to the lifecycle generation that created it, so a superseded session cannot write into its replacement.
+
+- Async teardown and restart boundaries: a settled `stop()` gate can no longer swallow a later teardown (`stop → start → stop` now ends stopped), and `getHealthSummary()` reports `state: 'stopped'` for a stopping bus instead of contradicting the `publish()` / `subscribe()` / `ready()` rejections it is already issuing.
+- Replay persistence isolation: microtask-queued batch flushes and a queued retention cleanup are discarded once `suspend()` / `stop()` supersedes their generation, so stopped-session history cannot be appended to the durable store.
+- Durable hydration cancellation: a `load()` that resolves after `suspend()` or `stop()` can no longer append into buffers teardown has already cleared, and is reported as a lifecycle cancellation rather than a persistence failure.
+- Trace session isolation: a stopped trace reporter stays inert — queued `asyncSink` events from the old session are dropped and the stopped flag is cleared by an explicit restart so its lifecycle `start` is emitted again.
+- Transport and Worker callback isolation: Centrifuge credential-provider results are bound to the exact Worker/port/session that requested them, async `CentrifugeSession` client/subscription callbacks are ignored after `STOP` or reinit, and a `Blob` binary frame from a replaced WebSocket connection can no longer be dispatched as if it belonged to the new one.
+- Regression safety net: the seeded lifecycle fuzzer now covers 1_500 interleavings and asserts that a sequence whose last explicit intent was `stop()` settles in `state: 'stopped'` with no live transport.
+
 ## 0.20.88 delivered scope
 
 - Startup-failure recovery is now re-entrant. A transport that reports `error` synchronously while its initial `openTransport()` is still settling can be retried from either the `onStatus('error')` or `onError` callback; the failed open finishes cleanup first, the retry starts a fresh lifecycle, and the stale rejection cannot repopulate the reset failure ledger.
