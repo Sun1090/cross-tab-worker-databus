@@ -1,3 +1,42 @@
+## 0.20.87 WebSocket automatic recovery reopen (2026-09-16)
+
+- Status: implementation, regressions, and documentation complete on
+  `feat/websocket-recovery-reopen`; atomic code commit `0cddadf`
+  (`fix(websocket): reopen after the active socket fails`).
+- Completed content: `WebSocketTransport.start()` returned whenever
+  `this.socket` was non-null, while `error`/`close` left that reference in
+  place. The DataBus recovery timer therefore called `reopenTransport()` but
+  never created a new socket, so `createWebSocketDataBus()` could not recover
+  after a real connection failure. The transport now tracks `socketActive`,
+  replaces an invalid/closed socket on the next `start()`, re-sends the
+  retained subscriptions when the replacement opens, and ignores late
+  lifecycle/message callbacks from the superseded socket. An `error` followed
+  by `close` keeps the `error` status that schedules recovery; a clean close
+  still maps to `disconnected`.
+- Reproduction: the two new regressions failed against the previous code with
+  one socket created after both manual `start()` recovery and a DataBus
+  cooldown recovery. Both pass after the fix, including stale message
+  isolation and subscription replay.
+- Changed files: `src/websocket.ts`, `tests/websocket.test.ts`, `CHANGELOG.md`,
+  `docs/api.md`, `docs/zh/api.md`, `docs/transports.md`,
+  `docs/zh/transports.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`, `docs/progress.md`.
+- Verification: focused `tests/websocket.test.ts` 38/38;
+  `tests/websocket.test.ts tests/data-bus.test.ts` 166/166; `pnpm check`
+  (699/699 tests, 34 files); `pnpm lint`; `pnpm test:coverage` (97.18%
+  statements, 92.41% branches, 96.57% functions, 98.65% lines);
+  `pnpm verify:compat`; `pnpm verify:pack`; `pnpm test:e2e` (27/27 browser
+  tests); `git diff --check` all pass.
+- Blockers: none. No public API shape, storage-key, schema, or wire-protocol
+  change.
+- Risk / rollback: replacement sockets intentionally invalidate every callback
+  from the failed generation, so a transport that relied on late events from an
+  errored socket would observe fewer status/message callbacks; that isolation is
+  required to keep recovery deterministic. Roll back with `git revert 0cddadf`.
+- Next: audit clean-close recovery semantics and replacement-window publish
+  behavior, then continue the lifecycle/`ready()` boundary audit. Updated:
+  2026-09-16.
+
 # Development Progress
 
 ## 0.20.87 React/Vue health interval reactivity (2026-09-16)
