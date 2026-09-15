@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.85 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.86 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+
+## 0.20.86 delivered scope
+
+- Lifecycle hardening across explicit stop/start boundaries: queued restarts are serialized with in-flight stops, canceled by a newer stop, and observable through `ready()`; superseded asynchronous opens cannot tear down newer suspend/resume transitions; stop-time `subscribe()` and non-empty `publish()`/`publishBatch()` calls now report through `onError` instead of mutating teardown state or being silently dropped.
+- Explicit `start()` now performs the documented manual recovery after automatic recovery exhaustion, while preserving cluster state, subscriptions, and replay history.
+- IndexedDB replay persistence settles all mutations on transaction abort (including connection-loss aborts) so the serialized queue cannot remain blocked, and replay age pruning now uses one shared, position-independent policy for in-memory and persisted history.
+- The configuration reference documents the full replay/dedup public option surface in both languages, with declaration-derived documentation guards; seeded property invariants cover active-worker selection and rebalance targets.
 
 ## 0.20.85 delivered scope
 
