@@ -10,6 +10,37 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 replay retention consistency (2026-09-15)
+
+- Status: DONE on `feat/replay-retention-consistency`; atomic code commit
+  `a87d8d5` (`fix(replay): unify age pruning across memory and persistence`).
+- Completed content: extracted one internal `pruneReplayHistory` policy shared
+  by the in-memory rings and IndexedDB adapter; AGE now removes expired
+  timestamped entries even when they follow a timestamp-less legacy entry or a
+  non-expired entry; hydration applies the configured policy instead of always
+  truncating to `maxPerTopic`; timestamp-less legacy entries are count-capped
+  under AGE so they cannot grow without bound; timestamped AGE entries remain
+  bounded only by `retentionMs`.
+- Changed files: `src/core/replay-pruning.ts` (new), `src/core/replay-manager.ts`,
+  `src/core/replay-persistence.ts`, `src/core/data-bus.ts`,
+  `tests/replay-manager.test.ts`, `tests/replay-persistence.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/configuration.md`, `docs/zh/api.md`,
+  `docs/zh/configuration.md`.
+- Verification: focused replay suites 70/70; `pnpm check` (669 unit tests / 34
+  files); `pnpm lint`; `pnpm test:coverage` (97.28% statements, 92.66% branches,
+  96.81% functions, 98.8% lines); `pnpm test:e2e` 27/27;
+  `pnpm verify:compat`; `pnpm verify:pack`; `git diff --check`. The first
+  `verify:pack` invocation ran concurrently with the E2E build and read a
+  transiently incomplete `dist`; the required serial rerun passed.
+- Blockers: none. No schema migration is required.
+- Risk / rollback: the intentional compatibility change is that unbounded
+  timestamp-less replay history is now capped by `maxPerTopic` under AGE; AGE's
+  timestamped entries still ignore the count cap and remain retention-bounded.
+  Roll back with `git revert a87d8d5`.
+- Next: continue the observability/parity audit; evaluate the existing local
+  benchmark-refresh audit branch, then select the next concrete coverage or
+  reliability gap.
+
 ## 0.20.85 publication confirmed (2026-09-14)
 
 - npm registry now serves `cross-tab-worker-databus@0.20.85`; `latest` points to 0.20.85.
