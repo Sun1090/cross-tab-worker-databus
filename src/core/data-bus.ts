@@ -1023,7 +1023,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.canceledQueuedStartToken = this.queuedStartToken;
       this.queuedStart = null;
     }
-    if (this.stopPromise) return this.stopPromise;
+    // `stopPromise` is only the shared in-flight gate while the teardown is
+    // still running. It is cleared in a microtask once performStop() settles,
+    // so a stop() issued in that window (for example from code that observed
+    // an earlier stop settle without awaiting it) would otherwise receive the
+    // settled promise and skip a teardown the caller asked for, leaving a
+    // concurrently restarted bus running. `stopping` flips to false inside
+    // performStop()'s finally, so it is the authoritative "still stopping"
+    // signal; a settled gate is stale and must fall through to a fresh stop.
+    if (this.stopPromise && this.stopping) return this.stopPromise;
     if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
       return Promise.resolve();
     }
