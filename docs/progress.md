@@ -10,6 +10,36 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 superseded transport-open invalidation (2026-09-16)
+
+- Status: implementation complete on `feat/lifecycle-stale-open`; atomic code
+  commit `046e2c2`
+  (`fix(data-bus): invalidate superseded transport opens`).
+- Completed content: asynchronous transport opens now carry a monotonic
+  `lifecycleEpoch`. A fresh start, reopen, suspend, or stop invalidates older
+  opens; stale message/status/error callbacks are ignored, and a stale failure
+  can no longer clear `started`, null the newer `startPromise`, or tear down a
+  newer page-hide/pageshow lifecycle. `stop()` now also waits for pending
+  opens/reopens even when `started` was already cleared, so a superseded open
+  cannot become ready after stop. Regression reproduces the previous race:
+  initial async open + pagehide + pageshow + initial failure + stop; before the
+  fix `stop()` resolved immediately and the queued reopen could still start.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`.
+- Verification: focused regression failed before the fix and passes after;
+  `pnpm check` (679 unit tests / 34 files); `pnpm lint`;
+  `pnpm test:coverage` (97.23% statements, 92.34% branches, 96.54% functions,
+  98.75% lines); `pnpm test:e2e` 27/27; `pnpm verify:compat`;
+  `pnpm verify:pack`; `git diff --check`.
+- Blockers: none. No schema migration or public API shape change.
+- Risk / rollback: lifecycle ownership is now epoch-scoped; healthy
+  start/recovery paths retain their existing serialization. Roll back with
+  `git revert 046e2c2`.
+- Next: push the branch, open a PR, wait for all CI checks, rebase-merge, then
+  continue the lifecycle audit (especially queued-start intent when another
+  stop arrives before the queued restart runs).
+
 ## 0.20.86 start/stop lifecycle serialization (2026-09-16)
 
 - Status: implementation complete on `feat/start-during-stop`; atomic code
