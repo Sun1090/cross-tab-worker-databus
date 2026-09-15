@@ -3294,4 +3294,43 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     releaseStop();
     await stopping;
   });
+  it('surfaces a failed queued restart and allows a clean explicit retry', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'queued-restart-failure' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>();
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-restart-failure',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    transport.startShouldFail = true;
+    const restarting = bus.start({});
+    releaseStop();
+    await stopping;
+
+    // The queued lifecycle reports its own transport failure...
+    await expect(restarting).rejects.toThrow('Transport failed during startup.');
+    // ...and a later ready() must surface that failure rather than masking it
+    // with the "requires initialConfig" error for an explicit start(config).
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+
+    // The failed restart must not leave a stale lifecycle gate behind: an
+    // explicit retry after the transport recovers starts cleanly.
+    transport.startShouldFail = false;
+    await bus.start({});
+    await bus.ready();
+    expect(transport.startCalls).toBe(3);
+    expect(bus.getHealthSummary()).toMatchObject({ started: true, state: 'healthy' });
+    await bus.stop();
+  });
+
 });

@@ -578,6 +578,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         'Wait for stop() to resolve, then call start() before awaiting ready().'
       ));
     }
+    // An explicit start(config) does not become an implicit initialConfig.
+    // When that attempted start failed, ready() must still surface its real
+    // transport error instead of masking it with "requires initialConfig".
+    if (!this.started && !this.hasInitialConfig && this.lastError !== null) {
+      return Promise.reject(this.lastError);
+    }
     try {
       this.ensureStarted();
     } catch (error) {
