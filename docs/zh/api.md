@@ -208,7 +208,7 @@ getHealthSummary(): DataBusHealthSummary
 
 ```ts
 interface DataBusHealthSummary {
-  healthy: boolean;   // 已启动、未挂起、transport 实时状态为 connected
+  healthy: boolean;   // 已启动、未在停止中、未挂起、transport 实时状态为 connected
   state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
   status: WorkerStatus;
   sdkVersion: string;
@@ -223,7 +223,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` 语义：`stopped`（未启动）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。处于 degraded 时再次调用 `start()` 会保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本后重新打开 transport；subscribe 与 publish 也走同一恢复路径。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。`healthy` 依据 transport 的实时状态判定；`transport.ready` 是诊断字段，在 transport 已报告 `connected`、但其 `start()` Promise 尚未 settle 的短暂窗口内可能仍为 `false`，此时操作会排队等待该在途 start，而不会丢失。
+`state` 语义：`stopped`（未启动，或显式 `stop()` 仍在 teardown）、`starting`（首次连接进行中）、`recovering`（transport 自动恢复进行中）、`suspended`（Tab 隐藏，pageshow 后自动恢复）、`degraded`（自动恢复已耗尽，需要手动 `start()` 或重新 subscribe 触发恢复）、`healthy`。处于 degraded 时再次调用 `start()` 会保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本后重新打开 transport；subscribe 与 publish 也走同一恢复路径。`lastFailure` 是覆盖全部失败来源的统一账本，每次显式 `start()` 后重置。`healthy` 依据 transport 的实时状态判定，但当显式 `stop()` 仍在进行时一律报告 `stopped`：teardown 期间其余生命周期 API（`publish()`、`subscribe()`、`ready()`）已经拒绝操作，健康判定不能与之矛盾。`transport.ready` 是诊断字段，在 transport 已报告 `connected`、但其 `start()` Promise 尚未 settle 的短暂窗口内可能仍为 `false`，此时操作会排队等待该在途 start，而不会丢失。
 
 ### `getMetrics()`
 

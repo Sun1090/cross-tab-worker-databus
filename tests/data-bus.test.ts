@@ -1784,6 +1784,45 @@ describe('CrossTabDataBus', () => {
     await Promise.allSettled([firstStop]);
   });
 
+  it('does not report a healthy bus while an explicit stop is still tearing down', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stopping-health' });
+    const transport = new FakeTransport<number>();
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stopping-health',
+      environment: environment.environment,
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.start({});
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    // The transport still reports connected because stop() is async, but every
+    // operation is already rejected during teardown: the health verdict must
+    // not contradict that by claiming the bus is usable.
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: true,
+      transport: { status: 'connected', ready: true }
+    });
+    bus.publish('topic', 1);
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0])).toMatch(/is stopping; publish\(\) was not sent/);
+
+    releaseStop();
+    await stopping;
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: false, state: 'stopped', started: false });
+  });
+
   it('keeps a queued resume owned by the bus when a superseded initial open fails', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-open-resume' });
