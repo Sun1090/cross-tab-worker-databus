@@ -423,6 +423,27 @@ describe('ReplayManager — hydration', () => {
     expect(received).toEqual([2, 3]);
   });
 
+  it('does not repopulate buffers when hydration resolves after suspend', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    });
+    const persistence = {
+      load: vi.fn(() => load),
+      append: vi.fn(async () => undefined)
+    };
+    const { manager, persistenceErrors } = createManager({ persistence });
+
+    await Promise.resolve();
+    expect(persistence.load).toHaveBeenCalledOnce();
+    manager.suspend();
+    resolveLoad([message('t', 1)]);
+    await settle(10);
+
+    expect(manager.getStats()).toMatchObject({ topics: 0, messages: 0 });
+    expect(persistenceErrors).toEqual([expect.any(PersistenceRetryCancelledError)]);
+  });
+
   it('reports a hydration failure without blocking startup', async () => {
     const persistence = new FakePersistence();
     persistence.failures.load = 99;

@@ -353,6 +353,38 @@ describe('stability: storage write failure recovery', () => {
 });
 
 describe('stability: replay persistence cleanup races', () => {
+  it('does not repopulate replay buffers when hydration resolves after stop', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<{ topic: string; data: number }>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<{ topic: string; data: number }>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'hydration-after-stop',
+      environment: createFakeEnvironment({
+        storage: new MemoryStorage(),
+        now: () => 1_000,
+        randomId: 'hydration-after-stop'
+      }).environment,
+      transport,
+      replay: { persistence: { load, append: async () => undefined } }
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+
+    await bus.start({});
+    await bus.ready();
+    expect(load).toHaveBeenCalledOnce();
+
+    const stopping = bus.stop();
+    resolveLoad([{ topic: 'topic', data: 1 }]);
+    await stopping;
+    await Promise.resolve();
+
+    expect(bus.getDiagnostics().replay).toMatchObject({ topics: 0, messages: 0 });
+    expect(errors).toEqual([]);
+  });
+
   it('does not resurrect cleared topic history when a batch flush races unsubscribe', async () => {
     const storage = new MemoryStorage();
     const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'clear-race' });
