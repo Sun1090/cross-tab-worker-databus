@@ -20,11 +20,13 @@
  * DataBus's persistence error sink so teardown never surfaces noise.
  */
 import { isWildcardTopic, topicMatchesPattern } from './routing';
+import { pruneReplayHistory } from './replay-pruning';
 import type { DataBusReplayPersistence } from './replay-persistence';
 import type { DataBusTraceReporter } from './trace';
 import type { DataBusMessage, DataBusMessageHandler } from './types';
 import { approximatePayloadBytes } from './routing';
-import { PERSISTENCE_OPERATION, PRUNE_STRATEGY, RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';
+import { PERSISTENCE_OPERATION, RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';
+import type { PRUNE_STRATEGY } from '../utils/constants';
 
 /** Thrown when a lifecycle transition cancels an in-flight persistence retry. */
 export class PersistenceRetryCancelledError extends Error {
@@ -38,7 +40,8 @@ export class PersistenceRetryCancelledError extends Error {
 export interface ReplayManagerDeps<TData = unknown> {
   /** Whether replay buffering is enabled at all (false → no-op instance). */
   enabled: boolean;
-  /** Maximum buffered publications per topic. */
+  /** Per-topic count cap. AGE bounds timestamped entries by retention and
+   * still applies this cap to timestamp-less legacy entries. */
   maxPerTopic: number;
   /** Optional durable history backend; null → in-memory only. */
   persistence?: DataBusReplayPersistence<TData> | null;
@@ -121,20 +124,15 @@ export class ReplayManager<TData = unknown> {
     // Preserve the public message shape for legacy adapters. Retention pruning
     // applies to messages that carry an explicit producer timestamp.
     buffer.push(message);
-    // The count cap is the only bound when the strategy is not AGE, and also
-    // when AGE is requested without a retention window: there is no age to
-    // prune by, so skipping the cap would let the ring grow without bound.
-    const ageBounded = this.pruneStrategy !== PRUNE_STRATEGY.COUNT && this.retentionMs !== undefined;
-    if (this.pruneStrategy !== PRUNE_STRATEGY.AGE || !ageBounded) {
-      while (buffer.length > this.maxPerTopic) buffer.shift();
-    }
-    if (ageBounded) {
-      const cutoff = this.now() - this.retentionMs!;
-      while (buffer.length > 0) {
-        const first = buffer[0];
-        if (!first || first.timestamp === undefined || first.timestamp >= cutoff) break;
-        buffer.shift();
-      }
+    const pruned = pruneReplayHistory(buffer, {
+      maxPerTopic: this.maxPerTopic,
+      pruneStrategy: this.pruneStrategy,
+      retentionMs: this.retentionMs,
+      now: this.now()
+    });
+    if (pruned !== buffer) {
+      buffer = pruned;
+      this.buffers.set(message.topic, buffer);
     }
     if (!this.persistence) return;
     if (this.persistence.appendBatch) {
@@ -342,14 +340,24 @@ export class ReplayManager<TData = unknown> {
       if (this.retentionMs !== undefined && this.persistence.clearBefore) {
         await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(this.now() - this.retentionMs!));
       }
-      for (const message of await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load())) {
+      const loaded = await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load());
+      for (const message of loaded) {
         let buffer = this.buffers.get(message.topic);
         if (!buffer) {
           buffer = [];
           this.buffers.set(message.topic, buffer);
         }
         buffer.push(message);
-        if (buffer.length > this.maxPerTopic) buffer.shift();
+      }
+      const hydrationNow = this.now();
+      for (const [topic, buffer] of this.buffers) {
+        const pruned = pruneReplayHistory(buffer, {
+          maxPerTopic: this.maxPerTopic,
+          pruneStrategy: this.pruneStrategy,
+          retentionMs: this.retentionMs,
+          now: hydrationNow
+        });
+        if (pruned !== buffer) this.buffers.set(topic, pruned);
       }
     } catch (error) {
       this.onPersistenceError(error);

@@ -1,4 +1,5 @@
 import type { DataBusMessage } from './types';
+import { pruneReplayHistory } from './replay-pruning';
 import { DEFAULT_STORAGE_PREFIX, PRUNE_STRATEGY } from '../utils/constants';
 import { assertPositiveFiniteNumber, assertPositiveSafeInteger, assertPruneStrategy } from '../utils/validation';
 
@@ -137,16 +138,10 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
           const request = store.get(topic);
           request.onsuccess = () => {
             if (hasError) return;
-            let history = ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages);
-            // Mirrors ReplayManager: an AGE strategy with no retention window
-            // has nothing to prune by, so the count cap still applies (else the
-            // stored topic record would grow without bound).
-            const ageBounded = pruneStrategy !== PRUNE_STRATEGY.COUNT && retentionMs !== undefined;
-            if (ageBounded) {
-              const cutoff = Date.now() - retentionMs;
-              history = history.filter(item => item.timestamp === undefined || item.timestamp >= cutoff);
-            }
-            if (pruneStrategy !== PRUNE_STRATEGY.AGE || !ageBounded) history = history.slice(-maxPerTopic);
+            const history = pruneReplayHistory(
+              ((request.result?.messages ?? []) as DataBusMessage<TData>[]).concat(topicMessages),
+              { maxPerTopic, pruneStrategy, retentionMs, now: Date.now() }
+            );
             store.put({ topic, messages: history });
           };
           request.onerror = () => {
