@@ -10,6 +10,41 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 stop-time lifecycle operation rejection (2026-09-16)
+
+- Status: implementation complete on `feat/stop-lifecycle-boundaries`; atomic
+  code commit `ecf89c8` (`fix(data-bus): reject lifecycle calls during stop`).
+- Completed content: `subscribe()` calls made while an explicit `stop()` was
+  settling could mutate `topicHandlers`/`subscribedTopics` after teardown had
+  begun. Depending on timing, the handler could be erased by
+  `topicHandlers.clear()` while the cluster subscription survived into a later
+  restart, or a handler could outlive the intended teardown. The DataBus now
+  rejects late subscriptions through `onError` and returns a no-op cleanup
+  without mutating either state. `ready()` likewise rejected false readiness
+  during teardown instead of resolving against the stopping transport; when
+  `start()` has already queued a restart behind that stop, `ready()` still
+  follows the queued-start promise because it is the newest lifecycle intent.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`.
+- Verification: two focused regressions failed before the fix (late
+  `subscribe()` reported no error and left no matching teardown contract;
+  `ready()` resolved during the gated stop) and pass after; `pnpm check` (685
+  unit tests / 34 files); `pnpm lint`; `pnpm test:coverage` (97.25% statements,
+  92.46% branches, 96.55% functions, 98.76% lines); `pnpm test:e2e` 27/27;
+  `pnpm verify:compat`; `pnpm verify:pack`; `git diff --check`.
+- Blockers: none. No schema migration, version bump, or public API shape change
+  (the subscription failure is delivered through the existing `onError`
+  channel).
+- Risk / rollback: callers that subscribed during teardown now receive an
+  error and must wait for `stop()` before restarting; `ready()` no longer
+  resolves against a stopping transport. Normal start, suspend/resume,
+  queued-restart, and post-stop auto-start behavior are unchanged. Roll back
+  with `git revert ecf89c8`.
+- Next: push the branch, open a PR, wait for all CI checks, and rebase-merge;
+  then add a focused regression for queued-restart failure cleanup and continue
+  the lifecycle audit.
+
 ## 0.20.86 stop-time publish rejection (2026-09-16)
 
 - Status: implementation complete on `feat/stop-publish-rejection`; atomic code

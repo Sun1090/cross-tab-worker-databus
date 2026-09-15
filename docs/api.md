@@ -66,6 +66,8 @@ ready(): Promise<void>
 
 Waits for the current transport's `start` to complete. The Promise rejects when auto-start fails; calling again can trigger a retry based on `initialConfig`.
 
+While an explicit `stop()` is settling, `ready()` rejects unless a `start()` has queued a restart behind that stop. It never resolves against a transport that is already being torn down. Wait for `stop()` to settle, then call `start()` before awaiting `ready()` again.
+
 When no `initialConfig` is provided and `start(config)` has not been called, `ready()` returns a rejected Promise instead of throwing synchronously, so callers can attach `.catch` and decide whether to start explicitly.
 
 `ready()` is not equivalent to the server being connected; protocol connection status is obtained via `onStatus`.
@@ -85,6 +87,7 @@ Registers a local subscription and returns a cleanup function.
 - The first handler in the current tab registers a cluster subscription.
 - The current tab only leaves the topic after the last handler is released.
 - Subscriptions are automatically queued when the transport is not yet ready.
+- A subscription requested while an explicit `stop()` is settling is not registered: `subscribe()` reports the rejection through `onError` and returns a no-op cleanup function. Wait for `stop()` to settle, then call `start()` before subscribing again.
 - Wildcard subscriptions: a topic ending in `.*` (`chat.*`) matches any remainder, and `*` matches everything. The pattern is routed, owned, and transport-subscribed as a literal channel; publications tagged with a matching concrete topic (or with the pattern itself) are delivered to wildcard handlers. See `topicMatchesPattern` below.
 - Replay (opt-in): construct the bus with `replay: { maxPerTopic }` and pass `{ replay: true | n }` as the third `subscribe()` argument. `maxPerTopic` must be a positive safe integer. The new handler immediately receives the buffered history (up to `n`, capped by `maxPerTopic`, default 100) with `message.replayed: true`, so late joiners do not miss earlier publications. Only dispatched publications are buffered (a topic with no local subscriber drops them as unowned); buffers are in-memory and cleared when the last handler for the topic unsubscribes. Wildcard subscriptions replay across every buffered topic matching the pattern. For reload/BFCache persistence, pass an optional `persistence` created by `createIndexedDbReplayPersistence({ maxPerTopic })`; persistence is asynchronous and failures are reported through `onError` without breaking live delivery. Set `retentionMs` to prune expired producer-timestamped history in memory and to sweep adapters that implement `clearBefore` during hydration and after appends. Set `persistenceRetry: { maxAttempts, backoffMs }` to retry transient persistence failures; defaults preserve one-attempt behavior. Set `pruneStrategy` to `'count'` (default), `'age'`, or `'both'` to cap by `maxPerTopic`, prune timestamped history by `retentionMs`, or apply both. Under `age`, timestamp-less legacy entries are retained but capped by `maxPerTopic`; timestamped entries are bounded by the retention window.
   When tracing is enabled, retries emit `reliability` events with `operation: 'persistence_retry'`, a bounded `persistenceOperation`, and `attempt`.

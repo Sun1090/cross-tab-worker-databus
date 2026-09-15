@@ -66,6 +66,8 @@ ready(): Promise<void>
 
 等待当前 transport 的 `start` 完成。自动启动失败时 Promise 会 reject；再次调用可以触发基于 `initialConfig` 的重试。
 
+显式 `stop()` 尚未 settle 时，`ready()` 会 reject，除非此前已有 `start()` 在该 stop 之后排队重启；它绝不会针对正在拆除的 transport 报告 ready。调用方应等待 `stop()` settle，再调用 `start()` 后重新 await `ready()`。
+
 未传入 `initialConfig` 且未显式调用 `start(config)` 时，`ready()` 返回 rejected Promise 而不是同步抛出，调用方可以统一通过 `.catch` 处理并决定是否显式启动。
 
 `ready()` 不等价于服务端已连接，协议连接状态通过 `onStatus` 获取。
@@ -85,6 +87,7 @@ subscribe(
 - 当前 Tab 第一个 handler 会登记集群订阅。
 - 最后一个 handler 释放后，当前 Tab 才退出该 Topic。
 - transport 尚未 ready 时订阅自动排队。
+- 显式 `stop()` 尚未 settle 时发起的订阅不会登记：`subscribe()` 通过 `onError` 上报并返回 no-op 释放函数。调用方应等待 `stop()` settle，再调用 `start()` 后重新订阅。
 - 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。
 - 重放（可选）：构造 bus 时传 `replay: { maxPerTopic }` 开启缓冲，`maxPerTopic` 必须是正安全整数；`subscribe()` 第三个参数传 `{ replay: true | n }` 后，新 handler 会立即收到缓冲历史（最多 `n` 条，受 `maxPerTopic` 上限约束，默认 100），消息带 `message.replayed: true` 标记——晚加入的 handler 不会错过更早的发布。只有被分发过的消息才入缓冲（无本地订阅者的 topic 会被 owner 丢弃）；缓冲仅存内存，该 topic 最后一个 handler 退订时清空。通配订阅会对所有匹配 pattern 的已缓冲 topic 做回放。需要跨 reload/BFCache 持久化时，可传入 `createIndexedDbReplayPersistence({ maxPerTopic })` 创建的 `persistence`；持久化为异步操作，失败会通过 `onError` 报告，不影响实时投递。设置 `retentionMs` 后会清理内存中过期的 producer-timestamped 历史，并通过实现 `clearBefore` 的 adapter 在 hydrate 和追加后清理 durable 历史。设置 `persistenceRetry: { maxAttempts, backoffMs }` 可重试瞬时持久化失败；默认仍保持单次尝试。设置 `pruneStrategy` 为 `'count'`（默认）、`'age'` 或 `'both'`，分别表示按 `maxPerTopic` 截断、按 `retentionMs` 清理带时间戳历史，或两者都应用。`age` 下无时间戳的 legacy 条目会保留，但受 `maxPerTopic` 限制；带时间戳条目由 retention 窗口约束。
   启用 trace 后，重试会发出 `reliability` 事件，包含 `operation: 'persistence_retry'`、有界的 `persistenceOperation` 和 `attempt`。
