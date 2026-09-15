@@ -261,12 +261,35 @@ export class CentrifugeWorkerTransport<TData = unknown>
    * credentialProvider, then post the fresh token (or a serialized failure)
    * back to the session that issued the request. */
   private resolveTokenRequest(requestId: number, kind: 'token' | 'channelToken', channel: string | undefined): void {
+    // Credential providers may be asynchronous. Capture the backend identity
+    // before awaiting so a stop/start that replaces the Worker cannot receive
+    // a late token (or error) belonging to the superseded session. Request IDs
+    // restart at 1 for a fresh CentrifugeSession, so without this guard a stale
+    // reply can incorrectly satisfy the replacement session's request.
+    const generation = this.generation;
+    const worker = this.worker;
+    const port = this.port;
+    const localSession = this.localSession;
+    const isCurrentBackend = () =>
+      this.generation === generation &&
+      this.worker === worker &&
+      this.port === port &&
+      this.localSession === localSession;
     const provider = this.credentialProvider;
-    const value = kind === 'channelToken' && provider?.getChannelToken
-      ? provider.getChannelToken(channel ?? '')
-      : provider?.getToken?.();
+    let value: string | null | Promise<string | null | undefined> | undefined;
+    try {
+      value = kind === 'channelToken' && provider?.getChannelToken
+        ? provider.getChannelToken(channel ?? '')
+        : provider?.getToken?.();
+    } catch (error) {
+      if (isCurrentBackend()) {
+        this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
+      }
+      return;
+    }
     Promise.resolve(value).then(
       token => {
+        if (!isCurrentBackend()) return;
         if (typeof token !== 'string' || token.length === 0) {
           this.post({
             type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR,
@@ -278,6 +301,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
         this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_RESPONSE, requestId, token });
       },
       error => {
+        if (!isCurrentBackend()) return;
         this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
       }
     );

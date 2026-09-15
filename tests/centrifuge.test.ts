@@ -10,8 +10,10 @@ import { EVENT_TYPE } from '../src/utils/constants';
 
 const { FakeCentrifuge } = vi.hoisted(() => {
   type AnyListener = (context: unknown) => void;
+  const instances: FakeCentrifuge[] = [];
 
   class FakeCentrifuge {
+    static readonly instances = instances;
     readonly listeners = new Map<string, Set<AnyListener>>();
     readonly subscriptions = new Map<string, {
       on(event: string, listener: AnyListener): unknown;
@@ -20,7 +22,9 @@ const { FakeCentrifuge } = vi.hoisted(() => {
     }>();
     publish: (topic: string, data: unknown) => Promise<unknown> = vi.fn().mockResolvedValue({});
 
-    constructor(_endpoint: string, _options?: unknown) {}
+    constructor(_endpoint: string, _options?: unknown) {
+      instances.push(this);
+    }
 
     on(event: string, listener: AnyListener): this {
       const set = this.listeners.get(event) ?? new Set<AnyListener>();
@@ -874,6 +878,38 @@ describe('CentrifugeWorkerTransport heartbeatIntervalMs explicit bad values', ()
 });
 
 describe('CentrifugeWorkerTransport local fallback session', () => {
+  it('drops a rejected local publish from a replaced session', async () => {
+    vi.stubGlobal('Worker', undefined);
+    vi.stubGlobal('SharedWorker', undefined);
+    FakeCentrifuge.instances.length = 0;
+
+    const transport = new CentrifugeWorkerTransport({ workerMode: 'dedicated' });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    const oldClient = FakeCentrifuge.instances[0]!;
+    let rejectPublish!: (error: unknown) => void;
+    oldClient.publish = vi.fn(() => new Promise((_resolve, reject) => {
+      rejectPublish = reject;
+    }));
+    transport.publish('market.tick', { price: 1 });
+
+    transport.stop();
+    const onError = vi.fn();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: () => {}, onMessage: () => {}, onError }
+    );
+
+    rejectPublish(new Error('stale publish failure'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onError).not.toHaveBeenCalled();
+    transport.stop();
+    vi.unstubAllGlobals();
+  });
+
   it('falls back to a local in-process session when no Worker is available', () => {
     vi.stubGlobal('Worker', undefined);
     vi.stubGlobal('SharedWorker', undefined);
@@ -1272,6 +1308,54 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 2, token: 'channel-token-chat.room.1' });
   });
 
+  it('does not deliver a stale credential reply to a replacement worker', async () => {
+    const workers: WorkerDouble[] = [];
+    let resolveStale!: (token: string) => void;
+    const getToken = vi.fn()
+      .mockImplementationOnce(() => new Promise<string>(resolve => { resolveStale = resolve; }))
+      .mockResolvedValueOnce('fresh-token');
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => {
+        const worker = new WorkerDouble();
+        workers.push(worker);
+        return worker as unknown as Worker;
+      },
+      credentialProvider: { getToken }
+    });
+
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    workers[0]!.emit({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' });
+
+    // Replace the entire backend while the first provider call is pending.
+    transport.stop();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    workers[1]!.emit({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' });
+    await Promise.resolve();
+
+    // The old request ID is intentionally reused by the replacement session.
+    // Its late reply must not satisfy the new session's request.
+    resolveStale('stale-token');
+    await Promise.resolve();
+    expect(workers[1]!.messages).not.toContainEqual({
+      type: 'TOKEN_RESPONSE',
+      requestId: 1,
+      token: 'stale-token'
+    });
+
+    expect(workers[1]!.messages).toContainEqual({
+      type: 'TOKEN_RESPONSE',
+      requestId: 1,
+      token: 'fresh-token'
+    });
+  });
+
   it('surfaces provider rejection and empty tokens as TOKEN_ERROR', async () => {
     const worker = new WorkerDouble();
     const transport = new CentrifugeWorkerTransport({
@@ -1294,6 +1378,32 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     await Promise.resolve();
     const empty = worker.messages.filter(message => message.type === 'TOKEN_ERROR');
     expect(empty[empty.length - 1]).toMatchObject({ requestId: 4 });
+  });
+
+  it('converts a synchronously throwing credential provider into TOKEN_ERROR', async () => {
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: {
+        getToken: () => {
+          throw new Error('synchronous token failure');
+        }
+      }
+    });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+
+    expect(() => worker.emit({ type: 'TOKEN_REQUEST', requestId: 5, kind: 'token' })).not.toThrow();
+    const failure = worker.messages.find(message => message.type === 'TOKEN_ERROR') as
+      | { type: 'TOKEN_ERROR'; requestId: number; error: { message?: string } }
+      | undefined;
+    expect(failure).toBeDefined();
+    expect(failure!.requestId).toBe(5);
+    expect(failure!.error.message).toContain('synchronous token failure');
+    transport.stop();
   });
 });
 

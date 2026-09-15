@@ -607,3 +607,34 @@ describe('CentrifugeSession token bridge', () => {
     expect(() => session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'late' })).not.toThrow();
   });
 });
+
+describe('CentrifugeSession lifecycle isolation', () => {
+  it('drops events from a stopped client after the session is reinitialized', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({ post: message => sink(message) });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+    const firstClient = FakeCentrifuge.instances[0]!;
+
+    session.handle({ type: 'STOP' });
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    });
+    const secondClient = FakeCentrifuge.instances[1]!;
+    sink.mockClear();
+
+    firstClient.emit('connected', {});
+    firstClient.emit('error', { error: new Error('stale client error') });
+    firstClient.emit('publication', { channel: 'old.topic', data: { stale: true } });
+    expect(sink).not.toHaveBeenCalled();
+
+    secondClient.emit('connected', {});
+    expect(sink).toHaveBeenCalledWith({ type: 'STATUS', status: 'connected' });
+  });
+});
