@@ -536,6 +536,8 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 | `startPromise` | `Promise \| null` | 并发 `start()` 调用的 gate；操作完成后清除 |
 | `stopPromise` | `Promise \| null` | 显式 `stop()` 及其后排队的 restart 共享的 gate |
 | `queuedStart` | `Promise \| null` | 等待进行中的显式 stop 完成后执行的一次全新 start |
+| `queuedStartToken` | `number` | 每次排队 restart 获得的单调令牌，避免取消被误认为更晚的 restart |
+| `canceledQueuedStartToken` | `number` | 被 `stop()` 取消的最高 queued-restart 令牌；令牌不高于它的续体只 resolve，不打开 transport |
 | `pendingStop` | `Promise \| null` | 异步 `transport.stop()` 的 gate；由 suspend 和故障路径共享 |
 | `lifecycleEpoch` | `number` | 单调所有权令牌；使被取代 open 的回调与清理失效 |
 
@@ -569,6 +571,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 
 - **并发 start**：真实 transport open 在飞行中时，第二次调用 `start()` 返回同一个 promise，任何时候只有一个 transport open 在飞行中。pagehide 产生的 stop 也可能占用 `startPromise`；`start()` 会识别 `startPromise === pendingStop`，把 reopen 排在该 stop 之后，而不是把清理 promise 当作成功启动返回。
 - **显式 stop 期间 start**：`stop()` 用共享的 `stopPromise` 服务并发调用者。若 `start()` 在该 stop settle 期间到达，只保存一个 `queuedStart`；stop 的 `finally` 清理生命周期状态后，排队的 start 使用新配置开启全新生命周期。此窗口内的重复调用共享 stop 和 queued-start promise。
+- **stop 取消排队 restart**：排队续体已经挂在 stop promise 上、无法撤销调度，因此在它执行前再次 `stop()` 会改为使其失效。每个排队 restart 携带单调令牌；`stop()` 记录当前令牌并释放唯一的队列槽位，续体发现自己的令牌不再是最新时只 resolve、不打开 transport。由于后到的 `start()` 会签发更高令牌，`stop → start → stop → start` 仍以运行态结束，而 `stop → start → stop` 以停止态结束且不会多打开一次 transport。
 - **启动期间隐藏**：`pagehide` 在 `openTransport` 飞行中触发时，`suspendTransport()` 设置 `suspended = true`，并在飞行中的 start 之后链式执行 `transport.stop()`。`openTransport` 的 catch 路径检测到 `suspended` 后放弃本次 open，不视为失败。
 - **被取代 open 失效**：每次全新 start、reopen、suspend 和 stop 都会推进 `lifecycleEpoch`。open 会捕获自己的 epoch；一旦更新的转换接管生命周期，旧 open 的 status/message/error 回调会被忽略，也不会再把 transport 标记为 ready 或执行失败清理。因此 `stop()` 会等待未完成的 open/reopen，并阻止被取代的 open 在 stop 完成后变为 ready。
 - **恢复冷却**：transport 上报 `error` 且 `started` 为 true、`stopping` 为 false 时，`updateStatus` 在 `RECOVERY_COOLDOWN_MS`（1000 ms）后调度自动 `reopenTransport()`。冷却窗口内的第二次错误被抑制，防止紧循环重试。
