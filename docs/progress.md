@@ -1,6 +1,21 @@
+## 0.20.88 RELEASED (2026-09-16)
+
+- 状态：已发布。版本 **0.20.88** 已合并到 `origin/main`，tag 为 `v0.20.88`；npm `latest` 指向该版本，GitHub Release、Release workflow 与已发布包消费者 smoke test 均通过。
+- 分支 / PR：`feat/release-0.20.88` → PR #50，rebase merge 并删除远端分支；release commit `22865cf`，合并后 main commit `00813df`，tag 指向 `00813df25a4fa944e952bd51d1f90e003b0ee7ca`。
+- 完成内容：版本从 0.20.87 升至 0.20.88；`[Unreleased]` 固化为 `## [0.20.88] - 2026-09-16`；中英文 roadmap 记录 startup retry、BFCache 重复往返与显式 `start()` 完整恢复；此前四项功能进度记录校正为已合并。
+- 发布范围：startup 同步 `error` 从 `onStatus` / `onError` 回调重试时隔离旧 opening 并重置失败账本；初始 open 飞行期间重复 BFCache hide/show 恢复；显式 `start()` 恢复 cluster、trace metrics、dedup 与 replay retention 定时工作。
+- 迁移：无需迁移。没有删除 public export、改变存储 schema、存储键或线协议；`verify:compat` 确认 v0.20.87 的 exports 与 type metadata 继续存在。
+- 发布验证：PR #50 的 analyze / verify / browser / CodeQL 全绿；Release workflow 重新执行 typecheck、build、715/715 单测、lint、compat、packed consumer 与 published consumer 验证并全部通过。
+- 发布结果：GitHub Release <https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.88>；Release workflow <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35024221368>；npm 确认 `0.20.88` 为 `latest`，integrity 为 `sha512-ka4bp+eO3tbGE2IKNa2xp0Xi1TsP+LQE8iR+4Db1PJYvioHdJxa+gU2cay9eGlemKeFKC6Fumyzw0GDoT4Bb+Q==`。
+- 部署与 smoke test：这是库包发布，无独立服务部署；Release workflow 的 `Verify published npm consumers` 已通过，本地再次执行 `pnpm verify:published` 验证 npm 上的根入口与 subpath ESM/CJS 消费通过。
+- 阻塞：无。
+- 风险 / 回滚：npm 版本不可覆盖。发现缺陷时安装方应固定 `0.20.87`，随后发布后续 patch；仓库侧可 revert `00813df`，但不要删除或移动已发布 tag。回滚不涉及存储迁移或线协议。
+- 下一 milestone：**0.20.89** —— 继续 lifecycle / `ready()` 边界、superseded async open 与 React/Vue suspend-resume parity 审计，优先寻找可复现的真实竞态或适配器泄漏。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 RELEASE_FREEZE (2026-09-16)
 
-- 状态：发布准备中。`0.20.88` patch 候选已建立，版本、CHANGELOG、中英文 roadmap 与进度记录已更新；全量冻结门禁通过，等待 release commit、PR、tag 与发布工作流。
+- 状态：发布前置冻结已完成；最终发布结果见上方 `0.20.88 RELEASED`。
 - 分支：`feat/release-0.20.88`（基线 `main` = `0a80b68`）。
 - 完成内容：`package.json` 从 0.20.87 升至 0.20.88；将 `[Unreleased]` 提升为 `## [0.20.88] - 2026-09-16` 并保留新的空 `[Unreleased]`；中英文 roadmap 新增 0.20.88 delivered scope；同步校正此前四项 lifecycle 进度记录为已合并/纳入发布状态。
 - 发布范围：startup 同步 `error` 期间从 `onStatus` / `onError` 回调重试时隔离旧 opening，并重置失败账本；初始 open 飞行期间重复 BFCache hide/show 不再永久挂起；显式 `start()` 恢复 cluster 及 trace / dedup / replay retention 定时工作。
