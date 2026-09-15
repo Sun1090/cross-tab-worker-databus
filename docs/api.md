@@ -56,7 +56,7 @@ Creates a DataBus. When `initialConfig` is provided, it starts automatically by 
 start(config: TConfig): Promise<void>
 ```
 
-Starts cluster coordination and transport. The first call actually starts the transport; concurrent calls during an in-flight open share the same start Promise without creating a duplicate transport. A call made on a healthy started instance is an immediate no-op. If the transport is down, `start()` acts as an explicit manual recovery: it preserves the cluster, subscriptions, and replay buffers, resets the failure/recovery ledger, and reopens the transport. If an explicit `stop()` is still settling, `start()` queues one fresh start behind that cleanup and returns a Promise that settles with the restart. After `stop()` has completed, `start()` can be called normally to restart.
+Starts cluster coordination and transport. The first call actually starts the transport; concurrent calls during an in-flight open share the same start Promise without creating a duplicate transport. A call made on a healthy started instance is an immediate no-op. If the transport is down, `start()` acts as an explicit manual recovery: it preserves the cluster, subscriptions, and replay buffers, resets the failure/recovery ledger, and reopens the transport. If an explicit `stop()` is still settling, `start()` queues one fresh start behind that cleanup and returns a Promise that settles with the restart. That queued restart belongs to the latest lifecycle intent: a `stop()` arriving before it can run cancels it (resolving the queued start Promise without opening a transport), and a `start()` issued after that cancellation queues a fresh restart. After `stop()` has completed, `start()` can be called normally to restart.
 
 ### `ready()`
 

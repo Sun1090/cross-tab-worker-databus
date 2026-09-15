@@ -10,6 +10,43 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 stop cancels queued restart (2026-09-16)
+
+- Status: implementation complete on `feat/stop-cancels-queued-restart`; atomic
+  code commit `e78be57`
+  (`fix(data-bus): cancel queued restart when stop is requested`).
+- Completed content: a `start()` queued behind an in-flight explicit `stop()`
+  is now invalidated by a later `stop()` instead of being swallowed by the
+  already-published `stopPromise`. Each queued restart carries a monotonic
+  token; `stop()` records the current token and frees the single queue slot, so
+  the queued continuation (which is already chained to the stop promise and
+  cannot be un-scheduled) resolves without opening a transport. A `start()`
+  issued after the cancellation issues a higher token, so the latest lifecycle
+  intent still wins: `stop → start → stop` ends stopped with no extra transport
+  open, while `stop → start → stop → start` still ends running. Before the fix
+  the second `stop()` returned the in-flight stop promise and the queued restart
+  reopened the transport anyway (`transport.startCalls` became 2).
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`.
+- Verification: focused regression `cancels a queued restart when stop()
+  arrives before it can run` failed before the fix (startCalls 2, expected 1)
+  and passes after; the companion `lets a start() issued after a canceling
+  stop() queue a fresh restart` guards against over-cancellation; `pnpm check`
+  (681 unit tests / 34 files); `pnpm lint`; `pnpm test:coverage` (97.24%
+  statements, 92.41% branches, 96.54% functions, 98.76% lines);
+  `pnpm test:e2e` 27/27; `pnpm verify:compat`; `pnpm verify:pack`;
+  `git diff --check`.
+- Blockers: none. No schema migration, version bump, or public API shape change.
+- Risk / rollback: the queued continuation still resolves, so `await start()`
+  following a canceling `stop()` no longer guarantees a running transport (the
+  later `stop()` is the latest intent and `ready()` then rejects). Healthy
+  start/stop, suspend/resume, and recovery paths are unchanged. Roll back with
+  `git revert e78be57`.
+- Next: push the branch, open a PR, wait for all CI checks, rebase-merge, then
+  continue the lifecycle audit (stop-time `ready()`/`subscribe()`/`publish()`
+  contracts, then queued-restart failure cleanup).
+
 ## 0.20.86 superseded transport-open invalidation (2026-09-16)
 
 - Status: implementation complete on `feat/lifecycle-stale-open`; atomic code
