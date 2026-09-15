@@ -351,10 +351,19 @@ export class WebSocketTransport<TData = unknown>
     // `binaryType = 'arraybuffer'` is explicitly configured by the host.
     // Normalize Blob asynchronously and reuse the exact ArrayBuffer parser.
     if (typeof Blob !== 'undefined' && raw instanceof Blob) {
+      // Blob conversion is asynchronous. Capture the socket/handler pair so a
+      // stop/start that replaces the connection while arrayBuffer() is pending
+      // cannot let the stale frame leak into the new connection's handlers.
+      const socket = this.socket;
+      const handlers = this.handlers;
       try {
-        await this.handleMessage(await raw.arrayBuffer());
+        const buffer = await raw.arrayBuffer();
+        if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
+        await this.handleMessage(buffer);
       } catch (error) {
-        this.handlers?.onError(error);
+        if (this.socket === socket && this.handlers === handlers && this.socketActive) {
+          this.handlers?.onError(error);
+        }
       }
       return;
     }

@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Fixed
+- A WebSocket binary frame delivered as a `Blob` can no longer leak into a replacement connection after a `stop()` / `start()` cycle. `Blob.arrayBuffer()` is asynchronous, so a frame received by the old socket could finish converting after the new handlers were installed and be dispatched as if it belonged to the new connection. The transport now captures the socket/handler pair before conversion and drops the frame or its conversion error when either has been replaced or the socket is no longer active.
+
 ## [0.20.88] - 2026-09-16
 
 ### Fixed
