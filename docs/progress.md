@@ -1,7 +1,22 @@
-## 0.20.91 websocket error cleanup + published-gate audit (2026-09-16)
+## 0.20.91 centrifuge token lifecycle binding (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/websocket-handshake-error-cleanup` ← `origin/main@81492a5`。
+- 分支 / 基线：`feat/centrifuge-token-lifecycle-binding` ← `origin/main@904c84f`。
+- 复现场景：启用 token bridge 后，Centrifuge client 保存的 `getToken` / `getChannelToken` 闭包在该 client 已被 `STOP` 取代、随后又初始化新 client 时仍可被迟到调用。旧闭包此前在 `requestToken()` 内读取当时的 `this.lifecycle`，因此会把旧 client 的凭证请求送上新 session；加入回归测试后，修复前 Promise 永远等不到响并触发测试超时。
+- 根因：token provider 闭包没有绑定创建它的 Centrifuge client lifecycle，lifecycle 校验发生在回调内部、读取的是替换后的会话状态，无法区分迟到调用与当前调用。
+- 修复：`src/centrifuge-session.ts` 在创建 bridged provider 时捕获该 client 的 `lifecycle` 并显式传入 `requestToken(kind, lifecycle, channel?)`；若当前 session lifecycle 已变化，在分配 requestId、登记 pending 和发送 `TOKEN_REQUEST` 之前直接 reject。旧 client 因而不能污染重启后的凭证请求或响应表。
+- 变更文件：`src/centrifuge-session.ts`、`tests/centrifuge-session.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/centrifuge-session.test.ts` — `rejects credential requests from a client whose lifecycle has ended`。覆盖 STOP 后旧 client 的 `getToken` 被拒绝且不发新请求、重新 INIT 后旧 client 的 `getChannelToken` 仍被拒绝、新 client 的 token round-trip 正常完成。
+- 验证命令与结果：`pnpm exec vitest run tests/centrifuge-session.test.ts`（30/30）；`pnpm check`（35 files，735/735）；`pnpm lint`；`pnpm test:coverage`（35 files，735/735；statements 97.22% / branches 92.87% / functions 97.06% / lines 98.62%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅收紧已失效 Centrifuge client token provider 的行为；当前 client 的请求语义、worker protocol、public export、存储 schema 与线协议均不变。旧 client 本就不应获得新会话凭证，迟到调用现在显式 reject。回滚 = revert 本任务提交。
+- 下一项：审计 `CentrifugeSession` 的 `publication`、`error`、`unsubscribed` 订阅级异步回调隔离，补 STOP/reinit 后旧 subscription 污染的回归；随后继续检查 `data-bus.ts` 未覆盖的生命周期恢复分支。
+- 更新时间：2026-09-16。
+
+## 0.20.91 websocket error cleanup + published-gate audit (2026-09-16)
+
+- 状态：已完成并合并。
+- 分支 / PR / 合并：`feat/websocket-handshake-error-cleanup` ← `origin/main@81492a5`；GitHub PR #58 rebase merge 后 main 为 `904c84f`，提交 `50ee694`。
 - 问题：`WebSocketTransport` 在 socket `error` 后立即把连接标记为 inactive，但只对握手超时显式调用 `close()`。若浏览器或注入实现没有紧随 `onerror` 发出 `onclose`，DataBus 自动恢复会跳过关闭已失活的旧连接，导致死 socket 泄漏；握手前错误还会拒绝 `start()` 而不终止半开连接。
 - 修复：新增 best-effort `abortSocket()`，统一关闭超时、握手前错误和已连接错误之后的失活 socket；先保持既有 status/handshake failure 语义，再清理连接，且忽略 close 本身与失败握手竞争时的异常。
 - 公开包验证审计：工作流已经显式传入 `PUBLISHED_VERSION`，正常路径不会执行额外的 `npm view`；首次 `npm pack` 成功时无固定等待，只有 registry 尚未传播 tarball 时才进入 48 × 7.5 s 退避。未发现应改动的正常路径延迟或多余 registry 往返，因此不修改发布脚本。
@@ -15,8 +30,9 @@
 
 ## 0.20.91 replay persistence transaction errors (2026-09-16)
 
-- 状态：实现与定向测试完成，完整 check/lint 验证中；待提交、推送和 PR。
-- 分支 / 基线：`feat/replay-persistence-error-paths` ← `origin/main@4eaec94`。
+- 状态：已完成并合并。
+- 分支 / PR / 合并：`feat/replay-persistence-error-paths`；GitHub PR #57 rebase merge 后 main 为 `81492a5`。
+- 基线：`origin/main@4eaec94`。
 - 问题：`createIndexedDbReplayPersistence()` 的 `clear()`、`clearTopic()`、`clearBefore()` 都依赖 `IDBTransaction.onerror` 才能在某些配额/存储故障下拒绝并失效缓存连接；既有测试只覆盖了 `onabort` 和 append 的 `onerror`，这六条关键分支完全未执行。缺少回归时，clear 类操作可能在事务错误后永不 settle 或错误保留死连接。
 - 修复 / 加固：新增两组回归测试，分别覆盖三个 clear 类操作在带错误对象的 `transaction.onerror` 下拒绝并 invalidate、禁用故障后同一 adapter 可重新打开并持久化，以及三个操作在 transaction error 无错误对象时返回对应领域 fallback message。无需修改生产代码，现有实现通过新增约束。
 - 变更文件：`tests/replay-persistence.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
