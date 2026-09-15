@@ -1,6 +1,17 @@
+## 0.20.90 RELEASED (2026-09-16)
+
+- 状态：已正式发布，发布后验证完成。
+- PR / 合并：PR #55（`feat/release-0.20.90` → `main`）已以 rebase 方式合并；合并提交 `d194d05 chore(release): prepare 0.20.90`。
+- Tag / Release workflow：`v0.20.90` 指向 `d194d05`；Release run `35035368211` 成功（58 秒），完整执行 verify、lint、公开导出兼容、packed consumer smoke、GitHub Release、npm publish、published consumer gate 与验证上下文记录。
+- npm 发布结果：`cross-tab-worker-databus@0.20.90` 可从 `https://registry.npmjs.org` 获取；tarball `https://registry.npmjs.org/cross-tab-worker-databus/-/cross-tab-worker-databus-0.20.90.tgz`，integrity `sha512-CqkcnThfTvw6My5t/P9+zbkAmPGa8kQqbGWrDeojOJpV6a581eD6BqyHz+XbJARJf36n9HZ5Q2imwBbwVX6jkw==`。
+- 发布后 smoke test：`npm view cross-tab-worker-databus version --registry https://registry.npmjs.org` 返回 `0.20.90`；`PUBLISHED_VERSION=0.20.90 pnpm verify:published` 从真实发布包验证 ESM/CJS root 与全部 subpath 可导入。
+- 风险 / 回滚：patch 版无 public export、存储 schema/key 或线协议不兼容变更；npm 版本不可覆盖。若发现严重回归，撤回/移动 tag 并 revert 发布提交，必要时 `npm deprecate cross-tab-worker-databus@0.20.90` 后补发 0.20.91。
+- 下一 milestone：0.20.91 继续可靠性审计，优先检查覆盖率未触达的关键分支与优化 `verify:published` 的正常路径等待行为；修复必须带可复现回归测试。
+- 更新时间：2026-09-16。
+
 ## 0.20.90 RELEASE_FREEZE (2026-09-16)
 
-- 状态：发布前置冻结完成，待提交 → 推送分支 → PR → rebase merge → 打 tag → 触发 Release 工作流。
+- 状态：发布前冻结已完成，正式发布结果见上方 `0.20.90 RELEASED` 记录。
 - 分支 / 基线：`feat/release-0.20.90` ← `origin/main@c30ef28`；额外测试修复独立提交为 `67a699e test: budget lifecycle fuzzer under coverage`。
 - 完成内容：`package.json` 从 0.20.89 升至 0.20.90；将 `[Unreleased]` 固化为 `## [0.20.90] - 2026-09-16`；中英文 roadmap 将 0.20.90 从进行中提升为已完成范围，记录 6 分钟 npm 传播预算、统一投递语义和发布性能证据；中英文 benchmark trend 基于 23 份归档报告刷新。覆盖率发布门暴露 V8 instrumentation 下 1_500-seed lifecycle fuzzer 超过 Vitest 默认 5 秒的问题，保留全部 seed 并给该重负载测试显式 30 秒预算。
 - 变更文件（release commit）：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/benchmarks.md`、`docs/zh/benchmarks.md`、`docs/progress.md`；测试预算修复：`tests/lifecycle-invariants.test.ts`。
