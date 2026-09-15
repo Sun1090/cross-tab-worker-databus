@@ -397,6 +397,64 @@ describe('CrossTabDataBus', () => {
     expect(receivedB).toEqual([1, 2, 3]);
   });
 
+  it('resumes cluster coordination when an explicit start() takes a hidden tab out of suspension', async () => {
+    // pagehide() pauses the cluster (channel closed, routes handed off, worker
+    // record removed) and stops the transport. An explicit start() is a
+    // documented resume path: it clears `suspended` and reopens the transport.
+    // It must restart the paused cluster too. Otherwise the bus reports a
+    // healthy transport while cross-tab coordination stays dormant until the
+    // next pageshow, and every incoming publication is discarded by
+    // isAssigned() against the cleared assignment map.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'explicit-start-resume',
+      environment: envA.environment,
+      initialConfig: {},
+      tabId: 'tab-a',
+      transport: transportA,
+      workerId: 'worker-a'
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'explicit-start-resume',
+      environment: envB.environment,
+      initialConfig: {},
+      tabId: 'tab-b',
+      transport: transportB,
+      workerId: 'worker-b'
+    });
+    const receivedA: number[] = [];
+    const receivedB: number[] = [];
+    busA.subscribe('topic', message => receivedA.push(message.data));
+    await busA.ready();
+    now += 1;
+    busB.subscribe('topic', message => receivedB.push(message.data));
+    await busB.ready();
+
+    envA.pageHide();
+    expect(busA.getClusterSnapshot().suspended).toBe(true);
+    transportB.emit('topic', 2);
+    expect(receivedA).toEqual([]);
+    expect(receivedB).toEqual([2]);
+
+    await busA.start({});
+    await busA.ready();
+    expect(busA.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    expect(busA.getClusterSnapshot().suspended).toBe(false);
+
+    // The resumed cluster re-registers its subscriber, so the peer owner's
+    // fan-out reaches this tab again.
+    transportB.emit('topic', 3);
+    expect(receivedA).toEqual([3]);
+    expect(receivedB).toEqual([2, 3]);
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
+
   it('aggregates message metrics at the configured interval without leaking content', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

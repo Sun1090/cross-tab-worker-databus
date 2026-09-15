@@ -2,6 +2,7 @@
 
 ### Fixed
 - A bus whose initial transport open is still pending now recovers from repeated BFCache `pagehide`/`pageshow` cycles. Each suspend used to return early whenever a `pendingStop` gate existed, but a queued resume opening could already sit behind an older stop gate, so `startPromise` and `pendingStop` stopped being the same promise; the next `pageshow` then reused that superseded opening and the bus stayed suspended forever. `suspendTransport()` now reuses the gate only when it still represents this suspend, and otherwise chains a fresh serial `transport.stop()` that restores the `startPromise === pendingStop` invariant, so the following reopen actually restarts the transport.
+- An explicit `start()` that resumes a BFCache-suspended bus now also resumes cross-tab coordination. `pagehide` pauses the bus *and* the `WorkerClusterRuntime` (closing the channel, stopping the heartbeat, releasing route assignments), but the started `start()` fast path only cleared `suspended` and reopened the transport, leaving `cluster.suspended` true. The bus then reported a healthy transport while every publication arriving from a peer tab was discarded by `isAssigned()` against the cleared assignment map, until a later `pageshow` happened to fire. `start()` now resumes the cluster whenever it is taking the bus out of suspension, so an explicit resume restores the full coordination plane.
 
 ## [0.20.87] - 2026-09-16
 
