@@ -1,3 +1,15 @@
+## 0.20.87 RELEASE_FREEZE (2026-09-16)
+
+- 状态：发布候选已准备在 `chore/0.20.87-release`；版本、CHANGELOG、中英文 roadmap 与进度记录已更新，全量发布门禁通过，等待 release commit、PR、tag 与发布工作流。
+- 完成内容：`package.json` 从 0.20.86 升至 0.20.87；将 `[Unreleased]` 提升为 `## [0.20.87] - 2026-09-16` 并保留新的空 `[Unreleased]`；中英文 roadmap 新增 0.20.87 delivered scope，同时保留此前的 0.20.86 记录。发布文档初次检查发现 roadmap 中的 scoped 包名触发公共文档守卫，已改为 unprefixed 的 coverage-v8 provider 表述后通过。
+- 发布范围：修复 transport 错误/重连恢复窗口中的操作丢失与替换连接语义；修复 clean `disconnected` 后显式操作写入关闭连接的问题；加固 WebSocket `start()` / `ready()` 握手契约、生命周期/`ready()` 边界与健康摘要；同步适配器 `intervalMs` 更新行为，并将 Vitest 与 coverage-v8 provider 升级到 5.0.1。
+- 迁移：无。没有删除 public export、改变存储 schema 或线协议；`verify:compat` 确认 v0.20.86 的 exports 与 type metadata 继续存在。
+- 验证命令与结果：`pnpm check`（34 files，709/709）、`pnpm lint`、`pnpm test:coverage`（97.18% statements / 92.42% branches / 96.66% functions / 98.63% lines）、`pnpm bench`（3 files，25/25）、`pnpm test:e2e`（27/27）、两次 `pnpm bench:browser` 后 `pnpm bench:compare --fail-above-pct 50` 通过（最大回归 +5.4%）、`pnpm verify:compat`（保留 v0.20.86 公共面）、`pnpm verify:pack`（根入口与 subpath 的 ESM/CJS 消费通过）、`pnpm audit --registry=https://registry.npmjs.org`（No known vulnerabilities）、`npm pack --dry-run --json`（109 files，未包含 `docs/progress.md`，包含 `dist/`）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：这是 0.20.86 之后的 patch 发布；若 release PR 合入前发现问题，修复或放弃 release 分支即可；合入后回滚 revert release commit（必要时再补 patch）。npm 版本不可覆盖，已发布的 0.20.87 只能由后续 patch 取代。
+- 下一项：提交并推送 release 分支，创建并合并 PR，打 `v0.20.87` tag，监控 Release 工作流与 npm 发布结果，随后记录发布结果并进入下一 milestone。
+- 更新时间：2026-09-16。
+
 ## 0.20.87 WebSocket start/ready handshake gate (2026-09-16)
 
 - 状态：已合并。PR #42（`feat/websocket-connect-gate`），合并后 main commit `def6b68`；
@@ -40,7 +52,7 @@
 
 ## 0.20.87 clean-disconnected demand reopen (2026-09-16)
 
-- 状态：实现、回归测试与文档已完成，位于 `feat/disconnected-demand-reopen`，待 commit。
+- 状态：已合并。PR #43（`feat/disconnected-demand-reopen`），合并后 main commit `8710230`；CI analyze / verify / browser / CodeQL 全绿，rebase merge 并删除远端分支。
 - 完成内容：修复干净 `disconnected` 之后的操作丢失。`runTransport()` 原本只把
   `error` 视为「不可用」，因此在 transport 干净 `close`（状态映射为 `disconnected`）
   之后到达的 `subscribe()` / `publish()` 会走 ready 快速路径，被直接写进已关闭的连接；
