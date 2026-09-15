@@ -10,6 +10,34 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 replay persistence abort safety (2026-09-15)
+
+- Status: implementation complete on `feat/replay-persistence-error-coverage`;
+  atomic code commit `366b0ce`
+  (`fix(replay): settle persistence transactions on abort`).
+- Completed content: every IndexedDB replay mutation now settles on
+  `transaction.onabort`, including connection-loss aborts that emit no
+  preceding request error; without this, the serialized mutation queue could
+  remain blocked forever and later appends/clears would never run. `load()`
+  now resolves only on `transaction.oncomplete`, so a `getAll` request that
+  succeeds before a later abort cannot be reported as a successful read.
+  Request/transaction failures with no `error` object use operation-specific
+  fallback messages, and grouped batch reads keep the first failure
+  authoritative.
+- Changed files: `src/core/replay-persistence.ts`,
+  `tests/replay-persistence.test.ts`, `CHANGELOG.md`.
+- Verification: focused replay persistence suite 30/30; `pnpm check`
+  (675 unit tests / 34 files); `pnpm lint`; `pnpm test:coverage` (97.36%
+  statements, 92.87% branches, 96.88% functions, 98.82% lines);
+  `pnpm test:e2e` 27/27; `pnpm verify:compat`; `pnpm verify:pack`;
+  `git diff --check`.
+- Blockers: none. No schema migration or public API change.
+- Risk / rollback: the change tightens IndexedDB success semantics and makes
+  failure paths settle instead of hanging. Roll back with `git revert 366b0ce`.
+- Next: push this branch, open a PR, wait for all CI checks, rebase-merge, then
+  continue the observability/parity audit with the next concrete coverage or
+  reliability gap.
+
 ## 0.20.86 replay retention consistency (2026-09-15)
 
 - Status: DONE on `feat/replay-retention-consistency`; atomic code commit
