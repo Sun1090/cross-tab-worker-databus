@@ -655,6 +655,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
     this.ensureStarted();
+    if (this.rejectPublishDuringStop('publish')) return;
     if (!this.cluster.publish(topic, data, options)) {
       this.reportError(
         new Error('Failed to send the publish control message to the owning worker.')
@@ -675,6 +676,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   ): void {
     this.ensureStarted();
     if (items.length === 0) return;
+    if (this.rejectPublishDuringStop('publishBatch')) return;
     if (items.length === 1) {
       const first = items[0]!;
       this.publish(topic, first.data, first.options);
@@ -1219,6 +1221,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         return operation();
       })
       .catch(error => this.reportError(error));
+  }
+
+  /**
+   * Publications started after teardown begins cannot reach any transport.
+   * Surface that as a normal asynchronous API failure instead of letting
+   * runTransport() return silently. Empty publishBatch() calls remain a no-op
+   * and are filtered by the caller before this check.
+   */
+  private rejectPublishDuringStop(operation: 'publish' | 'publishBatch'): boolean {
+    if (!this.stopping) return false;
+    this.reportError(new Error(
+      `CrossTabDataBus is stopping; ${operation}() was not sent. ` +
+      'Wait for stop() to resolve, then call start() before publishing again.'
+    ));
+    return true;
   }
 
   /**

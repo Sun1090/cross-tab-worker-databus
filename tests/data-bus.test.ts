@@ -3156,4 +3156,71 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     await bus.stop();
     expect(transport.stopCalls).toBe(stopsAfterFirst);
   });
+
+  it('publish() during an in-flight stop reports an error instead of silently dropping the message', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-publish' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>();
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-publish',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+    bus.subscribe('t', vi.fn());
+    expect(transport.subscribeCalls).toEqual(['t']);
+
+    const stopping = bus.stop();
+    // performStop sets `stopping` before it awaits the gated transport.stop(),
+    // so this publish lands squarely in the teardown window.
+    bus.publish('t', 1);
+
+    expect(transport.publishCalls).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect((errors[0] as Error).message).toMatch(/stopping/i);
+
+    releaseStop();
+    await stopping;
+  });
+
+  it('publishBatch() during an in-flight stop reports an error and sends nothing', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-publish-batch' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>(undefined, { supportsPublishBatch: true });
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-publish-batch',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+    bus.subscribe('t', vi.fn());
+
+    const stopping = bus.stop();
+    bus.publishBatch('t', [{ data: 1 }, { data: 2 }]);
+
+    expect(transport.publishBatchCalls).toHaveLength(0);
+    expect(transport.publishCalls).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect((errors[0] as Error).message).toMatch(/batch/i);
+    expect((errors[0] as Error).message).toMatch(/stopping/i);
+
+    releaseStop();
+    await stopping;
+  });
 });
