@@ -1,15 +1,15 @@
-## 0.20.89 stop-time trace and hydration async isolation (2026-09-16)
+## 0.20.89 stop-time async isolation (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
-- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `cdd6014`、`f53d0e7`。
-- 复现场景：两组 teardown 窗口可在生命周期结束后继续改变状态。其一，`DataBusTraceReporter.stop()` 只暂停 metrics，没有阻止普通事件；`asyncSink` 中 stop 前排队的微任务仍会在 stop 返回后投递，且 `mode: 'events'` 的 reporter 在 `stop()` 后再次 `start()` 时不会清除 stopped 标记。其二，durable replay 的异步 `load()` 在 `suspend()` / `stop()` 之后成功 resolve，仍会把消息追加进已经被 `performStop()` 清空的 replay buffers。
-- 根因：trace reporter 的 stopped 状态没有覆盖 `event()`、异步 sink flush 与 event-only restart 路径；DataBus 首次启动/显式重启时又在 reporter `start()` 之前记录 lifecycle `start`，重启后的首事件被 stopped 守卫丢弃。Replay 的 persistence retry generation 只在异步 operation 开始前和 retry delay 后检查，没有在 operation 成功返回后再次校验，导致迟到结果越过 lifecycle 边界。
-- 修复：`src/core/trace.ts` 的 `start()` 在 event-only 模式也清除 stopped，`stop()` 丢弃旧会话 pending sink 队列，`event()` 与 metrics 记录/查询均拒绝 stopped 会话；`src/core/data-bus.ts` 调整首次启动和显式恢复的顺序，先开启新 trace 会话再记录 `start` / `resume`。`src/core/replay-manager.ts` 在 `withPersistenceRetry()` 的 operation resolve 后再次比较 generation，迟到成功结果统一转换为 `PersistenceRetryCancelledError`，不会修改 application state。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `cdd6014`、`f53d0e7`、`66a65e0`。
+- 复现场景：三组 teardown 窗口可在生命周期结束后继续改变状态。其一，`DataBusTraceReporter.stop()` 只暂停 metrics，没有阻止普通事件；`asyncSink` 中 stop 前排队的微任务仍会在 stop 返回后投递，且 `mode: 'events'` 的 reporter 在 `stop()` 后再次 `start()` 时不会清除 stopped 标记。其二，durable replay 的异步 `load()` 在 `suspend()` / `stop()` 之后成功 resolve，仍会把消息追加进已经被 `performStop()` 清空的 replay buffers。其三，retention cleanup 的 `clearBefore()` 在途时又收到新的 cutoff，随后 `suspend()`，旧循环仍在首个 operation 完成后发出排队的第二次 durable cleanup。
+- 根因：trace reporter 的 stopped 状态没有覆盖 `event()`、异步 sink flush 与 event-only restart 路径；DataBus 首次启动/显式重启时又在 reporter `start()` 之前记录 lifecycle `start`，重启后的首事件被 stopped 守卫丢弃。Replay 的 persistence retry generation 只在异步 operation 开始前和 retry delay 后检查，没有在 operation 成功返回后再次校验，导致迟到结果越过 lifecycle 边界。Coalesced retention cleanup 又绕过该 generation，并在 `suspend()` 后继续消费队列。
+- 修复：`src/core/trace.ts` 的 `start()` 在 event-only 模式也清除 stopped，`stop()` 丢弃旧会话 pending sink 队列，`event()` 与 metrics 记录/查询均拒绝 stopped 会话；`src/core/data-bus.ts` 调整首次启动和显式恢复的顺序，先开启新 trace 会话再记录 `start` / `resume`。`src/core/replay-manager.ts` 在 `withPersistenceRetry()` 的 operation resolve 后再次比较 generation，迟到成功结果统一转换为 `PersistenceRetryCancelledError`，不会修改 application state；retention cleanup 捕获开始时的 generation，`suspend()` 清除排队 cutoff，旧循环不能继续或重新调度，迟到的 cleanup failure 也不会进入新会话的错误账本。
 - 变更文件：`src/core/trace.ts`、`src/core/data-bus.ts`、`src/core/replay-manager.ts`、`tests/trace.test.ts`、`tests/data-bus.test.ts`、`tests/replay-manager.test.ts`、`tests/stability.test.ts`、`CHANGELOG.md`。
-- 新增测试：`tests/trace.test.ts` — `stays silent after stop and resets for an explicitly restarted session`；`tests/data-bus.test.ts` — `restarts trace event delivery after an explicit stop`；`tests/replay-manager.test.ts` — `does not repopulate buffers when hydration resolves after suspend`；`tests/stability.test.ts` — `does not repopulate replay buffers when hydration resolves after stop`。两组 mutation check 均确认回退对应守卫后新增测试失败，恢复后通过。
-- 验证命令与结果：`pnpm exec vitest run tests/trace.test.ts tests/replay-manager.test.ts tests/data-bus.test.ts tests/stability.test.ts`（222/222）、`pnpm check`（35 files，724/724）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.44% branches / 96.51% functions / 98.46% lines）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 新增测试：`tests/trace.test.ts` — `stays silent after stop and resets for an explicitly restarted session`；`tests/data-bus.test.ts` — `restarts trace event delivery after an explicit stop`；`tests/replay-manager.test.ts` — `does not repopulate buffers when hydration resolves after suspend`、`does not run a queued cleanup after suspend()`；`tests/stability.test.ts` — `does not repopulate replay buffers when hydration resolves after stop`。三组 mutation check 均确认回退对应守卫后新增测试失败，恢复后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/replay-manager.test.ts tests/stability.test.ts tests/data-bus.test.ts`（202/202）、`pnpm check`（35 files，725/725）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.36% branches / 96.51% functions / 98.46% lines）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
 - 阻塞：无。
-- 风险 / 回滚：仅收紧 teardown 后异步状态写入与 trace 会话边界，无 public export、存储 schema、存储键或线协议变更。若出现兼容性回归，可分别 revert `cdd6014`、`f53d0e7`。
+- 风险 / 回滚：仅收紧 teardown 后异步状态写入、retention cleanup 排队与 trace 会话边界，无 public export、存储 schema、存储键或线协议变更。若出现兼容性回归，可分别 revert `cdd6014`、`f53d0e7`、`66a65e0`。
 - 下一项：继续审计 stop/suspend 后仍排队的 replay batch/retention 微任务与定时器、`ready()` 排队 start/stop 取消窗口，以及其他 transport/adapter 异步回调跨 runtime 替换的隔离。
 - 更新时间：2026-09-16。
 
