@@ -4,7 +4,7 @@ import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
 import type { DataBusTransport, WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
-import { CLUSTER_MESSAGE_TYPE } from '../src/utils/constants';
+import { CLUSTER_MESSAGE_TYPE, WORKER_STATUS } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
@@ -1509,7 +1509,56 @@ describe('CrossTabDataBus', () => {
     await retry;
     expect(transport.startCalls).toBe(2);
     await expect(bus.ready()).resolves.toBeUndefined();
-    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, started: true, transport: { ready: true } });
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      started: true,
+      transport: { ready: true },
+      recovery: { hasError: false },
+      lastFailure: null
+    });
+    await bus.stop();
+  });
+
+  it('starts a fresh lifecycle when start() retries from the failure onStatus callback', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'onstatus-retry' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'onstatus-retry',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    let retry: Promise<void> | null = null;
+    bus.onStatus(status => {
+      if (status !== WORKER_STATUS.ERROR || retry) return;
+      transport.startShouldFail = false;
+      retry = bus.start({});
+    });
+    bus.subscribe('topic', vi.fn());
+
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+    expect(retry).not.toBeNull();
+    // The retry must not overlap the failed open's transport.stop() cleanup.
+    expect(transport.startCalls).toBe(1);
+
+    releaseStop();
+    await retry;
+    expect(transport.startCalls).toBe(2);
+    await expect(bus.ready()).resolves.toBeUndefined();
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      started: true,
+      transport: { ready: true },
+      recovery: { hasError: false },
+      lastFailure: null
+    });
     await bus.stop();
   });
 
