@@ -405,7 +405,12 @@ export class ReplayManager<TData = unknown> {
       attempt += 1;
       try {
         if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
-        return await operation();
+        const result = await operation();
+        // A lifecycle transition may complete while an async backend operation
+        // is in flight. Do not let its successful result mutate application
+        // state after suspend/stop has already cleared that state.
+        if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
+        return result;
       } catch (error) {
         if (error instanceof PersistenceRetryCancelledError || generation !== this.retryGeneration) {
           throw new PersistenceRetryCancelledError();
