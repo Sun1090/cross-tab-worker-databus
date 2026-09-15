@@ -67,6 +67,22 @@ describe('createIndexedDbReplayPersistence', () => {
     expect((await persistence.load()).map(item => item.data.value)).toEqual([2, 3]);
   });
 
+  it('caps timestamp-less legacy history under age retention', async () => {
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 2,
+      pruneStrategy: 'age',
+      retentionMs: 1_000
+    });
+    await persistence.appendBatch!([
+      message('t', 0),
+      message('t', 1),
+      message('t', 2),
+      message('t', 3),
+      message('t', 4)
+    ]);
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([3, 4]);
+  });
+
   it('applies count and age pruning together with the both strategy', async () => {
     const now = Date.now();
     const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 2, pruneStrategy: 'both', retentionMs: 1_000 });

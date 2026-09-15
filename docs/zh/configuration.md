@@ -60,10 +60,10 @@ const bus = new CrossTabDataBus({
 
 | 配置 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `maxPerTopic` | `number` | `100` | 每个 topic 最多缓冲的 publication 数；超出时先淘汰最旧条目（正安全整数） |
+| `maxPerTopic` | `number` | `100` | `count`/`both` 下每个 topic 最多缓冲的 publication 数；超出时先淘汰最旧条目。`age` 下带时间戳条目按 retention 窗口有界，无时间戳的 legacy 条目仍受该值限制（正安全整数） |
 | `persistence` | `DataBusReplayPersistence` | — | 可选持久化后端（`createIndexedDbReplayPersistence`）；省略则历史仅存内存 |
 | `retentionMs` | `number` | — | 生产者时间戳保留窗口；早于 cutoff 的历史通过适配器的 `clearBefore` 清理 |
-| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` 按 `maxPerTopic` 截断；`age` 按 `retentionMs` 清理；`both` 两者都应用。`age` 未配置 `retentionMs` 时无 age 可依，回退为数量上限 |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` 按 `maxPerTopic` 截断；`age` 按 `retentionMs` 清理带时间戳历史，并以 `maxPerTopic` 限制无时间戳的 legacy 条目；`both` 两者都应用。`age` 未配置 `retentionMs` 时无 age 可依，回退为数量上限 |
 | `retentionSweepMs` | `number` | — | 面向安静 topic 的周期性 durable retention sweep；需要 `retentionMs` 与实现 `clearBefore` 的适配器 |
 | `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | 瞬时持久化失败的有界重试；延迟指数增长并封顶 |
 

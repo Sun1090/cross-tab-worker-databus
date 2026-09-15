@@ -195,6 +195,35 @@ describe('ReplayManager — in-memory ring semantics', () => {
     expect(received).toEqual([2, 3]);
   });
 
+  it('removes expired timestamped entries even when a legacy entry precedes them', () => {
+    const { manager } = createManager({
+      pruneStrategy: PRUNE_STRATEGY.AGE,
+      retentionMs: 1_000,
+      maxPerTopic: 5
+    });
+    manager.record(message('t', 1)); // No producer timestamp: retained for compatibility.
+    manager.record(message('t', 2, 8_000)); // Expired.
+    manager.record(message('t', 3, 9_900));
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    expect(received).toEqual([1, 3]);
+  });
+
+  it('caps timestamp-less legacy entries under age retention', () => {
+    const { manager } = createManager({
+      pruneStrategy: PRUNE_STRATEGY.AGE,
+      retentionMs: 1_000,
+      maxPerTopic: 2
+    });
+    for (let index = 0; index < 5; index += 1) manager.record(message('t', index));
+
+    expect(manager.getStats().messages).toBe(2);
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    expect(received).toEqual([3, 4]);
+  });
+
   it('still caps the ring when the age strategy has no retention window', () => {
     // `pruneStrategy: 'age'` without `retentionMs` leaves nothing to prune by,
     // so the count cap must still bound the ring (otherwise it grows without
@@ -211,7 +240,7 @@ describe('ReplayManager — in-memory ring semantics', () => {
     const { manager } = createManager({
       pruneStrategy: PRUNE_STRATEGY.BOTH,
       retentionMs: 1_000,
-      maxPerTopic: 3
+      maxPerTopic: 2
     });
     manager.record(message('t', 1, 5_000));
     manager.record(message('t', 2, 9_500));
@@ -219,7 +248,7 @@ describe('ReplayManager — in-memory ring semantics', () => {
     manager.record(message('t', 4, 9_700));
     const received: number[] = [];
     manager.deliverReplay('t', true, item => received.push(item.data.value));
-    expect(received).toEqual([2, 3, 4]);
+    expect(received).toEqual([3, 4]);
   });
 
   it('keeps timestamp-less messages when retention pruning runs', () => {
@@ -361,6 +390,37 @@ describe('ReplayManager — hydration', () => {
     await settle();
     expect(persistence.clearBeforeCalls).toEqual([9_000]);
     expect(received).toEqual([2]);
+  });
+
+  it('applies age pruning to loaded history without requiring a clearBefore adapter', async () => {
+    const persistence = new FakePersistence();
+    persistence.messages = [message('t', 1), message('t', 2, 8_000), message('t', 3, 9_900)];
+    const { manager } = createManager({
+      persistence,
+      pruneStrategy: PRUNE_STRATEGY.AGE,
+      retentionMs: 1_000,
+      maxPerTopic: 5
+    });
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(received).toEqual([1, 3]);
+  });
+
+  it('keeps age-retained timestamped history in memory while delivery stays capped', async () => {
+    const persistence = new FakePersistence();
+    persistence.messages = [message('t', 1, 9_500), message('t', 2, 9_600), message('t', 3, 9_700)];
+    const { manager } = createManager({
+      persistence,
+      pruneStrategy: PRUNE_STRATEGY.AGE,
+      retentionMs: 1_000,
+      maxPerTopic: 2
+    });
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(manager.getStats().messages).toBe(3);
+    expect(received).toEqual([2, 3]);
   });
 
   it('reports a hydration failure without blocking startup', async () => {

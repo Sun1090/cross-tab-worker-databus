@@ -60,10 +60,10 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 
 | Config | Type | Default | Description |
 |---|---|---|---|
-| `maxPerTopic` | `number` | `100` | Maximum buffered publications per topic; oldest are evicted first (positive safe integer) |
+| `maxPerTopic` | `number` | `100` | Maximum buffered publications per topic under `count`/`both`; oldest are evicted first. Under `age`, timestamped entries are retention-bounded and timestamp-less legacy entries are capped by this value (positive safe integer) |
 | `persistence` | `DataBusReplayPersistence` | — | Optional durable backend (`createIndexedDbReplayPersistence`); omitted keeps history in memory only |
 | `retentionMs` | `number` | — | Producer-timestamp retention window; history older than the cutoff is pruned through the adapter's `clearBefore` |
-| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` caps each topic at `maxPerTopic`; `age` prunes by `retentionMs`; `both` applies both. `age` without `retentionMs` has nothing to prune by and falls back to the count cap |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` caps each topic at `maxPerTopic`; `age` prunes timestamped history by `retentionMs` and caps timestamp-less legacy entries by `maxPerTopic`; `both` applies both. `age` without `retentionMs` has nothing to prune by and falls back to the count cap |
 | `retentionSweepMs` | `number` | — | Periodic durable-retention sweep for quiet topics; requires `retentionMs` and a `clearBefore` adapter |
 | `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | Bounded retry for transient persistence failures; delays grow exponentially and are capped |
 

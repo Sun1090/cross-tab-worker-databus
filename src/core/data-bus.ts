@@ -56,17 +56,20 @@ const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
  * Buffers live in memory by default; an optional persistence backend can make
  * them durable. */
 export interface DataBusReplayOptions<TData = unknown> {
-  /** Maximum buffered publications per topic. Oldest entries are evicted
-   * first. Default 100. */
+  /** Maximum buffered publications per topic under 'count'/'both'. With 'age',
+   * timestamped history is bounded by `retentionMs` and timestamp-less legacy
+   * entries are capped by this value. Oldest entries are evicted first.
+   * Default 100. */
   maxPerTopic?: number;
   /** Optional durable history backend. Defaults to in-memory only. */
   persistence?: DataBusReplayPersistence<TData>;
   /** Optional producer-timestamp retention window in milliseconds. */
   retentionMs?: number;
   /** History trimming policy: 'count' (default) caps each topic at
-   * `maxPerTopic`, 'age' prunes by `retentionMs`, and 'both' applies both. An
-   * 'age' strategy without `retentionMs` has nothing to prune by and falls
-   * back to the count cap. */
+   * `maxPerTopic`, 'age' prunes by `retentionMs`, and 'both' applies both.
+   * With 'age', timestamped entries are bounded by the retention window and
+   * timestamp-less legacy entries are capped by `maxPerTopic`. An 'age'
+   * strategy without `retentionMs` falls back to the count cap. */
   pruneStrategy?: (typeof PRUNE_STRATEGY)[keyof typeof PRUNE_STRATEGY];
   /** Optional periodic sweep interval for durable retention cleanup. */
   retentionSweepMs?: number;
