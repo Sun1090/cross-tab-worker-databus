@@ -51,6 +51,10 @@ export class CentrifugeSession<TData = unknown> {
   private transferable = false;
   private tokenBridge = false;
   private nextRequestId = 1;
+  // Bumped on every initialize/stop. Async client callbacks capture the value
+  // from the connection that created them so a stopped client cannot emit into
+  // a later session instance (including the main-thread local fallback).
+  private lifecycle = 0;
   private readonly pendingTokenRequests = new Map<number, PendingTokenRequest>();
 
   constructor(private readonly sink: CentrifugeSessionSink<TData>) {}
@@ -92,6 +96,7 @@ export class CentrifugeSession<TData = unknown> {
   /** Create the Centrifuge client, wire up lifecycle listeners, and connect. */
   private initialize(url: string, config: CentrifugeWorkerConfig, transferable: boolean, tokenBridge: boolean): void {
     if (this.client) return;
+    const lifecycle = ++this.lifecycle;
     this.transferable = transferable;
     this.tokenBridge = tokenBridge;
     const clientOptions: CentrifugeWorkerConfig | CentrifugeBridgedOptions = tokenBridge
@@ -107,16 +112,27 @@ export class CentrifugeSession<TData = unknown> {
     const client = new Centrifuge(url, clientOptions);
     this.client = client;
     client.on('state', (context: StateContext) => {
+      if (this.lifecycle !== lifecycle) return;
       this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: normalizeStatus(context.newState) });
     });
-    client.on('connected', () => this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.CONNECTED }));
-    client.on('disconnected', () => this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.DISCONNECTED }));
-    client.on('error', context => this.postError(context));
+    client.on('connected', () => {
+      if (this.lifecycle !== lifecycle) return;
+      this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.CONNECTED });
+    });
+    client.on('disconnected', () => {
+      if (this.lifecycle !== lifecycle) return;
+      this.post({ type: CENTRIFUGE_OUTPUT_TYPE.STATUS, status: WORKER_STATUS.DISCONNECTED });
+    });
+    client.on('error', context => {
+      if (this.lifecycle !== lifecycle) return;
+      this.postError(context);
+    });
     // Client-level publications are only for server-side subscriptions (where
     // no client Subscription object exists). For topics we have an active
     // subscription for, the subscription-level 'publication' listener handles
     // dispatch — skip here to avoid delivering the same message twice.
     client.on('publication', (context: PublicationContext) => {
+      if (this.lifecycle !== lifecycle) return;
       const topic = context.channel || getPayloadTopic(context.data);
       if (!topic || this.subscriptions.has(topic)) return;
       this.postPublication(topic, context.data);
@@ -130,6 +146,7 @@ export class CentrifugeSession<TData = unknown> {
    * avoiding the removeAllListeners + re-on churn on every duplicate message. */
   private subscribe(topic: string): void {
     if (!this.client) return this.postError(new Error('Centrifuge client is not initialized.'));
+    const lifecycle = this.lifecycle;
     // If we already track this subscription, it already has our listeners —
     // a duplicate SUBSCRIBE is a no-op (idempotent), matching the transport
     // contract. Only a fresh subscription needs listener wiring.
@@ -148,10 +165,16 @@ export class CentrifugeSession<TData = unknown> {
     subscription.removeAllListeners('unsubscribed');
     this.subscriptions.set(topic, subscription);
     subscription.on('publication', context => {
+      if (this.lifecycle !== lifecycle) return;
       this.postPublication(topic, context.data);
     });
-    subscription.on('error', (context: SubscriptionErrorContext) => this.postError(context));
-    subscription.on('unsubscribed', () => this.subscriptions.delete(topic));
+    subscription.on('error', (context: SubscriptionErrorContext) => {
+      if (this.lifecycle !== lifecycle) return;
+      this.postError(context);
+    });
+    subscription.on('unsubscribed', () => {
+      if (this.lifecycle === lifecycle) this.subscriptions.delete(topic);
+    });
     subscription.subscribe();
   }
 
@@ -171,6 +194,7 @@ export class CentrifugeSession<TData = unknown> {
   /** Publish a message to the Centrifuge channel. */
   private publish(topic: string, data: unknown, messageId?: string, timestamp?: number): void {
     if (!this.client) return this.postError(new Error('Centrifuge client is not initialized.'));
+    const lifecycle = this.lifecycle;
     // Centrifuge's payload is application-defined. Preserve legacy payloads;
     // when an ID is requested, send a small metadata envelope that compatible
     // servers can echo back for end-to-end deduplication.
@@ -182,7 +206,9 @@ export class CentrifugeSession<TData = unknown> {
           ...(timestamp === undefined ? {} : { timestamp })
         }
       : data;
-    void this.client.publish(topic, payload).catch(error => this.postError(error));
+    void this.client.publish(topic, payload).catch(error => {
+      if (this.lifecycle === lifecycle) this.postError(error);
+    });
   }
 
   /** Forward a publication to the transport. Binary payloads take the
@@ -207,6 +233,9 @@ export class CentrifugeSession<TData = unknown> {
 
   /** Disconnect the client and clear all subscriptions. */
   private stop(): void {
+    // Invalidate callbacks from the connection being stopped before disconnect
+    // so its synchronous or queued events cannot leak into a later session.
+    this.lifecycle += 1;
     // Settle every in-flight credential request so a stop cannot leave the
     // Worker awaiting a main-thread response forever.
     for (const [, pending] of this.pendingTokenRequests) {
@@ -223,9 +252,14 @@ export class CentrifugeSession<TData = unknown> {
    * Used as Centrifuge's `getToken` / `getChannelToken` when token bridging is
    * enabled; resolved or rejected by a matching TOKEN_RESPONSE / TOKEN_ERROR. */
   private requestToken(kind: 'token' | 'channelToken', channel?: string): Promise<string> {
+    const lifecycle = this.lifecycle;
     const requestId = this.nextRequestId;
     this.nextRequestId += 1;
     return new Promise<string>((resolve, reject) => {
+      if (this.lifecycle !== lifecycle) {
+        reject(new Error('Centrifuge session stopped before the credential was requested.'));
+        return;
+      }
       this.pendingTokenRequests.set(requestId, { resolve, reject });
       this.post({
         type: CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST,
@@ -285,4 +319,3 @@ const LIVE_STATES = new Set<string>([WORKER_STATUS.CONNECTING, WORKER_STATUS.CON
 function normalizeStatus(status: string): 'connecting' | 'connected' | 'disconnected' {
   return LIVE_STATES.has(status) ? (status as 'connecting' | 'connected') : 'disconnected';
 }
-

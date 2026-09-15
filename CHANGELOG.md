@@ -1,6 +1,8 @@
 ## [Unreleased]
 
 ### Fixed
+- Centrifuge credential-provider results are now bound to the exact Worker, port, or local session that issued the request. A pending async token from a stopped backend could previously resolve after `stop()` / `start()` and satisfy the replacement session because request IDs restart at 1; late tokens and rejections are now dropped, while a provider that throws synchronously is converted into `TOKEN_ERROR` instead of escaping the worker-message handler.
+- Async callbacks from a stopped in-process `CentrifugeSession` can no longer leak into the session created by a later `INIT`. Client lifecycle/publication/error events, subscription callbacks, and rejected local-fallback publishes now capture a lifecycle generation and are ignored once `STOP` or reinitialization supersedes their connection, preventing stale status, publications, or errors from reaching the replacement session.
 - A WebSocket binary frame delivered as a `Blob` can no longer leak into a replacement connection after a `stop()` / `start()` cycle. `Blob.arrayBuffer()` is asynchronous, so a frame received by the old socket could finish converting after the new handlers were installed and be dispatched as if it belonged to the new connection. The transport now captures the socket/handler pair before conversion and drops the frame or its conversion error when either has been replaced or the socket is no longer active.
 
 ## [0.20.88] - 2026-09-16
