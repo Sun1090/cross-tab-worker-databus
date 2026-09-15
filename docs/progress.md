@@ -1,6 +1,20 @@
+## 0.20.88 RELEASE_FREEZE (2026-09-16)
+
+- 状态：发布准备中。`0.20.88` patch 候选已建立，版本、CHANGELOG、中英文 roadmap 与进度记录已更新；全量冻结门禁通过，等待 release commit、PR、tag 与发布工作流。
+- 分支：`feat/release-0.20.88`（基线 `main` = `0a80b68`）。
+- 完成内容：`package.json` 从 0.20.87 升至 0.20.88；将 `[Unreleased]` 提升为 `## [0.20.88] - 2026-09-16` 并保留新的空 `[Unreleased]`；中英文 roadmap 新增 0.20.88 delivered scope；同步校正此前四项 lifecycle 进度记录为已合并/纳入发布状态。
+- 发布范围：startup 同步 `error` 期间从 `onStatus` / `onError` 回调重试时隔离旧 opening，并重置失败账本；初始 open 飞行期间重复 BFCache hide/show 不再永久挂起；显式 `start()` 恢复 cluster 及 trace / dedup / replay retention 定时工作。
+- 变更文件：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 迁移：无需迁移。没有删除 public export、改变存储 schema、存储键或线协议；`verify:compat` 继续以 `v0.20.87` 为公共面基线。
+- 验证命令与结果：`pnpm check`（typecheck + build，35 files，715/715）、`pnpm lint`、`pnpm test:coverage`（97.16% statements / 92.76% branches / 96.50% functions / 98.51% lines）、`pnpm test:e2e`（27/27）、`pnpm verify:compat`（保留 v0.20.87 exports 与 type metadata）、`pnpm verify:pack`（根入口与 subpath 的 ESM/CJS 消费通过）、`pnpm bench`（3 files，25/25）、`pnpm audit --registry=https://registry.npmjs.org`（No known vulnerabilities）均通过；发布提交前再执行 `git diff --check`。
+- 阻塞：无。
+- 风险 / 回滚：这是 0.20.87 之后的 patch 发布。npm 版本不可覆盖；若发布后发现回归，安装方固定 `0.20.87`，仓库侧 revert release commit，必要时发布后续 patch。变更不涉及已发布存储键或线协议，不需要数据迁移。
+- 下一项：原子提交并推送 release 分支，创建并合并 PR，打 `v0.20.88` tag，监控 Release 工作流与 npm 发布结果，执行 `pnpm verify:published` smoke test，然后记录发布结果并进入下一 milestone。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 startup-failure onStatus retry lifecycle isolation (2026-09-16)
 
-- 状态：实现、回归测试与双语文档已完成，待全量验证后 commit；0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第四项。
+- 状态：已合并到 main 并纳入 0.20.88 发布（lifecycle / BFCache 异步竞态审计第四项）。
 - 分支：`feat/lifecycle-audit-4`（基线 `origin/main` = `d158a7a`）。
 - 复现场景：首次 transport open 失败并同步上报 `error` 后，调用方在 `onStatus('error')` 回调中同步调用 `bus.start({})` 重试。
 - 现象（修复前）：`onStatus` 在 `openTransport()` 完成失败清理之前触发，重试拿到仍指向失败 opening 的 `startPromise`；即使 transport 已切换到可成功启动，`transport.startCalls` 仍停留在 1。排队在旧 opening 后的操作还会捕获旧 rejection，并在重试已重置账本后通过 `runTransport().catch()` 再次写回错误，导致恢复后的 health 仍报 `hasError: true` / 非空 `lastFailure`。
@@ -11,12 +25,12 @@
 - 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts tests/documentation.test.ts`（2 files，155/155）、`pnpm check`（typecheck + build，35 files，715/715）、`pnpm lint`、`pnpm test:e2e`（27/27）、`pnpm test:coverage`（97.16% statements、92.76% branches、96.50% functions、98.51% lines）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench`（3 files，25/25）、`pnpm audit --registry=https://registry.npmjs.org`（无已知漏洞）、`git diff --check` 全部通过。本机默认 npmmirror registry 不提供 audit endpoint，改用 npmjs registry 后通过。
 - 阻塞：无。
 - 风险 / 回滚：仅改变 startup `error` 通知与旧 opening rejection 的内部顺序；真实 open 飞行中的普通并发 start 仍共享同一 Promise。无 public export、存储 schema 或线协议变化。若引入生命周期回归，revert 本 commit 即可。
-- 下一项：完成全量验证并提交本项，然后继续审计 `openTransport()` 顶部 `transportReady = false` 对 superseded open 的影响及 React/Vue suspend/resume parity。
+- 下一项：已由 0.20.88 RELEASE_FREEZE 接续。
 - 更新时间：2026-09-16。
 
 ## 0.20.88 synchronous start() retry from startup-failure onError (2026-09-16)
 
-- 状态：实现、回归测试与双语文档已完成，待全量验证后 commit；0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第四项。
+- 状态：已合并到 main 并纳入 0.20.88 发布（lifecycle / BFCache 异步竞态审计第四项）。
 - 分支：`feat/lifecycle-audit-3`（基线 `origin/main` = `c238b48`）。
 - 复现场景：首次 transport open 失败后，调用方在 `onError` 回调中同步调用 `bus.start({})` 重试。
 - 现象（修复前）：回调拿到的仍是刚刚失败的同一个 `startPromise`，`transport.startCalls` 始终停留在 1；重试没有开启新生命周期，只会再次抛出同一个启动错误。
@@ -27,12 +41,12 @@
 - 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（138/138）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`pnpm check`（35 files，714/714）、`pnpm lint`、`pnpm test:e2e`（27/27）均通过；`git diff --check` 干净。
 - 阻塞：无。
 - 风险 / 回滚：仅改变失败通知时的内部 gate 顺序；真实 open 飞行中的普通并发 start 仍共享同一 Promise。无 public export、存储 schema 或线协议变化。若引入生命周期回归，revert 本 commit 即可。
-- 下一项：完成全量验证并提交本项，然后继续审计 `openTransport()` 顶部 `transportReady = false` 对 superseded open 的影响及 React/Vue suspend/resume parity。
+- 下一项：已由 0.20.88 RELEASE_FREEZE 接续。
 - 更新时间：2026-09-16。
 
 ## 0.20.88 explicit start() resumes paused background resources (2026-09-16)
 
-- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第三项。
+- 状态：已合并到 main 并纳入 0.20.88 发布（lifecycle / BFCache 异步竞态审计第三项）。
 - 分支：`feat/lifecycle-audit-3`（基线 `origin/main` = `c238b48`）。
 - 复现场景：Tab 启用 replay retention sweep（或 trace metrics / dedup expiry sweep）后执行 `pagehide`，不等待 `pageshow`，直接调用 `bus.start({})` 恢复。
 - 现象（修复前）：bus 与 cluster 都能恢复为 `healthy`，transport 也会重新连接，但 `onSuspend()` 在此前已暂停 trace、dedup sweep 与 replay retention sweep；显式 `start()` 只重开了 transport 和 cluster，没有执行 `onResume()` 中的资源恢复，因此 bus 在健康状态下永久不再 flush trace metrics，也不再执行周期性的 dedup/retention 清理。
@@ -43,12 +57,12 @@
 - 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（137/137）、`pnpm exec vitest run tests/documentation.test.ts`（16/16）、`pnpm check`（35 files，713/713）、`pnpm lint`、`pnpm test:e2e`（27/27）均通过；`git diff --check` 干净。
 - 阻塞：无。
 - 风险 / 回滚：纯主线程生命周期修复，无 public export / storage schema / 线协议变更。若引入回归，revert 本次 commit 即可。
-- 下一项：继续审计 `start()` / in-flight `startPromise` / `onError` 重试与 `openTransport()` 状态清理边界。
+- 下一项：已由 0.20.88 RELEASE_FREEZE 接续。
 - 更新时间：2026-09-16。
 
 ## 0.20.88 explicit start() cluster resume after BFCache (2026-09-16)
 
-- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第二项。
+- 状态：已合并到 main 并纳入 0.20.88 发布（lifecycle / BFCache 异步竞态审计第二项）。
 - 分支：`feat/lifecycle-replacement-audit-2`（基线 `origin/main` = `07f53e0`）。
 - 复现场景：Tab A 已经 `start()` 并与 Tab B 建立跨 Tab 协调；随后 `pagehide`（bus 与 cluster 同时 suspended）。此时不再等 `pageshow`，直接由调用方显式 `bus.start({})`。
 - 现象（修复前）：`bus.getHealthSummary()` 报告 `healthy`、transport `connected`，但 `getClusterSnapshot().suspended` 仍为 `true`；cluster 的 channel listener 已关闭、heartbeat 已停止、`assignedTopics` 已清空，因此所有来自 peer tab 的入站 publication 都被 `cluster.isAssigned()` 丢弃，直到下一次 `pageshow` 才恢复。
@@ -61,12 +75,12 @@
 - 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`、`pnpm exec vitest run tests/lifecycle-invariants.test.ts` 通过；`pnpm check`（35 files，712/712）通过；`pnpm lint` 干净；`pnpm exec vitest run tests/documentation.test.ts` 通过；`pnpm test:e2e` 27/27 通过；`git diff --check` 干净。
 - 阻塞：无。
 - 风险 / 回滚：纯主线程生命周期修复，无 public export / storage schema / 线协议变更。若引入回归，revert 本次 commit 即可。
-- 下一项：继续 lifecycle / `ready()` / async transport replacement / stop-resume 交错审计（含 `start()` 在 in-flight `startPromise` 且 bus 已 suspended 的路径、`openTransport()` 顶部无条件 `transportReady = false`、React/Vue adapter 的 suspend/resume parity）。
+- 下一项：已由 0.20.88 RELEASE_FREEZE 接续。
 - 更新时间：2026-09-16。
 
 ## 0.20.88 repeated BFCache hide/show during startup (2026-09-16)
 
-- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第一项。
+- 状态：已合并到 main 并纳入 0.20.88 发布（lifecycle / BFCache 异步竞态审计第一项）。
 - 分支：`feat/lifecycle-replacement-audit`（基线 `origin/main` = `8c59c26`）。
 - 复现场景：初始 transport 打开尚未完成时连续执行 `pagehide → pageshow → pagehide → pageshow`，修复前最终 `transport.startCalls` 停留在 `1`，恢复未真正重开 transport。
 - 根因：`suspendTransport()` 之前只要 `pendingStop` 非空就直接返回。重复 hide/show 后 `startPromise` 可能已经是排队中的 resume opening，而 `pendingStop` 仍是旧 stop gate，二者失去「挂起时相同 promise」的关键不变量；下一次 `pageshow` 复用了已被 lifecycle epoch 淘汰的 opening，bus 永久保持挂起。
@@ -76,7 +90,7 @@
 - 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts` 135/135 通过；`pnpm check`（34 files，710/710）通过；`pnpm lint` 干净；`pnpm exec vitest run tests/documentation.test.ts` 16/16 通过；`pnpm test:e2e` 27/27 通过；`git diff --check` 干净。
 - 阻塞：无。
 - 风险 / 回滚：纯主线程生命周期状态机修复，无 public export / storage schema / 线协议变更。若引入回归，可 revert 本次 commit。
-- 下一项：运行剩余门禁，原子提交并推送，创建 PR 并 rebase-merge；随后继续 lifecycle / `ready()` / async transport replacement / stop-resume 交错审计。
+- 下一项：已由 0.20.88 RELEASE_FREEZE 接续。
 - 更新时间：2026-09-16。
 
 ## 0.20.87 RELEASED (2026-09-16)

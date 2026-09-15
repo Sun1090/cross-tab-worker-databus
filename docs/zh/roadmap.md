@@ -1,6 +1,12 @@
 # 路线图
 
-0.20.87 正在推进。项目会先持续完成可靠性与协议兼容性的中版本迭代，再进入 1.0.0 稳定性冻结。
+0.20.88 正在推进。项目会先持续完成可靠性与协议兼容性迭代，再进入 1.0.0 稳定性冻结。
+
+## 0.20.88 已完成范围
+
+- 启动失败恢复现在可重入：transport 在初始 `openTransport()` 尚未结算时同步上报 `error`，调用方可以从 `onStatus('error')` 或 `onError` 回调立即重试。失败 open 会先完成清理，重试建立新的生命周期，旧 rejection 不会重新污染已重置的失败账本。
+- 初始 transport open 尚在飞行时反复发生 BFCache `pagehide`/`pageshow`，不再让 bus 永久停留在挂起状态。suspend 只在旧 stop gate 仍代表当前生命周期时复用；否则安装新的串行 stop，使下一次 resume 真正重开 transport。
+- 显式 `start()` 现在是完整的 BFCache 恢复路径：除 transport 外还会恢复跨 Tab 协调，并重新启动 `pagehide` 暂停的 trace metrics、dedup 过期清扫与 replay retention 定时工作。
 
 ## 0.20.87 已完成范围
 
