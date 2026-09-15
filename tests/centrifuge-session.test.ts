@@ -541,6 +541,40 @@ describe('CentrifugeSession token bridge', () => {
     expect(legacy.options.getChannelToken).toBeUndefined();
   });
 
+  it('rejects credential requests from a client whose lifecycle has ended', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const { sink, session, client: oldClient } = makeSession();
+
+    session.handle({ type: 'STOP' });
+    sink.mockClear();
+    await expect(oldClient.options.getToken!()).rejects.toThrow(/lifecycle has ended/i);
+    expect(sink).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TOKEN_REQUEST' })
+    );
+
+    // Reinitializing must not make a callback from the replaced client look
+    // current again; the closure belongs to the client that created it.
+    session.handle({
+      type: 'INIT',
+      url: 'wss://example.test/connection/websocket',
+      config: {},
+      tokenBridge: true
+    });
+    const newClient = FakeCentrifuge.instances[FakeCentrifuge.instances.length - 1]!;
+    await expect(oldClient.options.getChannelToken!('old.channel')).rejects.toThrow(/lifecycle has ended/i);
+    expect(sink).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TOKEN_REQUEST' })
+    );
+
+    const freshToken = newClient.options.getToken!();
+    expect(sink).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TOKEN_REQUEST', kind: 'token' })
+    );
+    const request = sink.mock.calls.at(-1)![0] as { requestId: number };
+    session.handle({ type: 'TOKEN_RESPONSE', requestId: request.requestId, token: 'fresh' });
+    await expect(freshToken).resolves.toBe('fresh');
+  });
+
   it('round-trips a connection token request through the bridge', async () => {
     FakeCentrifuge.instances.length = 0;
     const { sink, session, client } = makeSession();

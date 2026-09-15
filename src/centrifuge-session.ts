@@ -105,8 +105,8 @@ export class CentrifugeSession<TData = unknown> {
           // Route credential fetches back to the main thread, where the
           // application's credentialProvider lives (config must stay
           // structured-cloneable, so functions cannot cross the boundary).
-          getToken: () => this.requestToken('token'),
-          getChannelToken: (channel: string) => this.requestToken('channelToken', channel)
+          getToken: () => this.requestToken('token', lifecycle),
+          getChannelToken: (channel: string) => this.requestToken('channelToken', lifecycle, channel)
         }
       : config;
     const client = new Centrifuge(url, clientOptions);
@@ -251,15 +251,16 @@ export class CentrifugeSession<TData = unknown> {
   /** Issue a credential request to the main thread and await the response.
    * Used as Centrifuge's `getToken` / `getChannelToken` when token bridging is
    * enabled; resolved or rejected by a matching TOKEN_RESPONSE / TOKEN_ERROR. */
-  private requestToken(kind: 'token' | 'channelToken', channel?: string): Promise<string> {
-    const lifecycle = this.lifecycle;
+  private requestToken(kind: 'token' | 'channelToken', lifecycle: number, channel?: string): Promise<string> {
+    // The provider is installed on a specific Centrifuge client. An old client
+    // must not be able to route a late credential request into a replacement
+    // session merely because it retained the callback closure.
+    if (this.lifecycle !== lifecycle) {
+      return Promise.reject(new Error('Centrifuge client lifecycle has ended before the credential was requested.'));
+    }
     const requestId = this.nextRequestId;
     this.nextRequestId += 1;
     return new Promise<string>((resolve, reject) => {
-      if (this.lifecycle !== lifecycle) {
-        reject(new Error('Centrifuge session stopped before the credential was requested.'));
-        return;
-      }
       this.pendingTokenRequests.set(requestId, { resolve, reject });
       this.post({
         type: CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST,
