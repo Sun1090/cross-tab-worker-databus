@@ -210,6 +210,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // separate from startPromise because stop()'s finally block clears the
   // ordinary lifecycle gate before the queued start is allowed to run.
   private queuedStart: Promise<void> | null = null;
+  // Lazy readiness view of queuedStart. start() keeps its documented
+  // resolve-on-cancellation contract, while ready() must reject when the
+  // queued intent was superseded by a later stop().
+  private queuedStartReady: Promise<void> | null = null;
+  private queuedStartReadyToken = 0;
   // The queued continuation is chained to the stop promise and cannot be
   // un-scheduled once scheduled. A later stop() therefore invalidates the
   // current intent by recording its token; a subsequent start() issues a
@@ -443,6 +448,31 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     return opening;
   }
 
+  /** Return a cancellation-aware readiness view of the current queued start. */
+  private getQueuedStartReady(): Promise<void> {
+    const queued = this.queuedStart;
+    if (!queued) {
+      return Promise.reject(new Error('No queued start is in flight.'));
+    }
+    const token = this.queuedStartToken;
+    if (this.queuedStartReady && this.queuedStartReadyToken === token) {
+      return this.queuedStartReady;
+    }
+    this.queuedStartReadyToken = token;
+    this.queuedStartReady = queued.then(() => {
+      if (token <= this.canceledQueuedStartToken) {
+        throw new Error(
+          'CrossTabDataBus start was canceled by a later stop(); ready() cannot report readiness. ' +
+          'Call start() again after stop() resolves.'
+        );
+      }
+      if (!this.started || !this.transportReady) {
+        throw new Error('CrossTabDataBus restart completed without a ready transport.');
+      }
+    });
+    return this.queuedStartReady;
+  }
+
   /** Queue exactly one fresh start after an in-flight explicit stop settles. */
   private queueStartAfterStop(config: TConfig): Promise<void> {
     if (this.queuedStart) return this.queuedStart;
@@ -571,7 +601,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // A start() queued behind an in-flight stop is the newest lifecycle intent;
     // ready() remains its shared completion gate. Without that queued intent,
     // reporting readiness while teardown is in progress would be false.
-    if (this.queuedStart) return this.queuedStart;
+    if (this.queuedStart) return this.getQueuedStartReady();
     if (this.stopping) {
       return Promise.reject(new Error(
         'CrossTabDataBus is stopping; ready() cannot report readiness until stop() resolves. ' +

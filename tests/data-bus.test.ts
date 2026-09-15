@@ -1143,13 +1143,14 @@ describe('CrossTabDataBus', () => {
 
     const restarting = bus.start({});
     expect(bus.start({})).toBe(restarting);
-    expect(bus.ready()).toBe(restarting);
+    const readiness = bus.ready();
     await Promise.resolve();
     expect(transport.startCalls).toBe(1);
 
     releaseStop();
     await stopping;
     await restarting;
+    await readiness;
     expect(transport.startCalls).toBe(2);
     expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
     await bus.stop();
@@ -1177,6 +1178,7 @@ describe('CrossTabDataBus', () => {
 
     // A resume queues a fresh start behind the in-flight stop...
     const restarting = bus.start({});
+    const readiness = bus.ready();
     await Promise.resolve();
     expect(transport.startCalls).toBe(1);
 
@@ -1187,6 +1189,7 @@ describe('CrossTabDataBus', () => {
     await stopping;
     await canceling;
     await restarting;
+    await expect(readiness).rejects.toThrow(/canceled by a later stop/i);
     expect(transport.startCalls).toBe(1);
     expect(transport.stopCalls).toBe(1);
     expect(bus.getHealthSummary()).toMatchObject({
