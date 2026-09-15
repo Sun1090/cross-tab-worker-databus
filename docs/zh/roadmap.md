@@ -4,7 +4,7 @@
 
 ## 0.20.91 进行中
 
-可靠性开发线继续补强错误路径覆盖并维护发布门禁。IndexedDB replay 清理现在覆盖 `clear()`、`clearTopic()`、`clearBefore()` 的事务级错误，包括连接失效后的恢复，以及浏览器未提供 transaction error 对象时的领域级 fallback 拒绝信息。
+可靠性开发线继续补强错误路径覆盖并维护发布门禁。IndexedDB replay 清理现在覆盖 `clear()`、`clearTopic()`、`clearBefore()` 的事务级错误，包括连接失效后的恢复，以及浏览器未提供 transaction error 对象时的领域级 fallback 拒绝信息。WebSocket transport 也会在连接失活后 best-effort 关闭 socket，避免自动恢复遗留死连接；已发布包验证的正常路径经审计确认没有固定等待或多余 registry 往返。
 
 ## 0.20.90 已完成范围
 

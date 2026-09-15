@@ -1,3 +1,18 @@
+## 0.20.91 websocket error cleanup + published-gate audit (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/websocket-handshake-error-cleanup` ← `origin/main@81492a5`。
+- 问题：`WebSocketTransport` 在 socket `error` 后立即把连接标记为 inactive，但只对握手超时显式调用 `close()`。若浏览器或注入实现没有紧随 `onerror` 发出 `onclose`，DataBus 自动恢复会跳过关闭已失活的旧连接，导致死 socket 泄漏；握手前错误还会拒绝 `start()` 而不终止半开连接。
+- 修复：新增 best-effort `abortSocket()`，统一关闭超时、握手前错误和已连接错误之后的失活 socket；先保持既有 status/handshake failure 语义，再清理连接，且忽略 close 本身与失败握手竞争时的异常。
+- 公开包验证审计：工作流已经显式传入 `PUBLISHED_VERSION`，正常路径不会执行额外的 `npm view`；首次 `npm pack` 成功时无固定等待，只有 registry 尚未传播 tarball 时才进入 48 × 7.5 s 退避。未发现应改动的正常路径延迟或多余 registry 往返，因此不修改发布脚本。
+- 变更文件：`src/websocket.ts`、`tests/websocket.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：握手前 `error` 会拒绝 `start()`、报告 `error`、关闭 socket 并进入 closed 状态；真实 DataBus 自动恢复用例新增旧 socket 必须关闭一次的断言。
+- 验证命令与结果：`pnpm exec vitest run tests/websocket.test.ts`（44/44）；`pnpm check`（35 files，734/734）；`pnpm lint`；`pnpm test:coverage`（35 files，734/734；statements 97.15% / branches 92.82% / functions 97.06% / lines 98.54%）。相比上一任务，branches 从 92.76% 提升至 92.82%，lines 从 98.46% 提升至 98.54%。
+- 阻塞：无。
+- 风险 / 回滚：改变的是错误后连接清理，不改变 wire protocol、public API 或恢复预算。`error` 后只发送 `close()`；若宿主实现不支持对 CONNECTING socket 调用 close，异常被 best-effort 吞掉并保留原始错误。回滚 = revert 本任务提交。
+- 下一项：提交并创建 PR；随后审计 `CentrifugeSession` 在 `STOP`/重新初始化后的 subscription callback 隔离，或继续检查 `data-bus.ts` 生命周期恢复分支。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 replay persistence transaction errors (2026-09-16)
 
 - 状态：实现与定向测试完成，完整 check/lint 验证中；待提交、推送和 PR。

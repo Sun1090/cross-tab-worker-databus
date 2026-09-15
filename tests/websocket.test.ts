@@ -15,6 +15,7 @@ class FakeWebSocket implements WebSocketLike {
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
+  closeCalls = 0;
 
   constructor(
     readonly url: string,
@@ -26,6 +27,7 @@ class FakeWebSocket implements WebSocketLike {
   }
 
   close(): void {
+    this.closeCalls += 1;
     this.readyState = 3;
     this.onclose?.();
   }
@@ -686,6 +688,34 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('aborts a socket that errors before the handshake completes', async () => {
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const onStatus = vi.fn();
+    const rejection = Promise.resolve(
+      transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus, onError: () => {} }
+      )
+    ).then(() => null, error => error);
+
+    const socket = sockets[0]!;
+    socket.onerror?.();
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('failed to open');
+    expect(onStatus).toHaveBeenCalledWith('error');
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.readyState).toBe(3);
+  });
+
   it('rejects start() when the socket closes before the handshake completes', async () => {
     const sockets: FakeWebSocket[] = [];
     const transport = new WebSocketTransport({
@@ -830,6 +860,9 @@ describe('createWebSocketDataBus', () => {
       await bus.ready();
       first.onerror?.();
       expect(bus.getStatus()).toBe('error');
+      // Recovery replaces the socket; failing to close it here would leave a
+      // dead connection alive and make close-only resource checks unreliable.
+      expect(first.closeCalls).toBe(1);
 
       await vi.advanceTimersByTimeAsync(100);
       expect(sockets).toHaveLength(2);

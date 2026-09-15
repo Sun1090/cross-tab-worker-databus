@@ -154,7 +154,7 @@ export class WebSocketTransport<TData = unknown>
           this.failConnect(error);
           // Abort the half-open handshake so the timed-out attempt cannot
           // linger in CONNECTING or deliver a late onopen.
-          socket.close();
+          this.abortSocket(socket);
         }, timeoutMs);
       }
       socket.onopen = () => {
@@ -189,6 +189,10 @@ export class WebSocketTransport<TData = unknown>
           handshakeFailed = true;
           this.failConnect(new Error('WebSocket failed to open.'));
         }
+        // `error` is not guaranteed to be followed by `close` (especially for
+        // injected WebSocket implementations). Abort here so DataBus recovery
+        // cannot orphan a socket that this transport has already marked dead.
+        this.abortSocket(socket);
       };
       socket.onmessage = event => {
         if (this.socket === socket && this.handlers === handlers && this.socketActive) {
@@ -293,6 +297,17 @@ export class WebSocketTransport<TData = unknown>
     this.connectResolve = null;
     this.connectReject = null;
     reject?.(error);
+  }
+
+  /** Best-effort close for a socket that can no longer carry transport data.
+   * The error that invalidated it has already been reported by the caller. */
+  private abortSocket(socket: WebSocketLike): void {
+    try {
+      socket.close();
+    } catch {
+      // Some injected implementations throw when close races a failed
+      // handshake. The original failure remains the actionable error.
+    }
   }
 
   private clearConnectTimer(): void {

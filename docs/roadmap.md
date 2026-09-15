@@ -4,7 +4,7 @@
 
 ## 0.20.91 in progress
 
-The reliability line continues with error-path coverage and release-gate maintenance. IndexedDB replay cleanup now has regressions for transaction-level errors on `clear()`, `clearTopic()`, and `clearBefore()`, including connection invalidation/recovery and fallback rejections when the browser exposes no transaction error object.
+The reliability line continues with error-path coverage and release-gate maintenance. IndexedDB replay cleanup now has regressions for transaction-level errors on `clear()`, `clearTopic()`, and `clearBefore()`, including connection invalidation/recovery and fallback rejections when the browser exposes no transaction error object. The WebSocket transport now best-effort closes a socket after connection invalidation so automatic recovery cannot orphan a dead connection; the published-consumer gate normal path was audited with no fixed wait or redundant registry round-trip found.
 
 ## 0.20.90 delivered scope
 
