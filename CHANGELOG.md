@@ -2,6 +2,7 @@
 
 ### Fixed
 - `ready()` no longer reports a BFCache-suspended bus as ready. After `pagehide`, `suspendTransport()` chains `transport.stop()` and reuses `startPromise` as the stop gate; `ready()` previously returned that gate, so it resolved the moment cleanup finished even though the transport was intentionally stopped and publications were dropped. Readiness now rejects with a clear suspended-state error while hidden; `pageshow` (or an explicit `start()`) clears the flag and installs a real reopen promise, after which `ready()` resolves as before. This restores the documented invariant that `ready()` never resolves for a transport that cannot carry data.
+- A runtime transport failure reported through `onError` now lands in the transport recovery ledger, not only in the unified `lastFailure` record. `getRecoveryStats().hasError` / `errorMessage` / `errorAt` were written exclusively by the transport-*open* failure path, so a failure raised after a successful open produced a self-contradicting health snapshot: `state: 'recovering'` and a retained `lastFailure` alongside `recovery.hasError: false, errorMessage: null`. The recovery ledger now tracks every transport-sourced failure (open or runtime) and still keeps non-transport failures (`persistence`, `dispatch`) out of it, where they remain visible through `lastFailure` and `getPersistenceStats()`.
 
 ## [0.20.86] - 2026-09-16
 

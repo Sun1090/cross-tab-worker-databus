@@ -984,6 +984,56 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('records a runtime transport onError in the recovery ledger, not just lastFailure', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'runtime-error-ledger' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'runtime-error-ledger', environment: environment.environment, initialConfig: {}, transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      lastFailure: null,
+      recovery: { hasError: false, errorMessage: null, errorAt: null }
+    });
+
+    // A failure surfaced by the transport *after* a successful open used to
+    // land only in lastFailure, so the same health snapshot reported a
+    // retained transport error while recovery claimed hasError: false.
+    transport.emitError(new Error('socket died mid-stream'));
+    expect(bus.getRecoveryStats()).toMatchObject({
+      hasError: true,
+      errorMessage: 'socket died mid-stream',
+      errorAt: expect.any(Number)
+    });
+    expect(bus.getHealthSummary()).toMatchObject({
+      lastFailure: { source: 'transport', message: 'socket died mid-stream', at: expect.any(Number) },
+      recovery: { hasError: true, errorMessage: 'socket died mid-stream', errorAt: expect.any(Number) }
+    });
+    await bus.stop();
+  });
+
+  it('keeps non-transport failures out of the transport recovery ledger', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'dispatch-error-ledger' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'dispatch-error-ledger', environment: environment.environment, initialConfig: {}, transport
+    });
+    // The handler throws while dispatching a publication, which is reported as
+    // a dispatch failure. That must stay visible through lastFailure without
+    // pretending the transport recovery ledger has an error to explain.
+    transport.subscribe('topic');
+    bus.subscribe('topic', () => { throw new Error('handler exploded'); });
+    await bus.ready();
+    transport.emit('topic', 1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      lastFailure: { source: 'dispatch', message: 'handler exploded', at: expect.any(Number) },
+      recovery: { hasError: false, errorMessage: null, errorAt: null }
+    });
+    await bus.stop();
+  });
+
   it('exposes generation and lastSuccessAt that increment on each successful open', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-gen' });
