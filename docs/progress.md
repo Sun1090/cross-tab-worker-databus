@@ -1,5 +1,50 @@
 # Development Progress
 
+## 0.20.87 BFCache readiness rejection (2026-09-16)
+
+- Status: implementation, docs, and verification complete; merged to `main` as
+  `b03601d` (`fix(data-bus): reject readiness while BFCache-suspended`) via
+  **PR #32** (`feat/0.20.87-lifecycle-audit`, rebase-merged, branch deleted).
+- Completed content: `ready()` no longer reports a BFCache-suspended bus as
+  ready. `pagehide` chains `transport.stop()` and reuses the same promise for
+  `startPromise`/`pendingStop` so `reopenTransport()` can tell a stop gate from
+  a resume opening; `ready()` fell through to `if (this.startPromise) return
+  this.startPromise` and resolved the moment cleanup finished, even though
+  `publish()` was being dropped. `ready()` now checks `suspended` after the
+  existing `stopping` gate and rejects with a suspended-state error;
+  `pageshow`/`reopenTransport()` and an explicit `start()` clear the flag and
+  install a real reopen promise. `getHealthSummary()` already reported
+  `{ healthy: false, state: 'suspended' }`, so rejection matches that verdict.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`, `docs/progress.md`.
+- Verification: the new regression
+  (`does not report ready while the tab is BFCache-suspended`) failed before the
+  fix; after it, `pnpm exec vitest run tests/data-bus.test.ts` 122/122,
+  `pnpm test` 687/687 across 34 files (was 686; +1), `pnpm typecheck`,
+  `pnpm lint`, `pnpm build`, `pnpm verify:compat`, `pnpm verify:pack` clean,
+  `pnpm test:coverage` 97.16% statements / 92.31% branches / 96.57% functions /
+  98.64% lines (no regression), `pnpm test:e2e` 27/27 (including the
+  real-browser BFCache round-trip specs), `git diff --check` clean. PR CI:
+  `verify`, `analyze`, `browser`, and CodeQL all passed.
+- Behavioral contract note: an existing test used `ready()` as a
+  wait-for-the-suspend-stop-gate primitive
+  (`does not deliver transport operations while suspended during an async
+  start`). That is the exact false-readiness confusion being fixed; it now
+  asserts the rejection while keeping its publish-drop assertions.
+- Blockers: none. No schema migration, storage-key change, or public export
+  change.
+- Risk / rollback: callers that awaited `ready()` on a hidden tab now receive a
+  rejection instead of a resolved promise; the documented contract is that
+  `ready()` never reports a transport that cannot carry data. Roll back with
+  `git revert b03601d`.
+- Next: continue the lifecycle/observability audit. Untouched candidates from
+  the coverage map in `src/core/data-bus.ts`: the unconditional
+  `transportReady = false` at the top of `openTransport()` (a stale-epoch call
+  could in principle clobber a newer ready state), stop-time `subscribe`/
+  `publish` ordering, and adapter parity between the React and Vue composables
+  for suspend/resume and dependency-change teardown. Updated: 2026-09-16.
+
 Session operating notes: work in local batches (10-20 real tasks), commit locally
 during development, push once per completed phase after full local verification,
 then check CI and fix failures automatically. If interrupted, resume from here.
@@ -21,7 +66,7 @@ fake tasks; each item is verified locally before being marked done.
 - Release result: tag `v0.20.86`; GitHub release <https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.86>; Release workflow <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000351855> passed; npm verified `0.20.86` with `latest` pointing to it. Post-merge CI run <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000325037> and CodeQL run <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35000325051> passed.
 - Blockers: none.
 - Risk / rollback: npm versions are immutable. If a defect is found, installers can pin `0.20.85`, then publish a corrective `0.20.87` patch; a non-published regression can be reverted with `git revert 4863640`. Do not delete or move the published tag.
-- Next milestone: **0.20.87** — continue the lifecycle/observability and adapter-parity audit, starting with the next reproducible contract gap or uncovered failure transition. Updated: 2026-09-16.
+- Next milestone: **0.20.87** — in progress; the BFCache readiness rejection above is the first shipped item. Updated: 2026-09-16.
 
 ## 0.20.86 canceled restart readiness rejection (2026-09-16)
 
