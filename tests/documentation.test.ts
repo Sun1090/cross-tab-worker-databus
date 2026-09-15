@@ -73,6 +73,30 @@ describe('public documentation', () => {
     }
   });
 
+  it('documents local fan-out without claiming end-to-end exactly-once delivery', () => {
+    const expectations = [
+      {
+        file: 'docs/architecture.md',
+        localGuarantee: 'at-most-once fan-out per accepted transport publication',
+        endToEndBoundary: 'does not provide end-to-end at-least-once or exactly-once delivery'
+      },
+      {
+        file: 'docs/zh/architecture.md',
+        localGuarantee: '每次已接受的 transport publication 至多扇出一次',
+        endToEndBoundary: '不提供端到端的 at-least-once 或 exactly-once 保证'
+      }
+    ];
+
+    for (const { file, localGuarantee, endToEndBoundary } of expectations) {
+      const content = readFileSync(file, 'utf8');
+      expect(content, `${file} must state the bounded local fan-out guarantee`).toContain(localGuarantee);
+      expect(content, `${file} must state the end-to-end delivery boundary`).toContain(endToEndBoundary);
+      expect(content, `${file} must not claim exactly-once dispatch per subscriber`).not.toMatch(
+        /exactly-once dispatch per subscriber|保证\*\*每个 subscriber 恰好分发一次\*\*/
+      );
+    }
+  });
+
   it('keeps both release checklists aligned with the CI gate set', () => {
     // The Before-tagging steps must mirror what CI enforces, in both
     // languages, or a local dry run silently skips a blocking gate.

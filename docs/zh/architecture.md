@@ -455,16 +455,18 @@ SDK 当前刻意不在 Service Worker 中承载实时 transport。Service Worker
 
 ### 分发流程：三道关卡
 
-每条来自 transport 的 publication 在到达应用 handler 之前经过三道关卡：
+经过可选的 `messageId` 去重门之后，每条被接受的 transport publication 在到达应用 handler 之前还会经过三道关卡：
 
 1. **`isAssigned(topic)`** — 在 owner Worker 上检查（`handleTransportMessage`）。如果该 topic 已不再分配给此 worker（比如前一个 ownership 窗口的过期消息），立即丢弃。这是外层关卡：防止非 owner 广播。
 2. **`broadcastEvent('DATABUS_PUBLICATION', message)`** — 仅当 `isAssigned` 通过后调用。owner Worker 通过 BroadcastChannel `EVENT` 将消息扇出到所有 Tab。每个 Tab 收到事件但暂不分发——必须通过内层关卡。
 3. **`hasLocalSubscriber(topic)`** — 在收到 `EVENT` 的每个 Tab 上检查。仅当该 Tab 有该 topic 的本地 subscriber 记录时才调用已注册的 handler。无本地订阅的 Tab 静默丢弃。
 
-这三道关卡保证**每个 subscriber 恰好分发一次**：
+这三道关卡提供的是**每次已接受的 transport publication 至多扇出一次**：
 - 外层关卡（`isAssigned`）防止过期 owner 重复广播。
 - 内层关卡（`hasLocalSubscriber`）防止 Tab 分发自从未订阅过的 topic。
 - BroadcastChannel 从不把消息回传给发送者，因此 owner 不会收到自己的 `EVENT`——本地分发是唯一一次本地投递。
+
+这只是本地扇出保证，不是端到端投递保证。transport 或服务端可能重复投递，断连或挂起中的 Tab 可能错过 `EVENT`，BroadcastChannel 扇出也没有应用层确认。可选的 `dedup` 能在每个 bus 实例的有界窗口内抑制重复的 `messageId`，但它是尽力而为、按实例生效，并会被 `stop()` 重置。因此 SDK 不提供端到端的 at-least-once 或 exactly-once 保证；无法容忍重复或缺口的应用必须让 handler 幂等，并依赖其工作负载所需的 transport/服务端保证。
 
 ```text
 Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
@@ -499,7 +501,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 如果仍订阅某 Topic 的 Tab 发现 owner Worker 已退出或心跳过期，它会选择新 owner 并递增 route `generation`。正常 `pagehide` 迁移采用严格握手：新路由记录 `handoffFromWorkerId`，旧 owner 先退订 transport，再发送 `ROUTE_RELEASED(generation)`；只有 generation 匹配的新 owner 才发送 `SUBSCRIBE`。如果旧 Worker 已经消失，新 owner 立即接管。刷新后的旧 Tab 再次加入时只恢复 subscriber 记录并复用替代 owner，不会把 route 抢回。
 
-该过程在正常 owner 交接时避免重复订阅，同时在故障恢复时保持可用；不保证 exactly-once。
+该过程在正常 owner 交接时避免重复订阅，同时在故障恢复时保持可用；它不会把本地扇出保证变成端到端 at-least-once 或 exactly-once 投递。
 
 ## 稳定性不变量
 
