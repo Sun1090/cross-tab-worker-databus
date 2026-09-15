@@ -412,7 +412,20 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // intact, but begin a fresh failure/recovery ledger before reopening.
       this.activeConfig = config;
       this.resetFailureState();
-      return this.reopenTransport();
+      // An explicit start() is also a documented resume path out of BFCache
+      // suspension: it clears `suspended` and reopens the transport. The
+      // cluster keeps its own paused flag and is normally resumed by the
+      // pageshow listener, so resume it here too. Otherwise the bus reports a
+      // healthy transport while cross-tab coordination stays dormant (closed
+      // channel, no heartbeat, cleared assignments) and incoming publications
+      // are discarded by isAssigned() until the next pageshow. reopenTransport()
+      // clears `suspended` and installs the opening first so the cluster's
+      // re-subscription traffic parks behind it instead of hitting the stopped
+      // transport; cluster.start() is idempotent and a no-op when not paused.
+      const resumingFromSuspend = this.suspended;
+      const opening = this.reopenTransport();
+      if (resumingFromSuspend) this.cluster.start();
+      return opening;
     }
     this.started = true;
     this.stopping = false;

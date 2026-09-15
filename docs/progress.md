@@ -1,3 +1,21 @@
+## 0.20.88 explicit start() cluster resume after BFCache (2026-09-16)
+
+- 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第二项。
+- 分支：`feat/lifecycle-replacement-audit-2`（基线 `origin/main` = `07f53e0`）。
+- 复现场景：Tab A 已经 `start()` 并与 Tab B 建立跨 Tab 协调；随后 `pagehide`（bus 与 cluster 同时 suspended）。此时不再等 `pageshow`，直接由调用方显式 `bus.start({})`。
+- 现象（修复前）：`bus.getHealthSummary()` 报告 `healthy`、transport `connected`，但 `getClusterSnapshot().suspended` 仍为 `true`；cluster 的 channel listener 已关闭、heartbeat 已停止、`assignedTopics` 已清空，因此所有来自 peer tab 的入站 publication 都被 `cluster.isAssigned()` 丢弃，直到下一次 `pageshow` 才恢复。
+- 根因：`start()` 的 `started` 快速路径只清除了 `this.suspended` 并 `reopenTransport()`，而 `pagehide` 是**独立**暂停 cluster 的（`cluster.pause()`），并不会因 transport 重开而自动恢复。
+- 修复：`src/core/data-bus.ts` 的 `start()` 在 `started` 分支先记录 `resumingFromSuspend = this.suspended`，完成 `reopenTransport()`（清除 `suspended`、安装 opening）之后再调用 `this.cluster.start()`。这样 cluster 的重订阅流量会排在 transport opening 之后而不是打到已停止的 transport；`cluster.start()` 幂等，非挂起路径为 no-op。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`tests/lifecycle-invariants.test.ts`（新增）、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：
+  - `tests/data-bus.test.ts` — `resumes cluster coordination when an explicit start() takes a hidden tab out of suspension`（修复前 `getClusterSnapshot().suspended` 断言 `expected true to be false` 失败，修复后通过）。
+  - `tests/lifecycle-invariants.test.ts`（新增）— 基于 seeded RNG（400 seeds）的随机化生命周期不变量测试，随机序列覆盖 `hide` / `show` / `error` / `timer` / `publish` / `subscribe` / `disconnect` / `toggleStartFailure` / `start` / `stop` / `flush`，断言 ① `health.suspended === cluster.suspended`、② `intent === 'stopped'` 时 `health.started === false`、③ 非 stopped 且两侧非 suspended 时 `ready()` 必须 resolve 为 `healthy`。对本次修复做了 mutation check（stash 掉 `src/core/data-bus.ts` 修改后测试失败，恢复后通过）。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`、`pnpm exec vitest run tests/lifecycle-invariants.test.ts` 通过；`pnpm check`（35 files，712/712）通过；`pnpm lint` 干净；`pnpm exec vitest run tests/documentation.test.ts` 通过；`pnpm test:e2e` 27/27 通过；`git diff --check` 干净。
+- 阻塞：无。
+- 风险 / 回滚：纯主线程生命周期修复，无 public export / storage schema / 线协议变更。若引入回归，revert 本次 commit 即可。
+- 下一项：继续 lifecycle / `ready()` / async transport replacement / stop-resume 交错审计（含 `start()` 在 in-flight `startPromise` 且 bus 已 suspended 的路径、`openTransport()` 顶部无条件 `transportReady = false`、React/Vue adapter 的 suspend/resume parity）。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 repeated BFCache hide/show during startup (2026-09-16)
 
 - 状态：进行中（未提交、未发布）。0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第一项。
