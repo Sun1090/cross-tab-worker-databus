@@ -12,9 +12,11 @@ fake tasks; each item is verified locally before being marked done.
 
 ## 0.20.86 canceled restart readiness rejection (2026-09-16)
 
-- Status: implementation complete on `feat/queued-restart-failure-cleanup`;
-  atomic code commit `385d82e` (`fix(data-bus): reject readiness for canceled
-  restarts`).
+- Status: implementation and documentation complete on
+  `feat/queued-restart-failure-cleanup`; atomic code commit `385d82e`
+  (`fix(data-bus): reject readiness for canceled restarts`) plus docs commit
+  `4825f00` (`docs: record canceled restart readiness semantics`). The
+  four-commit branch checkpoint is ready for PR integration.
 - Completed content: `start()` intentionally resolves when a later `stop()`
   cancels a queued restart without opening a transport, but `ready()` returned
   that same promise and therefore reported a stopped bus as ready. `ready()`
@@ -28,16 +30,19 @@ fake tasks; each item is verified locally before being marked done.
   `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
   `docs/zh/architecture.md`, `docs/progress.md`.
 - Verification: the new regression failed before the fix (readiness resolved
-  after the queued restart was canceled) and passes after;
-  `tests/data-bus.test.ts` 121/121; `pnpm test` 686/686 (34 files);
-  `pnpm typecheck`; `pnpm build`; `pnpm lint`; `git diff --check`.
+  after the queued restart was canceled) and passes after the full branch
+  checkpoint battery: `pnpm check` (686/686 tests, 34 files), `pnpm lint`,
+  `pnpm test:coverage` (97.16% statements, 92.30% branches, 96.57% functions,
+  98.64% lines), `pnpm test:e2e` (27/27), `pnpm verify:compat`,
+  `pnpm verify:pack`, and `git diff --check`.
 - Blockers: none. No schema migration, public API shape change, or version bump.
 - Risk / rollback: callers that observed `ready()` resolving after a canceled
   restart now receive a rejection and must call `start()` again after the stop
   settles. `start()` semantics are unchanged. Roll back with `git revert
   385d82e` plus the documentation commit.
-- Next: continue the lifecycle-contract audit around readiness and explicit
-  stop/restart combinations, prioritizing reproducible failing sequences.
+- Next: push `feat/queued-restart-failure-cleanup`, open and verify the PR
+  against `main`, then continue the lifecycle-contract audit with the next
+  reproducible failure sequence.
 
 ## 0.20.86 failed queued-restart error retention (2026-09-16)
 
