@@ -400,7 +400,7 @@ const bus = createWebSocketDataBus({
 new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 ```
 
-Implements `DataBusTransport`. Connection lifecycle maps to the DataBus status vocabulary: socket `open` → `connected`, `close` → `disconnected`, `error` → `error` (which triggers DataBus auto-recovery). Subscriptions are re-asserted when a socket reopens in place. Frames dropped while the socket is not open are reported via `handlers.onError`; reopening re-sends subscribe frames.
+Implements `DataBusTransport`. Connection lifecycle maps to the DataBus status vocabulary: socket `open` → `connected`, `close` → `disconnected`, `error` → `error` (which triggers DataBus auto-recovery). Subscriptions are re-asserted when a socket reopens in place. When the bus reopens after a failed socket — automatic recovery after `error`, or an explicit `start()`/page restore after `close` — `start()` creates a replacement socket and ignores late lifecycle or message callbacks from the superseded one. Frames dropped while the socket is not open are reported via `handlers.onError`; the replacement re-sends subscribe frames.
 
 `WebSocketDataBusConfig` fields:
 

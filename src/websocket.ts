@@ -75,6 +75,7 @@ export class WebSocketTransport<TData = unknown>
   readonly diagnosticsName = 'websocket';
   readonly diagnosticsBackend = 'native-websocket';
   private socket: WebSocketLike | null = null;
+  private socketActive = false;
   private handlers: DataBusTransportHandlers<TData> | null = null;
   private readonly subscribedTopics = new Set<string>();
 
@@ -83,7 +84,13 @@ export class WebSocketTransport<TData = unknown>
   /** Open the WebSocket and wire lifecycle listeners. A factory failure is
    * reported through `onStatus('error')` so the DataBus can recover. */
   start(config: WebSocketDataBusConfig, handlers: DataBusTransportHandlers<TData>): MaybePromise<void> {
-    if (this.socket) return;
+    if (this.socket && this.socketActive) return;
+    // A failed or closed socket is one-shot; retain its object only long
+    // enough for a transparent same-object reopen to fire, but replace it
+    // whenever start() is called again. Clearing the reference here also
+    // makes every late callback from the old socket a no-op.
+    this.socket = null;
+    this.socketActive = false;
     this.handlers = handlers;
     // The factory may live on the constructor connection (createWebSocketDataBus
     // path) or on the runtime config (direct transport use) — accept both.
@@ -99,6 +106,7 @@ export class WebSocketTransport<TData = unknown>
     }
     socket.onopen = () => {
       if (this.socket !== socket || this.handlers !== handlers) return;
+      this.socketActive = true;
       // Re-assert every topic so a reopened socket (recovery path) restores
       // the server-side subscriptions without DataBus involvement.
       for (const topic of this.subscribedTopics) {
@@ -107,15 +115,22 @@ export class WebSocketTransport<TData = unknown>
       handlers.onStatus(WORKER_STATUS.CONNECTED);
     };
     socket.onclose = () => {
-      if (this.socket === socket && this.handlers === handlers) handlers.onStatus(WORKER_STATUS.DISCONNECTED);
+      if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
+      this.socketActive = false;
+      handlers.onStatus(WORKER_STATUS.DISCONNECTED);
     };
     socket.onerror = () => {
-      if (this.socket === socket && this.handlers === handlers) handlers.onStatus(WORKER_STATUS.ERROR);
+      if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
+      this.socketActive = false;
+      handlers.onStatus(WORKER_STATUS.ERROR);
     };
     socket.onmessage = event => {
-      if (this.socket === socket && this.handlers === handlers) void this.handleMessage(event.data);
+      if (this.socket === socket && this.handlers === handlers && this.socketActive) {
+        void this.handleMessage(event.data);
+      }
     };
     this.socket = socket;
+    this.socketActive = true;
   }
 
   /** Idempotent: re-subscribing an active topic re-sends the frame but does
@@ -178,10 +193,12 @@ export class WebSocketTransport<TData = unknown>
   /** Close the socket and drop all state. Safe to call multiple times. */
   stop(): MaybePromise<void> {
     const socket = this.socket;
+    const shouldClose = this.socketActive;
     this.socket = null;
+    this.socketActive = false;
     this.handlers = null;
     this.subscribedTopics.clear();
-    socket?.close();
+    if (shouldClose) socket?.close();
   }
 
   /** Send one JSON frame. Frames are dropped with an `onError` report when

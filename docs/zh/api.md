@@ -397,7 +397,7 @@ const bus = createWebSocketDataBus({
 new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 ```
 
-实现 `DataBusTransport`。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，重开后自动补发订阅帧。
+实现 `DataBusTransport`。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；当 bus 在 socket 失败后重新打开时（`error` 触发自动恢复，或 `close` 后显式 `start()` / 页面恢复），`start()` 会创建替代 socket，并忽略被取代 socket 的迟到生命周期与消息回调；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，替代 socket 打开后自动补发订阅帧。
 
 `WebSocketDataBusConfig` 字段：
 
