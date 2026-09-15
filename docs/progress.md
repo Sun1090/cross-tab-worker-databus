@@ -1,3 +1,15 @@
+## 0.20.90 RELEASE_FREEZE (2026-09-16)
+
+- 状态：发布前置冻结完成，待提交 → 推送分支 → PR → rebase merge → 打 tag → 触发 Release 工作流。
+- 分支 / 基线：`feat/release-0.20.90` ← `origin/main@c30ef28`；额外测试修复独立提交为 `67a699e test: budget lifecycle fuzzer under coverage`。
+- 完成内容：`package.json` 从 0.20.89 升至 0.20.90；将 `[Unreleased]` 固化为 `## [0.20.90] - 2026-09-16`；中英文 roadmap 将 0.20.90 从进行中提升为已完成范围，记录 6 分钟 npm 传播预算、统一投递语义和发布性能证据；中英文 benchmark trend 基于 23 份归档报告刷新。覆盖率发布门暴露 V8 instrumentation 下 1_500-seed lifecycle fuzzer 超过 Vitest 默认 5 秒的问题，保留全部 seed 并给该重负载测试显式 30 秒预算。
+- 变更文件（release commit）：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/benchmarks.md`、`docs/zh/benchmarks.md`、`docs/progress.md`；测试预算修复：`tests/lifecycle-invariants.test.ts`。
+- 验证命令与结果：`pnpm check`（35 files，731/731）、`pnpm lint`、`pnpm test:coverage`（35 files，731/731；96.97% statements / 92.43% branches / 96.51% functions / 98.46% lines）、`pnpm bench`（25/25）、`pnpm test:e2e`（27/27）、`pnpm bench:browser` ×2 + `pnpm bench:compare --fail-above-pct 50`（OK，无指标超过 50%）、`pnpm verify:pack`、`pnpm verify:compat`（v0.20.89 基线）、`pnpm audit --registry=https://registry.npmjs.org`（clean）、`npm pack --dry-run --json`（109 files）、documentation/workflows guards（22/22）、`git diff --check` 全部通过。
+- 阻塞：无；初次并行运行的 coverage 超时已由显式测试预算修复并在空闲状态下复验通过。
+- 风险 / 回滚：patch 发布，无 public export、storage schema/key 或线协议变更；`verify:compat` 保持 v0.20.89 公开面。回滚 = 撤回 tag 并 revert release commit；npm 版本不可覆盖，必要时 deprecate 或补发下一 patch。
+- 下一项：提交 release freeze，rebase 到 `origin/main`，推送并创建 PR；checks 全绿后 rebase merge，打 `v0.20.90` tag；等待 Release workflow 发布 npm 并执行发布后 `PUBLISHED_VERSION=0.20.90 pnpm verify:published`，随后记录正式发布结果并进入下一可靠性任务。
+- 更新时间：2026-09-16。
+
 ## 0.20.90 delivery semantics documentation (2026-09-16)
 
 - 状态：已完成并提交，待推送/PR。

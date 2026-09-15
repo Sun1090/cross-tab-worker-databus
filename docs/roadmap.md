@@ -1,12 +1,14 @@
 # Roadmap
 
-0.20.89 is released. 0.20.90 is the current development line, continuing the reliability audit before a 1.0.0 stability freeze.
+0.20.90 is released. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
-## 0.20.90 in progress
+## 0.20.90 delivered scope
 
-Not yet released. The line hardens the release pipeline uncovered by the 0.20.89 tag run and continues the async-callback isolation audit.
+The line hardens the release pipeline uncovered by the 0.20.89 tag run and aligns the documented delivery semantics with the implementation.
 
 - Release-gate propagation budget: the blocking published-consumer verification now waits 48 x 7.5 s (6 min) instead of 24 x 5 s (2 min). The 0.20.89 tag run published successfully and then still failed the gate because `npm pack` returned `ETARGET` for the whole old budget; a genuinely missing package still exhausts the budget.
+- Delivery semantics: the API, architecture, and capabilities docs now consistently state the bounded local fan-out guarantee and the lack of end-to-end at-least-once or exactly-once delivery; the Chinese API reference documents the opt-in `messageId` deduplication window.
+- Release performance evidence: the benchmark trend docs were refreshed from 23 archived reports; the latest two-run comparison stayed inside the 50% ceiling, with per-message publish latency improving in both worker modes.
 
 ## 0.20.89 delivered scope
 
