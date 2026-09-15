@@ -563,15 +563,26 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /**
    * Await the DataBus to be fully started (lazy init when using initialConfig).
    * Returns a rejected promise when the transport has failed and no start is in
-   * flight — the caller can retry by calling start() or ready() again.
+   * flight — the caller can retry by calling start() or ready() again. While an
+   * explicit stop() is settling, this rejects unless a restart is queued behind
+   * it; false readiness during teardown is never reported.
    */
   ready(): Promise<void> {
+    // A start() queued behind an in-flight stop is the newest lifecycle intent;
+    // ready() remains its shared completion gate. Without that queued intent,
+    // reporting readiness while teardown is in progress would be false.
+    if (this.queuedStart) return this.queuedStart;
+    if (this.stopping) {
+      return Promise.reject(new Error(
+        'CrossTabDataBus is stopping; ready() cannot report readiness until stop() resolves. ' +
+        'Wait for stop() to resolve, then call start() before awaiting ready().'
+      ));
+    }
     try {
       this.ensureStarted();
     } catch (error) {
       return Promise.reject(error);
     }
-    if (this.queuedStart) return this.queuedStart;
     if (this.startPromise) return this.startPromise;
     if (this.transportReady) return Promise.resolve();
     // Surface the last failure so callers can distinguish a transient retry
@@ -586,13 +597,26 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /**
    * Register a handler for `topic`. The handler fires on every publication
    * delivered to this tab, regardless of which tab published it. Returns an
-   * unsubscribe function for convenience.
+   * unsubscribe function for convenience. During an explicit stop() the
+   * registration is rejected through onError and a no-op cleanup is returned,
+   * so a late subscriber cannot leak into a future restart.
    */
   subscribe(
     topic: string,
     handler: DataBusMessageHandler<TData>,
     options?: { replay?: boolean | number }
   ): () => void {
+    // A subscription requested during teardown would either be erased by
+    // topicHandlers.clear() or leak into the next start while its handler was
+    // already dropped. Reject it explicitly, consistent with publish(), and
+    // return a safe cleanup function so callers can keep uniform teardown code.
+    if (this.stopping) {
+      this.reportError(new Error(
+        'CrossTabDataBus is stopping; subscribe() was not registered. ' +
+        'Wait for stop() to resolve, then call start() before subscribing again.'
+      ));
+      return () => {};
+    }
     this.ensureStarted();
     const handlers = this.topicHandlers.get(topic) ?? new Set<DataBusMessageHandler<TData>>();
     const wasUnused = handlers.size === 0;
