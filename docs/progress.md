@@ -1,3 +1,17 @@
+## 0.20.90 delivery semantics documentation (2026-09-16)
+
+- 状态：已完成并提交，待推送/PR。
+- 分支 / commit：`feat/delivery-semantics`；提交 `ac7f6fc`。
+- 问题：`docs/architecture.md` 把三道分发关卡描述为「每个 subscriber exactly-once」，与同文件故障转移说明、`docs/capabilities.md` 以及 `docs/api.md` 的边界互相矛盾；中文 API 还漏掉了英文已有的 dedup 边界段落。
+- 修复：统一记录真实保证——经过可选 `messageId` 去重门后，每条被接受的 transport publication 只会扇出一次，每个匹配的本地 handler 至多分发一次；transport/服务端仍可能重复或丢失，断连/挂起期间跨 Tab `EVENT` 可能丢失，`dedup` 是按 bus 实例有界、尽力而为并会被 `stop()` 重置，因此 SDK 不保证端到端 at-least-once 或 exactly-once。英文与中文 architecture/API/capabilities 同步，并将 roadmap 0.13.0 候选 #2 标记为已交付。
+- 变更文件：`docs/architecture.md`、`docs/zh/architecture.md`、`docs/api.md`、`docs/zh/api.md`、`docs/capabilities.md`、`docs/zh/capabilities.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`CHANGELOG.md`、`tests/documentation.test.ts`、`docs/progress.md`。
+- 新增测试：`tests/documentation.test.ts` — 同时断言中英文 architecture 必须包含本地至多一次扇出与端到端不保证 at-least-once/exactly-once 的边界，并禁止旧的 exactly-once per-subscriber 声明回归。
+- 验证命令与结果：`pnpm exec vitest run tests/documentation.test.ts`（17/17）、`pnpm check`（35 files，731/731）、`pnpm lint`、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅文档与文档守卫，无运行时、public export、存储 schema 或线协议变化。回滚 = revert `ac7f6fc`。
+- 下一项：推送分支并创建 PR；随后继续审计 `ready()` 排队 start 失败后的状态保留与 `initialConfig` 边界，以及 `verify:published` 的正常路径等待优化。
+- 更新时间：2026-09-16。
+
 ## 0.20.90 release verify budget (2026-09-16)
 
 - 状态：已完成，待提交。
