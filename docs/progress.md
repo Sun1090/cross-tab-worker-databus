@@ -1,3 +1,18 @@
+## 0.20.89 queued replay batch isolation (2026-09-16)
+
+- 状态：已完成并提交，等待 0.20.89 发布冻结。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `6118815`。
+- 复现场景：`ReplayManager.record()` 将 publication 放入 `pendingReplayPersistence` 并排入 `queueMicrotask`。若 `suspend()` 或 `CrossTabDataBus.stop()` 在微任务执行前发生，旧回调会在生命周期切换后才调用 `withPersistenceRetry()`，因此捕获的是新 generation 并继续执行 `appendBatch()`，把已停止会话的历史重新写入 durable store。
+- 根因：batch flush 的 generation 不是随队列条目绑定，而是在微任务真正开始时才捕获；`suspend()` 虽然递增 generation、取消已在途 retry 和 retention cleanup，却没有清空尚未启动的待写队列。
+- 修复：`src/core/replay-manager.ts` 的 `suspend()` 在递增 generation 的同时清空 `pendingReplayPersistence`。已启动的 backend operation 仍由 generation 校验取消；尚未启动的 flush 则不会越过 teardown 边界。`CHANGELOG.md`、架构、capabilities 与中英文 configuration 文档同步记录该生命周期语义。
+- 变更文件：`src/core/replay-manager.ts`、`tests/replay-manager.test.ts`、`tests/stability.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/capabilities.md`、`docs/zh/capabilities.md`、`docs/configuration.md`、`docs/zh/configuration.md`。
+- 新增测试：`tests/replay-manager.test.ts` — `drops a queued batch flush when suspend() wins the microtask race`；`tests/stability.test.ts` — `does not flush a queued replay batch after stop begins`。mutation check 回退 `suspend()` 的队列清理后，两处测试均失败（分别观察到 `appendBatchCalls: [1]` 与一次真实 `appendBatch` 调用），恢复后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/replay-manager.test.ts tests/stability.test.ts`（64/64）、`pnpm check`（35 files，727/727）、`pnpm lint`、`pnpm test:coverage`（96.97% statements / 92.36% branches / 96.51% functions / 98.46% lines）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅改变生命周期切换时尚未开始的 batch append 语义；按设计，已接受但尚未进入 backend 的写入会随旧会话丢弃，无 public export、存储 schema、存储键或线协议变更。若出现兼容性回归，可 revert `6118815`。
+- 下一项：继续审计 `ready()` 排队 start/stop/cancel token 窗口、最终 stop 后 trace/dedup/replay 定时器与微任务残留，以及其他 transport/adapter 快速替换时异步订阅、发布、状态回调的隔离。
+- 更新时间：2026-09-16。
+
 ## 0.20.89 stop-time async isolation (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
