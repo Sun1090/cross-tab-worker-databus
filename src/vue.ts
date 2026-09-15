@@ -87,7 +87,8 @@ export interface UseCrossTabHealthOptions {
 /**
  * Mirror the bus health summary into a Vue ref. `getHealthSummary()` is a
  * snapshot, so the composable polls it on an interval (default 1000 ms) and
- * refreshes on status changes and errors. Returns `null` until the bus exists.
+ * refreshes on status changes and errors. A reactive interval change replaces
+ * the timer without rebuilding the bus. Returns `null` until the bus exists.
  */
 export function useCrossTabHealth<TConfig, TData>(
   bus: Ref<CrossTabDataBus<TConfig, TData> | null>,
@@ -102,7 +103,7 @@ export function useCrossTabHealth<TConfig, TData>(
     for (const cleanup of cleanups) cleanup();
     cleanups = [];
   };
-  watch(bus, next => {
+  watch([bus, () => options?.intervalMs], ([next]) => {
     teardown();
     if (!next) {
       health.value = null;
