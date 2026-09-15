@@ -440,7 +440,7 @@ Mirrors `bus.onStatus()` into React state and reads the current value synchronou
 
 ### `useCrossTabHealth(bus, options?)`
 
-Mirrors `bus.getHealthSummary()` into React state (`DataBusHealthSummary | null`). Because the summary is a snapshot, the hook polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. Returns `null` while the bus has not been created yet.
+Mirrors `bus.getHealthSummary()` into React state (`DataBusHealthSummary | null`). Because the summary is a snapshot, the hook polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. An `intervalMs` change replaces the polling timer without recreating the bus. Returns `null` while the bus has not been created yet.
 
 ## Vue Composables (`cross-tab-worker-databus/vue`)
 
@@ -456,7 +456,7 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 ### `useVueCrossTabHealth(bus, options?)`
 
-The Vue binding of `useCrossTabHealth`: mirrors `bus.getHealthSummary()` into a `Ref<DataBusHealthSummary | null>`. Because the summary is a snapshot rather than an event stream, the composable polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. Returns `null` while the bus has not been created yet.
+The Vue binding of `useCrossTabHealth`: mirrors `bus.getHealthSummary()` into a `Ref<DataBusHealthSummary | null>`. Because the summary is a snapshot rather than an event stream, the composable polls it on an interval (default 1000 ms; pass `{ intervalMs: 0 }` for event-driven refreshes only) and refreshes immediately on status changes and errors. A reactive `intervalMs` change replaces the polling timer without rebuilding the bus. Returns `null` while the bus has not been created yet.
 
 ## `WorkerClusterRuntime`
 

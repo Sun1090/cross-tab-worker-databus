@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, defineComponent, h, nextTick, ref, type Ref } from 'vue';
+import { createApp, defineComponent, h, nextTick, reactive, ref, type Ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
 import { useCrossTabDataBus, useCrossTabHealth, useCrossTabStatus, useCrossTabSubscription } from '../src/vue';
 import type { CrossTabDataBus } from '../src/core/data-bus';
@@ -316,6 +316,46 @@ describe('useCrossTabHealth edge cases', () => {
       expect(calls).toBe(initial);
       await vi.advanceTimersByTimeAsync(2);
       expect(calls).toBe(initial + 1);
+      app.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies a reactive intervalMs change without rebuilding the bus', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const bus = {
+        getHealthSummary: () => { calls += 1; return { healthy: true, state: 'healthy' }; },
+        onStatus: () => () => {},
+        onError: () => () => {}
+      } as unknown as CrossTabDataBus<unknown, unknown>;
+      const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      const options = reactive({ intervalMs: 1_000 });
+      const host = document.createElement('div');
+      const app = createApp(defineComponent({ setup() {
+        const health = useCrossTabHealth(active, options);
+        return () => h('span', health.value ? 'up' : 'none');
+      }}));
+
+      app.mount(host);
+      await nextTick();
+      const initialCalls = calls;
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(calls).toBe(initialCalls + 1);
+
+      options.intervalMs = 0;
+      await nextTick();
+      const callsWhenDisabled = calls;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toBe(callsWhenDisabled);
+
+      options.intervalMs = 50;
+      await nextTick();
+      const callsWhenEnabled = calls;
+      await vi.advanceTimersByTimeAsync(51);
+      expect(calls).toBe(callsWhenEnabled + 1);
       app.unmount();
     } finally {
       vi.useRealTimers();

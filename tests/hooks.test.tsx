@@ -316,6 +316,48 @@ describe('useCrossTabHealth edge cases', () => {
     view.unmount();
     vi.useRealTimers();
   });
+
+  it('applies intervalMs changes without recreating the bus', async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = makeFakeHealthBus();
+      function DynamicHealthDemo({ intervalMs }: { intervalMs: number }) {
+        const health = useCrossTabHealth(bus as never, { intervalMs });
+        return <span data-testid="health">{health ? 'up' : 'none'}</span>;
+      }
+
+      const view = render(<DynamicHealthDemo intervalMs={1_000} />);
+      const initialCalls = bus.calls();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(bus.calls()).toBe(initialCalls + 1);
+
+      // Switching to event-driven mode must replace the old timer, not keep it
+      // polling because the bus identity stayed the same.
+      await act(async () => {
+        view.rerender(<DynamicHealthDemo intervalMs={0} />);
+      });
+      const callsWhenDisabled = bus.calls();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(bus.calls()).toBe(callsWhenDisabled);
+
+      // Enabling polling again installs the new cadence immediately.
+      await act(async () => {
+        view.rerender(<DynamicHealthDemo intervalMs={50} />);
+      });
+      const callsWhenEnabled = bus.calls();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(51);
+      });
+      expect(bus.calls()).toBe(callsWhenEnabled + 1);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
   it('keeps unmount fire-and-forget when the transport close throws', async () => {

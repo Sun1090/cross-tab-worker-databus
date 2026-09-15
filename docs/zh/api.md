@@ -437,7 +437,7 @@ React（>= 18）是可选 peer 依赖；独立入口保证非 React 消费者不
 
 ### `useCrossTabHealth(bus, options?)`
 
-将 `bus.getHealthSummary()` 镜像为 React 状态（`DataBusHealthSummary | null`）。由于健康摘要是快照而非事件流，该 hook 按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。bus 创建前返回 `null`。
+将 `bus.getHealthSummary()` 镜像为 React 状态（`DataBusHealthSummary | null`）。由于健康摘要是快照而非事件流，该 hook 按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。修改 `intervalMs` 会替换轮询定时器，但不会重建 bus。bus 创建前返回 `null`。
 
 ## Vue Composables（`cross-tab-worker-databus/vue`）
 
@@ -453,7 +453,7 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 ### `useVueCrossTabHealth(bus, options?)`
 
-`useCrossTabHealth` 的 Vue 绑定：将 `bus.getHealthSummary()` 镜像为 Vue `Ref<DataBusHealthSummary | null>`。健康摘要是快照而非事件流，因此该组合式函数按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。bus 创建前返回 `null`。
+`useCrossTabHealth` 的 Vue 绑定：将 `bus.getHealthSummary()` 镜像为 Vue `Ref<DataBusHealthSummary | null>`。健康摘要是快照而非事件流，因此该组合式函数按间隔轮询（默认 1000 ms；传 `{ intervalMs: 0 }` 可仅依赖事件驱动刷新），并在状态变化与错误发生时立即刷新。响应式修改 `intervalMs` 会替换轮询定时器，但不会重建 bus。bus 创建前返回 `null`。
 
 ## `WorkerClusterRuntime`
 

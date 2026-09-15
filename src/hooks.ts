@@ -102,13 +102,15 @@ export function useCrossTabStatus<TConfig, TData>(
  * `getHealthSummary()` is a snapshot, not an event stream, so the hook polls
  * it on an interval (default 1000 ms) and refreshes immediately on status
  * changes and errors. Pass `intervalMs: 0` to rely on event-driven refreshes
- * only. Returns `null` while the bus has not been created yet.
+ * only; changing the interval replaces the timer without recreating the bus.
+ * Returns `null` while the bus has not been created yet.
  */
 export function useCrossTabHealth<TConfig, TData>(
   bus: CrossTabDataBus<TConfig, TData> | null,
   options?: { intervalMs?: number }
 ): DataBusHealthSummary | null {
   const [health, setHealth] = useState<DataBusHealthSummary | null>(null);
+  const intervalMs = options?.intervalMs ?? 1_000;
   useEffect(() => {
     if (!bus) {
       setHealth(null);
@@ -118,15 +120,15 @@ export function useCrossTabHealth<TConfig, TData>(
     refresh();
     const unsubscribeStatus = bus.onStatus(refresh);
     const unsubscribeError = bus.onError(refresh);
-    const intervalMs = options?.intervalMs ?? 1_000;
     const timer = intervalMs > 0 ? setInterval(refresh, intervalMs) : null;
     return () => {
       unsubscribeStatus();
       unsubscribeError();
       if (timer) clearInterval(timer);
     };
-    // The options object is intentionally not a dependency: callers pass an
-    // inline literal and the interval only affects polling cadence.
-  }, [bus]);
+    // Depend on the normalized cadence rather than the options object so inline
+    // option literals do not restart the effect on every render, while a real
+    // intervalMs change still replaces the polling timer.
+  }, [bus, intervalMs]);
   return health;
 }
