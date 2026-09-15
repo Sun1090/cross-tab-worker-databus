@@ -413,6 +413,30 @@ describe('stability: replay persistence cleanup races', () => {
     await bus.stop();
   });
 
+  it('does not flush a queued replay batch after stop begins', async () => {
+    const storage = new MemoryStorage();
+    const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-append-race' });
+    const transport = new FakeTransport<number>();
+    const appendBatch = vi.fn(async () => undefined);
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-append-race',
+      environment: env.environment,
+      initialConfig: {},
+      transport,
+      replay: { persistence: { load: async () => [], append: async () => undefined, appendBatch } }
+    });
+    bus.subscribe('topic', () => {});
+    await bus.ready();
+
+    // The publication queues a batch flush, then stop() clears that session's
+    // pending writes before the microtask can start a new-generation append.
+    transport.emit('topic', 1);
+    await bus.stop();
+    await Promise.resolve();
+
+    expect(appendBatch).not.toHaveBeenCalled();
+  });
+
   it('does not resurrect pruned history when a batch flush races clearReplayBefore', async () => {
     const storage = new MemoryStorage();
     const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'prune-race' });

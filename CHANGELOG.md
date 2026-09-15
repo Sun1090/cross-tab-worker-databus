@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- Replay batch flushes that are still queued in a microtask are now discarded when the bus suspends or stops. The queued callback previously started its persistence retry only after the lifecycle generation had already advanced, so it inherited the new session and could append stopped-session history to the durable store.
 - A replay retention cleanup that is already in flight when the bus suspends or stops can no longer drain a newer cutoff queued behind it. The coalesced cleanup loop now captures the persistence lifecycle generation, the lifecycle transition clears its queued cutoff, and late failures from the superseded session are dropped instead of reaching the public persistence error ledger.
 - Replay hydration results are now bound to the lifecycle generation that issued the load. A durable `load()` that resolves after `suspend()` or `stop()` can no longer append messages into buffers that teardown has already cleared; the stale operation is reported as a lifecycle cancellation and is filtered from the public error ledger.
 - A stopped trace reporter now remains inert until `start()` explicitly begins a new session. Queued `asyncSink` events from the old session are discarded instead of flushing after teardown, metrics and ordinary events are ignored while stopped, and the stopped flag is cleared even for event-only mode so an explicit restart emits its new lifecycle `start` again.

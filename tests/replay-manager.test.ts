@@ -481,6 +481,18 @@ describe('ReplayManager — persistence appends', () => {
     expect(persistence.appendBatchCalls).toEqual([3]);
   });
 
+  it('drops a queued batch flush when suspend() wins the microtask race', async () => {
+    const persistence = new FakePersistence({ appendBatch: true });
+    const { manager } = createManager({ persistence });
+    manager.record(message('t', 1));
+
+    manager.suspend();
+    await settle();
+
+    expect(persistence.appendBatchCalls).toEqual([]);
+    expect(persistence.messages).toEqual([]);
+  });
+
   it('does not issue an empty flush when the queue is drained before the microtask', async () => {
     const persistence = new FakePersistence({ appendBatch: true, clearTopic: true });
     const { manager } = createManager({ persistence });
