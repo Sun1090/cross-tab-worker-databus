@@ -537,7 +537,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 | `suspended` | `boolean` | Tab 已隐藏；transport 被有意暂停 |
 | `transportReady` | `boolean` | 本次会话中 transport 已成功打开；运行期 `error` 后会保留，使 `ready()` 继续跟随已安装的 transport（待执行操作由恢复门而非该标记控制） |
 | `startPromise` | `Promise \| null` | 并发 `start()` 调用的 gate；操作完成后清除 |
-| `stopPromise` | `Promise \| null` | 显式 `stop()` 及其后排队的 restart 共享的 gate |
+| `stopPromise` | `Promise \| null` | 显式 `stop()` 及其后排队的 restart 共享的 gate；仅在 `stopping` 为 true 时复用，因为它会在 `performStop()` settle 后再过一个微任务才被清空 |
 | `queuedStart` | `Promise \| null` | 等待进行中的显式 stop 完成后执行的一次全新 start |
 | `queuedStartToken` | `number` | 每次排队 restart 获得的单调令牌，避免取消被误认为更晚的 restart |
 | `canceledQueuedStartToken` | `number` | 被 `stop()` 取消的最高 queued-restart 令牌；令牌不高于它的续体只 resolve，不打开 transport |
@@ -574,7 +574,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 
 - **并发 start**：真实 transport open 在飞行中时，第二次调用 `start()` 返回同一个 promise，任何时候只有一个 transport open 在飞行中。pagehide 产生的 stop 也可能占用 `startPromise`；`start()` 会识别 `startPromise === pendingStop`，把 reopen 排在该 stop 之后，而不是把清理 promise 当作成功启动返回。
 - **失败通知顺序**：transport 可能在 `start()` 仍在飞行时同步上报 `error`。`openTransport()` 会立即更新内部状态，但会延迟用户可见的 `onStatus('error')` 通知，直到它清除 `transportReady`、拆掉初始启动的 cluster、安装失败 transport 的 stop gate、记录失败并清除 `startPromise`；启动失败的 `onError` 通知也在这些清理之后发送。因此在任一回调中同步调用 `start()` 都会在 stop gate 之后开启全新尝试，而不是共享刚刚 reject 的 promise。重试会重置失败账本，被取代 opening 的 rejection 由其自身生命周期清理消费，不会在重试成功后再次写回。真实 open 仍在飞行时的普通并发 start 仍共享同一个 promise。
-- **显式 stop 期间 start**：`stop()` 用共享的 `stopPromise` 服务并发调用者。若 `start()` 在该 stop settle 期间到达，只保存一个 `queuedStart`；stop 的 `finally` 清理生命周期状态后，排队的 start 使用新配置开启全新生命周期。此窗口内的重复调用共享 stop 和 queued-start promise。
+- **显式 stop 期间 start**：`stop()` 用共享的 `stopPromise` 服务并发调用者。若 `start()` 在该 stop settle 期间到达，只保存一个 `queuedStart`；stop 的 `finally` 清理生命周期状态后，排队的 start 使用新配置开启全新生命周期。此窗口内的重复调用共享 stop 和 queued-start promise。该共享 gate 只在 `stopping` 为 true 时复用：`performStop()` 在 `finally` 中把 `stopping` 翻回 false，而 `stopPromise` 要再过一个微任务才清空，因此落在这个缝隙里的 `start()`/`stop()` 必须 fall through 到一次全新 teardown，而不是对已 settle 的 gate resolve 并放任重启后的 bus 继续运行。
 - **stop 取消排队 restart**：排队续体已经挂在 stop promise 上、无法撤销调度，因此在它执行前再次 `stop()` 会改为使其失效。每个排队 restart 携带单调令牌；`stop()` 记录当前令牌并释放唯一的队列槽位，续体发现自己的令牌不再是最新时只 resolve、不打开 transport。排队 `start()` Promise 保留这一「取消即 resolve」契约，而单独的 readiness 视图会让 `ready()` 对被取消的意图 reject。由于后到的 `start()` 会签发更高令牌，`stop → start → stop → start` 仍以运行态结束，而 `stop → start → stop` 以停止态结束且不会多打开一次 transport。
 - **停止期间发布拒绝**：`stop()` 设置 `stopping` 后，新发起的 `publish()` 与非空 `publishBatch()` 无法到达 transport；它们通过 `onError` 上报错误，而不是让 `runTransport()` 静默返回；空 batch 仍为 no-op。已排队在飞行中 open 之后的发布会被 stop 取消（最新生命周期意图优先），而页面隐藏挂起仍保持文档所述的「不延迟、直接丢弃」语义。
 - **停止期间生命周期操作拒绝**：`stopping` gate 同样覆盖 `subscribe()` 与 `ready()`。迟到的 `subscribe()` 会通过 `onError` 上报并返回 no-op 释放函数，避免 handler 被 `topicHandlers.clear()` 清掉，或订阅漂移进下一次 restart 却没有对应 handler。`ready()` 会 reject，而不是对正在停止的 transport 报告 ready。若 `start()` 已在该 stop 之后排队重启，`ready()` 仍返回 queued-start promise，因为这是最新生命周期意图。
