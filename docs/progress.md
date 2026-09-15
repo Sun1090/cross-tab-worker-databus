@@ -13,6 +13,23 @@
 - 下一项：继续审计 `ready()` 排队 start 失败后的状态保留与 `initialConfig` 边界，以及最终 stop 后 trace/dedup/replay 定时器与微任务残留。
 - 更新时间：2026-09-16。
 
+## 0.20.89 stopping health verdict (2026-09-16)
+
+- 状态：已完成并提交，等待 0.20.89 发布冻结。
+- 分支 / commit：`feat/lifecycle-stop-resume-race`；修复提交 `f9fac5d`。
+- 复现场景：transport 的 `stop()` 被 `stopGate` 挂起期间，`bus.stop()` 已设置 `stopping = true`，但 `started` 仍为 true、transport 仍上报 `connected`。此时 `getHealthSummary()` 返回 `{ healthy: true, state: 'healthy', transport: { ready: true } }`，而同一时刻 `publish()` 已经通过 `onError` 拒绝、`ready()` 已经 reject——就绪探针会得到与真实可操作性相反的结论。
+- 根因：健康判定只看了 `started` / `suspended` / 实时 transport status，没有把 `stopping` 计入。`stopping` 在 `performStop()` 一开始就置位，而 `started` 要在 `finally` 才翻回 false，期间的异步 transport teardown 使窗口可以任意长（取决于 transport 实现）。
+- 修复：`getHealthSummary()` 的 state 推导改为 `!this.started || this.stopping ? 'stopped' : ...`。停止期间一律报告 `state: 'stopped'` / `healthy: false`；`started` 与 `transport.status`/`transport.ready` 仍作为诊断字段原样输出。排在 stop 之后的 restart 在真正接管生命周期后自然报告为 `starting`/`healthy`。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`tests/lifecycle-invariants.test.ts`、`CHANGELOG.md`、`docs/api.md`、`docs/zh/api.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `does not report a healthy bus while an explicit stop is still tearing down`（用 `stopGate` 卡住 teardown，断言停止期间 `healthy: false` / `state: 'stopped'`，`started: true` 与 `transport.status: 'connected'` 仍可见，`publish()` 产生 1 条 "is stopping; publish() was not sent" 错误，stop settle 后 `started: false`）。
+- 测试强化：`tests/lifecycle-invariants.test.ts` 的 seeded fuzzer 从 400 seeds 提升到 1_500 seeds，并新增第 3 条不变式——序列的最后一次显式生命周期意图为 `stop()` 时，`health.state === 'stopped'`。该断言是健康语义的独立安全网；stale stop gate 的最小复现由 `tests/data-bus.test.ts` 的精确用例承担。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（142/142）、`pnpm exec vitest run tests/lifecycle-invariants.test.ts`（1/1，1_500 seeds）、`pnpm check`（35 files，729/729）通过；完整链（lint / coverage / build + e2e / documentation / diff check）见本次提交前的最终验证。全部通过。
+- 阻塞：无。
+- 风险 / 回滚：只改变 `getHealthSummary()` 在停止窗口内的 `state`/`healthy` 输出，不影响 `started`、`transport`、恢复账本或任何操作语义；停止期间的调用方本来就已被 `publish()`/`subscribe()`/`ready()` 拒绝。外部消费者若曾在 stop 未 settle 时依赖 `healthy: true`，那是本次修复要消除的错误结论。若需回滚，revert 本修复提交即可，无 schema、存储键或线协议变更。
+- 下一项：继续审计 transport/adapter 快速替换时异步 subscribe/publish/status 回调的隔离，以及最终 stop 后 trace/dedup/replay 定时器与微任务残留；`docs/roadmap.md` 的 0.20.89 delivered scope 也待补。
+- 更新时间：2026-09-16。
+
+
 ## 0.20.89 queued replay batch isolation (2026-09-16)
 
 - 状态：已完成并提交，等待 0.20.89 发布冻结。
