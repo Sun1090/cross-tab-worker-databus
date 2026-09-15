@@ -569,6 +569,64 @@ describe('createIndexedDbReplayPersistence', () => {
     }
   });
 
+  it('rejects and invalidates when clear mutations fail at the transaction level', async () => {
+    const cases = [
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clear!(),
+        label: 'clear'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearTopic!('t'),
+        label: 'clearTopic'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearBefore!(1_000),
+        label: 'clearBefore'
+      }
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const broken = makeBrokenFactory('transaction-errors');
+      (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+      const persistence = createIndexedDbReplayPersistence<{ value: number }>({
+        dbName: `clear-transaction-error-${testCase.label}`,
+        maxPerTopic: 4
+      });
+
+      await expect(testCase.run(persistence)).rejects.toThrow('transaction aborted');
+
+      // The failed transaction invalidated the cached connection; the same
+      // adapter must be able to reopen and persist once the fault is disabled.
+      broken.disable();
+      await persistence.append(message('recovered', index));
+      expect((await persistence.load()).map(item => item.data.value)).toEqual([index]);
+    }
+  });
+
+  it('uses domain fallback messages when clear transactions error without an error object', async () => {
+    const cases = [
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clear!(),
+        message: 'Failed to clear replay history.'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearTopic!('t'),
+        message: 'Failed to clear topic replay history.'
+      },
+      {
+        run: (persistence: ReturnType<typeof createIndexedDbReplayPersistence<{ value: number }>>) => persistence.clearBefore!(1_000),
+        message: 'Failed to prune replay history.'
+      }
+    ];
+
+    for (const testCase of cases) {
+      const broken = makeBrokenFactory('transaction-errors', null);
+      (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+      const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+      await expect(testCase.run(persistence)).rejects.toThrow(testCase.message);
+    }
+  });
+
   it('falls back to a generic message when an aborted transaction carries no error', async () => {
     // `transaction.error` is normally set on an error-caused abort, but the
     // adapter must still reject with a useful message if a browser leaves it

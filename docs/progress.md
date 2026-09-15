@@ -1,3 +1,17 @@
+## 0.20.91 replay persistence transaction errors (2026-09-16)
+
+- 状态：实现与定向测试完成，完整 check/lint 验证中；待提交、推送和 PR。
+- 分支 / 基线：`feat/replay-persistence-error-paths` ← `origin/main@4eaec94`。
+- 问题：`createIndexedDbReplayPersistence()` 的 `clear()`、`clearTopic()`、`clearBefore()` 都依赖 `IDBTransaction.onerror` 才能在某些配额/存储故障下拒绝并失效缓存连接；既有测试只覆盖了 `onabort` 和 append 的 `onerror`，这六条关键分支完全未执行。缺少回归时，clear 类操作可能在事务错误后永不 settle 或错误保留死连接。
+- 修复 / 加固：新增两组回归测试，分别覆盖三个 clear 类操作在带错误对象的 `transaction.onerror` 下拒绝并 invalidate、禁用故障后同一 adapter 可重新打开并持久化，以及三个操作在 transaction error 无错误对象时返回对应领域 fallback message。无需修改生产代码，现有实现通过新增约束。
+- 变更文件：`tests/replay-persistence.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/replay-persistence.test.ts` — clear/clearTopic/clearBefore 的事务级错误、连接失效恢复、无错误对象 fallback 共 6 条路径；测试文件从 30 增至 32 个用例。
+- 验证命令与结果：`pnpm exec vitest run tests/replay-persistence.test.ts`（32/32）；`pnpm test:coverage`（35 files，733/733；statements 97.08% / branches 92.76% / functions 97.06% / lines 98.46%）。相比 0.20.90 冻结前，branches 从 92.43% 提升至 92.76%；`replay-persistence.ts` branches 从 80.8%（63/78）提升至 88.46%。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改运行时、public export、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：完成 `pnpm check`、`pnpm lint`，提交并创建 PR；随后审计 `verify:published` 正常路径是否存在可消除的固定等待或额外 registry 往返。
+- 更新时间：2026-09-16。
+
 ## 0.20.90 RELEASED (2026-09-16)
 
 - 状态：已正式发布，发布后验证完成。

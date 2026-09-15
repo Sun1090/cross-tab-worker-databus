@@ -2,6 +2,10 @@
 
 0.20.90 is released. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
+## 0.20.91 in progress
+
+The reliability line continues with error-path coverage and release-gate maintenance. IndexedDB replay cleanup now has regressions for transaction-level errors on `clear()`, `clearTopic()`, and `clearBefore()`, including connection invalidation/recovery and fallback rejections when the browser exposes no transaction error object.
+
 ## 0.20.90 delivered scope
 
 The line hardens the release pipeline uncovered by the 0.20.89 tag run and aligns the documented delivery semantics with the implementation.
