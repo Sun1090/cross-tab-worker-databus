@@ -671,4 +671,77 @@ describe('CentrifugeSession lifecycle isolation', () => {
     secondClient.emit('connected', {});
     expect(sink).toHaveBeenCalledWith({ type: 'STATUS', status: 'connected' });
   });
+
+  it('isolates subscription callbacks when the owning client is replaced', () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({ post: message => sink(message) });
+    const init = {
+      type: 'INIT' as const,
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    };
+
+    session.handle(init);
+    const firstClient = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const firstSubscription = firstClient.getSubscription('market.tick')!;
+
+    session.handle({ type: 'STOP' });
+    session.handle(init);
+    const secondClient = FakeCentrifuge.instances[1]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    const secondSubscription = secondClient.getSubscription('market.tick')!;
+    const secondListeners = secondSubscription.listeners.get('publication');
+    sink.mockClear();
+
+    for (const listener of firstSubscription.listeners.get('publication') ?? []) {
+      listener({ data: { stale: 'publication' } });
+    }
+    for (const listener of firstSubscription.listeners.get('error') ?? []) {
+      listener({ type: 'subscribe:error', error: new Error('stale subscription error') });
+    }
+    for (const listener of firstSubscription.listeners.get('unsubscribed') ?? []) {
+      listener({});
+    }
+    expect(sink).not.toHaveBeenCalled();
+
+    // If the stale unsubscribed callback deleted the replacement's map entry,
+    // the duplicate SUBSCRIBE below would remove and re-register its listeners.
+    session.handle({ type: 'SUBSCRIBE', topic: 'market.tick' });
+    expect(secondSubscription.listeners.get('publication')).toBe(secondListeners);
+
+    for (const listener of secondSubscription.listeners.get('publication') ?? []) {
+      listener({ data: { fresh: true } });
+    }
+    expect(sink).toHaveBeenCalledWith({
+      type: 'MESSAGE',
+      topic: 'market.tick',
+      data: { fresh: true }
+    });
+  });
+
+  it('suppresses a publish rejection from a replaced client', async () => {
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({ post: message => sink(message) });
+    const init = {
+      type: 'INIT' as const,
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    };
+
+    session.handle(init);
+    const firstClient = FakeCentrifuge.instances[0]!;
+    firstClient.publish = vi.fn().mockRejectedValue(new Error('stale publish failure'));
+    session.handle({ type: 'PUBLISH', topic: 'market.tick', data: { value: 1 } });
+
+    session.handle({ type: 'STOP' });
+    session.handle(init);
+    sink.mockClear();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sink).not.toHaveBeenCalled();
+  });
 });

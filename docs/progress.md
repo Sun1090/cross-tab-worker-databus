@@ -1,3 +1,18 @@
+## 0.20.91 centrifuge subscription callback isolation (2026-09-16)
+
+- 状态：回归约束与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/centrifuge-subscription-lifecycle-isolation` ← `origin/main@3844ace`。
+- 审计目标：确认被 `STOP` 取代、随后重新初始化的 Centrifuge client 无法通过 subscription 级 `publication` / `error` / `unsubscribed` 回调污染新会话；同时确认旧 client 的异步 `publish()` rejection 不会越过生命周期边界上报到新会话。
+- 结论 / 加固：生产代码已有对应 lifecycle 守卫，无需修改。新增回归测试固定三件事：旧订阅的 publication 不得派发、旧订阅的 error 不得上报、旧订阅的 unsubscribed 不得从新会话中删除同 topic 的替换订阅；重复 `SUBSCRIBE` 后 replacement listener 集合必须保持不变，随后新订阅仍可正常派发。另一个测试让旧 client 的 publish rejection 在新 client 初始化之后才结算，确认错误被静默丢弃。
+- 变更文件：`tests/centrifuge-session.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/centrifuge-session.test.ts` — `isolates subscription callbacks when the owning client is replaced`、`suppresses a publish rejection from a replaced client`。
+- Mutation check：依次移除 subscription publication guard、subscription error guard、unsubscribed guard 和 publish rejection guard，定向回归分别失败；恢复后 32/32 通过。
+- 验证命令与结果：`pnpm exec vitest run tests/centrifuge-session.test.ts`（32/32）；`pnpm check`（35 files，737/737）；`pnpm lint`；`pnpm test:coverage`（35 files，737/737；statements 97.28% / branches 93.04% / functions 97.06% / lines 98.62%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`git diff --check` 均通过。`centrifuge-session.ts` branches 从 91.95% 提升至 95.4%。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改运行时、public export、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续检查 `data-bus.ts` 覆盖率未命中的生命周期恢复分支，重点审计 queued-start readiness、canceled restart、reopen 失败清理和 stop failure 路径是否都有真实回归。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 centrifuge token lifecycle binding (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
