@@ -1,6 +1,12 @@
 # Roadmap
 
-0.20.87 is the current development line. The project is intentionally continuing through reliability-focused minor releases before a 1.0.0 stability freeze.
+0.20.88 is the current development line. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.20.88 delivered scope
+
+- Startup-failure recovery is now re-entrant. A transport that reports `error` synchronously while its initial `openTransport()` is still settling can be retried from either the `onStatus('error')` or `onError` callback; the failed open finishes cleanup first, the retry starts a fresh lifecycle, and the stale rejection cannot repopulate the reset failure ledger.
+- Repeated BFCache `pagehide`/`pageshow` cycles during an in-flight initial open no longer strand the bus in a permanently suspended state. Suspend reuses the existing stop gate only when it still represents the current lifecycle, otherwise it installs a fresh serial stop so the next resume actually reopens the transport.
+- Explicit `start()` is now a complete resume path after BFCache suspension: it restores cross-tab coordination as well as the transport, and restarts trace metrics, dedup expiry, and replay retention work that `pagehide` had paused.
 
 ## 0.20.87 delivered scope
 

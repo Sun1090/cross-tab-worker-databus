@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.88] - 2026-09-16
+
 ### Fixed
 - A transport that reports `error` synchronously during startup now lets `start()` retry from either the startup-failure `onStatus` callback or the startup-failure `onError` callback. The internal status is updated immediately, but the user-facing `onStatus('error')` notification is deferred until the failed open has cleared `transportReady`, torn down the initial cluster, installed the transport stop gate, recorded the failure, and cleared `startPromise`. The retry therefore opens a fresh lifecycle after cleanup and resets the failure ledger; the superseded opening's rejection is consumed by that lifecycle path and cannot repopulate the ledger after the retry succeeds.
 - A synchronous `start()` retry issued from the startup-failure `onError` callback now opens a fresh lifecycle instead of returning the same rejecting open. `openTransport()` previously notified error handlers before clearing `startPromise`, so the retry shared the failed promise and never called `transport.start()` again. The failed open is now fully torn down and its lifecycle gate cleared before failure notification, and the retry is chained after the failed transport's stop cleanup.
