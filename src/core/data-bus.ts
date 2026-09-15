@@ -934,8 +934,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // operations are queued behind that in-flight start promise rather than
     // dropped. `transportReady` stays in the snapshot as a diagnostic.
     const transportDown = this.status !== WORKER_STATUS.CONNECTED;
+    // `stopping` means every operation is already rejected (publish/subscribe
+    // return through onError, ready() rejects) even though the transport may
+    // still report `connected` because teardown is async. Reporting HEALTHY
+    // here would contradict that verdict, so an in-flight stop is surfaced as
+    // STOPPED: the bus is not usable, and a queued restart behind this stop is
+    // reported as STARTING once it actually owns the lifecycle.
     const state: DataBusHealthSummary['state'] =
-      !this.started
+      !this.started || this.stopping
         ? HEALTH_STATE.STOPPED
         : this.suspended
           ? HEALTH_STATE.SUSPENDED

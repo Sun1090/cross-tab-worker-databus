@@ -210,7 +210,7 @@ Compact readiness verdict for dashboards, readiness probes, and support bundles.
 
 ```ts
 interface DataBusHealthSummary {
-  healthy: boolean;   // started, not suspended, live transport status is 'connected'
+  healthy: boolean;   // started, not stopping/suspended, live transport status is 'connected'
   state: 'stopped' | 'starting' | 'healthy' | 'recovering' | 'suspended' | 'degraded';
   status: WorkerStatus;
   sdkVersion: string;
@@ -225,7 +225,7 @@ interface DataBusHealthSummary {
 }
 ```
 
-`state` semantics: `stopped` (not started), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. Calling `start()` again while degraded keeps the cluster, subscriptions, and replay buffers intact, resets the failure/recovery ledger, and reopens the transport; subscribe and publish also trigger the same reopen path. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`. The `healthy` verdict follows the live transport status; `transport.ready` is diagnostic and can remain `false` for the brief window between a transport reporting `connected` and its `start()` Promise settling, during which operations are queued behind that in-flight start rather than dropped.
+`state` semantics: `stopped` (not started, or an explicit `stop()` is still tearing down), `starting` (initial open in flight), `recovering` (automatic transport recovery in progress), `suspended` (tab hidden, resumes on pageshow), `degraded` (automatic recovery exhausted — call `start()` or subscribe again to recover manually), `healthy`. Calling `start()` again while degraded keeps the cluster, subscriptions, and replay buffers intact, resets the failure/recovery ledger, and reopens the transport; subscribe and publish also trigger the same reopen path. `lastFailure` is a unified ledger across all failure sources and resets on every explicit `start()`. The `healthy` verdict follows the live transport status, except that an in-flight `stop()` always reads as `stopped` because every other lifecycle API (`publish()`, `subscribe()`, `ready()`) already rejects during teardown; `transport.ready` is diagnostic and can remain `false` for the brief window between a transport reporting `connected` and its `start()` Promise settling, during which operations are queued behind that in-flight start rather than dropped.
 
 ### `getRecoveryStats()` / `getPersistenceStats()`
 

@@ -21,7 +21,11 @@ import { WORKER_STATUS } from '../src/utils/constants';
  *   1. the DataBus suspend flag and the cluster suspend flag never diverge, so
  *      a bus that reports a live transport always has live coordination; and
  *   2. whenever neither side is suspended and no stop was requested, `ready()`
- *      resolves to a healthy transport instead of leaving the caller parked.
+ *      resolves to a healthy transport instead of leaving the caller parked; and
+ *   3. a sequence whose last explicit lifecycle intent was `stop()` settles in
+ *      `started === false` / `state === 'stopped'` with no live transport, even
+ *      when a fresh `start()` was issued before the teardown completed. This is
+ *      the invariant the settle-but-not-cleared stop gate violated.
  *
  * Seeds are fixed, so a failure is always reproducible.
  */
@@ -95,7 +99,7 @@ async function flushMicrotasks(): Promise<void> {
 describe('CrossTabDataBus lifecycle invariants', () => {
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
-    for (let seed = 1; seed <= 400 && failures.length < 5; seed += 1) {
+    for (let seed = 1; seed <= 1_500 && failures.length < 5; seed += 1) {
       const random = mulberry32(seed);
       vi.useFakeTimers();
       try {
@@ -192,6 +196,12 @@ describe('CrossTabDataBus lifecycle invariants', () => {
         }
         if (intent === 'stopped' && health.started !== false) {
           failures.push(`${context}: expected a stopped bus, got started=${health.started}`);
+        }
+        if (intent === 'stopped' && health.state !== 'stopped') {
+          failures.push(
+            `${context}: expected state=stopped, got state=${health.state} ` +
+            `transportReady=${health.transport.ready} status=${health.status}`
+          );
         }
         if (intent !== 'stopped' && !health.suspended && !cluster.suspended) {
           let readyError: unknown = null;
