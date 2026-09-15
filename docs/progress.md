@@ -10,6 +10,34 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 explicit retry after recovery exhaustion (2026-09-15)
+
+- Status: implementation complete on `feat/recovery-error-state`; atomic code
+  commit `07f1303`
+  (`fix(data-bus): allow explicit retry after recovery exhaustion`).
+- Completed content: `CrossTabDataBus.start()` no longer returns a resolved
+  no-op when the bus is already started but its transport is down with the
+  automatic recovery budget exhausted. It now keeps the cluster,
+  subscriptions, and replay buffers intact, resets the unified
+  failure/recovery ledger (including stale `errorAt`, persistence counters,
+  recovery attempt/exhaustion, and cooldown state), and reopens the transport.
+  This matches the public `degraded` recovery contract, which already
+  documented explicit `start()` as a manual recovery path.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`.
+- Verification: focused regression reproduced the prior no-op failure and
+  passes after the fix; `pnpm check` (676 unit tests / 34 files);
+  `pnpm lint`; `pnpm test:coverage` (97.37% statements, 92.89% branches,
+  96.88% functions, 98.82% lines); `pnpm test:e2e` 27/27;
+  `pnpm verify:compat`; `pnpm verify:pack`; `git diff --check`.
+- Blockers: none. No schema migration or public API shape change.
+- Risk / rollback: an explicit `start()` call while the transport is down now
+  triggers a reopen and resets the failure/recovery ledger instead of being a
+  no-op; healthy `start()` calls remain no-ops. Roll back with
+  `git revert 07f1303`.
+- Next: commit this progress record, push the branch, open a PR, wait for all
+  CI checks, rebase-merge, and continue the next reliability/coverage audit.
+
 ## 0.20.86 replay persistence abort safety (2026-09-15)
 
 - Status: implementation complete on `feat/replay-persistence-error-coverage`;
