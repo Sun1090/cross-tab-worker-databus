@@ -770,6 +770,148 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('defers transport operations while a runtime recovery is in cooldown', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'defer-recovery' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'defer-recovery',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 2 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+    expect(transport.subscribeCalls).toEqual(['topic']);
+
+    // The transport is dead, but automatic recovery cannot run until the
+    // cooldown expires. Operations issued in that window must wait for the
+    // scheduled attempt instead of being written to the dead connection.
+    transport.setStatus('error');
+    bus.publish('topic', 42);
+    bus.subscribe('topic-2', vi.fn());
+
+    expect(transport.startCalls).toBe(1);
+    expect(transport.publishCalls).toEqual([]);
+    expect(transport.subscribeCalls).toEqual(['topic']);
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(transport.startCalls).toBe(2);
+    expect(transport.publishCalls).toHaveLength(1);
+    expect(transport.publishCalls[0]).toMatchObject({ topic: 'topic', data: 42 });
+    expect(transport.subscribeCalls).toEqual(expect.arrayContaining(['topic', 'topic-2']));
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('lets an explicit operation drive an immediate reopen after a failed auto attempt', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'demand-recovery' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'demand-recovery',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 3 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // The first automatic attempt fails while the failure is still inside the
+    // cooldown window, so the next auto timer is another full cooldown away.
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(transport.startCalls).toBe(2);
+
+    // An explicit operation must not wait for that next timer: it starts an
+    // on-demand reopen immediately and is delivered once the transport is
+    // actually ready again.
+    transport.startShouldFail = false;
+    bus.publish('topic', 7);
+    expect(transport.startCalls).toBe(2);
+    expect(transport.publishCalls).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.startCalls).toBe(3);
+    expect(transport.publishCalls).toHaveLength(1);
+    expect(transport.publishCalls[0]).toMatchObject({ topic: 'topic', data: 7 });
+
+    // The superseded automatic timer must not open a second transport.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(transport.startCalls).toBe(3);
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('keeps a queued operation parked until a demand-driven reopen succeeds', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'demand-recovery-retry' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'demand-recovery-retry',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 5 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // Automatic attempt fails; the cooldown window is still open.
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(transport.startCalls).toBe(2);
+
+    // The queued publish drives a reopen that also fails. It must stay queued
+    // instead of being written to the dead transport or discarded.
+    bus.publish('topic', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.startCalls).toBe(3);
+    expect(transport.publishCalls).toEqual([]);
+
+    transport.startShouldFail = false;
+    bus.publish('topic', 2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(transport.startCalls).toBe(4);
+    expect(transport.publishCalls.map(call => call.data)).toEqual([1, 2]);
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('does not auto-reopen a cleanly disconnected transport', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'clean-disconnect' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'clean-disconnect',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // A clean close maps to `disconnected`, which is not a recoverable runtime
+    // error: the bus must not schedule an automatic reopen for it.
+    transport.setStatus('disconnected');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(transport.startCalls).toBe(1);
+    expect(bus.getHealthSummary().status).toBe('disconnected');
+
+    // Recovery remains explicit: the caller's next start() reopens.
+    await bus.start({});
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
   it('traces scheduled, failed, and successful transport recovery outcomes', async () => {
     vi.useFakeTimers();
     const events: unknown[] = [];
