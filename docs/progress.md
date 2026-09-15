@@ -10,6 +10,35 @@ Phase goal: close real gaps in adapter parity, doc parity (EN/ZH) that drifted,
 release-compat coverage for new public API, and demo/observability polish. No
 fake tasks; each item is verified locally before being marked done.
 
+## 0.20.86 start/stop lifecycle serialization (2026-09-16)
+
+- Status: implementation complete on `feat/start-during-stop`; atomic code
+  commit `a6e4e49`
+  (`fix(data-bus): serialize start with in-flight stop`).
+- Completed content: `start()` no longer returns a page-hide cleanup promise
+  when an asynchronous `transport.stop()` is still settling. It recognizes the
+  `startPromise === pendingStop` lifecycle gate and queues a real reopen behind
+  the stop. Explicit `stop()` now publishes a shared in-flight `stopPromise`;
+  `start()` received while it settles stores one `queuedStart` and performs a
+  fresh lifecycle only after `finally` has cleared the old state. Concurrent
+  start/stop calls share their respective promises, and `ready()` follows a
+  queued restart instead of observing the old ready state.
+- Changed files: `src/core/data-bus.ts`, `tests/data-bus.test.ts`,
+  `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`, `docs/architecture.md`,
+  `docs/zh/architecture.md`.
+- Verification: focused regressions reproduced both prior failures (suspend stop
+  did not reopen; explicit stop left the bus stopped after a resolved `start()`)
+  and pass after the fix; `pnpm check` (678 unit tests / 34 files);
+  `pnpm lint`; `pnpm test:coverage` (97.25% statements, 92.61% branches,
+  96.53% functions, 98.75% lines); `pnpm test:e2e` 27/27;
+  `pnpm verify:compat`; `pnpm verify:pack`; `git diff --check`.
+- Blockers: none. No schema migration or public API shape change.
+- Risk / rollback: lifecycle transitions now queue rather than overlap; a
+  healthy no-op `start()` and degraded manual recovery are unchanged. Roll back
+  with `git revert a6e4e49`.
+- Next: push the branch, open a PR, wait for all CI checks, rebase-merge, then
+  continue the lifecycle/reliability audit with the next concrete gap.
+
 ## 0.20.86 explicit retry after recovery exhaustion (2026-09-15)
 
 - Status: implementation complete on `feat/recovery-error-state`; atomic code
