@@ -70,6 +70,8 @@ While an explicit `stop()` is settling, `ready()` rejects unless a `start()` has
 
 If a later `stop()` cancels that queued restart, the queued `start()` Promise still resolves without opening a transport, but `ready()` rejects with a lifecycle error rather than reporting a stopped bus as ready.
 
+While the tab is BFCache-suspended (after `pagehide` and before `pageshow`), `ready()` rejects with a suspended-state error. The suspend path reuses `startPromise` as the asynchronous `transport.stop()` gate, so returning it would resolve readiness against a deliberately stopped transport. `pageshow` or an explicit `start()` clears the suspension and installs a real reopen promise, after which `ready()` resolves normally once the transport is ready.
+
 If that queued restart fails during transport startup, `ready()` rejects with the underlying startup error even when no `initialConfig` was supplied. The failure is retained for explicit recovery rather than being replaced by the generic missing-configuration error.
 
 When no `initialConfig` is provided and `start(config)` has not been called, `ready()` returns a rejected Promise instead of throwing synchronously, so callers can attach `.catch` and decide whether to start explicitly.

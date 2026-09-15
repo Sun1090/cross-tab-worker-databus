@@ -70,6 +70,8 @@ ready(): Promise<void>
 
 若后续 `stop()` 取消了该排队重启，排队 `start()` Promise 仍按既定语义 resolve 且不会打开 transport，但 `ready()` 会以生命周期错误 reject，而不会把已停止的 bus 报告为 ready。
 
+Tab 处于 BFCache 挂起态时（`pagehide` 之后、`pageshow` 之前），`ready()` 会以挂起态错误 reject。挂起路径会把 `startPromise` 复用为异步 `transport.stop()` 的 gate，若直接返回它，就会针对一个被有意停止的 transport 报告 ready。`pageshow` 或显式 `start()` 会清除挂起标记并安装真正的重开 Promise，此后 `ready()` 会在 transport 就绪后正常 resolve。
+
 若该排队重启在 transport 启动阶段失败，即使未传入 `initialConfig`，`ready()` 也会以底层启动错误 reject。该失败会保留给显式恢复，而不会被通用的「缺少配置」错误掩盖。
 
 未传入 `initialConfig` 且未显式调用 `start(config)` 时，`ready()` 返回 rejected Promise 而不是同步抛出，调用方可以统一通过 `.catch` 处理并决定是否显式启动。

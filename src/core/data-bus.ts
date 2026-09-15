@@ -595,7 +595,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * Returns a rejected promise when the transport has failed and no start is in
    * flight — the caller can retry by calling start() or ready() again. While an
    * explicit stop() is settling, this rejects unless a restart is queued behind
-   * it; false readiness during teardown is never reported.
+   * it; false readiness during teardown is never reported. While the tab is
+   * BFCache-suspended (pagehide without a following pageshow), this also
+   * rejects: the suspended start promise is the transport-stop gate, not a
+   * readiness signal.
    */
   ready(): Promise<void> {
     // A start() queued behind an in-flight stop is the newest lifecycle intent;
@@ -606,6 +609,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       return Promise.reject(new Error(
         'CrossTabDataBus is stopping; ready() cannot report readiness until stop() resolves. ' +
         'Wait for stop() to resolve, then call start() before awaiting ready().'
+      ));
+    }
+    // A page-hide suspension reuses startPromise as the async transport-stop
+    // gate. That promise proves cleanup completed, not that the transport is
+    // ready, so never let ready() resolve while the tab is intentionally
+    // suspended. An explicit start()/pageshow clears the flag and installs a
+    // real reopen promise before this check runs.
+    if (this.suspended) {
+      return Promise.reject(new Error(
+        'CrossTabDataBus is suspended; ready() cannot report readiness until pageshow resumes the transport.'
       ));
     }
     // An explicit start(config) does not become an implicit initialConfig.

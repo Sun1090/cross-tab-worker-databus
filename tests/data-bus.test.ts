@@ -582,6 +582,29 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('does not report ready while the tab is BFCache-suspended', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'ready-suspended' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'ready-suspended',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    environment.pageHide();
+    await expect(bus.ready()).rejects.toThrow(/suspended/i);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: false, state: 'suspended' });
+
+    environment.pageShow();
+    await expect(bus.ready()).resolves.toBeUndefined();
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
+    await bus.stop();
+  });
+
   it('keeps tracing disabled by default', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
@@ -1082,7 +1105,9 @@ describe('CrossTabDataBus', () => {
     expect(transport.publishCalls).toEqual([]);
 
     releaseStop();
-    await bus.ready();
+    // The suspension stop gate proves cleanup finished, not that the transport
+    // can carry data, so ready() must not report the hidden bus as usable.
+    await expect(bus.ready()).rejects.toThrow(/suspended/i);
     expect(transport.publishCalls).toEqual([]);
     await bus.stop();
   });
