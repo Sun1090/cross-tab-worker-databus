@@ -1,3 +1,18 @@
+## 0.20.87 RELEASED (2026-09-16)
+
+- 状态：已发布。版本 **0.20.87** 已合并到 `origin/main`，tag 为 `v0.20.87`，npm `latest` 已指向该版本；tag-triggered Release workflow 与已发布包消费者验证均通过。
+- 分支 / PR：`chore/0.20.87-release` → PR #44，rebase merge 并删除远端分支；release commit `a58bb5f`，合并后 main commit `e8e8daf`。
+- 完成内容：版本从 0.20.86 升至 0.20.87；`[Unreleased]` 提升为 `## [0.20.87] - 2026-09-16`；中英文 roadmap 记录 transport 恢复/就绪、生命周期边界、适配器与 Vitest 更新；发布检查中发现并修复了公共文档中的 scoped 包名守卫失败。
+- 发布范围：修复 transport 错误/重连恢复窗口和 clean `disconnected` 后的操作丢失；加固 WebSocket `start()` / `ready()` 握手契约、生命周期与健康摘要；同步 React/Vue health hook 的 `intervalMs` 更新行为。
+- 迁移：无需迁移。没有删除 public export、改变存储 schema 或线协议；`verify:compat` 确认 v0.20.86 exports 与 type metadata 继续存在。
+- 发布验证：本地 `pnpm check`（34 files，709/709）、lint、coverage（97.18% / 92.42% / 96.66% / 98.63%）、`pnpm bench`（25/25）、E2E（27/27）、两次浏览器基准与 50% 回归门禁、compat、pack、public-registry audit、109 文件 pack 清单和 `git diff --check` 均通过。PR #44 的 analyze / verify / browser / CodeQL 全绿。
+- 发布结果：GitHub Release <https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.87>；Release workflow <https://github.com/Sun1090/cross-tab-worker-databus/actions/runs/35016769983> 通过；npm 确认 `0.20.87` 存在且 `latest` 指向它，integrity 为 `sha512-AxzsqPOHapJCmZi5GaCDGjqXao2Vq43ix2ggq/sJpWR2ja8hXaXByYABMP6kX4lCrXVyy+FVMwIej0z/lRejrw==`。
+- 部署与 smoke test：这是库包发布，无独立服务部署；Release workflow 的 `Verify published npm consumers` 已通过，本地再次执行 `pnpm verify:published` 验证 npm 上的根入口与 subpath ESM/CJS 消费通过。
+- 阻塞：无。
+- 风险 / 回滚：npm 版本不可覆盖。发现缺陷时安装方应固定 `0.20.86`，随后发布修复版 `0.20.88`；仓库侧可 revert `e8e8daf`，但不要删除或移动已发布 tag。回滚不会影响已发布的跨 Tab 存储键或线协议。
+- 下一 milestone：**0.20.88** —— 继续 lifecycle / `ready()` 边界与 replacement-window 发布审计；优先寻找可复现的异步 replacement / suspend / resume / stop 交错失败。
+- 更新时间：2026-09-16。
+
 ## 0.20.87 RELEASE_FREEZE (2026-09-16)
 
 - 状态：发布候选已准备在 `chore/0.20.87-release`；版本、CHANGELOG、中英文 roadmap 与进度记录已更新，全量发布门禁通过，等待 release commit、PR、tag 与发布工作流。
