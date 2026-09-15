@@ -129,7 +129,7 @@ publish(
 
 在 `stop()` 尚未 settle 时调用 `publish()` 会通过 `onError` 上报且不路由任何消息；消息不会延迟到之后的 start。更早发出、仍排队等待 transport open 的发布会被 stop 取消。
 
-运行期 transport 上报 `error` 后发起的发布同样会挂在恢复门之后，等 transport 重新 ready 再发送，因此不会被写进刚刚失败的连接。若恢复预算耗尽，或等待被 `stop()` / 页面隐藏取代，该发布会按文档丢弃而不是无限期延迟（页面挂起仍保持「不延迟、直接丢弃」语义）。干净的 `disconnected` 不会触发 DataBus 自动重开：需要显式再调用 `start()`。
+运行期 transport 上报 `error` 后发起的发布同样会挂在恢复门之后，等 transport 重新 ready 再发送，因此不会被写进刚刚失败的连接。若恢复预算耗尽，或等待被 `stop()` / 页面隐藏取代，该发布会按文档丢弃而不是无限期延迟（页面挂起仍保持「不延迟、直接丢弃」语义）。干净的 `disconnected` 不会触发后台 DataBus 自动重开，但也不会再吞掉后续操作：干净关闭后发起的 `subscribe()` / `publish()` 会触发一次按需重开，先挂起等待替代连接就绪，随后再 flush。可显式调用 `start()`（或直接发起操作）来重开。
 
 传入 `options.messageId` 和 `options.timestamp` 后，元数据会穿过跨 Tab 路由、Worker 边界和支持的 transport。服务端必须回显或以其他方式保留它们，入站去重和 replay retention 才能使用。
 
@@ -399,7 +399,7 @@ const bus = createWebSocketDataBus({
 new WebSocketTransport<TData>(connection: WebSocketDataBusConfig)
 ```
 
-实现 `DataBusTransport`。`start()` 只在 socket 握手完成后 settle：`open` 时 resolve；握手前发生 `error`、`close`，或超过 `connectTimeoutMs` 时 reject。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；当 bus 在 socket 失败后重新打开时（`error` 触发自动恢复，或 `close` 后显式 `start()` / 页面恢复），`start()` 会创建替代 socket，并忽略被取代 socket 的迟到生命周期与消息回调（包括超时尝试之后迟到的 `open`）；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，替代 socket 打开后自动补发订阅帧。
+实现 `DataBusTransport`。`start()` 只在 socket 握手完成后 settle：`open` 时 resolve；握手前发生 `error`、`close`，或超过 `connectTimeoutMs` 时 reject。连接生命周期直接映射 DataBus 状态：socket `open` → `connected`，`close` → `disconnected`，`error` → `error`（触发 DataBus 自动恢复）。socket 原地重连时会自动重发订阅；当 bus 在 socket 失败后重新打开时（`error` 触发自动恢复，或 `close` 后显式 `start()` / 页面恢复 / 后续操作），`start()` 会创建替代 socket，并忽略被取代 socket 的迟到生命周期与消息回调（包括超时尝试之后迟到的 `open`）；socket 未打开期间被丢弃的帧通过 `handlers.onError` 上报，替代 socket 打开后自动补发订阅帧。
 
 `WebSocketDataBusConfig` 字段：
 

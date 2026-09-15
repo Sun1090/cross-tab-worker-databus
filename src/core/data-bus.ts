@@ -190,6 +190,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private started = false;
   private stopping = false;
   private transportReady = false;
+  // Whether the installed transport has reported `connected` at least once
+  // since the current open began. A clean `disconnected` after this point is
+  // a lost working connection, not the pre-connect window of a worker-style
+  // backend whose start() resolves before it reports the connection.
+  private transportHasConnected = false;
   // Last transport failure, retained so ready() can surface it to callers who
   // never awaited start() directly. Cleared on the next successful start.
   private lastError: unknown = null;
@@ -585,6 +590,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // is a different promise and must stay visible to later catch/resume
         // paths so cleanup is not duplicated.
         if (this.pendingStop === chainedPendingStop) this.pendingStop = null;
+        // A fresh transport instance starts from scratch: until it reports
+        // `connected` again its status is "not connected yet".
+        this.transportHasConnected = false;
         return Promise.resolve(
           this.transport.start(config, {
             onMessage: message => {
@@ -1107,6 +1115,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private updateStatus(status: WorkerStatus): void {
     const previousStatus = this.status;
     this.status = status;
+    if (status === WORKER_STATUS.CONNECTED) this.transportHasConnected = true;
     if (previousStatus !== status) this.trace.event({ type: TRACE_EVENT_TYPE.STATUS, status });
     this.cluster.setStatus(status);
     // Clear transport subscriptions on disconnect; the transport is gone.
@@ -1412,8 +1421,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     // `transportReady` is intentionally retained through a runtime error so
     // ready() keeps tracking the installed transport. Operations, however,
-    // must never be written to a transport whose live status is `error`.
-    if (this.transportReady && this.status !== WORKER_STATUS.ERROR && !this.stopping) {
+    // must not be written to a connection that is gone. `error` always falls
+    // through to recovery, and a clean `disconnected` *after* the transport
+    // actually reached `connected` means the working connection dropped (a
+    // WebSocket `close`); both fall through to the demand-driven reopen below
+    // so the operation is flushed against the replacement instead of being
+    // handed to a closed socket that can only report a dropped frame. A
+    // transport that resolved start() before reporting its first `connected`
+    // (worker-style backends report the connection asynchronously) keeps the
+    // previous behaviour: its `disconnected` status is "not connected yet".
+    const droppedAfterConnect =
+      this.transportHasConnected && this.status === WORKER_STATUS.DISCONNECTED;
+    if (this.transportReady && this.status !== WORKER_STATUS.ERROR && !droppedAfterConnect && !this.stopping) {
       try {
         void Promise.resolve(operation()).catch(error => this.reportError(error));
       } catch (error) {

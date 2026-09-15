@@ -152,7 +152,9 @@ Centrifuge session 遵循同一个传输无关契约：不带 metadata 的 paylo
 生命周期映射：`open` → `connected`，`close` → `disconnected`，`error` → `error`
 （触发 DataBus 自动恢复）。socket 原地重连时自动重发订阅帧。成功的重开既可以
 复用同一个 socket 对象，也可以通过工厂创建替代 socket；被取代 socket 的迟到
-回调会被忽略，因此失败连接的 close 或 message 不会污染恢复后的连接。支持
+回调会被忽略，因此失败连接的 close 或 message 不会污染恢复后的连接。干净的
+`disconnected` 不会调度后台自动恢复，但下一次 `subscribe()` / `publish()` 会触发
+一次按需重开并在其后 flush，因此关闭后的操作不会被写进已关闭的 socket。支持
 pattern 的服务器可以以具体 topic 标注发布——见 [api.md](../api.md) 中的通配符订阅。
 
 ## 工厂入口

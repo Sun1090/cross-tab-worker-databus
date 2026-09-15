@@ -522,7 +522,7 @@ DataBus 将"业务订阅意图"与"transport 当前订阅状态"分离。transpo
 
 内置 Centrifuge transport 也会保留自己的 Subscriptions 并做协议层重连。两层恢复都要求 `subscribe` / `unsubscribe` 幂等。
 
-运行期 `error` 会有意保留 `transportReady`：该标记记录「本次会话中已安装的 transport 曾成功打开」，使 `ready()` 跟随 transport 而不是随协议连接抖动。transport 的*操作*由独立的恢复门（recovery gate）控制：当自动或按需重开尚未完成时，`runTransport()` 会把新的 `subscribe` / `publish` 挂在该门之后，而不是写入刚刚上报 `error` 的连接；门只在重开成功（或 transport 自愈回到 `connected`）后释放，此时所有挂起的操作才在可用 transport 上执行。自动尝试失败后门保持关闭，但下一次显式操作可以立即触发按需重开，而不必再等一个冷却周期；当 `recovery.maxAttempts` 耗尽，或被 `stop()` / 页面隐藏取代时，门会被释放，使文档化的显式重试路径与挂起丢弃语义继续成立。`disconnected` 是干净关闭而非可恢复失败：它不会调度 DataBus 重开，只有显式 `start()`、页面恢复或 transport 自身的重连才会回到 `connected`。
+运行期 `error` 会有意保留 `transportReady`：该标记记录「本次会话中已安装的 transport 曾成功打开」，使 `ready()` 跟随 transport 而不是随协议连接抖动。transport 的*操作*由独立的恢复门（recovery gate）控制：当自动或按需重开尚未完成时，`runTransport()` 会把新的 `subscribe` / `publish` 挂在该门之后，而不是写入刚刚上报 `error` 的连接；门只在重开成功（或 transport 自愈回到 `connected`）后释放，此时所有挂起的操作才在可用 transport 上执行。自动尝试失败后门保持关闭，但下一次显式操作可以立即触发按需重开，而不必再等一个冷却周期；当 `recovery.maxAttempts` 耗尽，或被 `stop()` / 页面隐藏取代时，门会被释放，使文档化的显式重试路径与挂起丢弃语义继续成立。`disconnected` 是干净关闭而非可恢复失败：它不会调度后台 DataBus 重开，只有显式 `start()`、页面恢复、transport 自身的重连，或后续的 transport 操作才会回到 `connected`。最后一条路径很关键：transport 一旦真正到达过 `connected` 后再上报 `disconnected`，ready 快速路径就会被拒绝；这类干净关闭后到达的 `subscribe()` / `publish()` 会被挂在同一个恢复门之后并触发一次按需重开，随后在替换连接上 flush，而不再写入已关闭的连接。对于在首次 `connected` 之前就 resolve `start()` 的 transport（worker 型后端异步上报连接状态），操作仍会直接交给它，因为此时的 `disconnected` 表示「尚未连接」，而不是「已建立的连接断开」。
 
 ## 生命周期状态机
 
