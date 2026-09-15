@@ -1,3 +1,19 @@
+## 0.20.88 startup-failure onStatus retry lifecycle isolation (2026-09-16)
+
+- 状态：实现、回归测试与双语文档已完成，待全量验证后 commit；0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第四项。
+- 分支：`feat/lifecycle-audit-4`（基线 `origin/main` = `d158a7a`）。
+- 复现场景：首次 transport open 失败并同步上报 `error` 后，调用方在 `onStatus('error')` 回调中同步调用 `bus.start({})` 重试。
+- 现象（修复前）：`onStatus` 在 `openTransport()` 完成失败清理之前触发，重试拿到仍指向失败 opening 的 `startPromise`；即使 transport 已切换到可成功启动，`transport.startCalls` 仍停留在 1。排队在旧 opening 后的操作还会捕获旧 rejection，并在重试已重置账本后通过 `runTransport().catch()` 再次写回错误，导致恢复后的 health 仍报 `hasError: true` / 非空 `lastFailure`。
+- 根因：同步 `ERROR` status 在 catch 清理前通知用户；`runTransport()` 也把 openTransport 自身上报后的 rejection 当成 operation failure 二次上报。
+- 修复：startup 飞行期间同步到达的 `ERROR` 只更新内部 status、cluster 与恢复调度，暂缓用户 `onStatus`；catch 先完成 cluster / transport-ready / failure ledger 清理、清除 `startPromise`，再通知状态和错误 handler。`runTransport()` 消费旧 opening 的 rejection，避免重试成功后被再次记录。新增 `recordError()` / `notifyError()` 拆分，使状态回调重试可以在错误 handler 前重置账本。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/api.md`、`docs/zh/api.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `starts a fresh lifecycle when start() retries from the failure onStatus callback`。使用延迟 stop gate 断言重试不与失败 open 的清理重叠；释放后 `transport.startCalls` 从 1 增至 2，`ready()` resolve，health 为 healthy 且失败账本为空。原 `onError` 回归也补充了相同账本断言。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts tests/documentation.test.ts`（2 files，155/155）、`pnpm check`（typecheck + build，35 files，715/715）、`pnpm lint`、`pnpm test:e2e`（27/27）、`pnpm test:coverage`（97.16% statements、92.76% branches、96.50% functions、98.51% lines）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench`（3 files，25/25）、`pnpm audit --registry=https://registry.npmjs.org`（无已知漏洞）、`git diff --check` 全部通过。本机默认 npmmirror registry 不提供 audit endpoint，改用 npmjs registry 后通过。
+- 阻塞：无。
+- 风险 / 回滚：仅改变 startup `error` 通知与旧 opening rejection 的内部顺序；真实 open 飞行中的普通并发 start 仍共享同一 Promise。无 public export、存储 schema 或线协议变化。若引入生命周期回归，revert 本 commit 即可。
+- 下一项：完成全量验证并提交本项，然后继续审计 `openTransport()` 顶部 `transportReady = false` 对 superseded open 的影响及 React/Vue suspend/resume parity。
+- 更新时间：2026-09-16。
+
 ## 0.20.88 synchronous start() retry from startup-failure onError (2026-09-16)
 
 - 状态：实现、回归测试与双语文档已完成，待全量验证后 commit；0.20.88 patch milestone 的 lifecycle / BFCache 异步竞态审计第四项。

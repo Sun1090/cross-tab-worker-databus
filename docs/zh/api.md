@@ -56,7 +56,7 @@ new CrossTabDataBus<TConfig, TData>(options)
 start(config: TConfig): Promise<void>
 ```
 
-启动集群协调和 transport。首次调用真正启动 transport；打开过程尚未结束时，并发调用共享同一个启动 Promise，不重复创建 transport。对健康且已启动的实例调用是立即 resolve 的空操作。若 transport 已断开，`start()` 作为显式手动恢复：保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本并重新打开 transport。若显式 `stop()` 尚未完成，`start()` 会在清理之后排队一次全新启动，并返回随重启完成而 settle 的 Promise。该排队重启归属于最近一次生命周期意图：若它在真正执行前又收到 `stop()`，则会被取消（排队 start 的 Promise resolve，但不会打开 transport）；取消之后再调用 `start()` 会以更高令牌重新排队。`stop()` 完成后也可正常再次调用 `start()` 重启。open 失败时，清理和生命周期 gate 会先 settle，再调用 `onError` handler；因此在该回调中同步调用 `start()` 重试会在失败 transport 清理完成后开启一次全新尝试，而不是返回同一个已拒绝的 Promise。
+启动集群协调和 transport。首次调用真正启动 transport；打开过程尚未结束时，并发调用共享同一个启动 Promise，不重复创建 transport。对健康且已启动的实例调用是立即 resolve 的空操作。若 transport 已断开，`start()` 作为显式手动恢复：保留 cluster、订阅和 replay 缓冲区，重置失败/恢复账本并重新打开 transport。若显式 `stop()` 尚未完成，`start()` 会在清理之后排队一次全新启动，并返回随重启完成而 settle 的 Promise。该排队重启归属于最近一次生命周期意图：若它在真正执行前又收到 `stop()`，则会被取消（排队 start 的 Promise resolve，但不会打开 transport）；取消之后再调用 `start()` 会以更高令牌重新排队。`stop()` 完成后也可正常再次调用 `start()` 重启。open 失败时，清理和生命周期 gate 会先 settle，再调用启动失败的 `onError` handler；因此在该回调中同步调用 `start()` 重试会在失败 transport 清理完成后开启一次全新尝试，而不是返回同一个已拒绝的 Promise。transport 在 `start()` 仍在飞行时同步上报 `error` 时，两类通知遵循同一契约：内部状态会立即更新，但用户可见的 `onStatus('error')` 会延迟到 `openTransport()` 完成清理、安装失败 transport 的 stop gate、记录失败并清除 `startPromise` 之后。此时从该状态回调或随后启动失败的 `onError` 回调中同步调用 `start()`，都会在清理完成后排队一次全新生命周期；若重试成功，它会开启新的失败账本，原 opening 的 rejection 不会再次写回。
 
 ### `ready()`
 

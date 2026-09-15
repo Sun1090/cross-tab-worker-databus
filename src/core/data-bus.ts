@@ -588,6 +588,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.transportReady = false;
     const chainedPendingStop = this.pendingStop;
     const isCurrentLifecycle = () => lifecycleEpoch === this.lifecycleEpoch;
+    // A transport can report `error` synchronously before start() settles.
+    // Suppress the user-facing status notification until openTransport's catch
+    // has created the stop gate and cleared startPromise; otherwise an onStatus
+    // retry runs while the failed opening still owns the gate.
+    let startupInProgress = true;
     return before
       .catch(() => undefined)
       .then(() => {
@@ -610,13 +615,16 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
               if (isCurrentLifecycle()) this.handleTransportMessage(message);
             },
             onStatus: status => {
-              if (isCurrentLifecycle()) this.updateStatus(status);
+              if (isCurrentLifecycle()) {
+                this.updateStatus(status, status !== WORKER_STATUS.ERROR || !startupInProgress);
+              }
             },
             onError: error => {
               if (isCurrentLifecycle()) this.reportError(error);
             }
           })
         ).then(() => {
+          startupInProgress = false;
           if (!isCurrentLifecycle()) return;
           // A transport may report 'error' synchronously during start() (e.g. a
           // Worker that fails to boot) while still returning normally. Treat that
@@ -642,6 +650,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // A newer suspend/resume/stop owns the lifecycle now. Do not let this
         // superseded open tear down the newer operation or clear its gate.
         if (!isCurrentLifecycle()) throw error;
+        startupInProgress = false;
         // Reset started before reporting so an initial-start failure does not
         // schedule automatic recovery; only the caller can retry a first start.
         if (stopClusterOnFailure) this.started = false;
@@ -653,23 +662,24 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.pendingStop = this.createStopPromise();
         }
         this.transportReady = false;
-        this.updateStatus(WORKER_STATUS.ERROR);
         if (stopClusterOnFailure) {
           this.stopping = true;
           this.cluster.stop();
           this.stopping = false;
         }
-        // Make the failed opening observable as settled before notifying error
-        // handlers. An onError callback can legitimately retry with start();
-        // leaving the old rejecting promise in startPromise would make that
-        // retry return the failure it is reacting to instead of opening a new
-        // lifecycle. startPromise's settlement handler only clears this field
-        // when it still owns the gate, so a reentrant retry remains installed.
+        // Record the failure before any user callback can retry. The status
+        // notification below runs re-entrantly and may legitimately call
+        // start(); that explicit lifecycle must be able to reset this ledger.
+        this.recordError(error);
+        // Make the failed opening observable as settled before notifying any
+        // status or error handler. Leaving the old rejecting promise in
+        // startPromise would make a synchronous retry return the failure it is
+        // reacting to instead of opening a new lifecycle. Settlement handlers
+        // only clear this field when they still own the gate, so a reentrant
+        // retry and any later error notification remain safe.
         this.startPromise = null;
-        // reportError() records lastError/lastErrorAt for transport failures;
-        // sampling the clock again here would give the recovery ledger and the
-        // unified lastFailure record different timestamps for one failure.
-        this.reportError(error);
+        this.updateStatus(WORKER_STATUS.ERROR);
+        this.notifyError(error);
         throw error;
       });
   }
@@ -1130,7 +1140,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * Propagate a status change to the cluster, trace, and all registered
    * status handlers. On reconnect, re-subscribe any topics assigned to us.
    */
-  private updateStatus(status: WorkerStatus): void {
+  private updateStatus(status: WorkerStatus, notifyHandlers = true): void {
     const previousStatus = this.status;
     this.status = status;
     if (status === WORKER_STATUS.CONNECTED) this.transportHasConnected = true;
@@ -1200,10 +1210,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // initial start failure) must not leave demand-driven operations gated.
       this.releaseRecoveryGate();
     }
-    this.invokeHandlers(this.statusHandlers, handler => handler(status));
+    if (notifyHandlers) this.invokeHandlers(this.statusHandlers, handler => handler(status));
   }
 
-  private reportError(error: unknown, source: DataBusFailureSource = FAILURE_SOURCE.TRANSPORT): void {
+  private recordError(error: unknown, source: DataBusFailureSource = FAILURE_SOURCE.TRANSPORT): void {
     const at = this.now();
     // Transport failures must land in *both* ledgers. lastFailure is the
     // unified record exposed by getHealthSummary(); lastError/lastErrorAt are
@@ -1229,7 +1239,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       type: TRACE_EVENT_TYPE.ERROR,
       source: source === FAILURE_SOURCE.TRANSPORT ? TRACE_ERROR_SOURCE.TRANSPORT : TRACE_ERROR_SOURCE.OPERATION
     });
+  }
+
+  private notifyError(error: unknown): void {
     this.invokeHandlers(this.errorHandlers, handler => handler(error), INVOKE_LABEL.ERROR_HANDLER);
+  }
+
+  private reportError(error: unknown, source: DataBusFailureSource = FAILURE_SOURCE.TRANSPORT): void {
+    this.recordError(error, source);
+    this.notifyError(error);
   }
 
   /** Report a persistence failure to the trace and the unified failure ledger,
@@ -1483,10 +1501,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     if (!ready || this.stopping) return;
     void ready
-      .then(() => {
-        if (!this.started || this.stopping || this.suspended) return;
-        return operation();
-      })
+      .then(
+        () => {
+          if (!this.started || this.stopping || this.suspended) return;
+          return operation();
+        },
+        // The opening promise reports its own lifecycle failure through
+        // openTransport(). Swallowing it here prevents a stale startup
+        // rejection from being recorded again after an onStatus/onError
+        // callback has already started and reset the ledger for a retry.
+        () => undefined
+      )
       .catch(error => this.reportError(error));
   }
 
