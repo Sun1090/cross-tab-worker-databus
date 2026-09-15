@@ -1,5 +1,39 @@
 # Development Progress
 
+## 0.20.87 React/Vue health interval reactivity (2026-09-16)
+
+- Status: implementation, regressions, and documentation complete on
+  `feat/hooks-health-interval-reactivity`; atomic code commit `1bb91ff`
+  (`fix(hooks): react to health interval changes`).
+- Completed content: `useCrossTabHealth` ignored changes to `intervalMs` unless
+  the bus identity changed. React intentionally excluded the options object to
+  avoid restarting on inline literals, but also excluded the normalized cadence,
+  so switching `1_000 → 0` left the old timer running and positive cadence
+  changes kept the previous interval. The React hook now depends on the
+  normalized primitive; Vue now watches `[bus, () => options?.intervalMs]` so a
+  reactive options object replaces the listener/timer set as well. Neither path
+  recreates the bus.
+- Reproduction: both new regressions failed against the previous code after
+  changing a 1 s poller to `intervalMs: 0` and advancing five seconds: React
+  observed 7 health reads where 2 were expected, and Vue observed the same
+  stale-timer leak. Both pass with immediate timer replacement after the fix.
+- Changed files: `src/hooks.ts`, `src/vue.ts`, `tests/hooks.test.tsx`,
+  `tests/vue.test.ts`, `CHANGELOG.md`, `docs/api.md`, `docs/zh/api.md`,
+  `docs/progress.md`.
+- Verification: focused adapter suite 23/23; `pnpm check` (696/696 tests, 34
+  files); `pnpm lint`; `pnpm test:coverage` (97.17% statements, 92.38% branches,
+  96.57% functions, 98.64% lines); `pnpm verify:compat`; `pnpm verify:pack`;
+  `git diff --check` all pass.
+- Blockers: none. No dependency, storage-key, protocol, or public API shape
+  change; the new behavior is covered by additive docs.
+- Risk / rollback: React now restarts health listeners when `intervalMs`
+  changes, producing one immediate refresh, and Vue reactive cadence changes
+  rebuild listeners/timers for the same bus. Consumers that intentionally
+  ignored runtime options changes are unaffected unless they mutate the option.
+  Roll back with `git revert 1bb91ff`.
+- Next: continue the adapter contract audit, then move to the remaining
+  `ready()` boundary branches. Updated: 2026-09-16.
+
 ## 0.20.87 stop() tolerates a failing transport stop (2026-09-16)
 
 - Status: implementation, regression tests, and docs complete; PR
