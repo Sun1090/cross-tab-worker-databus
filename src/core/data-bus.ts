@@ -1524,6 +1524,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.startPromise = opening;
     this.started = true;
     this.suspended = false;
+    // Clear readiness before the synchronous CONNECTING notification. The old
+    // transport is already down, but transportReady is intentionally retained
+    // through a runtime error/disconnect so ready() can keep tracking that
+    // installed instance. Without clearing it here, a second operation issued
+    // before openTransport() runs sees CONNECTING instead of DISCONNECTED and
+    // is written directly to the dead transport, bypassing the opening gate.
+    this.transportReady = false;
     // Install the new lifecycle before publishing CONNECTING: a status handler
     // can synchronously call stop(), and stop() must see and await this opening
     // instead of tearing down while reopenTransport() later installs a fresh
