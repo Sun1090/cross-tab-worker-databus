@@ -1,3 +1,18 @@
+## 0.20.92 replay retention cleanup across suspend (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/replay-retention-across-suspend` ← `origin/main@0d705e7`。
+- 复现场景：`ReplayManager` 的 retention cleanup 正在执行时发生 `suspend()`，旧 cleanup 完成后 resume 并产生新的 cutoff；新 cutoff 会设置 `retentionCutoff`，但因旧 `retentionCleanup` 仍占用单一 in-flight slot 而只能排队等待。旧 cleanup 的 `.finally()` 仅在 generation 未变化时重调度，因此 suspend 已提升 generation 后会直接丢弃新 cutoff，直到未来某次无关记录才可能再次清理。
+- 修复：旧 cleanup 在清空 in-flight slot 后，只要仍有 `retentionCutoff` 就交给新一轮 `scheduleRetentionCleanup()`；新一轮使用当前 generation，因此 suspend 取消旧代工作的契约不变，resume 后已排队的最新 cutoff 会继续执行。
+- 变更文件：`src/core/replay-manager.ts`、`tests/replay-manager.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/replay-manager.test.ts` — `runs the newest cleanup queued after resume behind an in-flight suspend cleanup`，阻塞旧 cleanup、suspend/resume 后排队新 cutoff，并断言旧事务释放后新 cutoff 仍会执行。
+- Mutation check：修复前同一回归稳定得到 `[9000, 9000]` 而非 `[9000, 9000, 10000]`，证明新 cutoff 确实被丢弃；修复后通过。
+- 验证命令与结果：`pnpm check`（35 files，764/764）、`pnpm lint`、`pnpm test:coverage`（35 files，764/764；statements 97.76% / branches 93.98% / functions 98% / lines 99.04%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅修改 retention cleanup 的跨 lifecycle 重调度，不改 public API、worker protocol、存储 schema/key 或线协议；suspend 仍会清空 cutoff 并取消旧 generation，不影响已覆盖的「suspend 后不得继续 cleanup」契约。回滚 = revert 本任务提交。
+- 下一项：继续审计 replay persistence 在 suspend/resume、失败重试与清理串行化上的剩余可达边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 cluster-key isolation regression (2026-09-16)
 
 - 状态：已合并（PR #75，rebase merge 至 `main@0d705e7`）。

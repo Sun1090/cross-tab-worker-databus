@@ -393,7 +393,11 @@ export class ReplayManager<TData = unknown> {
       }
     })().finally(() => {
       this.retentionCleanup = null;
-      if (this.retentionCutoff !== null && generation === this.retryGeneration) {
+      // A cutoff can be queued by a newer generation while this pass is still
+      // unwinding after suspend(). The old pass cannot run it, but it still
+      // owns the single in-flight slot, so hand that cutoff to a fresh cleanup
+      // instead of dropping it until some unrelated future publication.
+      if (this.retentionCutoff !== null) {
         this.scheduleRetentionCleanup(this.retentionCutoff);
       }
     });
