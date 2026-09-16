@@ -1,3 +1,18 @@
+## 0.20.92 queued restart BFCache guard (2026-09-16)
+
+- 状态：已合并（PR #87，rebase merge 至 `main@ef7b474`）。
+- 分支 / PR / 合并：`feat/queued-restart-bfcache-race` ← `origin/main@1ef80b9`；PR #87，合并提交 `ef7b474`（`fix(cluster): keep queued restart suspended in BFCache`）。
+- 复现场景：bus 已启动后调用 `stop()`，其异步 `transport.stop()` 仍 pending；随后调用 `start()`，重启被排队在该 stop 之后。在清理窗口内页面进入 BFCache / `visibilityState === 'hidden'` 且触发 `pagehide`。旧的 `WorkerClusterRuntime.stop()` 已同步移除 lifecycle listener，因此排队重启看不到隐藏事件，stop 结算后仍会为后台页面打开新 transport。
+- 修复：`WorkerClusterRuntime.start()` 改为先安装 lifecycle listener，再检查 `getVisibilityState()`；若文档已隐藏，只记录 `suspended` 并触发 `onSuspend`，不注册 worker、不创建 channel、不启动 heartbeat。后续 `pageshow` 由已安装的 listener 正常恢复，因此隐藏页面不会被后台重连。
+- 变更文件：`src/core/cluster.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `keeps a queued restart suspended when pagehide lands during async stop cleanup`。覆盖 start → async stop → queued start → hidden/pagehide → release stop，断言在页隐藏期间 transport 没有第二次启动、健康状态为 `suspended`、`ready()` reject；随后 `pageshow` 恢复为 healthy，transport 总启动次数恰好为 2。
+- Mutation check：回归测试先在旧实现上稳定失败于 `expected 2 to be 1`；加入 visibility guard 后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts tests/lifecycle-invariants.test.ts`（243/243）；`pnpm check`（35 files，775/775）；`pnpm lint`（通过）；`pnpm test:coverage`（35 files，775/775；statements 97.68% / branches 93.88% / functions 98% / lines 98.94%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：只改变 cluster 对隐藏文档的首轮启动判定，不改变 public API、消息协议、storage schema/key。正常可见文档启动路径不变；隐藏文档将等待 `pageshow` 或显式 `start()`。回滚 = revert 合并提交 `ef7b474`。
+- 下一项：继续审计 `resume` / `reopen` recovery 交错、排队 lifecycle 操作的剩余边界，以及 route ownership / handoff 跨 runtime 的其他竞态。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 strict route-release generation guard (2026-09-16)
 
 - 状态：已合并（PR #85，rebase merge 至 `main@463a6e6`）。
