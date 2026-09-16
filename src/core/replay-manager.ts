@@ -349,13 +349,22 @@ export class ReplayManager<TData = unknown> {
         await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(this.now() - this.retentionMs!));
       }
       const loaded = await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load());
+      const loadedByTopic = new Map<string, DataBusMessage<TData>[]>();
       for (const message of loaded) {
-        let buffer = this.buffers.get(message.topic);
+        let buffer = loadedByTopic.get(message.topic);
         if (!buffer) {
           buffer = [];
-          this.buffers.set(message.topic, buffer);
+          loadedByTopic.set(message.topic, buffer);
         }
         buffer.push(message);
+      }
+      // Publications may be recorded locally while load() is in flight, before
+      // the asynchronous backend can expose them through this snapshot. Put
+      // durable history ahead of that live tail so count pruning retains the
+      // newest messages instead of evicting them as if they were older.
+      for (const [topic, durableBuffer] of loadedByTopic) {
+        const liveBuffer = this.buffers.get(topic);
+        this.buffers.set(topic, liveBuffer ? [...durableBuffer, ...liveBuffer] : durableBuffer);
       }
       const hydrationNow = this.now();
       for (const [topic, buffer] of this.buffers) {
