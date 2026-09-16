@@ -1,7 +1,7 @@
 ## 0.20.92 replay hydration ordering (2026-09-16)
 
-- 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/replay-hydration-order` ← `origin/main@3a58bd5`。
+- 状态：已合并（PR #81，rebase merge 至 `main@7ce5379`）。
+- 分支 / PR / 合并：`feat/replay-hydration-order` ← `origin/main@3a58bd5`；PR #81，合并提交 `7ce5379`（`fix(replay): preserve live order during hydration`）。
 - 复现场景：durable replay 的异步 `load()` 尚未完成时，本地已经 `record()` 了一条新 publication。旧 hydration 在 resolve 后把已加载历史追加到现有 live buffer 尾部，使旧历史反而成为“最新”条目；当 `maxPerTopic` 为 1 时，数量裁剪会删除刚产生的实时消息并保留旧历史。
 - 修复：`ReplayManager.hydrate()` 先按 topic 收集 durable snapshot，再将它放在 hydration 期间已存在的 live tail 之前，最后统一执行 retention/count pruning。持久历史保持原始顺序，实时消息保持原始顺序，并始终被视为更新的尾部。
 - 变更文件：`src/core/replay-manager.ts`、`tests/replay-manager.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
