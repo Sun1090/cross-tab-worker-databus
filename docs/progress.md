@@ -1,3 +1,18 @@
+## 0.20.92 parked recovery cancellation (2026-09-16)
+
+- 状态：已合并（PR #91，rebase merge 至 `main@8a1c911`）。
+- 分支 / PR / 合并：`feat/parked-recovery-cancellation` ← `origin/main@3ea4a90`；PR #91（https://github.com/Sun1090/cross-tab-worker-databus/pull/91），合并提交 `8a1c911`（`fix(data-bus): cancel parked recovery operations on suspend`）。
+- 复现场景：transport 运行期进入 `error` 后自动恢复被调度，recovery gate 关闭；此时 `subscribe('topic-2')` 停靠在 gate 上。随后 `pagehide()` 取消 recovery，再立即显式 `start({})`。新生命周期会清除 `suspended` 并在 replacement transport 上重订阅 `topic` 与 `topic-2`，但旧 waiter 的 continuation 稍后仍看到 `stopping === false` / `suspended === false`，于是再次订阅 `topic-2`，产生重复订阅。
+- 修复：新增单调 `recoveryCancellationToken`。`runTransport()` 的停靠 waiter 捕获创建时的 token；`beginStop()` 与 `suspendTransport()` 通过 `cancelScheduledRecovery(true)` 在取代恢复周期时递增 token。waiter 释放后除检查 stopping/suspended 外，还必须仍持有当前 token，旧恢复周期中的操作因此被丢弃，不能重放到 replacement transport。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/capabilities.md`、`docs/zh/capabilities.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `drops a parked recovery operation when pagehide and an immediate explicit start supersede it`。测试在 error 后停放第二个订阅，记录重连前调用，然后 pagehide + 显式 start；断言 replacement 连接对 `topic` 与 `topic-2` 各恰好订阅一次。
+- Mutation check：仅移除 waiter 中的 `cancellationToken !== this.recoveryCancellationToken` 守卫后，回归稳定失败于 `expected [ 'topic-2', 'topic-2' ] to have a length of 1 but got 2`；恢复修复后定向测试通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts tests/lifecycle-invariants.test.ts tests/documentation.test.ts`（4 files，263/263）；`pnpm check`（35 files，778/778）；`pnpm lint`（通过）；`pnpm test:coverage` 单独运行（35 files，778/778；statements 97.69% / branches 93.92% / functions 98% / lines 98.95%，`data-bus.ts` 97.26% / 94.91% / 95.04% / 98.49%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：仅新增内部恢复代次并在 stop/pagehide 取代恢复周期时使停靠 waiter 失效，不改变 public API、worker protocol、storage schema/key 或线协议；正常成功重开、失败后的 demand reopen、预算耗尽与显式重试路径保持不变。若出现恢复期间操作被误丢弃，回滚 = revert 合并提交 `8a1c911`。
+- 下一项：继续审计 recovery gate 的 waiter 计数在 gate 被取消又重建时是否可能串代，以及 failed startup 与异步 stop rejection 的统一账本顺序。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 SUBSCRIBE route binding (2026-09-16)
 
 - 状态：已合并（PR #89，rebase merge 至 `main@82cf127`）。
