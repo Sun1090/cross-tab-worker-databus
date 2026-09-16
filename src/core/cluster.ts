@@ -829,10 +829,26 @@ export class WorkerClusterRuntime {
     if (message.targetWorkerId !== this.workerId) return;
     this.rememberTopic(message.topic);
     switch (message.action) {
-      case CONTROL_ACTION.SUBSCRIBE:
+      case CONTROL_ACTION.SUBSCRIBE: {
+        const route = this.readRoute(message.topicKey);
+        // A CONTROL/SUBSCRIBE authorizes ownership only for the worker named
+        // by the durable route. A delayed frame from an earlier assignment
+        // round must not make a non-owner subscribe. A pending graceful
+        // handoff is stricter still: only its exact ROUTE_RELEASED ACK may
+        // authorize the new owner, otherwise the old and new transport
+        // subscriptions can overlap.
+        if (route && route.workerId !== this.workerId) return;
+        if (
+          route?.workerId === this.workerId &&
+          route.handoffFromWorkerId !== undefined &&
+          route.confirmedAt === undefined
+        ) {
+          return;
+        }
         this.assignedTopics.set(message.topicKey, message.topic);
         this.confirmRoute(message.topicKey);
         break;
+      }
       case CONTROL_ACTION.UNSUBSCRIBE:
         // A graceful handoff release short-circuits the generic dispatch.
         if (this.releaseHandoffOnUnsubscribe(message)) return;

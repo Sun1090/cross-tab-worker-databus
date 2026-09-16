@@ -46,6 +46,7 @@ and regression-locked:
 
 | Invariant | Area | Regressed guarantee |
 |---|---|---|
+| SUBSCRIBE route binding | coordination | An inbound `CONTROL/SUBSCRIBE` is honored only when the durable route currently names the receiver and is not awaiting `ROUTE_RELEASED`; delayed frames from earlier assignment rounds cannot create ownership, subscribe the transport, or confirm a pending handoff |
 | Handoff ACK validity | coordination | `ROUTE_RELEASED` is honored only when the route still points to the receiver, the release matches `handoffFromWorkerId`, and the ACK generation exactly matches the stored route — delayed ACKs from another a↔b ping-pong round are dropped |
 | Replay persistence cleanup ordering | durability | Queued batch flushes are filtered against the winning cleanup (`unsubscribe`/`clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff, and `suspend()`/`stop()` discard the queued batch); cleared or stopped-session history is never re-appended by an in-flight flush |
 | Storage write recovery | coordination | Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap); a structurally failing key is dropped after 5 attempts (with `console.warn`) without blocking other queued keys; backoff resets once the queue drains or `clear()` cancels the retries |

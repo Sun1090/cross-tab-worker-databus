@@ -1519,6 +1519,181 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
   });
 
+  it('ignores a stale CONTROL/SUBSCRIBE while a handoff is awaiting ROUTE_RELEASED', async () => {
+    // Regression: a delayed CONTROL/SUBSCRIBE from an earlier assignment round
+    // must not authorize a pending handoff before its ROUTE_RELEASED ACK. The
+    // strict handoff protocol keeps the old and new owners from overlapping;
+    // accepting the stale control frame would subscribe the new owner early
+    // and confirm the route without the old owner ever acknowledging release.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+
+    a.runtime.start();
+    a.runtime.subscribe('stale-subscribe-guard');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    const topicKey = route.topicKey as string;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    // A stale SUBSCRIBE from a previous round reaches the pending new owner
+    // before the matching ROUTE_RELEASED.
+    hub.create(bChannelName).postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-stale',
+      targetWorkerId: 'worker-b',
+      action: 'SUBSCRIBE',
+      topic: 'stale-subscribe-guard',
+      topicKey
+    });
+
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('stale-subscribe-guard');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'stale-subscribe-guard', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
+
+    // Only the matching generation ACK may authorize the handoff.
+    hub.create(bChannelName).postMessage({
+      type: 'ROUTE_RELEASED',
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-b',
+      topic: 'stale-subscribe-guard',
+      topicKey,
+      generation: 2
+    });
+    await Promise.resolve();
+
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('stale-subscribe-guard');
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'stale-subscribe-guard', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)).toMatchObject({
+      generation: 2,
+      confirmedAt: now
+    });
+  });
+
+  it('ignores a CONTROL/SUBSCRIBE when the route now names another worker', async () => {
+    // A delayed SUBSCRIBE from an earlier assignment round can arrive after a
+    // newer round has moved the route elsewhere. The receiver must verify the
+    // durable route before mutating its in-memory ownership, otherwise it
+    // subscribes the transport without owning the route and overlaps the real
+    // owner until the next reconcile drops the stale assignment.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+
+    a.runtime.start();
+    a.runtime.subscribe('stale-route-owner');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    const topicKey = route.topicKey as string;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-c',
+        tabId: 'tab-c',
+        generation: 2,
+        updatedAt: now
+      })
+    );
+
+    hub.create(bChannelName).postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-stale',
+      targetWorkerId: 'worker-b',
+      action: 'SUBSCRIBE',
+      topic: 'stale-route-owner',
+      topicKey
+    });
+
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('stale-route-owner');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'stale-route-owner', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)).toMatchObject({
+      workerId: 'worker-c',
+      generation: 2
+    });
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
+
+    // A later legitimate assignment back to worker-b is still authorized by
+    // its own CONTROL/SUBSCRIBE once the route names worker-b again.
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 3,
+        updatedAt: now
+      })
+    );
+    hub.create(bChannelName).postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-c',
+      targetWorkerId: 'worker-b',
+      action: 'SUBSCRIBE',
+      topic: 'stale-route-owner',
+      topicKey
+    });
+    await Promise.resolve();
+
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('stale-route-owner');
+    expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'stale-route-owner', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)).toMatchObject({
+      workerId: 'worker-b',
+      generation: 3,
+      confirmedAt: now
+    });
+  });
+
   it('recovers a stranded unconfirmed handoff once the previous owner is dead', async () => {
     // Regression: if the previous owner's ROUTE_RELEASED never arrives
     // (dropped channel message under load, or a crash between the route
