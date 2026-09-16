@@ -1,3 +1,13 @@
+## 0.20.92 heartbeat TTL/orphan convergence audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的运行时代码缺陷。
+- 审计范围：共享 fake clock 下的 worker TTL pruning、orphan subscriber/route cleanup 顺序、dead-owner route recovery、`BatchingStorageWriter` pending delete 与后续同 key write 的覆盖语义，以及 heartbeat/registry nudge 后的 projected-load 收敛。
+- 结论：`reconcileWorkers()` 先移除 stale workers，再清理 subscriber，最后清理无 subscriber 的过期 route，确保 route 判断使用最新 tab 集合；dead-owner 仍有 live subscriber 时由 `reconcileSubscriptions()` 立即 re-elect，完全 orphan 的 route 则 TTL 后删除。批写器对同 key 的 pending mutation 采用最后写入覆盖，删除不会被旧 pending write 重新引入；后续 route recovery 会明确写入新 assignment。storage-less 模式也保持本地 route 自洽。
+- 验证：`pnpm check`（typecheck、build、35 files / 780 tests）通过；`pnpm lint` 通过；`git diff --check` 通过。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、storage schema/key 或线协议。
+- 下一项：继续执行发布前验证（E2E、bench、打包兼容性）并修复任何实际失败。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 role/load recovery and degradation audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的运行时代码缺陷；同时补强了中途 storage failure 回归测试的真实装配。
