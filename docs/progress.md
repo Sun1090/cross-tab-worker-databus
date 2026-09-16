@@ -1,7 +1,7 @@
 ## 0.20.92 park operations behind every demanded transport reopen (2026-09-16)
 
-- 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-reopen-sync-readiness` ← `origin/main@6454d35`。
+- 状态：已合并（PR #77，rebase merge 至 `main@40a2ef0`）。
+- 分支 / PR / 合并：`feat/data-bus-reopen-sync-readiness` ← `origin/main@6454d35`；PR #77，合并提交 `40a2ef0`（`fix(data-bus): park operations during demanded reopen`）。
 - 复现场景：一个已连接的 transport 先报告 `disconnected`，随后同一 tick 内连续发出两次 `publish()`。第一次操作发现连接已掉线并调用 `reopenTransport()`；该函数同步把状态改为 `CONNECTING`，但 `transportReady` 仍短暂保持 `true`，直到 `openTransport()` 在 microtask 中运行才被清空。第二次操作因此把 `CONNECTING` 误判为仍可用的 transport，绕过 `startPromise` 直接写入已经关闭的连接；随后第一次操作才在 replacement 打开后投递，导致丢失风险和跨连接顺序反转。
 - 修复：`reopenTransport()` 在同步发出 `CONNECTING` 回调前先清空 `transportReady`。已在 opening 中排队的操作仍由 `startPromise` 统一放行；同 tick 后续操作会继续停靠，不再触碰旧连接。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
