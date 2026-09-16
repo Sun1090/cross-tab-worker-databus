@@ -1,3 +1,13 @@
+## 0.20.92 storage flush and registry nudge visibility audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：`BatchingStorageWriter` 的 pending-read 一致性、microtask coalescing、失败重试与单 timer 约束；cluster 在 route/worker/subscriber 写入后发送 REGISTRY nudge 的顺序；pagehide handoff 的显式 flush、route 持久化可见性与 channel 延迟关闭。
+- 结论：handoff 会在发送 ROUTE_RELEASED 前显式 flush 新 route 和删除/更新元数据，随后发送 REGISTRY；pagehide 最后再次 flush 并延迟关闭 channel，避免丢弃排队 ACK。writer 的 pending map 对读取立即可见，失败写入按 key 保留并共享指数退避 timer；clear 会同步取消 pending/retry，避免旧写入继续污染新状态。状态/role/load 变化的 nudge 与周期 heartbeat 分离，避免 heartbeat 引起 REGISTRY storm。
+- 验证：`pnpm exec vitest run tests/storage-batch.test.ts tests/cluster.test.ts`（2 files，88/88）；`pnpm test --run` 前轮为 35 files、780/780。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 worker role/load 更新与多 topic recovery 的 projected-load 一致性，以及 storage failure degradation 边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 route handoff ownership across rapid lifecycle transitions (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的实现缺陷。
