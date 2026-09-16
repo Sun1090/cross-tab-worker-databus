@@ -205,6 +205,9 @@ export class WorkerClusterRuntime {
   private started = false;
   private suspended = false;
   private lifecycleListening = false;
+  /** Invalidates an in-flight pageshow resume when a synchronous onResume
+   * callback stops or pauses the cluster before activate() is reached. */
+  private lifecycleGeneration = 0;
   private currentRecord: WorkerRecord;
 
   constructor(options: WorkerClusterOptions) {
@@ -248,6 +251,7 @@ export class WorkerClusterRuntime {
   /** Start the cluster: register, listen for lifecycle events, and begin heartbeats. */
   start(): void {
     if (this.started) return;
+    this.lifecycleGeneration += 1;
     this.suspended = false;
     this.addLifecycleListeners();
     this.activate();
@@ -261,6 +265,7 @@ export class WorkerClusterRuntime {
    * stop() path where callers expect every Set/Map to be empty afterwards.
    */
   stop(): void {
+    this.lifecycleGeneration += 1;
     if (!this.started && !this.suspended) return;
     this.pause();
     this.flushStorage();
@@ -319,6 +324,7 @@ export class WorkerClusterRuntime {
    * to other workers, remove our worker record, and close the channel.
    */
   private pause(): void {
+    this.lifecycleGeneration += 1;
     if (!this.started) return;
     this.started = false;
     this.suspended = true;
@@ -745,8 +751,13 @@ export class WorkerClusterRuntime {
 
   private readonly handlePageShow = () => {
     if (!this.suspended) return;
+    const generation = ++this.lifecycleGeneration;
     this.suspended = false;
     this.handlers.onResume?.();
+    // onResume is a synchronous extension point. A stop(), pause(), or newer
+    // start() from the callback owns the lifecycle and must not be undone by
+    // this outer pageshow handler reactivating the cluster.
+    if (generation !== this.lifecycleGeneration) return;
     this.activate();
   };
 

@@ -4,7 +4,7 @@
 
 ## 0.20.92 进行中
 
-当前开发线继续验证 predecessor reopen 结算、排队启动就绪与 stop promise 清理等生命周期错误路径。该开发线现已落地三处重入修复。第一处让共享 stop gate 先于同步 teardown 前奏安装：从同步 STOP lifecycle trace 事件重入的 `stop()` 会共享同一次 teardown，而不是再调用一次 `transport.stop()`。第二处在 START trace 发出前安装 lifecycle epoch 与 `startPromise`：若同步 trace/status 回调重入 `stop()`，外层 `start()` 会立即停止后续 timer、cluster 与 topic 启动，旧 opening 由 epoch guard 放弃，transport 不会被重新打开。第三处把相同的「先安装 lifecycle、再发同步回调」顺序应用到 `reopenTransport()` 的 CONNECTING 状态通知，使恢复期间重入的 stop 能取消本次 reopen，而不是在 teardown 后重新打开 transport；此前这些场景都可能留下 `state: stopped` 但 transport `connected` 的半停止状态。
+当前开发线继续验证 predecessor reopen 结算、排队启动就绪与 stop promise 清理等生命周期错误路径。该开发线现已落地四处重入修复。第一处让共享 stop gate 先于同步 teardown 前奏安装：从同步 STOP lifecycle trace 事件重入的 `stop()` 会共享同一次 teardown，而不是再调用一次 `transport.stop()`。第二处在 START trace 发出前安装 lifecycle epoch 与 `startPromise`：若同步 trace/status 回调重入 `stop()`，外层 `start()` 会立即停止后续 timer、cluster 与 topic 启动，旧 opening 由 epoch guard 放弃，transport 不会被重新打开。第三处把相同的「先安装 lifecycle、再发同步回调」顺序应用到 `reopenTransport()` 的 CONNECTING 状态通知，使恢复期间重入的 stop 能取消本次 reopen，而不是在 teardown 后重新打开 transport。第四处让同步 RESUME trace 回调内的 stop 同时取消显式 `start()` 与原生 `pageshow` 恢复；`WorkerClusterRuntime` 通过 lifecycle generation 阻止外层 pageshow 在 `onResume` 已停止或暂停 cluster 后再次 `activate()`。此前这些场景都可能留下 `state: stopped` 但 transport 或 cluster 仍活跃的半停止状态。
 
 ## 0.20.91 已完成范围
 

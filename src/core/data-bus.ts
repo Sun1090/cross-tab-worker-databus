@@ -377,7 +377,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.suspendTransport();
         },
         onResume: () => {
-          this.resumeSuspendedResources();
+          if (!this.resumeSuspendedResources()) return;
           this.resumeTransport();
         },
         onDiagnostic: event => {
@@ -429,9 +429,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // re-subscription traffic parks behind it instead of hitting the stopped
       // transport; cluster.start() is idempotent and a no-op when not paused.
       const resumingFromSuspend = this.suspended;
-      if (resumingFromSuspend) this.resumeSuspendedResources();
+      // RESUME trace events are synchronous extension points. A sink can call
+      // stop() while this resume is being prepared; the stop owns the newest
+      // lifecycle and the outer start must not restart timers or the cluster.
+      if (resumingFromSuspend && !this.resumeSuspendedResources()) {
+        return this.stopPromise ?? Promise.resolve();
+      }
       const opening = this.reopenTransport();
-      if (resumingFromSuspend) this.cluster.start();
+      // The CONNECTING notification inside reopenTransport() is another
+      // synchronous callback boundary. Only restore the cluster if that reopen
+      // still owns the lifecycle after the callback returns.
+      if (resumingFromSuspend && !this.stopping && !this.suspended) this.cluster.start();
       return opening;
     }
     this.started = true;
@@ -1396,11 +1404,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Resume the resources paused by a pagehide suspension. Both the native
    * pageshow path and explicit start() must run this so an explicit resume
    * cannot leave trace metrics and periodic cleanup timers permanently off. */
-  private resumeSuspendedResources(): void {
+  private resumeSuspendedResources(): boolean {
+    const lifecycleEpoch = this.lifecycleEpoch;
     this.trace.start();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.RESUME });
+    if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) return false;
     this.startDedupSweep();
     this.replayManager.start();
+    return lifecycleEpoch === this.lifecycleEpoch && !this.stopping;
   }
 
   /**

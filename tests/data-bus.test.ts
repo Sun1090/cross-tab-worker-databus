@@ -461,6 +461,114 @@ describe('CrossTabDataBus', () => {
     await Promise.all([busA.stop(), busB.stop()]);
   });
 
+  it('lets a stop() re-entered from the RESUME trace cancel the rest of an explicit resume', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-resume' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let resumeArmed = false;
+    let resumeSinkHits = 0;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-resume',
+      environment: environment.environment,
+      initialConfig: {},
+      trace: {
+        enabled: true,
+        sink: event => {
+          if (
+            resumeArmed &&
+            event.type === TRACE_EVENT_TYPE.LIFECYCLE &&
+            event.action === TRACE_LIFECYCLE_ACTION.RESUME
+          ) {
+            resumeSinkHits += 1;
+            if (resumeSinkHits === 1) nestedStop = bus.stop();
+          }
+        }
+      },
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    environment.pageHide();
+    expect(bus.getClusterSnapshot().suspended).toBe(true);
+
+    resumeArmed = true;
+    const resuming = bus.start({});
+    expect(nestedStop).toBeDefined();
+    await Promise.all([resuming, nestedStop!]);
+    await Promise.resolve();
+
+    expect(resumeSinkHits).toBe(1);
+    expect(transport.startCalls).toBe(1);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: false,
+      suspended: false,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+    // The stop from the RESUME trace must also prevent the outer explicit
+    // resume from restarting the cluster after teardown.
+    expect(bus.getClusterSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+
+    await bus.stop();
+  });
+
+  it('lets a stop() re-entered from the RESUME trace keep pageshow from reactivating the cluster', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-page-show' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let resumeArmed = false;
+    let resumeSinkHits = 0;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-page-show',
+      environment: environment.environment,
+      initialConfig: {},
+      trace: {
+        enabled: true,
+        sink: event => {
+          if (
+            resumeArmed &&
+            event.type === TRACE_EVENT_TYPE.LIFECYCLE &&
+            event.action === TRACE_LIFECYCLE_ACTION.RESUME
+          ) {
+            resumeSinkHits += 1;
+            if (resumeSinkHits === 1) nestedStop = bus.stop();
+          }
+        }
+      },
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    environment.pageHide();
+    expect(bus.getClusterSnapshot().suspended).toBe(true);
+
+    resumeArmed = true;
+    environment.pageShow();
+    expect(nestedStop).toBeDefined();
+    await nestedStop!;
+    await Promise.resolve();
+
+    expect(resumeSinkHits).toBe(1);
+    expect(transport.startCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: false,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+    // pageshow must not reactivate the cluster after the RESUME callback has
+    // stopped the new lifecycle.
+    expect(bus.getClusterSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+  });
+
   it('resumes replay retention sweeps when an explicit start() leaves BFCache suspension', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
