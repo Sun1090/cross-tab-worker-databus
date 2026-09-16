@@ -1,3 +1,18 @@
+## 0.20.91 stale transport callback isolation (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-reopen-lifecycle-audit` ← `origin/main@34927ed`。
+- 审计目标：补强 `CrossTabDataBus` 被替换 transport generation 的回调隔离：旧 `onMessage`、`onStatus`、`onError` 在自动 reopen 后迟到时，不得污染替代 transport 的分发、状态或告警账本。
+- 结论 / 加固：生产代码已有正确的 `isCurrentLifecycle()` 守卫，无需修改。新增回归保留首代 handlers，在 BFCache `pagehide`/`pageshow` 触发第二代 transport 并恢复 connected 后，再调用旧 generation 的三类回调；固定旧 publication 不派发、旧 error status 不降级新 transport、旧 error 不进入当前 failure ledger / `onError`。
+- 变更文件：`tests/data-bus.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `isolates message and failure callbacks from a replaced transport generation`。
+- Mutation check：依次移除 `onMessage`、`onStatus`、`onError` 的 lifecycle guard，测试分别以旧消息被派发、新状态被降级、旧错误进入 `onError` 失败；每次恢复生产守卫后定向 1/1 通过。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts tests/lifecycle-invariants.test.ts`（146/146）；`pnpm check`（35 files，740/740）；`pnpm lint`；`pnpm test:coverage`（35 files，740/740；statements 97.42% / branches 93.20% / functions 97.25% / lines 98.74%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改运行时、public export、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 queued-start readiness 缓存/未就绪分支、stale recovery timer token、`reopenTransport()` opening 复用与 stop failure settlement 的真实回归。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 data-bus lifecycle recovery regression coverage (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。

@@ -5,7 +5,7 @@
 ## 0.20.91 进行中
 
 可靠性开发线继续补强错误路径覆盖并维护发布门禁。IndexedDB replay 清理现在覆盖 `clear()`、`clearTopic()`、`clearBefore()` 的事务级错误，包括连接失效后的恢复，以及浏览器未提供 transaction error 对象时的领域级 fallback 拒绝信息。WebSocket transport 也会在连接失活后 best-effort 关闭 socket，避免自动恢复遗留死连接；已发布包验证的正常路径经审计确认没有固定等待或多余 registry 往返。Centrifuge token bridge provider 现在绑定到创建它的 client lifecycle，已被替换的 client 无法把迟到凭证请求送入新会话。旧 client 的 subscription 回调与 publish rejection 也已有回归约束，不能修改或上报到替代会话。
-DataBus 生命周期审计现在还固定了 failed-reopen 的 stop gate 复用，以及被取代 initial open 的迟到 rejection 隔离；mutation check 已确认移除对应守卫时两条回归都会失败。
+DataBus 生命周期审计现在还固定了 failed-reopen 的 stop gate 复用、被取代 initial open 的迟到 rejection 隔离，以及已退休 transport 迟到的 message/status/error 回调 generation 隔离；mutation check 已确认移除对应守卫时每条回归都会失败。
 
 ## 0.20.90 已完成范围
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataBusTraceReporter } from '../src/core/trace';
 import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
-import type { DataBusTransport, WorkerClusterMessage } from '../src/core/types';
+import type { DataBusTransport, DataBusTransportHandlers, WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
 import { CLUSTER_MESSAGE_TYPE, WORKER_STATUS } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
@@ -2060,6 +2060,54 @@ describe('CrossTabDataBus', () => {
       suspended: false,
       transport: { ready: true }
     });
+    await bus.stop();
+  });
+
+  it('isolates message and failure callbacks from a replaced transport generation', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-transport-callbacks' });
+    const generations: Array<DataBusTransportHandlers<number>> = [];
+    const transport: DataBusTransport<object, number> = {
+      start(_config, handlers) {
+        generations.push(handlers);
+        handlers.onStatus(WORKER_STATUS.CONNECTED);
+      },
+      subscribe() {},
+      unsubscribe() {},
+      publish() {},
+      stop() {}
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stale-transport-callbacks',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const handler = vi.fn();
+    const errors: unknown[] = [];
+    bus.subscribe('topic', handler);
+    bus.onError(error => errors.push(error));
+    await bus.ready();
+
+    // Replace the live transport while retaining the first generation's
+    // handlers, then let the replacement become healthy. Late callbacks from
+    // the retired generation must not dispatch data, downgrade status, or
+    // enter the current failure ledger.
+    environment.pageHide();
+    environment.pageShow();
+    await bus.ready();
+    expect(generations).toHaveLength(2);
+    expect(bus.getStatus()).toBe(WORKER_STATUS.CONNECTED);
+
+    const retired = generations[0]!;
+    retired.onMessage({ topic: 'topic', data: 99, messageId: 'stale-generation' });
+    retired.onStatus(WORKER_STATUS.ERROR);
+    retired.onError(new Error('stale transport callback'));
+    await Promise.resolve();
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(bus.getStatus()).toBe(WORKER_STATUS.CONNECTED);
+    expect(errors).toEqual([]);
     await bus.stop();
   });
 
