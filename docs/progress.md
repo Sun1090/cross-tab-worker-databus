@@ -1,3 +1,18 @@
+## 0.20.91 cluster pause timer + data-bus readiness/recovery contract (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-readiness-recovery-contract` ← `origin/main@c02b3c6`。
+- 审计目标：补强 `CrossTabDataBus` 就绪/恢复契约，并修掉审计过程中暴露的一处真实定时器泄漏：(1) `stop()` 后迟到的 `pageshow` 不得重启后台资源；(2) 自动恢复再次失败时 `ready()` 必须暴露最近一次 transport 错误；(3) 被后续 `stop()` 取消的排队启动，其 readiness gate 不得泄漏给替代重启；(4) 排队重启在变为可用前被 `suspend`，`ready()` 必须 reject；(5) 较新的错误重新排定恢复后，旧 recovery timer 不得再打开 transport；(6) 启动失败清理阶段的 `transport.stop()` rejection 必须被收敛且不污染后续重启。
+- 结论 / 加固：生产代码仅一处缺陷——`WorkerClusterRuntime.pause()` 无条件执行 `globalThis.setTimeout(() => channel?.close(), 0)`，即使 `channel === null` 也会留下一个无意义 timer，导致 `stop()` 后仍残留定时任务。现改为仅在 `channel` 非空时排定延迟关闭（无 `setTimeout` 时同步 `close()`）。其余五条契约生产代码已正确，新增回归固定行为。
+- 变更文件：`src/core/cluster.ts`、`tests/data-bus.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `does not restart background resources when pageshow arrives after an explicit stop`、`surfaces the last transport error from ready() after automatic recovery fails`、`invalidates a canceled queued-start readiness gate for the replacement restart`、`rejects ready() when a queued restart is suspended before it becomes usable`、`ignores a stale recovery timer when a newer error schedules another attempt`、`contains a stop rejection while cleaning up a failed startup and stays restartable`。
+- Mutation check（`/tmp/mutation_check.py`，6/6 全部被检出）：移除 null-channel 关闭守卫、移除 `ready()` 保留 `lastError` 分支、移除 canceled queued-start token 分支、移除 suspended queued-start readiness 守卫、移除 stale recovery timer token 检查、移除 `createStopPromise()` 的 stop rejection 收敛，均使对应回归失败；恢复生产代码后定向 6/6 通过。stale-timer 用例通过注入 `dedup.now` 时钟，使第二个错误越过 cooldown 而不推进 fake timer 时钟，从而把旧 timer 与新 timer 的到期点分离。
+- 验证命令与结果：`pnpm exec vitest run tests/cluster.test.ts tests/data-bus.test.ts`（221/221）；`pnpm exec vitest run tests/lifecycle-invariants.test.ts tests/documentation.test.ts tests/workflows.test.ts`（23/23）；`pnpm check`（35 files，746/746）；`pnpm lint`；`pnpm test:coverage`（35 files，746/746；statements 97.63% / branches 93.54% / functions 97.43% / lines 98.9%）；`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：`cluster.ts` 改动仅影响 `pause()` 在无 channel 时的延迟关闭排定，不改 storage schema/key、worker protocol 或公开 API；其余为测试与文档。回滚 = revert 本任务提交。
+- 下一项：继续审计 `getQueuedStartReady()` 缓存复用、`reopenTransport()` opening 复用、`createStopPromise()` 其他错误路径与 `data-bus.ts` 未覆盖分支。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 stale transport callback isolation (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。

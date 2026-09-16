@@ -699,6 +699,35 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('does not restart background resources when pageshow arrives after an explicit stop', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'pageshow-after-stop' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'pageshow-after-stop',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      trace: { sink: () => {}, metricsIntervalMs: 10 },
+      dedup: { sweepMs: 10 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    await bus.stop();
+    expect(vi.getTimerCount()).toBe(0);
+
+    // A pagehide/page show pair is not an implicit start. An explicit stop
+    // clears activeConfig and must keep every background resource dormant even
+    // when the browser later restores a BFCache page.
+    environment.pageShow();
+    await Promise.resolve();
+
+    expect(transport.startCalls).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(bus.getHealthSummary()).toMatchObject({ started: false, state: 'stopped' });
+  });
+
   it('keeps tracing disabled by default', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
@@ -1366,6 +1395,35 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('surfaces the last transport error from ready() after automatic recovery fails', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'ready-failed-recovery' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'ready-failed-recovery',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100, maxAttempts: 1 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: true,
+      transport: { ready: false },
+      recovery: { hasError: true, errorMessage: 'Transport failed during startup.' }
+    });
+    // No open is in flight, but the retained transport error is actionable.
+    // ready() must not hide it behind a generic "no start operation" message.
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+    await bus.stop();
+  });
+
   it('stamps one failed open once across both failure ledgers', async () => {
     // A clock that advances on every read exposes any path that samples `now()`
     // twice for a single failure. `getRecoveryStats().errorAt` and
@@ -1665,6 +1723,113 @@ describe('CrossTabDataBus', () => {
     await readiness;
     expect(transport.startCalls).toBe(2);
     expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
+  it('invalidates a canceled queued-start readiness gate for the replacement restart', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'queued-ready-cancel' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-ready-cancel',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    const canceledRestart = bus.start({});
+    const canceledReady = bus.ready();
+    expect(bus.ready()).toBe(canceledReady);
+    const canceledReadyFailure = canceledReady.catch(error => error as Error);
+
+    expect(bus.stop()).toBe(stopping);
+    const finalRestart = bus.start({});
+    const finalReady = bus.ready();
+    expect(finalReady).not.toBe(canceledReady);
+
+    releaseStop();
+    await stopping;
+    await canceledRestart;
+    await finalRestart;
+    await finalReady;
+    await expect(canceledReadyFailure).resolves.toMatchObject({
+      message: expect.stringMatching(/canceled by a later stop/i)
+    });
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
+  it('rejects ready() when a queued restart is suspended before it becomes usable', async () => {
+    let releaseStop!: () => void;
+    const stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    let releaseRestart!: () => void;
+    const restartGate = new Promise<void>(resolve => {
+      releaseRestart = resolve;
+    });
+    let startCalls = 0;
+    let stopCalls = 0;
+    const transport: DataBusTransport<object, number> = {
+      start(_config, handlers) {
+        startCalls += 1;
+        if (startCalls === 1) {
+          handlers.onStatus(WORKER_STATUS.CONNECTED);
+          return;
+        }
+        return restartGate.then(() => handlers.onStatus(WORKER_STATUS.CONNECTED));
+      },
+      subscribe() {},
+      unsubscribe() {},
+      publish() {},
+      stop() {
+        stopCalls += 1;
+        return stopCalls === 1 ? stopGate : undefined;
+      }
+    };
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'queued-restart-suspended'
+    });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-restart-suspended',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(stopCalls).toBe(1));
+    const restarting = bus.start({});
+    const readiness = bus.ready();
+    const readinessFailure = readiness.catch(error => error as Error);
+
+    releaseStop();
+    await stopping;
+    await vi.waitFor(() => expect(startCalls).toBe(2));
+
+    // The queued restart owns a new lifecycle, then the tab hides before its
+    // open settles. ready() must not report the restart as usable while the
+    // replacement transport has already been stopped by suspension.
+    environment.pageHide();
+    releaseRestart();
+    await restarting;
+    await expect(readinessFailure).resolves.toMatchObject({
+      message: expect.stringMatching(/without a ready transport/i)
+    });
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: true,
+      suspended: true,
+      transport: { ready: false }
+    });
     await bus.stop();
   });
 
@@ -2150,6 +2315,34 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('contains a stop rejection while cleaning up a failed startup and stays restartable', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'failed-start-stop-error' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    transport.stopShouldFail = true;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'failed-start-stop-error',
+      environment: environment.environment,
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+
+    await expect(bus.start({})).rejects.toThrow('Transport failed during startup.');
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    expect(errors.map(String).some(message => message.includes('transport stop failed'))).toBe(true);
+
+    // The failed cleanup must not poison the shared pending-stop gate: once the
+    // transport is healthy again, the same instance must restart cleanly.
+    transport.startShouldFail = false;
+    transport.stopShouldFail = false;
+    await bus.start({});
+    await expect(bus.ready()).resolves.toBeUndefined();
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
   it('waits for an async transport stop before automatic recovery reopens', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
@@ -2291,6 +2484,49 @@ describe('CrossTabDataBus', () => {
 
     // The stale recovery timer must not open a second transport.
     await vi.advanceTimersByTimeAsync(1_500);
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
+  it('ignores a stale recovery timer when a newer error schedules another attempt', async () => {
+    vi.useFakeTimers();
+    let now = 1_000;
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'stale-recovery-timer' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stale-recovery-timer',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100, maxAttempts: 5 },
+      // Inject the recovery clock so a second error can advance past the
+      // cooldown without also advancing the fake timer clock past timer A.
+      dedup: { now: () => now }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    transport.startShouldFail = true;
+    // First error arms timer A at t=1000; A comes due 100ms of fake timer
+    // clock later.
+    transport.setStatus('error');
+
+    // Advance the fake timer clock partway toward A, then let a second error
+    // arrive past the cooldown (t=1100). The newer error arms timer B, due
+    // later than A, and invalidates A's token.
+    await vi.advanceTimersByTimeAsync(50);
+    now = 1_100;
+    transport.setStatus('error');
+
+    // Advance to timer A's due time only, leaving timer B pending. A stale
+    // timer that skipped the token check would reopen here; the guard must
+    // keep it inert, so no extra start attempt is observable yet.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(transport.startCalls).toBe(1);
+
+    // The newer timer is the only one allowed to reopen the transport.
+    await vi.advanceTimersByTimeAsync(100);
     expect(transport.startCalls).toBe(2);
     await bus.stop();
   });
