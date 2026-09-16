@@ -1,3 +1,18 @@
+## 0.20.92 replay hydration lifecycle races (2026-09-16)
+
+- 状态：已合并（PR #83，rebase merge 至 `main@88ae3b0`）。
+- 分支 / PR / 合并：`feat/replay-hydration-lifecycle-races` ← `origin/main@bf6f369`；PR #83，合并提交 `88ae3b0`（`fix(replay): make hydration replaceable across lifecycle`）。
+- 复现场景：durable replay 的异步 `load()` 尚未完成时，若业务调用 `clearReplay()`、`clearReplayTopic()`、退订最后一个 handler 或 `clearReplayBefore()`，旧快照 resolve 后仍会把已清除历史写回内存 ring；显式 stop/start 还会复用已经完成或失败的 constructor hydration，导致重新启动后不再加载 durable history。suspend 后立即 start 时，旧 load 也可能覆盖新一代 hydration。
+- 修复：`ReplayManager` 的 hydration 从不可变 constructor promise 改为可替换的 lifecycle operation，并增加 hydration epoch / completion / failure 状态。clearAll、clearTopic、unsubscribe、clearBefore 会在等待中的快照应用 mutation 过滤；suspend/reset 会使旧 load 失效并允许 `start()` 发起新一代 hydration；旧 load 的结果、错误与 finally 均不能清除或覆盖 replacement。clear 操作仍保留原有 retry、错误上报与 rethrow 语义。
+- 变更文件：`src/core/replay-manager.ts`、`tests/replay-manager.test.ts`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：`tests/replay-manager.test.ts` — `does not repopulate buffers when hydration resolves after clearAll`、`does not repopulate a cleared topic when hydration resolves later`、`does not repopulate an unsubscribed topic after hydration resolves`、`does not re-add entries pruned by clearBefore while hydration is pending`、`rehydrates when start resumes before an in-flight hydration settles`、`rehydrates durable history after an explicit stop/start cycle`。
+- Mutation check：修复前四条 clear/unsubscribe 回归分别观察到已清除 history 被写回；将 `hydrationClearBefore` 快照过滤条件移除后，新增 `clearBefore` 回归稳定收到 `[1, 2]` 而非期望的 `[2]`；恢复生产守卫后定向 57/57 通过。
+- 验证命令与结果：`pnpm exec vitest run tests/replay-manager.test.ts`（57/57）；`pnpm check`（35 files，773/773）；`pnpm lint`；`pnpm test:coverage`（35 files，773/773；statements 97.61% / branches 93.77% / functions 98% / lines 98.94%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 均通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整 replay hydration 生命周期与 mutation 合并，不改变 public API、worker protocol、存储 schema/key 或线协议。无并发 clear/restart 时结果不变；回滚 = revert 合并提交 `88ae3b0`。
+- 下一项：继续可靠性审计 `resume` / `reopen` recovery 交错、queued start 与 pending stop 的剩余边界，以及 route handoff / ownership 跨 runtime 竞态。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 replay hydration ordering (2026-09-16)
 
 - 状态：已合并（PR #81，rebase merge 至 `main@7ce5379`）。
