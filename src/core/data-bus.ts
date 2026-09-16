@@ -427,7 +427,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // recovery budget is exhausted. Keep the cluster and subscriptions
       // intact, but begin a fresh failure/recovery ledger before reopening.
       this.activeConfig = config;
-      this.resetFailureState();
+      // Keep any operations parked on the recovery gate across this explicit
+      // manual attempt. If it fails, those operations remain queued for the
+      // next automatic recovery instead of being dropped with the superseded
+      // opening.
+      this.resetFailureState(true);
       // An explicit start() is also a documented resume path out of BFCache
       // suspension: it clears `suspended` and reopens the transport. The
       // cluster keeps its own paused flag and is normally resumed by the
@@ -575,14 +579,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Cancel a pending automatic retry when an explicit lifecycle transition
    * supersedes it. The released gate re-enters runTransport(), which then
    * follows the newest start/stop/suspend intent. */
-  private cancelScheduledRecovery(invalidateParkedOperations = false): void {
+  private cancelScheduledRecovery(invalidateParkedOperations = false, releaseGate = true): void {
     this.recoveryTimerToken += 1;
     if (invalidateParkedOperations) this.recoveryCancellationToken += 1;
     if (this.recoveryTimer !== null) {
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = null;
     }
-    this.releaseRecoveryGate();
+    if (releaseGate) this.releaseRecoveryGate();
   }
 
   /** Keep the recovery gate closed after a failed attempt while allowing the
@@ -624,8 +628,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   /** Reset failure and recovery diagnostics for a new explicit start session. */
-  private resetFailureState(): void {
-    this.cancelScheduledRecovery();
+  private resetFailureState(preserveRecoveryGate = false): void {
+    this.cancelScheduledRecovery(false, !preserveRecoveryGate);
+    if (preserveRecoveryGate) this.recoveryDemandAllowed = false;
     this.lastError = null;
     this.lastErrorAt = null;
     this.lastFailure = null;
