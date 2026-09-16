@@ -2864,11 +2864,20 @@ describe('CrossTabDataBus', () => {
     await expect(bus.stop()).resolves.toBeUndefined();
     expect(transport.stopCalls).toBe(1);
     expect(errors.map(String).some(message => message.includes('transport stop failed'))).toBe(true);
-    expect(bus.getHealthSummary()).toMatchObject({
+    const failureSummary = bus.getHealthSummary();
+    expect(failureSummary).toMatchObject({
       started: false,
       state: 'stopped',
       lastFailure: { source: 'transport', message: 'transport stop failed' },
       transport: { ready: false }
+    });
+    // The unified and recovery ledgers describe the same retained failure.
+    // Clearing one while the other survives makes the same health snapshot
+    // contradict itself.
+    expect(failureSummary.recovery).toMatchObject({
+      hasError: true,
+      errorMessage: 'transport stop failed',
+      errorAt: failureSummary.lastFailure?.at
     });
 
     // A failed teardown must still leave the instance restartable.
