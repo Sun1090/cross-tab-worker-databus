@@ -1,7 +1,22 @@
-## 0.20.92 re-entrant RESUME lifecycle cancellation (2026-09-16)
+## 0.20.92 pending demand recovery after failed automatic attempt (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-resume-reentrant-stop` ← `origin/main@4123759`。
+- 分支 / 基线：`feat/data-bus-pending-demand-recovery` ← `origin/main@a2e91c1`。
+- 复现场景：transport 运行期报 `error` 后进入自动恢复 cooldown，一个 `publish()` 到达并停在 `recoveryGate`。当随后的自动恢复尝试失败时，`allowDemandRecovery()` 仅把 `recoveryDemandAllowed` 置为 true 并保持 gate 关闭，但已经停靠的 waiter 本身不会被唤醒，也不会有任何后续操作替它触发 demand reopen。该操作因此永久滞留、既不发送也不报错，除非之后恰好又有一次无关的 transport 操作到来。
+- 修复：新增 `recoveryWaiters` 计数跟踪停靠在 gate 上的操作，并抽出 `startDemandRecovery()` 作为唯一的一次性 demand reopen 入口。自动尝试失败时调用 `allowDemandRecovery(true)`：若仍有 waiter 停靠，立即发起一次 demand reopen，使已发出的操作自身成为 demand，而不是等待未来某个无关操作。demand reopen 自身失败时以 `allowDemandRecovery()`（`kickParkedWaiters=false`）重新武装 flag，避免在自身失败上自循环，仍保留「后续操作再试一次」的既有契约。成功时 gate 释放，全部 waiter 按 FIFO 顺序 flush。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `retries an operation that was already queued when automatic recovery fails`（停靠操作在自动尝试失败后仍驱动一次 demand reopen 并成功投递）与 `issues a single demand reopen for multiple operations parked behind a failed automatic attempt`（三个停靠操作只触发一次 reopen，全部按序 flush）。
+- Mutation check：把自动失败处理回退为 `allowDemandRecovery()`（不 kick 停靠 waiter）后，两条回归均稳定失败（`transport.startCalls` 为 2 而非 3）；恢复修复后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（236/236）通过；完整验证见下方门禁清单。
+- 阻塞：无。
+- 风险 / 回滚：仅新增内部 waiter 计数与一次性 demand reopen helper，不改 public API、worker protocol、存储 schema/key 或线协议；既有 `allowDemandRecovery()`/`runTransport()` 行为与超时/耗尽/挂起释放契约保持。回滚 = revert 本任务提交。
+- 下一项：提交、推送并创建 PR，等待全部门禁后合并；随后继续审计 recovery gate 与 queued-start/pending-stop 的剩余可执行边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 re-entrant RESUME lifecycle cancellation (2026-09-16)
+
+- 状态：已合并（PR #73，rebase merge 至 `main@a2e91c1`）。
+- 分支 / PR / 合并：`feat/data-bus-resume-reentrant-stop` ← `origin/main@4123759`；PR #73，合并提交 `a2e91c1`（`fix(data-bus): honor reentrant stop during resume`）。
 - 复现场景：页面处于 BFCache suspension 时，显式 `start({})` 或原生 `pageshow` 进入 resume；同步 RESUME lifecycle trace sink 立即调用 `stop()`。旧实现会在 stop 完成 teardown 后继续重启 dedup/replay，或由外层 `pageshow` 再次 `activate()` cluster，最终可能出现 bus 报告 `stopped`、但 cluster 仍 coordinated 的矛盾状态。
 - 修复：`resumeSuspendedResources()` 现在返回本次 resume 是否仍拥有 lifecycle；显式 `start()` 在 RESUME 回调抢占后直接返回 stop gate，并在 `reopenTransport()` 的同步 CONNECTING 边界后再次确认 `stopping`/`suspended` 才恢复 cluster。`WorkerClusterRuntime` 增加内部 lifecycle generation，`stop()`、`pause()`、`start()` 与 `pageshow` 都会推进该代次，外层 `handlePageShow()` 只有在同步 `onResume` 回调返回后仍持有同一代次时才调用 `activate()`。
 - 变更文件：`src/core/data-bus.ts`、`src/core/cluster.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
