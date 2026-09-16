@@ -1999,6 +1999,96 @@ describe('CrossTabDataBus', () => {
     });
   });
 
+  it('lets a stop() re-entered from the START trace own a fresh lifecycle', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reentrant-start' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let startSinkHits = 0;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-start',
+      environment: environment.environment,
+      transport,
+      trace: {
+        enabled: true,
+        sink: event => {
+          if (
+            event.type === TRACE_EVENT_TYPE.LIFECYCLE &&
+            event.action === TRACE_LIFECYCLE_ACTION.START
+          ) {
+            startSinkHits += 1;
+            // The START lifecycle event is emitted synchronously before the
+            // transport opens. A stop() from the sink must supersede the whole
+            // outer start without allowing it to reopen a stopped bus later.
+            if (startSinkHits === 1) nestedStop = bus.stop();
+          }
+        }
+      }
+    });
+
+    const starting = bus.start({});
+    expect(nestedStop).toBeDefined();
+    await Promise.all([starting, nestedStop!]);
+    await Promise.resolve();
+
+    expect(startSinkHits).toBe(1);
+    expect(transport.startCalls).toBe(0);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getStatus()).toBe(WORKER_STATUS.DISCONNECTED);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: false,
+      suspended: false,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+
+    // The explicit stop must leave the bus reusable rather than stuck with a
+    // half-open transport or a stale lifecycle gate.
+    await bus.start({});
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+    await bus.stop();
+  });
+
+  it('lets a stop() from the CONNECTING status callback cancel the rest of start', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reentrant-connecting' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let connectingHits = 0;
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'reentrant-connecting',
+      environment: environment.environment,
+      transport
+    });
+    bus.onStatus(status => {
+      if (status === WORKER_STATUS.CONNECTING) {
+        connectingHits += 1;
+        if (connectingHits === 1) nestedStop = bus.stop();
+      }
+    });
+
+    const starting = bus.start({});
+    expect(nestedStop).toBeDefined();
+    await Promise.all([starting, nestedStop!]);
+    await Promise.resolve();
+
+    expect(connectingHits).toBe(1);
+    expect(transport.startCalls).toBe(0);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: false,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+
+    await bus.start({});
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+    await bus.stop();
+  });
+
   it('does not report a healthy bus while an explicit stop is still tearing down', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stopping-health' });
