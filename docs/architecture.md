@@ -452,6 +452,8 @@ A publication travels publisher → current Topic owner → transport/server →
 
 Optional publication metadata (`messageId` and `timestamp`) follows the same path as the payload: `CONTROL/PUBLISH` → transport/server → `DataBusMessage` → `EVENT` fan-out. It is never written to coordination storage. Transports normalize legacy payloads and the canonical `DataBusPublicationEnvelope` before the three dispatch gates.
 
+At the `EVENT` boundary, frames carrying an unknown `eventType` or a publication payload without a string `topic` are ignored. Legacy publication payloads without `originTabId` inherit the frame-level value, while an explicit payload-level `originTabId` wins. These rules keep the channel forward-compatible with older/newer SDK peers and prevent one malformed frame from breaking later delivery.
+
 At the transport layer, a Centrifuge client can emit a publication both on the `client` object and on the matching `Subscription` object. To avoid dispatching the same server publication twice, the Centrifuge session only handles the client-level `publication` for topics that have **no active client-side subscription** (server-side subscriptions); topics with an active subscription are delivered solely through the subscription-level listener.
 
 ```mermaid

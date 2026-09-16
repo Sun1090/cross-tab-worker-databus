@@ -1,3 +1,17 @@
+## 0.20.91 EVENT boundary hardening (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-event-start-audit` ← `origin/main@7e69ae1`。
+- 审计目标：验证 `CrossTabDataBus` 的跨 Tab `EVENT` 公共协调边界，覆盖未知事件类型、旧版 `originTabId` 回退、payload 归属优先级，以及畸形 publication 负载是否会影响后续投递。
+- 结论 / 修复：发现真实健壮性缺陷——同源 peer 发送 `EVENT/publication` 且 payload 为 `null` 时，`onEvent` 读取 `originTabId` 抛出 `TypeError` 并击穿 BroadcastChannel 监听器。现在边界只接受对象且带字符串 `topic` 的 publication payload；未知 `eventType` 与畸形 payload 均静默忽略，后续合法事件仍可投递。旧帧缺少 payload 级 `originTabId` 时继续继承帧级值，payload 自带归属优先。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`docs/architecture.md`、`docs/zh/architecture.md`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `falls back to the frame originTabId for legacy EVENT payloads and prefers payload attribution`、`ignores non-publication and malformed EVENT frames without breaking the listener`。第二个用例在修复前稳定复现 `TypeError: Cannot read properties of null (reading 'originTabId')`，并同时在畸形帧之后注入合法 publication，确认监听器与后续投递仍存活。
+- 验证命令与结果：`pnpm check`（35 files，752/752）、`pnpm lint`、`pnpm test:coverage`（35 files，752/752；statements 97.77% / branches 93.89% / functions 97.8% / lines 98.99%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅收窄跨 Tab `EVENT` 的输入校验；合法 `DataBusMessage`、worker protocol、存储 schema/key、public API 与线协议均不变。若需回滚，revert 本任务提交即可。
+- 下一项：继续审计 `getQueuedStartReady()`、`reopenTransport()`、`runTransport()` 与 `createStopPromise()` 的剩余未覆盖错误路径；必要时扩展真实故障回归。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 cluster pause timer + data-bus readiness/recovery contract (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。

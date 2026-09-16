@@ -4,7 +4,7 @@ import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
 import type { DataBusTransport, DataBusTransportHandlers, WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
-import { CLUSTER_MESSAGE_TYPE, WORKER_STATUS } from '../src/utils/constants';
+import { CLUSTER_MESSAGE_TYPE, PUBLICATION_EVENT, WORKER_STATUS } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
@@ -4038,6 +4038,51 @@ describe('CrossTabDataBus diagnostics', () => {
 });
 
 describe('CrossTabDataBus cross-tab replay consistency contract', () => {
+  async function makeEventBoundaryBus() {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({
+      storage,
+      hub,
+      now: () => 1_000,
+      randomId: 'event-boundary'
+    });
+    let channelName: string | undefined;
+    const createChannel = environment.environment.createChannel;
+    environment.environment.createChannel = name => {
+      channelName = name;
+      return createChannel(name);
+    };
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'event-boundary',
+      environment: environment.environment,
+      tabId: 'tab-boundary',
+      workerId: 'worker-boundary',
+      transport
+    });
+    await bus.start({});
+    await bus.ready();
+    expect(channelName).toBeDefined();
+    return { bus, hub, channelName: channelName! };
+  }
+
+  function postRawEvent(
+    hub: ChannelHub,
+    channelName: string,
+    eventType: string,
+    payload: unknown,
+    originTabId?: string
+  ): void {
+    hub.create(channelName).postMessage({
+      type: CLUSTER_MESSAGE_TYPE.EVENT,
+      sourceWorkerId: 'legacy-peer',
+      eventType,
+      payload,
+      ...(originTabId === undefined ? {} : { originTabId })
+    });
+  }
+
   it('stamps originTabId on the producing tab and preserves it on the neighbor', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
@@ -4198,6 +4243,47 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
     expect(replayed.map(message => message.data)).toEqual([1, 2]);
     expect(replayed.every(message => message.replayed === true && message.originTabId === 'tab-a')).toBe(true);
     await busA.stop();
+  });
+
+  it('falls back to the frame originTabId for legacy EVENT payloads and prefers payload attribution', async () => {
+    const { bus, hub, channelName } = await makeEventBoundaryBus();
+    const received: Array<{ data: unknown; originTabId?: string }> = [];
+    bus.subscribe('topic', message => received.push(message));
+
+    postRawEvent(hub, channelName, PUBLICATION_EVENT, { topic: 'topic', data: 'legacy' }, 'tab-frame');
+    postRawEvent(
+      hub,
+      channelName,
+      PUBLICATION_EVENT,
+      { topic: 'topic', data: 'payload', originTabId: 'tab-payload' },
+      'tab-frame'
+    );
+    postRawEvent(hub, channelName, PUBLICATION_EVENT, { topic: 'topic', data: 'unattributed' });
+
+    expect(received).toEqual([
+      expect.objectContaining({ data: 'legacy', originTabId: 'tab-frame' }),
+      expect.objectContaining({ data: 'payload', originTabId: 'tab-payload' }),
+      expect.objectContaining({ data: 'unattributed' })
+    ]);
+    expect(received[2]!.originTabId).toBeUndefined();
+    await bus.stop();
+  });
+
+  it('ignores non-publication and malformed EVENT frames without breaking the listener', async () => {
+    const { bus, hub, channelName } = await makeEventBoundaryBus();
+    const handler = vi.fn();
+    bus.subscribe('topic', handler);
+
+    expect(() => {
+      postRawEvent(hub, channelName, 'presence', { topic: 'topic', data: 'foreign' }, 'tab-frame');
+      postRawEvent(hub, channelName, PUBLICATION_EVENT, null, 'tab-frame');
+      postRawEvent(hub, channelName, PUBLICATION_EVENT, { data: 'missing-topic' }, 'tab-frame');
+      postRawEvent(hub, channelName, PUBLICATION_EVENT, { topic: 42, data: 'invalid-topic' }, 'tab-frame');
+      postRawEvent(hub, channelName, PUBLICATION_EVENT, { topic: 'topic', data: 'valid' }, 'tab-frame');
+    }).not.toThrow();
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ data: 'valid', originTabId: 'tab-frame' }));
+    await bus.stop();
   });
 });
 

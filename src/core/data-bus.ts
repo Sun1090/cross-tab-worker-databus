@@ -348,6 +348,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // own broadcastEvent call, which always posts a DataBusMessage.
         onEvent: (eventType, payload, _sourceWorkerId, originTabId) => {
           if (eventType !== PUBLICATION_EVENT) return;
+          // EVENT is a same-origin coordination boundary shared with older and
+          // newer SDK versions. Ignore frames that do not carry the minimum
+          // publication shape instead of letting a malformed peer throw from
+          // the channel listener and break subsequent EVENT delivery.
+          if (
+            typeof payload !== 'object' ||
+            payload === null ||
+            typeof (payload as { topic?: unknown }).topic !== 'string'
+          ) return;
           const incoming = payload as DataBusMessage<TData>;
           // Prefer the originTabId the sender stamped; only fall back to the
           // broadcast cluster tabId when the older cluster version is in use.
