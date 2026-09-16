@@ -3,7 +3,8 @@ import { WorkerClusterRuntime } from '../src/core/cluster';
 import { approximatePayloadBytes } from '../src/core/routing';
 import type { WorkerControlAction, WorkerRecord } from '../src/core/types';
 import type { WorkerClusterMessage } from '../src/core/types';
-import { CLUSTER_MESSAGE_TYPE } from '../src/utils/constants';
+import { createOpaqueKey } from '../src/core/hash';
+import { CLUSTER_MESSAGE_TYPE, DEFAULT_STORAGE_PREFIX } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -48,6 +49,69 @@ describe('WorkerClusterRuntime', () => {
     expect(runtimeB.isAssigned('market.tick.BTCUSDT')).toBe(true);
     expect(controlB).toHaveBeenCalledWith('SUBSCRIBE', 'market.tick.BTCUSDT', undefined);
     expect(runtimeB.getSnapshot().workers.map(worker => worker.workerId)).toEqual(['worker-b']);
+  });
+
+  it('isolates storage keys and channels between different clusterKeys', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envAlpha = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'alpha' });
+    const envBeta = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'beta' });
+    const controlAlpha = vi.fn();
+    const controlBeta = vi.fn();
+    const runtimeAlpha = new WorkerClusterRuntime({
+      clusterKey: 'tenant-alpha',
+      environment: envAlpha.environment,
+      tabId: 'tab-alpha',
+      workerId: 'worker-alpha',
+      handlers: { onControl: controlAlpha, onEvent: vi.fn() }
+    });
+    const runtimeBeta = new WorkerClusterRuntime({
+      clusterKey: 'tenant-beta',
+      environment: envBeta.environment,
+      tabId: 'tab-beta',
+      workerId: 'worker-beta',
+      handlers: { onControl: controlBeta, onEvent: vi.fn() }
+    });
+
+    runtimeAlpha.start();
+    now += 1;
+    runtimeBeta.start();
+    runtimeAlpha.subscribe('shared-topic');
+    await Promise.resolve();
+    runtimeBeta.subscribe('shared-topic');
+    await Promise.resolve();
+
+    // Both tenants own the same topic inside their own cluster: the control
+    // plane never crosses the cluster-key boundary, so neither tenant's
+    // subscribe is handed off to the other tenant's worker.
+    expect(runtimeAlpha.isAssigned('shared-topic')).toBe(true);
+    expect(runtimeBeta.isAssigned('shared-topic')).toBe(true);
+    expect(controlAlpha).toHaveBeenCalledWith('SUBSCRIBE', 'shared-topic', undefined);
+    expect(controlBeta).toHaveBeenCalledWith('SUBSCRIBE', 'shared-topic', undefined);
+    expect(runtimeAlpha.getSnapshot().workers.map(worker => worker.workerId)).toEqual(['worker-alpha']);
+    expect(runtimeBeta.getSnapshot().workers.map(worker => worker.workerId)).toEqual(['worker-beta']);
+
+    // A publish on one tenant stays local: it never surfaces on the other
+    // tenant's control plane.
+    controlBeta.mockClear();
+    expect(runtimeAlpha.publish('shared-topic', { value: 1 })).toBe(true);
+    expect(controlAlpha).toHaveBeenLastCalledWith('PUBLISH', 'shared-topic', { value: 1 });
+    expect(controlBeta).not.toHaveBeenCalled();
+
+    // Storage keys are namespaced by the opaque cluster hash, never overlap
+    // between tenants, and never expose the plaintext cluster identifier.
+    const alphaBase = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('tenant-alpha')}`;
+    const betaBase = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('tenant-beta')}`;
+    expect(alphaBase).not.toBe(betaBase);
+    const keys = storage.entries().map(([key]) => key);
+    const alphaKeys = keys.filter(key => key.startsWith(alphaBase));
+    const betaKeys = keys.filter(key => key.startsWith(betaBase));
+    expect(alphaKeys.length).toBeGreaterThan(0);
+    expect(betaKeys.length).toBeGreaterThan(0);
+    expect(alphaKeys.filter(key => betaKeys.includes(key))).toEqual([]);
+    expect(keys.every(key => key.startsWith(alphaBase) || key.startsWith(betaBase))).toBe(true);
+    expect(keys.some(key => key.includes('tenant-alpha') || key.includes('tenant-beta'))).toBe(false);
   });
 
   it('publishes through the synchronous local assignment without rereading storage', async () => {

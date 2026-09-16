@@ -1,7 +1,21 @@
+## 0.20.92 cluster-key isolation regression (2026-09-16)
+
+- 状态：实现与定向验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/cluster-key-isolation-regression` ← `origin/main@5b589ed`。
+- 覆盖缺口：AGENTS.md 与架构文档承诺不同 `clusterKey` 使用完全隔离的 storage 与 BroadcastChannel 命名空间，但此前没有专门回归同时证明「同 topic 可独立归属」「publication 不跨界」「持久化 key 使用不同 opaque hash 且不含明文」。
+- 变更：新增 `tests/cluster.test.ts` 双 runtime 回归，共享 `MemoryStorage` 与 `ChannelHub`，分别以 `tenant-alpha` / `tenant-beta` 启动并订阅同一 topic。断言两边各自拥有该 topic、snapshot 只包含本租户 worker、alpha 的 `publish()` 只到达 alpha 的 control handler，以及所有 storage key 分别位于两个不同的 `createOpaqueKey` 命名空间下且不泄露明文 clusterKey。
+- 变更文件：`tests/cluster.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- Mutation check：临时把 beta runtime 的 `clusterKey` 改成 `tenant-alpha` 后，新回归因 beta 不再独立拥有 `shared-topic` 稳定失败；恢复后定向 `tests/cluster.test.ts tests/data-bus.test.ts` 238/238 通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/cluster.test.ts tests/data-bus.test.ts`（238/238）通过；`pnpm check`（35 files，763/763）、`pnpm lint`、`pnpm test:coverage`（35 files，763/763；statements 97.73% / branches 93.88% / functions 98% / lines 99%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅新增测试与文档，不改 runtime、public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：完成完整门禁后提交、推送并创建 PR；随后继续审计无专门回归覆盖的安全与隔离不变量。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 pending demand recovery after failed automatic attempt (2026-09-16)
 
-- 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-pending-demand-recovery` ← `origin/main@a2e91c1`。
+- 状态：已合并（PR #74，rebase merge 至 `main@5b589ed`）。
+- 分支 / PR / 合并：`feat/data-bus-pending-demand-recovery` ← `origin/main@a2e91c1`；PR #74，合并提交 `5b589ed`（`fix(data-bus): drain operations parked when automatic recovery fails`）。
 - 复现场景：transport 运行期报 `error` 后进入自动恢复 cooldown，一个 `publish()` 到达并停在 `recoveryGate`。当随后的自动恢复尝试失败时，`allowDemandRecovery()` 仅把 `recoveryDemandAllowed` 置为 true 并保持 gate 关闭，但已经停靠的 waiter 本身不会被唤醒，也不会有任何后续操作替它触发 demand reopen。该操作因此永久滞留、既不发送也不报错，除非之后恰好又有一次无关的 transport 操作到来。
 - 修复：新增 `recoveryWaiters` 计数跟踪停靠在 gate 上的操作，并抽出 `startDemandRecovery()` 作为唯一的一次性 demand reopen 入口。自动尝试失败时调用 `allowDemandRecovery(true)`：若仍有 waiter 停靠，立即发起一次 demand reopen，使已发出的操作自身成为 demand，而不是等待未来某个无关操作。demand reopen 自身失败时以 `allowDemandRecovery()`（`kickParkedWaiters=false`）重新武装 flag，避免在自身失败上自循环，仍保留「后续操作再试一次」的既有契约。成功时 gate 释放，全部 waiter 按 FIFO 顺序 flush。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
@@ -10,7 +24,7 @@
 - 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（236/236）通过；完整验证见下方门禁清单。
 - 阻塞：无。
 - 风险 / 回滚：仅新增内部 waiter 计数与一次性 demand reopen helper，不改 public API、worker protocol、存储 schema/key 或线协议；既有 `allowDemandRecovery()`/`runTransport()` 行为与超时/耗尽/挂起释放契约保持。回滚 = revert 本任务提交。
-- 下一项：提交、推送并创建 PR，等待全部门禁后合并；随后继续审计 recovery gate 与 queued-start/pending-stop 的剩余可执行边界。
+- 下一项：继续审计 recovery gate 与 queued-start/pending-stop 的剩余可执行边界。
 - 更新时间：2026-09-16。
 
 ## 0.20.92 re-entrant RESUME lifecycle cancellation (2026-09-16)
