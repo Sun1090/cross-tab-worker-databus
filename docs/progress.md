@@ -1,6 +1,20 @@
-## 0.20.91 EVENT boundary hardening (2026-09-16)
+## 0.20.91 queued transport-operation rejection audit (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-run-transport-rejection-audit` ← `origin/main@0344246`。
+- 审计目标：验证启动期间排队的 transport 操作（`subscribe()` 在 initial open 尚未 settle 时进入 `runTransport()`）在放行后 reject 时，是否只通过 `onError` 上报一次、是否产生 unhandled rejection，以及失败后监听器/生命周期是否仍可正常停止。
+- 结论 / 加固：生产 `runTransport()` 的 `.then(operation, swallow-open-rejection).catch(reportError)` 链路正确；无需修改运行时。新增回归固定“排队操作 reject 恰好上报一次、且没有 `unhandledRejection`”的契约，并让 `data-bus.ts` 的排队操作失败分支获得覆盖。
+- 变更文件：`tests/data-bus.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `reports a queued operation rejection once without an unhandled rejection`。测试使用带 gate 的 `start()` 和 reject 的 `subscribe()`，确认操作直到 start 放行前不会写入 transport，放行后错误恰好到达 `onError` 一次，并显式监听 `process.on('unhandledRejection')` 确认没有逃逸拒绝。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（228/228）通过；`pnpm check`（35 files，753/753）、`pnpm lint`、`pnpm test:coverage`（35 files，753/753；statements 97.8% / branches 93.89% / functions 97.98% / lines 99.03%；`data-bus.ts` statements 97.43% / branches 94.75% / functions 94.87% / lines 98.6%，排队操作失败分支已覆盖）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改 runtime、public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 `data-bus.ts` 剩余未覆盖生命周期错误路径（`getQueuedStartReady()` 无 queued start、`reopenTransport()` chaining/settlement、`createStopPromise()` 拒绝收口等），优先补协议/生命周期竞态而不是不可达的类型防御分支。
+- 更新时间：2026-09-16。
+
+## 0.20.91 EVENT boundary hardening (2026-09-16)
+
+- 状态：已完成并合并（GitHub PR #65，rebase merge 后 main 为 `0344246`）。
 - 分支 / 基线：`feat/data-bus-event-start-audit` ← `origin/main@7e69ae1`。
 - 审计目标：验证 `CrossTabDataBus` 的跨 Tab `EVENT` 公共协调边界，覆盖未知事件类型、旧版 `originTabId` 回退、payload 归属优先级，以及畸形 publication 负载是否会影响后续投递。
 - 结论 / 修复：发现真实健壮性缺陷——同源 peer 发送 `EVENT/publication` 且 payload 为 `null` 时，`onEvent` 读取 `originTabId` 抛出 `TypeError` 并击穿 BroadcastChannel 监听器。现在边界只接受对象且带字符串 `topic` 的 publication payload；未知 `eventType` 与畸形 payload 均静默忽略，后续合法事件仍可投递。旧帧缺少 payload 级 `originTabId` 时继续继承帧级值，payload 自带归属优先。
