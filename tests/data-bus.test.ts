@@ -1121,6 +1121,76 @@ describe('CrossTabDataBus', () => {
     vi.useRealTimers();
   });
 
+  it('retries an operation that was already queued when automatic recovery fails', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'queued-demand' });
+    const transport = new FakeTransport<number>();
+    const originalStart = transport.start.bind(transport);
+    transport.start = (config, handlers) => {
+      // Initial start succeeds, the scheduled automatic recovery fails, and
+      // the queued operation's demand recovery succeeds immediately.
+      transport.startShouldFail = transport.startCalls === 1;
+      return originalStart(config, handlers);
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-demand',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 3 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // This operation arrives during the automatic cooldown. The automatic
+    // attempt fails; the operation must still drive one demand recovery rather
+    // than waiting forever for some unrelated future operation.
+    transport.setStatus(WORKER_STATUS.ERROR);
+    bus.publish('topic', 7);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(transport.startCalls).toBe(3);
+    expect(transport.publishCalls).toHaveLength(1);
+    expect(transport.publishCalls[0]).toMatchObject({ topic: 'topic', data: 7 });
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('issues a single demand reopen for multiple operations parked behind a failed automatic attempt', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'queued-demand-batch' });
+    const transport = new FakeTransport<number>();
+    const originalStart = transport.start.bind(transport);
+    transport.start = (config, handlers) => {
+      // Only the scheduled automatic attempt (the second start) fails; the one
+      // demand reopen then succeeds for every parked operation.
+      transport.startShouldFail = transport.startCalls === 1;
+      return originalStart(config, handlers);
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-demand-batch',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 3 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // Three operations arrive during the automatic cooldown and park together.
+    transport.setStatus(WORKER_STATUS.ERROR);
+    bus.publish('topic', 1);
+    bus.publish('topic', 2);
+    bus.publish('topic', 3);
+    await vi.advanceTimersByTimeAsync(500);
+
+    // One reopen drains all three parked operations — not one reopen each.
+    expect(transport.startCalls).toBe(3);
+    expect(transport.publishCalls.map(call => call.data)).toEqual([1, 2, 3]);
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
   it('does not auto-reopen a cleanly disconnected transport', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'clean-disconnect' });

@@ -246,6 +246,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // gate still stays closed so the operation cannot reach the failed
   // transport; it is released by the successful on-demand reopen.
   private recoveryDemandAllowed = false;
+  // Number of transport operations currently parked behind `recoveryGate`.
+  // When an automatic attempt fails, these already-parked operations are
+  // themselves demand: the failure path starts an on-demand reopen instead of
+  // stranding them until some unrelated future operation arrives.
+  private recoveryWaiters = 0;
   /** Monotonic generation incremented on every successful transport open.
    * Stays in lockstep with `lastSuccessAt` so callers can detect that the
    * transport has been reopened even if the timestamp window is short. */
@@ -576,8 +581,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /** Keep the recovery gate closed after a failed attempt while allowing the
    * next explicit transport operation to start an immediate on-demand reopen.
-   * If no gate/successor retry remains, release any waiters. */
-  private allowDemandRecovery(): void {
+   * If no gate/successor retry remains, release any waiters.
+   *
+   * `kickParkedWaiters` is set only when the failure is an automatic attempt: an
+   * operation that was already parked on the gate is itself demand, so it must
+   * not wait for some unrelated future operation. A failed *on-demand* reopen
+   * passes `false`, so it re-arms the flag for a later operation instead of
+   * looping on its own failure. */
+  private allowDemandRecovery(kickParkedWaiters = false): void {
     if (
       this.recoveryGate !== null &&
       this.started &&
@@ -586,9 +597,24 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.status === WORKER_STATUS.ERROR
     ) {
       this.recoveryDemandAllowed = true;
+      if (kickParkedWaiters && this.recoveryWaiters > 0) this.startDemandRecovery();
       return;
     }
     this.releaseRecoveryGate();
+  }
+
+  /** Start one on-demand reopen if a failed attempt has left parked operations
+   * and enabled demand recovery. Consumes the demand token so at most one
+   * reopen is issued; every waiter stays behind the gate until it succeeds. */
+  private startDemandRecovery(): void {
+    if (!this.recoveryDemandAllowed) return;
+    if (this.status !== WORKER_STATUS.ERROR || this.suspended || this.stopping) return;
+    this.recoveryDemandAllowed = false;
+    const opening = this.reopenTransport();
+    void opening.then(
+      () => this.releaseRecoveryGate(),
+      () => this.allowDemandRecovery()
+    );
   }
 
   /** Reset failure and recovery diagnostics for a new explicit start session. */
@@ -1280,7 +1306,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           const opening = this.reopenTransport(attempt);
           void opening.then(
             () => this.releaseRecoveryGate(),
-            () => this.allowDemandRecovery()
+            // Operations already parked on the gate are demand: run one
+            // on-demand reopen now instead of waiting for an unrelated event.
+            () => this.allowDemandRecovery(true)
           );
         }, this.recoveryCooldownMs);
       }
@@ -1544,19 +1572,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // until that attempt settles instead of writing it to the connection that
     // just reported `error`.
     if (this.recoveryGate && !this.stopping) {
+      const gate = this.recoveryGate;
       // A failed automatic attempt leaves the gate closed but enables explicit
       // demand recovery. The first transport operation starts that reopen once;
       // every waiter remains queued behind the gate and runs after success.
-      if (this.recoveryDemandAllowed && this.status === WORKER_STATUS.ERROR && !this.suspended) {
-        this.recoveryDemandAllowed = false;
-        const opening = this.reopenTransport();
-        void opening.then(
-          () => this.releaseRecoveryGate(),
-          () => this.allowDemandRecovery()
-        );
-      }
-      const gate = this.recoveryGate;
+      this.startDemandRecovery();
+      this.recoveryWaiters += 1;
       void gate.then(() => {
+        this.recoveryWaiters -= 1;
         if (this.stopping || this.suspended) return;
         this.runTransport(operation);
       });
