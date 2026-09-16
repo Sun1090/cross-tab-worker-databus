@@ -1,7 +1,22 @@
-## 0.20.92 re-entrant stop teardown sharing (2026-09-16)
+## 0.20.92 re-entrant START lifecycle ownership (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-reopen-predecessor-rejection` ← `origin/main@d8c51ed`。
+- 分支 / 基线：`feat/data-bus-reentrant-start` ← `origin/main@3f9a81e`。
+- 复现场景：trace sink 收到同步 START lifecycle 事件后立即调用 `stop()`；旧实现此时 `startPromise` 与 lifecycle epoch 尚未安装，因此 stop 完成 teardown 后，外层 start 仍继续启动 dedup/replay/cluster，并让 transport 重新进入 `connected`。最终健康摘要同时报告 `state: 'stopped'` 与 `transport.ready: true`。
+- 修复：在发出 START trace 前先递增 lifecycle epoch、创建 epoch-guarded opening 并安装 `startPromise`；START、CONNECTING status、`cluster.start()` 与 topic replay 前后都检查当前 lifecycle。同步回调一旦触发 stop/suspend，外层 start 立即停止后续资源启动，旧 opening 在 epoch guard 处被放弃，transport 从未调用 `start()`。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `lets a stop() re-entered from the START trace own a fresh lifecycle` 与 `lets a stop() from the CONNECTING status callback cancel the rest of start`。两者都断言 stop 胜出、transport 从未 start、最终健康为 stopped 且 transport 未 ready，并验证之后仍可干净重启。
+- Mutation check：在修复前运行新增测试，因 `transport.startCalls` 为 1 而失败；应用生命周期顺序修复后通过。
+- 验证命令与结果：`pnpm check`（35 files，757/757）、`pnpm lint`、`pnpm typecheck`、`pnpm test:coverage`（35 files，757/757；statements 97.78% / branches 93.89% / functions 98.17% / lines 98.99%；`data-bus.ts` statements 97.31% / branches 94.71% / functions 95.79% / lines 98.43%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整 `start()` 内部生命周期锁与同步回调之间的顺序，不改 public API、worker protocol、存储 schema/key 或线协议。若发现 trace/status 顺序或启动回归，回滚 = revert 本任务提交。
+- 下一项：完成覆盖率、文档/工作流守卫与浏览器 E2E，随后提交、推送、创建 PR 并等待全部门禁。
+- 更新时间：2026-09-16。
+
+## 0.20.92 re-entrant stop teardown sharing (2026-09-16)
+
+- 状态：已合并（PR #70，rebase merge 至 `main@3f9a81e`）；主分支 CI #35046227249 与 CodeQL #35046227256 全绿。
+- 分支 / PR / 合并：`feat/data-bus-reopen-predecessor-rejection` ← `origin/main@d8c51ed`；PR #70。
 - 审计目标：验证 explicit `stop()` 期间同步可观测的 trace 回调（STOP lifecycle event）在 `stopPromise` 安装前重入 `stop()` 时，是否会启动第二次 teardown。
 - 结论 / 加固：确认为真实缺陷。此前的 `stop()` 先调用 `performStop()` 再赋值 `this.stopPromise`，而 `performStop()` 体内的同步前奏会同步抛出 STOP trace event；trace sink 若在此同步重入 `stop()`，重入调用看到 `stopPromise === null`，于是开始第二次 teardown（`transport.stop()` 被调用两次）。修复方式：把同步前奏抽到 `beginStop()`，在 `stop()` 内先安装一个 deferred 共享 gate（`stopPromise = stopGate`），再执行 `beginStop()` 与 `performStop()`；重入调用现在看到 `stopping && stopPromise`，共享同一个 teardown，`stopGate` 以真实 teardown promise 结算。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
@@ -25,7 +40,7 @@
 - 发布后 smoke test：`npm view cross-tab-worker-databus version` 返回 `0.20.91`；registry integrity 为 `sha512-Rx4tSFVjpVYVCGjzKlClje2O8ZxruOqgKGU5nDpmtH3n4sNWlXs7m8qly8/L66d9ncMfW+jpLrZdQ1trq5ZHcQ==`；`PUBLISHED_VERSION=0.20.91 pnpm verify:published` 验证已发布 ESM/CJS root 与 public subpath 消费者可导入。
 - 阻塞：无。
 - 风险 / 回滚：若 0.20.91 发现回归，停止传播、保留 immutable tag，按 patch release 修复；不删除或重写已发布版本。运行时可回退到 `v0.20.90` 或上一兼容版本，存储 schema/key 与 worker protocol 未发生变化。
-- 下一项：进入 `0.20.92` 可靠性开发线，覆盖 `reopenTransport()` predecessor rejection/settlement、queued-start readiness 与 stop-promise cleanup 等剩余生命周期错误路径。
+- 下一项：已由 `0.20.92 re-entrant START lifecycle ownership` 接续，继续覆盖同步可观测回调与 start/stop 锁之间的重入边界。
 - 更新时间：2026-09-16。
 
 ## 0.20.91 superseded start/stop rejection ownership (2026-09-16)

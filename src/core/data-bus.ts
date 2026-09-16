@@ -441,15 +441,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // A fresh start begins a new failure ledger so health consumers correlate
     // failures with the current session, not the previous one.
     this.resetFailureState();
-    this.trace.start();
-    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
-    this.startDedupSweep();
-    this.replayManager.start();
-    this.updateStatus(WORKER_STATUS.CONNECTING);
-    this.cluster.start();
-    // Establish the opening before replaying topicHandlers: cluster.subscribe()
-    // can synchronously invoke onControl for self-owned topics, and those
-    // callbacks would otherwise see startPromise=null and open a second transport.
+    // Establish lifecycle ownership before emitting START: a synchronous trace
+    // sink can call stop() re-entrantly, and that stop must invalidate this
+    // opening before transport.start() is reached. Installing startPromise
+    // first also keeps cluster.subscribe() callbacks from opening a second
+    // transport while this start is still in progress.
     const lifecycleEpoch = ++this.lifecycleEpoch;
     const opening = this.openTransport(
       config,
@@ -458,12 +454,30 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       lifecycleEpoch
     );
     this.startPromise = opening;
+
+    this.trace.start();
+    this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.START });
+    // A re-entrant stop() or suspend() owns the newest lifecycle now. Do not
+    // continue starting timers/cluster resources after it has torn them down.
+    if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) return opening;
+
+    this.startDedupSweep();
+    this.replayManager.start();
+    this.updateStatus(WORKER_STATUS.CONNECTING);
+    // Status handlers and trace sinks run synchronously from updateStatus().
+    if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) return opening;
+
+    this.cluster.start();
+    if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) return opening;
     // Replay subscriptions that were registered before start() or that were lost
     // during a previous failure recovery. The cluster.stop() call in the failure
     // path clears subscribedTopics, but topicHandlers retains the intent.
     // Iterating topicHandlers (not transportSubscribedTopics) because the
     // transport hasn't subscribed to anything yet on a fresh start.
     for (const topic of this.topicHandlers.keys()) {
+      // cluster.subscribe() can synchronously invoke onControl for a
+      // self-owned topic, so a callback may supersede this lifecycle.
+      if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) break;
       this.cluster.subscribe(topic);
     }
     // Once startup settles (success or failure), clear the pending gate so a

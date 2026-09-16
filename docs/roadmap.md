@@ -4,7 +4,7 @@
 
 ## 0.20.92 in progress
 
-The current line continues lifecycle error-path verification around predecessor reopen settlement, queued-start readiness, and stop-promise cleanup. The first landed fix closes a real re-entrancy hole in `stop()`: the shared stop gate is now installed before the synchronous teardown prelude, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the one teardown instead of starting a second one (previously `transport.stop()` ran twice). The synchronous prelude still flips every lifecycle flag and releases handlers in the same tick, and `stop()` keeps resolving even when the transport stop rejects.
+The current line continues lifecycle error-path verification around predecessor reopen settlement, queued-start readiness, and stop-promise cleanup. Two re-entrancy fixes have now landed. First, the shared stop gate is installed before the synchronous teardown prelude, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the one teardown instead of running `transport.stop()` twice. Second, lifecycle ownership and `startPromise` are installed before the synchronous START trace: if a trace or status callback re-enters `stop()`, the outer `start()` immediately stops later timer, cluster, and topic setup; the epoch guard abandons the old opening before `transport.start()`. Previously the stop settled but the outer start continued, leaving a stopped bus with a live connected transport.
 
 ## 0.20.91 delivered scope
 
