@@ -1,7 +1,7 @@
 ## 0.20.92 cluster-key isolation regression (2026-09-16)
 
-- 状态：实现与定向验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/cluster-key-isolation-regression` ← `origin/main@5b589ed`。
+- 状态：已合并（PR #75，rebase merge 至 `main@0d705e7`）。
+- 分支 / PR / 合并：`feat/cluster-key-isolation-regression` ← `origin/main@5b589ed`；PR #75，合并提交 `0d705e7`（`test(cluster): pin cluster-key isolation`）。
 - 覆盖缺口：AGENTS.md 与架构文档承诺不同 `clusterKey` 使用完全隔离的 storage 与 BroadcastChannel 命名空间，但此前没有专门回归同时证明「同 topic 可独立归属」「publication 不跨界」「持久化 key 使用不同 opaque hash 且不含明文」。
 - 变更：新增 `tests/cluster.test.ts` 双 runtime 回归，共享 `MemoryStorage` 与 `ChannelHub`，分别以 `tenant-alpha` / `tenant-beta` 启动并订阅同一 topic。断言两边各自拥有该 topic、snapshot 只包含本租户 worker、alpha 的 `publish()` 只到达 alpha 的 control handler，以及所有 storage key 分别位于两个不同的 `createOpaqueKey` 命名空间下且不泄露明文 clusterKey。
 - 变更文件：`tests/cluster.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
@@ -9,7 +9,7 @@
 - 验证命令与结果：定向 `pnpm exec vitest run tests/cluster.test.ts tests/data-bus.test.ts`（238/238）通过；`pnpm check`（35 files，763/763）、`pnpm lint`、`pnpm test:coverage`（35 files，763/763；statements 97.73% / branches 93.88% / functions 98% / lines 99%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
 - 阻塞：无。
 - 风险 / 回滚：仅新增测试与文档，不改 runtime、public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
-- 下一项：完成完整门禁后提交、推送并创建 PR；随后继续审计无专门回归覆盖的安全与隔离不变量。
+- 下一项：继续审计持续增长中的持久化清理生命周期，优先处理 suspend/resume 边界。
 - 更新时间：2026-09-16。
 
 ## 0.20.92 pending demand recovery after failed automatic attempt (2026-09-16)
