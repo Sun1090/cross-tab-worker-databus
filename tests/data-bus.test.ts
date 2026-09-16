@@ -1191,6 +1191,44 @@ describe('CrossTabDataBus', () => {
     vi.useRealTimers();
   });
 
+  it('drops a parked recovery operation when pagehide and an immediate explicit start supersede it', async () => {
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'parked-recovery-cancel'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'parked-recovery-cancel',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 1_000, maxAttempts: 5 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.subscribeCalls).toEqual(['topic']);
+
+    // This subscribe parks behind the recovery gate rather than reaching the
+    // failed transport. pagehide cancels recovery; the explicit start below
+    // clears `suspended` before the gate's continuation microtask runs.
+    transport.setStatus(WORKER_STATUS.ERROR);
+    bus.subscribe('topic-2', vi.fn());
+    expect(transport.subscribeCalls).toEqual(['topic']);
+    const callsBeforeReconnect = transport.subscribeCalls.length;
+
+    environment.pageHide();
+    await bus.start({});
+    await bus.ready();
+
+    // Resuming must subscribe each assigned topic once for the new connection.
+    // A canceled recovery waiter must not replay a second copy afterward.
+    const reconnectCalls = transport.subscribeCalls.slice(callsBeforeReconnect);
+    expect(reconnectCalls.filter(topic => topic === 'topic')).toHaveLength(1);
+    expect(reconnectCalls.filter(topic => topic === 'topic-2')).toHaveLength(1);
+    await bus.stop();
+  });
+
   it('does not auto-reopen a cleanly disconnected transport', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'clean-disconnect' });

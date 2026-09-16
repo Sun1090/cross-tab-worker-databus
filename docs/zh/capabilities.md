@@ -48,6 +48,7 @@
 | 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 丢弃整个待写批次）；已清或已停止会话的历史不会被进行中的 flush 重新追加 |
 | 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）而不阻塞其他排队键；队列清空或 `clear()` 取消后退避重置 |
 | 传输恢复预算 | 生命周期 | 自动恢复由冷却间隔节流、以 `recovery.maxAttempts` 为界，预算耗尽时报 `exhausted`；成功重开后重置尝试计数与 exhausted，断线传输上的显式 `subscribe` 仍可手动恢复 |
+| 恢复 waiter 失效 | 生命周期 | 停靠在 transport recovery gate 上的操作会捕获恢复取消 generation；`stop()` / 页面隐藏会使其失效，因此紧随其后的显式 `start()` 在 replacement transport 重建订阅后，不会再执行过期操作造成重复订阅 |
 | BFCache 挂起 | 生命周期 | 隐藏页面停掉传输并静默取消进行中的持久化重试；pageshow 重开传输并每个周期恰好一次重建订阅 |
 | 交接通道关闭顺序 | 协调 | `pause()` 将物理 `channel.close()` 推迟一个任务，确保排队中的交接帧（含 `ROUTE_RELEASED`）先冲刷再关闭 |
 | 丢失与恢复矩阵 | 协调 | 每条协调消息都有有界的恢复路径（未确认 SUBSCRIBE 的重发、REGISTRY 催促、丢失 ACK 的 TTL 清理 + 重新选举）；传输断线窗口内丢失的发布是唯一有文档佐证的不恢复损失 |

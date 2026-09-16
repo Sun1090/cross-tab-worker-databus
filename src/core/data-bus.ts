@@ -241,6 +241,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private recoveryGateRelease: (() => void) | null = null;
   private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private recoveryTimerToken = 0;
+  // Invalidates operations parked on the recovery gate when a hide/stop
+  // supersedes the recovery cycle. Their microtask may run after an immediate
+  // explicit start has cleared `suspended`, so a state check alone is not
+  // enough to keep stale work from reaching the replacement transport.
+  private recoveryCancellationToken = 0;
   // Once an automatic attempt fails, an explicit transport operation may
   // recover immediately instead of waiting for the next paced attempt. The
   // gate still stays closed so the operation cannot reach the failed
@@ -570,8 +575,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Cancel a pending automatic retry when an explicit lifecycle transition
    * supersedes it. The released gate re-enters runTransport(), which then
    * follows the newest start/stop/suspend intent. */
-  private cancelScheduledRecovery(): void {
+  private cancelScheduledRecovery(invalidateParkedOperations = false): void {
     this.recoveryTimerToken += 1;
+    if (invalidateParkedOperations) this.recoveryCancellationToken += 1;
     if (this.recoveryTimer !== null) {
       clearTimeout(this.recoveryTimer);
       this.recoveryTimer = null;
@@ -1143,7 +1149,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private beginStop(): void {
     this.lifecycleEpoch += 1;
     this.stopping = true;
-    this.cancelScheduledRecovery();
+    this.cancelScheduledRecovery(true);
     this.replayManager.suspend();
     this.trace.event({ type: TRACE_EVENT_TYPE.LIFECYCLE, action: TRACE_LIFECYCLE_ACTION.STOP });
     this.trace.stop();
@@ -1450,7 +1456,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (this.stopping) return;
     const suspensionEpoch = ++this.lifecycleEpoch;
     this.suspended = true;
-    this.cancelScheduledRecovery();
+    this.cancelScheduledRecovery(true);
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
     this.updateStatus(WORKER_STATUS.DISCONNECTED);
@@ -1585,6 +1591,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // just reported `error`.
     if (this.recoveryGate && !this.stopping) {
       const gate = this.recoveryGate;
+      const cancellationToken = this.recoveryCancellationToken;
       // A failed automatic attempt leaves the gate closed but enables explicit
       // demand recovery. The first transport operation starts that reopen once;
       // every waiter remains queued behind the gate and runs after success.
@@ -1592,7 +1599,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.recoveryWaiters += 1;
       void gate.then(() => {
         this.recoveryWaiters -= 1;
-        if (this.stopping || this.suspended) return;
+        if (
+          this.stopping ||
+          this.suspended ||
+          cancellationToken !== this.recoveryCancellationToken
+        ) return;
         this.runTransport(operation);
       });
       return;

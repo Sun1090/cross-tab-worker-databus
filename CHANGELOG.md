@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- A transport operation parked behind the recovery gate is now invalidated when `stop()` / page-hide supersedes the recovery cycle. An immediate explicit `start()` can re-establish subscriptions on the replacement transport, but the stale waiter no longer replays its operation afterward, preventing a duplicate subscription from racing the restarted cluster.
 - A delayed or replayed `CONTROL/SUBSCRIBE` can no longer make a worker subscribe when the durable route does not currently name it, and it can no longer confirm a pending graceful handoff before the matching `ROUTE_RELEASED`. Ownership now follows the route record instead of control-frame arrival order, preventing transient double subscriptions when an earlier assignment round is overtaken by a newer one.
 - A restart queued behind an asynchronous `stop()` now stays suspended when `pagehide` lands during the stop cleanup. `WorkerClusterRuntime.start()` installs its lifecycle listeners before checking document visibility, so a hidden document waits for `pageshow` instead of opening a fresh transport in the background.
 - `ROUTE_RELEASED` handoff acknowledgements are now accepted only when their route generation exactly matches the stored route. A delayed or replayed ACK carrying a newer generation could previously confirm a different handoff and release the new owner's `SUBSCRIBE` before the matching release arrived.
@@ -16,6 +17,7 @@
 - `stop()` is now re-entrancy safe against a synchronous trace sink. The shared in-flight stop gate is installed before the teardown prelude runs, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the single teardown instead of starting a second one. Previously the nested call ran before `stopPromise` was assigned and invoked `transport.stop()` a second time. The teardown still takes effect in the same tick, concurrent and repeated `stop()` calls keep returning the same promise, and a rejecting transport stop still resolves `stop()` through `onError`.
 
 ### Tests
+- A parked-recovery cancellation regression covers page-hide followed by an immediate explicit `start()`: the replacement connection receives exactly one subscription for each assigned topic, and the stale recovery waiter cannot replay after that restart.
 - A route-generation guard regression proves a `ROUTE_RELEASED` carrying a newer generation than the current handoff cannot enter `assignedTopics`, trigger `SUBSCRIBE`, or stamp `confirmedAt`.
 - A delayed durable `load()` now has a direct replay ordering regression: a publication recorded while hydration is pending must remain newer than the loaded snapshot and survive a one-entry count cap.
 - Hydration lifecycle regressions now cover `clearAll()`, `clearTopic()`, topic unsubscribe, and `clearBefore()` racing a pending load, plus explicit stop/start and immediate suspend/start re-entry. The replacement load must win, stale results must stay out of the rings, and durable history must be restored after an explicit restart.
