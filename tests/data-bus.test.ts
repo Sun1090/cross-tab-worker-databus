@@ -2367,6 +2367,50 @@ describe('CrossTabDataBus', () => {
     expect(bus.getHealthSummary()).toMatchObject({ started: false, state: 'stopped' });
   });
 
+  it('keeps stop() successful when a superseded in-flight start rejects', async () => {
+    // stop() serialises behind an opening that has already called start().
+    // If that superseded opening rejects after stop owns the lifecycle, stop()
+    // must absorb the stale rejection, close the transport once, and leave the
+    // abandoned start failure on the caller's start() promise instead of the
+    // new lifecycle's error ledger.
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-superseded-start' });
+    let rejectStart!: (error: unknown) => void;
+    const startGate = new Promise<void>((_resolve, reject) => {
+      rejectStart = reject;
+    });
+    const start = vi.fn(() => startGate);
+    const stop = vi.fn(() => undefined);
+    const transport: DataBusTransport<object, number> = {
+      start,
+      stop,
+      subscribe: () => undefined,
+      unsubscribe: () => undefined,
+      publish: () => undefined
+    };
+    const errors: unknown[] = [];
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-superseded-start',
+      environment: environment.environment,
+      transport
+    });
+    bus.onError(error => errors.push(error));
+
+    const starting = bus.start({});
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+
+    const stopping = bus.stop();
+    // The stop has incremented the lifecycle epoch and is now waiting for the
+    // in-flight opening to settle.
+    rejectStart(new Error('superseded start boom'));
+
+    await expect(starting).rejects.toThrow('superseded start boom');
+    await expect(stopping).resolves.toBeUndefined();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([]);
+    expect(bus.getHealthSummary()).toMatchObject({ started: false, state: 'stopped' });
+  });
+
   it('contains a transport stop rejection during page-hide suspension and still resumes', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'suspend-stop-reject' });

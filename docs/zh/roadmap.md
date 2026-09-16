@@ -8,6 +8,7 @@
 DataBus 生命周期审计现在还固定了 failed-reopen 的 stop gate 复用、被取代 initial open 的迟到 rejection 隔离、已退休 transport 迟到的 message/status/error 回调 generation 隔离，以及就绪/恢复契约（`stop()` 后迟到的 `pageshow` 不得重启后台工作、自动恢复再次失败必须通过 `ready()` 暴露、被取消的排队启动不得满足替代重启、排队重启在可用前被挂起必须让 `ready()` reject、旧 recovery timer 不得重开 transport）。本轮审计还发现并修复了一处真实定时器泄漏：`WorkerClusterRuntime.pause()` 在无 channel 时不再排定延迟 `channel.close()`。mutation check 已确认移除对应守卫时每条回归都会失败。本阶段还覆盖 failed-open 后 stop gate 复用、pagehide stop rejection 恢复、replay handler 分发隔离，以及 in-flight recovery reopen 复用；重开守卫已有 mutation 覆盖。
 
 排队 transport 操作审计还固定了：在 initial open 尚未完成时排队的 `subscribe()`，其 rejection 必须恰好通过 `onError` 上报一次且不得成为 unhandled rejection；start gate 放行前不得触碰仍在 opening 的 transport。
+DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 取代后、teardown 等待期间才 reject 的 rejection ownership：原 `start()` 调用方看到自己的失败，`stop()` 仍成功，transport 恰好关闭一次，旧失败不会进入新 lifecycle 的 error ledger。
 跨 Tab `EVENT` 边界现在会拒绝不是对象、或缺少字符串 `topic` 的 publication payload，因此一条畸形的同源帧不会再从 BroadcastChannel 监听器抛出并破坏后续投递。未知事件类型保持前向兼容；旧版 payload 会继承帧级 `originTabId`，payload 自带归属优先，两项行为均有回归固定。
 
 ## 0.20.90 已完成范围
