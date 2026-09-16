@@ -350,10 +350,12 @@ export class WorkerClusterRuntime {
     // unconfirmed route on a loaded runner. Letting the queued frames flush
     // first keeps the strict handoff live; on a frozen BFCache page the task
     // simply never runs and the channel object is garbage-collected with it.
-    if (typeof globalThis.setTimeout === 'function') {
-      globalThis.setTimeout(() => channel?.close(), 0);
-    } else {
-      channel?.close();
+    if (channel) {
+      if (typeof globalThis.setTimeout === 'function') {
+        globalThis.setTimeout(() => channel.close(), 0);
+      } else {
+        channel.close();
+      }
     }
   }
 
