@@ -1191,6 +1191,38 @@ describe('CrossTabDataBus', () => {
     vi.useRealTimers();
   });
 
+  it('preserves operations parked on a recovery gate when an explicit start supersedes the automatic attempt', async () => {
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'manual-start-parked' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'manual-start-parked',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500, maxAttempts: 3 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // The operation parks during the automatic cooldown. An explicit start
+    // supersedes that timer, but if the explicit attempt also fails the parked
+    // operation must remain queued for the next automatic attempt instead of
+    // being silently dropped with the superseded opening.
+    transport.startShouldFail = true;
+    transport.setStatus(WORKER_STATUS.ERROR);
+    bus.publish('topic', 7);
+    await expect(bus.start({})).rejects.toThrow('Transport failed during startup.');
+    expect(transport.publishCalls).toEqual([]);
+
+    transport.startShouldFail = false;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(transport.publishCalls).toHaveLength(1);
+    expect(transport.publishCalls[0]).toMatchObject({ topic: 'topic', data: 7 });
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
   it('drops a parked recovery operation when pagehide and an immediate explicit start supersede it', async () => {
     const environment = createFakeEnvironment({
       storage: new MemoryStorage(),
