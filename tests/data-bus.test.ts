@@ -2343,6 +2343,127 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('stops once when an explicit stop follows a failed-open cleanup', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stop-after-failed-open' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'stop-after-failed-open',
+      environment: environment.environment,
+      transport
+    });
+
+    await expect(bus.start({})).rejects.toThrow('Transport failed during startup.');
+    // The failed open already ran transport.stop(); that cleanup stays the
+    // single shared stop gate.
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    await bus.stop();
+
+    // stop() must settle through the existing gate instead of issuing a
+    // second, redundant transport.stop().
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({ started: false, state: 'stopped' });
+  });
+
+  it('contains a transport stop rejection during page-hide suspension and still resumes', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'suspend-stop-reject' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'suspend-stop-reject',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    transport.stopShouldFail = true;
+    environment.pageHide();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+
+    // A rejecting page-hide stop is reported rather than thrown, and the bus
+    // still ends up in a clean suspended state.
+    await vi.waitFor(() =>
+      expect(errors.map(error => String(error)).some(message => message.includes('transport stop failed'))).toBe(true)
+    );
+    await expect(bus.ready()).rejects.toThrow(/suspended/i);
+
+    // Resume must open a fresh transport even though the suspend stop failed.
+    transport.stopShouldFail = false;
+    environment.pageShow();
+    await bus.ready();
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getStatus()).toBe('connected');
+    await bus.stop();
+  });
+
+  it('reuses an in-flight recovery reopen instead of opening a second transport', async () => {
+    vi.useFakeTimers();
+    let now = 1_000;
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => now, randomId: 'reopen-reuse' });
+    let startCalls = 0;
+    let handlers: DataBusTransportHandlers<number> | null = null;
+    let releaseReopen!: () => void;
+    const reopenGate = new Promise<void>(resolve => {
+      releaseReopen = resolve;
+    });
+    const transport: DataBusTransport<object, number> = {
+      start(_config, nextHandlers) {
+        startCalls += 1;
+        handlers = nextHandlers;
+        if (startCalls === 1) {
+          nextHandlers.onStatus(WORKER_STATUS.CONNECTED);
+          return;
+        }
+        return reopenGate.then(() => nextHandlers.onStatus(WORKER_STATUS.CONNECTED));
+      },
+      subscribe() {},
+      unsubscribe() {},
+      publish() {},
+      stop() {}
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reopen-reuse',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100, maxAttempts: 5 },
+      // The recovery clock is injected so a second error can pass the cooldown
+      // while the first reopen is still in flight.
+      dedup: { now: () => now }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(startCalls).toBe(1);
+
+    // The first failure arms automatic recovery; its timer opens a
+    // replacement transport that stays connecting behind the gate.
+    handlers!.onStatus(WORKER_STATUS.ERROR);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(startCalls).toBe(2);
+
+    // A second error lands past the cooldown while that reopen is still in
+    // flight. Its recovery timer must reuse the opening instead of starting a
+    // second transport that would orphan the first.
+    now = 1_200;
+    handlers!.onStatus(WORKER_STATUS.ERROR);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(startCalls).toBe(2);
+
+    releaseReopen();
+    await bus.ready();
+    expect(bus.getStatus()).toBe('connected');
+    expect(startCalls).toBe(2);
+    await bus.stop();
+  });
+
   it('waits for an async transport stop before automatic recovery reopens', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();
@@ -2945,6 +3066,32 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       { data: 2, replayed: true },
       { data: 3, replayed: undefined }
     ]);
+    await bus.stop();
+  });
+
+  it('isolates a throwing replay handler and reports it as a dispatch failure', async () => {
+    const { bus, transport } = makeReplayBus({ maxPerTopic: 4 });
+    const errors: unknown[] = [];
+    bus.onError(error => errors.push(error));
+    // Keep a sink subscriber so the topic stays owned and its publications are
+    // buffered instead of being dropped as unowned.
+    bus.subscribe('t', () => {});
+    await bus.ready();
+    transport.emit('t', 1);
+    transport.emit('t', 2);
+
+    const seen: number[] = [];
+    const boom = new Error('replay handler failed');
+    bus.subscribe('t', message => {
+      seen.push(message.data as number);
+      if (message.data === 1) throw boom;
+    }, { replay: true });
+
+    // A throwing replay delivery must not stop the remaining buffered history
+    // from reaching the handler...
+    expect(seen).toEqual([1, 2]);
+    // ...and it surfaces through the dispatch failure channel, not a throw.
+    expect(errors).toContain(boom);
     await bus.stop();
   });
 

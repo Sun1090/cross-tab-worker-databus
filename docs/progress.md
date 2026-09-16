@@ -2651,6 +2651,28 @@ corroborates the 26-spec collection.)
   mode, and toggling now takes effect immediately. Both chaos E2E specs
   green (13.7 s / 14.0 s); full e2e 27/27; 646 unit green.
 
+## Phase 52 (DataBus stop/reopen edge contracts)
+
+- Pinned four lifecycle/error-path boundaries with regressions in
+  `tests/data-bus.test.ts`:
+  - an explicit `stop()` after failed-open cleanup reuses the existing stop
+    gate and does not issue a second `transport.stop()`;
+  - a rejecting page-hide stop is reported through `onError` while the bus
+    still reaches a clean suspended state and can reopen on resume;
+  - a throwing replay handler is isolated so later history is still delivered
+    and the failure is reported through the dispatch-error channel;
+  - a second recovery signal arriving while a replacement open is in flight
+    reuses that open instead of starting a third transport.
+- Mutation check: deleting the in-flight reopen guard in
+  `CrossTabDataBus.reopenTransport()` makes the new reuse test fail with
+  `startCalls` 3 instead of 2; source restored before verification.
+- Verification (2026-09-16, `feat/data-bus-queued-ready-audit` based on
+  `c1b0735`): `pnpm check` green (35 files, 750 tests); `pnpm lint` green;
+  documentation/workflow contracts 22/22; coverage statements 97.73%,
+  branches 93.6%, functions 97.8%, lines 98.98%; `git diff --check` clean.
+- No production code changed in this phase; the new tests pin existing
+  lifecycle behavior and make future regressions detectable.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
