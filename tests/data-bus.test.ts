@@ -2089,6 +2089,53 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('lets a stop() from the reconnect CONNECTING callback cancel the reopen', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reentrant-reopen' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let reconnecting = false;
+    let reconnectConnectingHits = 0;
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'reentrant-reopen',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.onStatus(status => {
+      if (!reconnecting || status !== WORKER_STATUS.CONNECTING) return;
+      reconnectConnectingHits += 1;
+      if (reconnectConnectingHits === 1) nestedStop = bus.stop();
+    });
+
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    transport.setStatus(WORKER_STATUS.ERROR);
+    reconnecting = true;
+    const reopening = bus.start({});
+    expect(nestedStop).toBeDefined();
+    await Promise.all([reopening, nestedStop!]);
+    await Promise.resolve();
+
+    expect(reconnectConnectingHits).toBe(1);
+    expect(transport.startCalls).toBe(1);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'stopped',
+      started: false,
+      suspended: false,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+
+    reconnecting = false;
+    await bus.start({});
+    await bus.ready();
+    expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
   it('does not report a healthy bus while an explicit stop is still tearing down', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stopping-health' });

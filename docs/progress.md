@@ -1,3 +1,18 @@
+## 0.20.92 re-entrant reopen lifecycle ownership (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-reopen-reentrant-stop` ← `origin/main@76616eb`。
+- 复现场景：transport 运行期报错后，显式 `start()` 进入 `reopenTransport()`；同步 CONNECTING status handler 立即调用 `stop()`。旧实现先发出 CONNECTING，再安装新的 lifecycle epoch 与 `startPromise`，因此 stop 完成 teardown 后 reopen 仍继续注册 opening，并再次调用 `transport.start()`，最终健康状态可同时出现 `started: false` 与 live connected transport。
+- 修复：在 `reopenTransport()` 发出 CONNECTING 前递增 lifecycle epoch、创建 epoch-guarded opening 并安装 `startPromise`；同步 status handler 触发 stop/suspend 后立即返回，不再注册旧 lifecycle 的 recovery outcome。stop 现在会等待该 opening，而 epoch guard 在 `transport.start()` 前放弃旧 opening。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `lets a stop() from the reconnect CONNECTING callback cancel the reopen`。断言 stop 胜出、transport 仅启动一次且已停止、最终健康为 stopped/not ready，并验证之后仍可干净重启。
+- Mutation check：修复前该测试因 `transport.startCalls` 为 2 而失败；应用 lifecycle 安装顺序修复后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（233/233）、`pnpm check`（35 files，758/758）、`pnpm lint`、`pnpm test:coverage`（35 files，758/758；statements 97.75% / branches 93.90% / functions 97.99% / lines 98.99%；`data-bus.ts` statements 97.17% / branches 94.77% / functions 95.00% / lines 98.44%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整 `reopenTransport()` 内部 lifecycle 安装与 CONNECTING 通知顺序，不改 public API、worker protocol、存储 schema/key 或线协议。若发现恢复状态通知顺序回归，回滚 = revert 本任务提交。
+- 下一项：提交、推送并创建 PR，等待全部门禁后合并；随后继续审计排队启动与 recovery timer 的剩余重入边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 re-entrant START lifecycle ownership (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
