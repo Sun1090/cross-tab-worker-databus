@@ -1247,6 +1247,37 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('parks every operation behind a demanded reopen instead of writing to the closed connection', async () => {
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'disconnect-demand-order'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'disconnect-demand-order',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    transport.setStatus('disconnected');
+    // The first operation starts the asynchronous reopen. The second arrives
+    // before openTransport() can clear transportReady, so it must still be
+    // parked behind that opening instead of being sent to the closed socket.
+    bus.publish('topic', 1);
+    bus.publish('topic', 2);
+    expect(transport.publishCalls).toEqual([]);
+
+    await bus.ready();
+    expect(transport.startCalls).toBe(2);
+    expect(transport.publishCalls.map(call => call.data)).toEqual([1, 2]);
+    await bus.stop();
+  });
+
   it('keeps handing operations to a transport that resolves start() before reporting connected', async () => {
     const environment = createFakeEnvironment({
       storage: new MemoryStorage(),

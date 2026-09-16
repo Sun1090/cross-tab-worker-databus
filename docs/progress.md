@@ -1,3 +1,18 @@
+## 0.20.92 park operations behind every demanded transport reopen (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-reopen-sync-readiness` ← `origin/main@6454d35`。
+- 复现场景：一个已连接的 transport 先报告 `disconnected`，随后同一 tick 内连续发出两次 `publish()`。第一次操作发现连接已掉线并调用 `reopenTransport()`；该函数同步把状态改为 `CONNECTING`，但 `transportReady` 仍短暂保持 `true`，直到 `openTransport()` 在 microtask 中运行才被清空。第二次操作因此把 `CONNECTING` 误判为仍可用的 transport，绕过 `startPromise` 直接写入已经关闭的连接；随后第一次操作才在 replacement 打开后投递，导致丢失风险和跨连接顺序反转。
+- 修复：`reopenTransport()` 在同步发出 `CONNECTING` 回调前先清空 `transportReady`。已在 opening 中排队的操作仍由 `startPromise` 统一放行；同 tick 后续操作会继续停靠，不再触碰旧连接。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `parks every operation behind a demanded reopen instead of writing to the closed connection`，在 clean disconnect 后连续发布 1、2，断言 replacement 打开前没有 transport 写入，且最终仍按 `[1, 2]` 顺序投递。
+- Mutation check：修复前新回归稳定观察到 `[{ data: 2 }]` 已写入关闭连接（第一次断言失败）；清空 `transportReady` 后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts`（168/168）通过；`pnpm check`（35 files，765/765）、`pnpm lint`、`pnpm test:coverage`（35 files，765/765；statements 97.76% / branches 93.98% / functions 98% / lines 99.04%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整 `reopenTransport()` 的同步就绪状态与既有 opening gate 配合，不改 public API、worker protocol、存储 schema/key 或线协议；恢复成功后仍由 `openTransport()` 标记 ready 并释放操作。回滚 = revert 本任务提交。
+- 下一项：继续审计 manual start/recovery 与 queued-start/pending-stop 交错的同步就绪边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 replay retention cleanup across suspend (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
