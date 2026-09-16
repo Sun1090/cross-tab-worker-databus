@@ -693,6 +693,40 @@ describe('ReplayManager — retention sweep', () => {
     expect(clearBefore).toHaveBeenCalledTimes(2);
   });
 
+  it('runs the newest cleanup queued after resume behind an in-flight suspend cleanup', async () => {
+    let releaseInFlight!: () => void;
+    const clearBefore = vi.fn(async (_timestamp: number) => {
+      // Hydration is call 1; the first publication cleanup is call 2 and stays
+      // in flight across suspend/resume while a newer cutoff queues behind it.
+      if (clearBefore.mock.calls.length === 2) {
+        await new Promise<void>(resolve => {
+          releaseInFlight = resolve;
+        });
+      }
+    });
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearBefore
+    };
+    const harness = createManager({ persistence, retentionMs: 1_000, maxPerTopic: 10 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    harness.manager.record(message('t', 1, 10_000));
+    expect(clearBefore).toHaveBeenCalledTimes(2);
+
+    harness.manager.suspend();
+    harness.manager.start();
+    harness.advance(1_000);
+    harness.manager.record(message('t', 2, 11_000));
+    expect(clearBefore).toHaveBeenCalledTimes(2);
+
+    releaseInFlight();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(clearBefore.mock.calls.map(call => call[0])).toEqual([9_000, 9_000, 10_000]);
+  });
+
   it('reports a sweep failure without stopping the loop', async () => {
     const persistence = new FakePersistence({ clearBefore: true });
     const harness = createManager({ persistence, retentionMs: 1_000, retentionSweepMs: 100 });
