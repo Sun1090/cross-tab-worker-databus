@@ -1,3 +1,18 @@
+## 0.20.92 SUBSCRIBE route binding (2026-09-16)
+
+- 状态：已合并（PR #89，rebase merge 至 `main@82cf127`）。
+- 分支 / PR / 合并：`feat/subscribe-route-binding` ← `origin/main@2c36eab`；PR #89（https://github.com/Sun1090/cross-tab-worker-databus/pull/89），合并提交 `82cf127`（`fix(cluster): bind subscribe to current route`）。
+- 复现场景：durable route 已指向另一 worker，或当前 route 正等待某个 `handoffFromWorkerId` 的精确 `ROUTE_RELEASED` 时，迟到/重放的定向 `CONTROL/SUBSCRIBE` 仍会被旧实现接受。非 owner 会进入 `assignedTopics` 并订阅 transport；等待交接的 owner 会提前进入 `assignedTopics` 并给 route 盖上 `confirmedAt`，从而在匹配 ACK 到达前重新制造 transport 订阅重叠。
+- 修复：`WorkerClusterRuntime.handleControlMessage()` 的 `SUBSCRIBE` 分支现在先绑定 durable route。route 指向其他 worker 时忽略；当前 worker 的 route 带有 `handoffFromWorkerId` 且尚无 `confirmedAt` 时，只有匹配 generation 的 `ROUTE_RELEASED` 能授权；其余正常同 route 订阅路径保持不变。
+- 变更文件：`src/core/cluster.ts`、`tests/cluster.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/capabilities.md`、`docs/zh/capabilities.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：`tests/cluster.test.ts` — `ignores a stale CONTROL/SUBSCRIBE while a handoff is awaiting ROUTE_RELEASED` 证明迟到 SUBSCRIBE 不增加 assignment/不确认 handoff，随后 matching generation 2 的 `ROUTE_RELEASED` 仍可确认并订阅；`ignores a CONTROL/SUBSCRIBE when the route now names another worker` 证明 route 指向 worker-c 时 worker-b 不获得 ownership，后续 route 回到 worker-b 并收到新 SUBSCRIBE 后仍可正常工作。
+- Mutation check：两条回归在旧实现上分别稳定失败于 `expected [...] to not include ...`；绑定 durable route 后通过。
+- 验证命令与结果：`pnpm check`（35 files，777/777）；`pnpm lint`（通过）；`pnpm test:coverage`（statements 97.69% / branches 93.91% / functions 98% / lines 98.95%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：只收紧 cluster 对定向 SUBSCRIBE 的准入判定，不改变 public API、消息协议、storage schema/key 或线协议。正常同 route 的 SUBSCRIBE、首次路由和精确 generation 的交接 ACK 路径保持不变。若出现订阅恢复回归，回滚 = revert 合并提交 `82cf127`。
+- 下一项：继续审计 recovery 操作跨 `pagehide`/显式 `start()` 的状态归属、失败启动与异步 stop 的错误账本顺序，以及 reopen 回调相邻的剩余竞态。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 queued restart BFCache guard (2026-09-16)
 
 - 状态：已合并（PR #87，rebase merge 至 `main@ef7b474`）。
