@@ -4386,6 +4386,59 @@ describe('CrossTabDataBus lifecycle contract edges', () => {
     await bus.stop();
   });
 
+  it('reports a queued operation rejection once without an unhandled rejection', async () => {
+    // A subscribe() issued while the initial open is still pending is parked
+    // behind startPromise and released from the runTransport() continuation.
+    // Its rejection must reach onError exactly once and must not escape as an
+    // unhandled rejection after the start gate is released.
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'queued-op-rejection' });
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const subscribe = vi.fn(() => Promise.reject(new Error('queued subscribe boom')));
+    const transport: DataBusTransport<object, number> = {
+      start: (_config, handlers) => startGate.then(() => {
+        handlers.onStatus(WORKER_STATUS.CONNECTED);
+      }),
+      stop: () => undefined,
+      subscribe,
+      unsubscribe: () => undefined,
+      publish: () => undefined
+    };
+    const errors: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const bus = new CrossTabDataBus({
+        clusterKey: 'queued-op-rejection',
+        environment: environment.environment,
+        initialConfig: {},
+        transport
+      });
+      bus.onError(error => errors.push(error));
+      bus.subscribe('topic', vi.fn());
+
+      // The operation is queued, not written to the still-opening transport.
+      expect(subscribe).not.toHaveBeenCalled();
+      releaseStart();
+      await bus.ready();
+
+      await vi.waitFor(() => expect(errors).toHaveLength(1));
+      expect(String(errors[0])).toContain('queued subscribe boom');
+      // Let the rejection and reporter settle fully before asserting that no
+      // second report or unhandled rejection was produced.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(errors).toHaveLength(1);
+      expect(unhandled).toEqual([]);
+      await bus.stop();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('the owning tab fans out to a peer subscriber and records the message discarded locally', async () => {
     // The realistic shape of the third dispatch gate: tab A wins ownership of
     // a topic only tab B subscribes to. A must broadcast the publication to B
