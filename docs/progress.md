@@ -1,3 +1,13 @@
+## 0.20.92 RESUME/pageshow and replay hydration audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：显式 `start()` 与原生 `pageshow` 的 RESUME trace 同步重入；RESUME 回调触发 `stop()` 后的 cluster/transport 复活；replay hydration 在 `pagehide`、显式恢复、重复 `start()`、clear/unsubscribe 与 live record 交错时的 epoch、retry generation 和缓冲区归属。
+- 结论：RESUME trace 发出前捕获 lifecycle epoch，回调返回后再次校验 epoch/stopping，避免旧恢复流程重启 cluster；ReplayManager 在 suspend/reset/clear 时使 hydration epoch 或 retry generation 失效，旧 load 不能覆盖新一代 hydration 或清除后的 buffer；已完成 hydration 在普通 BFCache suspend 中保留，显式 stop 则 reset buffers 并要求下一生命周期重新加载。
+- 验证：现有 RESUME/pageshow 重入回归与 hydration 回归均覆盖；此前全量 `pnpm test --run` 为 35 files、779/779。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 replay persistence cleanup 与 suspend/resume、失败重试之间的串行化边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 reopen settlement and recovery gate audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的实现缺陷。
