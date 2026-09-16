@@ -1,3 +1,18 @@
+## 0.20.92 strict route-release generation guard (2026-09-16)
+
+- 状态：已合并（PR #85，rebase merge 至 `main@463a6e6`）。
+- 分支 / PR / 合并：`feat/route-release-generation-guard` ← `origin/main@2c84f8a`；PR #85，合并提交 `463a6e6`（`fix(cluster): require exact handoff generation`）。
+- 复现场景：当前 route 为 `worker-b`、`generation: 2`、`handoffFromWorkerId: 'worker-a'` 且尚未确认时，投递来自 `worker-a`、但携带 `generation: 3` 的 `ROUTE_RELEASED`。旧实现使用 `message.generation < route.generation`，会把其他交接轮次的迟到/重放 ACK 误当作当前授权：`worker-b` 进入 `assignedTopics`、发送 `SUBSCRIBE`，并给当前 route 盖上 `confirmedAt`，破坏严格交接的无重叠保证。
+- 修复：`isStaleRouteRelease()` 改为要求 ACK generation 与当前 route 精确相等；同步修正代码注释与中英文架构文档、capability matrix，使实现和“matching generation”协议一致。
+- 变更文件：`src/core/cluster.ts`、`tests/cluster.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/capabilities.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/cluster.test.ts` — `rejects a ROUTE_RELEASED whose generation is newer than the current handoff`，断言不进入 `assignedTopics`、不触发 `SUBSCRIBE`、route 保持 `generation: 2` 且无 `confirmedAt`。
+- Mutation check：新增回归在旧 `<` 比较下稳定失败于 `expected [ 'generation-guard' ] to not include 'generation-guard'`；恢复 `!==` 后包含 matching-generation 正常 ACK 路径的 4 条定向用例全部通过。
+- 验证命令与结果：`pnpm exec vitest run tests/cluster.test.ts tests/data-bus.test.ts`（241/241）；`pnpm check`（35 files，774/774）；`pnpm lint`；`pnpm test:coverage`（35 files，774/774；statements 97.61% / branches 93.77% / functions 98% / lines 98.94%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 均通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：只收严 `ROUTE_RELEASED` 的授权条件；正常精确 generation 交接不变，不改变 public API、worker protocol 字段、存储 schema/key 或线协议。回滚 = revert 合并提交 `463a6e6`。
+- 下一项：继续审计 `resume` / `reopen` recovery 交错、queued start 与 pending stop 的剩余边界，以及 route ownership / handoff 跨 runtime 的其他竞态。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 replay hydration lifecycle races (2026-09-16)
 
 - 状态：已合并（PR #83，rebase merge 至 `main@88ae3b0`）。
