@@ -1,3 +1,13 @@
+## 0.20.92 route handoff ownership across rapid lifecycle transitions (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：pagehide/pageshow 快速交错、延迟或丢失 `ROUTE_RELEASED` ACK、旧 owner 回归、handoff route generation、`handoffFromWorkerId` 与 confirmed marker 的所有权校验。
+- 结论：graceful handoff 先持久化新 owner 与递增 generation，再释放旧 transport subscription；新 owner 只有收到来源和 generation 均精确匹配的 ACK 才能确认，延迟 ACK 会被 route marker/generation 拒绝。旧 owner 回归只恢复 subscriber intent，不会夺回 sticky route。ACK 丢失时，只有 previous owner 已不存活且 handoff 超过 worker TTL 才允许单 writer re-election；活跃 previous owner 始终保留严格 no-overlap 语义。快速 pagehide/pageshow 由 lifecycle generation 防止旧回调重新 activate，且回归测试覆盖了 ACK 丢失、多轮 handoff 和页面恢复。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts`（75/75）；`pnpm test --run`（35 files，780/780）；此前新增的 re-entrant pagehide regression 也通过。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 storage writer 的 registry nudge、flush 顺序与 pagehide handoff 的持久化可见性边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 re-entrant pageshow re-hide ownership (2026-09-16)
 
 - 状态：已完成实现、回归测试与验证。
