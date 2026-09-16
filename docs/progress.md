@@ -1,3 +1,14 @@
+## 0.20.92 storage degradation regression harness correction (2026-09-16)
+
+- 状态：已完成测试修复与验证。
+- 发现：`keeps the runtime usable when storage writes start failing mid-session` 原测试并未覆盖其声称的故障。runtime 构造时包装的是另一份正常 storage，之后替换 `environment.storage` 不会改变已捕获的 adapter；同时未提供 BroadcastChannel hub 会使 activate 主动降级并丢弃 storage。因此测试即使 storage failure 路径失效也会通过。
+- 修复：在构造 runtime 时直接传入 flaky storage 和 ChannelHub，使 `BatchingStorageWriter` 实际包装故障 adapter 且协调模式保持启用；用 fake timers 驱动失败 flush/retry，断言后端确实收到失败写尝试，同时本地 topic assignment 和 subscription intent 继续可用。teardown 前恢复 storage，避免测试遗留 retry timer。
+- 变更文件：`tests/cluster.test.ts`、`docs/progress.md`。
+- 验证：定向回归 1/1；`pnpm exec vitest run tests/cluster.test.ts tests/routing.test.ts tests/storage-batch.test.ts`（3 files，122/122）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅修正测试装配和断言，不改变运行时代码或 public API。回滚 = revert 本任务提交。
+- 下一项：继续审计 role/load 更新与 storage retry exhaustion 后的跨 tab 收敛语义，必要时补充双 runtime 故障回归。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 storage flush and registry nudge visibility audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的实现缺陷。
