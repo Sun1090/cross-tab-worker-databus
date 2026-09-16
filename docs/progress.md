@@ -1,3 +1,14 @@
+## 0.20.92 role/load recovery and degradation audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的运行时代码缺陷；同时补强了中途 storage failure 回归测试的真实装配。
+- 审计范围：worker role 刷新与 record 写入、assigned-topic load 更新、stranded multi-topic recovery 的 projected load、无本地 subscriber 的 elected owner liveness、storage retry exhaustion 后的 local/coordinated degradation。
+- 结论：reconcile 在每轮先清理孤儿记录再刷新 role；load 以本地 assignedTopics 为准并通过即时 registry nudge 传播；recovery pass 使用 projected loads 防止多个 stranded route 堆叠到同一 survivor，并在 elected owner 没有 local subscription 时由当前协调者直接写 route/发送 SUBSCRIBE，避免永远 stand down。storage writer 失败不会抛穿 cluster 控制面，pending writes 按 key 重试并最终丢弃故障 key，内存 assignment/subscription intent 仍可用。
+- 测试改进：修正 `keeps the runtime usable when storage writes start failing mid-session`，让 runtime 构造时真正包装 flaky storage 并保持 ChannelHub 协调；fake timers 驱动 retry，避免假阳性。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts tests/routing.test.ts tests/storage-batch.test.ts`（3 files，122/122）；全量 `pnpm test --run`（35 files，780/780）；`pnpm typecheck` 和 `git diff --check` 均通过。
+- 风险 / 回滚：本轮不改变 public API、worker protocol 或 storage schema/key；测试修正可独立回滚。
+- 下一项：继续审计 worker heartbeat TTL、orphan cleanup 与 route recovery 在共享 fake clock / delayed storage flush 下的收敛性。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 storage degradation regression harness correction (2026-09-16)
 
 - 状态：已完成测试修复与验证。
