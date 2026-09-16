@@ -424,6 +424,8 @@ sequenceDiagram
 
 可选的 publication 元数据（`messageId` 与 `timestamp`）与 payload 走同一条路径：`CONTROL/PUBLISH` → transport/服务器 → `DataBusMessage` → `EVENT` 扇出。它不会写入协调存储。各 transport 会在三处分发门之前，把旧 payload 格式与标准 `DataBusPublicationEnvelope` 统一规范化。
 
+在 `EVENT` 边界，未知 `eventType` 或缺少字符串 `topic` 的 publication payload 会被忽略；不带 `originTabId` 的旧版 publication payload 会继承帧级值，而 payload 自带值优先。这样既能与新旧 SDK peer 保持前向兼容，也能避免一条畸形帧破坏后续投递。
+
 在 transport 层，Centrifuge 客户端可能同时在 `client` 对象和对应 `Subscription` 对象上触发同一 publication。为避免把同一条服务器 publication 分发两次，CentrifugeSession 的 client 级 `publication` 监听只处理**没有客户端订阅**的 topic（即服务端订阅）；已有活跃订阅的 topic 仅由 subscription 级监听派发。
 
 ```mermaid

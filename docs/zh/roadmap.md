@@ -7,6 +7,8 @@
 可靠性开发线继续补强错误路径覆盖并维护发布门禁。IndexedDB replay 清理现在覆盖 `clear()`、`clearTopic()`、`clearBefore()` 的事务级错误，包括连接失效后的恢复，以及浏览器未提供 transaction error 对象时的领域级 fallback 拒绝信息。WebSocket transport 也会在连接失活后 best-effort 关闭 socket，避免自动恢复遗留死连接；已发布包验证的正常路径经审计确认没有固定等待或多余 registry 往返。Centrifuge token bridge provider 现在绑定到创建它的 client lifecycle，已被替换的 client 无法把迟到凭证请求送入新会话。旧 client 的 subscription 回调与 publish rejection 也已有回归约束，不能修改或上报到替代会话。
 DataBus 生命周期审计现在还固定了 failed-reopen 的 stop gate 复用、被取代 initial open 的迟到 rejection 隔离、已退休 transport 迟到的 message/status/error 回调 generation 隔离，以及就绪/恢复契约（`stop()` 后迟到的 `pageshow` 不得重启后台工作、自动恢复再次失败必须通过 `ready()` 暴露、被取消的排队启动不得满足替代重启、排队重启在可用前被挂起必须让 `ready()` reject、旧 recovery timer 不得重开 transport）。本轮审计还发现并修复了一处真实定时器泄漏：`WorkerClusterRuntime.pause()` 在无 channel 时不再排定延迟 `channel.close()`。mutation check 已确认移除对应守卫时每条回归都会失败。本阶段还覆盖 failed-open 后 stop gate 复用、pagehide stop rejection 恢复、replay handler 分发隔离，以及 in-flight recovery reopen 复用；重开守卫已有 mutation 覆盖。
 
+跨 Tab `EVENT` 边界现在会拒绝不是对象、或缺少字符串 `topic` 的 publication payload，因此一条畸形的同源帧不会再从 BroadcastChannel 监听器抛出并破坏后续投递。未知事件类型保持前向兼容；旧版 payload 会继承帧级 `originTabId`，payload 自带归属优先，两项行为均有回归固定。
+
 ## 0.20.90 已完成范围
 
 本开发线修复 0.20.89 tag 首发暴露的发布管线问题，并统一文档中的投递语义。

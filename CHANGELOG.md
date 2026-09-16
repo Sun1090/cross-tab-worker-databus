@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Fixed
+- A malformed cross-tab `EVENT` frame can no longer break publication delivery. Publication payloads that are not objects with a string `topic`, and frames carrying an unknown `eventType`, are now ignored at the DataBus boundary; later valid events continue to dispatch. Legacy payloads without `originTabId` still inherit the frame-level attribution, while an explicit payload value takes precedence.
+
 ## [0.20.90] - 2026-09-16
 
 ### Fixed
