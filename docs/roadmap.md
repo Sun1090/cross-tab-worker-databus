@@ -5,6 +5,7 @@
 ## 0.20.91 in progress
 
 The reliability line continues with error-path coverage and release-gate maintenance. IndexedDB replay cleanup now has regressions for transaction-level errors on `clear()`, `clearTopic()`, and `clearBefore()`, including connection invalidation/recovery and fallback rejections when the browser exposes no transaction error object. The WebSocket transport now best-effort closes a socket after connection invalidation so automatic recovery cannot orphan a dead connection; the published-consumer gate normal path was audited with no fixed wait or redundant registry round-trip found. Centrifuge token-bridge providers are now bound to the lifecycle of the client that created them, so a replaced client cannot route a late credential request into a new session. Subscription-level callbacks and publish rejections from a replaced client are also pinned not to mutate or report into its replacement.
+The DataBus lifecycle audit now also pins failed-reopen stop-gate reuse and late rejection isolation for a superseded initial open, with mutation checks proving both regressions fail when their guards are removed.
 
 ## 0.20.90 delivered scope
 
