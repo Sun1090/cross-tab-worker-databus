@@ -1,3 +1,14 @@
+## 0.20.92 re-entrant pageshow re-hide ownership (2026-09-16)
+
+- 状态：已完成实现、回归测试与验证。
+- 复现场景：cluster 已因 `pagehide` 暂停，随后 `pageshow` 先把 `suspended` 暂时清为 false，再同步调用 `onResume`。若回调期间文档再次触发 `pagehide`，`pause()` 因 cluster 尚未重新 `started` 而直接返回，导致 runtime 落在 `started: false / suspended: false` 的失活状态；后续真正的 `pageshow` 也不会再激活 cluster。
+- 修复：`pause()` 在尚未 started 但 lifecycle listeners 仍安装时保留 `suspended: true`，让重入的 pagehide 成为最新生命周期意图；外层 pageshow 由 generation guard 放弃 activate，下一次 pageshow 可正常恢复协调。
+- 新增测试：`tests/cluster.test.ts` — `preserves a pagehide re-entered from onResume for the next pageshow`，覆盖 re-hide 后保持 suspended，以及下一次 pageshow 恢复 channel、协调和 topic assignment。
+- 验证：定向回归 1/1；`pnpm exec vitest run tests/cluster.test.ts tests/lifecycle-invariants.test.ts`（2 files，76/76）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅修复 cluster lifecycle 的同步重入状态，不改变 public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 route handoff 在 pagehide/pageshow 快速交错和延迟 ROUTE_RELEASED ACK 下的 generation ownership。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 replay persistence cleanup serialization audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的实现缺陷。

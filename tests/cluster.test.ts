@@ -607,6 +607,45 @@ describe('WorkerClusterRuntime', () => {
     expect(onControl).toHaveBeenCalledWith('SUBSCRIBE', 'topic', undefined);
   });
 
+  it('preserves a pagehide re-entered from onResume for the next pageshow', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'resume-rehide' });
+    let rehideOnResume = false;
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'resume-rehide',
+      environment: env.environment,
+      tabId: 'tab-resume-rehide',
+      workerId: 'worker-resume-rehide',
+      handlers: {
+        onControl: vi.fn(),
+        onEvent: vi.fn(),
+        onResume: () => {
+          if (rehideOnResume) env.pageHide();
+        }
+      }
+    });
+
+    runtime.start();
+    runtime.subscribe('topic');
+    await Promise.resolve();
+    env.pageHide();
+    expect(runtime.getSnapshot().suspended).toBe(true);
+
+    // The document hides again while pageshow is synchronously notifying its
+    // resume callback. That newer lifecycle must keep the cluster suspended
+    // instead of leaving it inactive with `suspended: false`.
+    rehideOnResume = true;
+    env.pageShow();
+    expect(runtime.getSnapshot()).toMatchObject({ suspended: true, coordinated: false });
+
+    rehideOnResume = false;
+    env.pageShow();
+    expect(runtime.getSnapshot()).toMatchObject({ suspended: false, coordinated: true });
+    expect(runtime.isAssigned('topic')).toBe(true);
+    runtime.stop();
+  });
+
   it('flushes batched storage writes before pagehide returns', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
