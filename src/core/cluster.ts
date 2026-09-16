@@ -34,6 +34,7 @@ import {
   CONTROL_ACTION,
   DEFAULT_STORAGE_PREFIX,
   RELIABILITY_OPERATION,
+  TAB_VISIBILITY,
   WORKER_ROLE,
   WORKER_STATUS
 } from '../utils/constants';
@@ -252,8 +253,17 @@ export class WorkerClusterRuntime {
   start(): void {
     if (this.started) return;
     this.lifecycleGeneration += 1;
-    this.suspended = false;
     this.addLifecycleListeners();
+    // A start can be issued after pagehide was missed by a synchronous teardown
+    // path (for example, a restart queued behind an async transport.stop()).
+    // Keep lifecycle listeners installed for the later pageshow, but do not
+    // register a worker or open coordination resources for a hidden document.
+    if (this.environment.getVisibilityState() === TAB_VISIBILITY.HIDDEN) {
+      this.suspended = true;
+      this.handlers.onSuspend?.();
+      return;
+    }
+    this.suspended = false;
     this.activate();
   }
 

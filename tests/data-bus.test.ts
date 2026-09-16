@@ -1985,6 +1985,60 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('keeps a queued restart suspended when pagehide lands during async stop cleanup', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({
+      storage,
+      now: () => 1_000,
+      randomId: 'queued-restart-pagehide'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'queued-restart-pagehide',
+      environment: environment.environment,
+      transport
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    let releaseStop!: () => void;
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+
+    const stopping = bus.stop();
+    await vi.waitFor(() => expect(transport.stopCalls).toBe(1));
+    const restarting = bus.start({});
+
+    // stop() removes the cluster's lifecycle listeners synchronously, but its
+    // transport cleanup is still pending. The browser can enter BFCache in that
+    // window; the queued restart must observe the hidden visibility instead of
+    // reconnecting a background page.
+    environment.setVisibility('hidden');
+    environment.pageHide();
+
+    releaseStop();
+    await stopping;
+    await restarting;
+
+    expect(transport.startCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: false,
+      state: 'suspended',
+      started: true,
+      suspended: true,
+      transport: { ready: false, status: WORKER_STATUS.DISCONNECTED }
+    });
+    await expect(bus.ready()).rejects.toThrow(/suspended/i);
+
+    environment.setVisibility('visible');
+    environment.pageShow();
+    await bus.ready();
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy', suspended: false });
+    await bus.stop();
+  });
+
   it('invalidates a canceled queued-start readiness gate for the replacement restart', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'queued-ready-cancel' });
