@@ -1,7 +1,22 @@
-## 0.20.92 re-entrant reopen lifecycle ownership (2026-09-16)
+## 0.20.92 re-entrant RESUME lifecycle cancellation (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-reopen-reentrant-stop` ← `origin/main@76616eb`。
+- 分支 / 基线：`feat/data-bus-resume-reentrant-stop` ← `origin/main@4123759`。
+- 复现场景：页面处于 BFCache suspension 时，显式 `start({})` 或原生 `pageshow` 进入 resume；同步 RESUME lifecycle trace sink 立即调用 `stop()`。旧实现会在 stop 完成 teardown 后继续重启 dedup/replay，或由外层 `pageshow` 再次 `activate()` cluster，最终可能出现 bus 报告 `stopped`、但 cluster 仍 coordinated 的矛盾状态。
+- 修复：`resumeSuspendedResources()` 现在返回本次 resume 是否仍拥有 lifecycle；显式 `start()` 在 RESUME 回调抢占后直接返回 stop gate，并在 `reopenTransport()` 的同步 CONNECTING 边界后再次确认 `stopping`/`suspended` 才恢复 cluster。`WorkerClusterRuntime` 增加内部 lifecycle generation，`stop()`、`pause()`、`start()` 与 `pageshow` 都会推进该代次，外层 `handlePageShow()` 只有在同步 `onResume` 回调返回后仍持有同一代次时才调用 `activate()`。
+- 变更文件：`src/core/data-bus.ts`、`src/core/cluster.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `lets a stop() re-entered from the RESUME trace cancel the rest of an explicit resume` 与 `lets a stop() re-entered from the RESUME trace keep pageshow from reactivating the cluster`。两者都断言嵌套 stop 胜出、transport 未重开、最终健康为 stopped/not ready，并检查 cluster 保持未 coordinated、未 suspended。
+- Mutation check：仅移除 `handlePageShow()` 的 lifecycle generation guard 时，pageshow 回归会因 `cluster.snapshot.coordinated === true` 稳定失败；恢复 guard 后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（235/235）、`pnpm check`（35 files，760/760）、`pnpm lint`、`pnpm test:coverage`（35 files，760/760；statements 97.75% / branches 93.91% / functions 97.99% / lines 98.99%；`data-bus.ts` statements 97.19% / branches 94.72% / functions 95.00% / lines 98.45%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅增加内部 lifecycle 代次与 resume 有效性返回值，不改 public API、worker protocol、存储 schema/key 或线协议。若发现 BFCache resume 激活顺序回归，回滚 = revert 本任务提交。
+- 下一项：提交、推送并创建 PR，等待全部门禁后合并；随后继续审计 queued-start 与 recovery timer 的剩余可执行边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 re-entrant reopen lifecycle ownership (2026-09-16)
+
+- 状态：已合并（PR #72，rebase merge 至 `main@4123759`）。
+- 分支 / PR / 合并：`feat/data-bus-reopen-reentrant-stop` ← `origin/main@76616eb`；PR #72。
 - 复现场景：transport 运行期报错后，显式 `start()` 进入 `reopenTransport()`；同步 CONNECTING status handler 立即调用 `stop()`。旧实现先发出 CONNECTING，再安装新的 lifecycle epoch 与 `startPromise`，因此 stop 完成 teardown 后 reopen 仍继续注册 opening，并再次调用 `transport.start()`，最终健康状态可同时出现 `started: false` 与 live connected transport。
 - 修复：在 `reopenTransport()` 发出 CONNECTING 前递增 lifecycle epoch、创建 epoch-guarded opening 并安装 `startPromise`；同步 status handler 触发 stop/suspend 后立即返回，不再注册旧 lifecycle 的 recovery outcome。stop 现在会等待该 opening，而 epoch guard 在 `transport.start()` 前放弃旧 opening。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
@@ -10,13 +25,13 @@
 - 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（233/233）、`pnpm check`（35 files，758/758）、`pnpm lint`、`pnpm test:coverage`（35 files，758/758；statements 97.75% / branches 93.90% / functions 97.99% / lines 98.99%；`data-bus.ts` statements 97.17% / branches 94.77% / functions 95.00% / lines 98.44%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
 - 阻塞：无。
 - 风险 / 回滚：仅调整 `reopenTransport()` 内部 lifecycle 安装与 CONNECTING 通知顺序，不改 public API、worker protocol、存储 schema/key 或线协议。若发现恢复状态通知顺序回归，回滚 = revert 本任务提交。
-- 下一项：提交、推送并创建 PR，等待全部门禁后合并；随后继续审计排队启动与 recovery timer 的剩余重入边界。
+- 下一项：继续审计 RESUME/pageshow 的同步回调重入边界。
 - 更新时间：2026-09-16。
 
 ## 0.20.92 re-entrant START lifecycle ownership (2026-09-16)
 
-- 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-reentrant-start` ← `origin/main@3f9a81e`。
+- 状态：已合并（PR #71，rebase merge 至 `main@76616eb`）。
+- 分支 / PR / 合并：`feat/data-bus-reentrant-start` ← `origin/main@3f9a81e`；PR #71。
 - 复现场景：trace sink 收到同步 START lifecycle 事件后立即调用 `stop()`；旧实现此时 `startPromise` 与 lifecycle epoch 尚未安装，因此 stop 完成 teardown 后，外层 start 仍继续启动 dedup/replay/cluster，并让 transport 重新进入 `connected`。最终健康摘要同时报告 `state: 'stopped'` 与 `transport.ready: true`。
 - 修复：在发出 START trace 前先递增 lifecycle epoch、创建 epoch-guarded opening 并安装 `startPromise`；START、CONNECTING status、`cluster.start()` 与 topic replay 前后都检查当前 lifecycle。同步回调一旦触发 stop/suspend，外层 start 立即停止后续资源启动，旧 opening 在 epoch guard 处被放弃，transport 从未调用 `start()`。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
@@ -25,7 +40,7 @@
 - 验证命令与结果：`pnpm check`（35 files，757/757）、`pnpm lint`、`pnpm typecheck`、`pnpm test:coverage`（35 files，757/757；statements 97.78% / branches 93.89% / functions 98.17% / lines 98.99%；`data-bus.ts` statements 97.31% / branches 94.71% / functions 95.79% / lines 98.43%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
 - 阻塞：无。
 - 风险 / 回滚：仅调整 `start()` 内部生命周期锁与同步回调之间的顺序，不改 public API、worker protocol、存储 schema/key 或线协议。若发现 trace/status 顺序或启动回归，回滚 = revert 本任务提交。
-- 下一项：完成覆盖率、文档/工作流守卫与浏览器 E2E，随后提交、推送、创建 PR 并等待全部门禁。
+- 下一项：继续审计 reopen CONNECTING 的同步回调重入边界。
 - 更新时间：2026-09-16。
 
 ## 0.20.92 re-entrant stop teardown sharing (2026-09-16)
