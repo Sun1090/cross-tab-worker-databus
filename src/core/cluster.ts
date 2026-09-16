@@ -896,8 +896,8 @@ export class WorkerClusterRuntime {
 
   /**
    * Accept a graceful handoff only when the route still points to this worker,
-   * the release comes from the recorded previous owner, and the generation is
-   * at least as new as ours. Any other ROUTE_RELEASED is stale and dropped.
+   * the release comes from the recorded previous owner, and the generation
+   * exactly matches ours. Any other ROUTE_RELEASED is stale and dropped.
    */
   private handleRouteReleasedMessage(
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
@@ -913,9 +913,9 @@ export class WorkerClusterRuntime {
 
   /** A ROUTE_RELEASED is stale (and must be dropped) unless the route still
    * points to us, the release comes from the recorded previous owner, and
-   * the release generation is at least as new as ours. A replayed ACK from an
-   * earlier handoff round (e.g. an a↔b ping-pong) carries an older generation
-   * and must not confirm the current round. */
+   * the release generation exactly matches ours. A delayed ACK from either an
+   * earlier or later handoff round belongs to a different route and must not
+   * confirm the current round. */
   private isStaleRouteRelease(
     route: WorkerRoute,
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
@@ -923,7 +923,7 @@ export class WorkerClusterRuntime {
     return (
       route.workerId !== this.workerId ||
       route.handoffFromWorkerId !== message.sourceWorkerId ||
-      message.generation < route.generation
+      message.generation !== route.generation
     );
   }
 

@@ -46,7 +46,7 @@ and regression-locked:
 
 | Invariant | Area | Regressed guarantee |
 |---|---|---|
-| Handoff ACK validity | coordination | `ROUTE_RELEASED` is honored only when the route still points to the receiver, the release matches `handoffFromWorkerId`, and the ACK generation is at least as new as the stored route — stale ACKs from an earlier a↔b ping-pong are dropped |
+| Handoff ACK validity | coordination | `ROUTE_RELEASED` is honored only when the route still points to the receiver, the release matches `handoffFromWorkerId`, and the ACK generation exactly matches the stored route — delayed ACKs from another a↔b ping-pong round are dropped |
 | Replay persistence cleanup ordering | durability | Queued batch flushes are filtered against the winning cleanup (`unsubscribe`/`clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff, and `suspend()`/`stop()` discard the queued batch); cleared or stopped-session history is never re-appended by an in-flight flush |
 | Storage write recovery | coordination | Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap); a structurally failing key is dropped after 5 attempts (with `console.warn`) without blocking other queued keys; backoff resets once the queue drains or `clear()` cancels the retries |
 | Transport recovery budget | lifecycle | Auto-recovery is paced by a cooldown, bounded by `recovery.maxAttempts`, and reports `exhausted` when the budget is spent; a successful reopen resets attempt + exhausted, and an explicit `subscribe` on a down transport can still recover manually |

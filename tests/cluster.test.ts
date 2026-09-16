@@ -1458,6 +1458,67 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(b.runtime.getSnapshot().routes[0]?.confirmedAt).toBe(now);
   });
 
+  it('rejects a ROUTE_RELEASED whose generation is newer than the current handoff', async () => {
+    // A ROUTE_RELEASED is an authorization for one exact route generation.
+    // Accepting a future generation would let a delayed/replayed ACK from a
+    // superseded handoff confirm a different route and release the new owner's
+    // SUBSCRIBE before the matching release arrived.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+
+    a.runtime.start();
+    a.runtime.subscribe('generation-guard');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    const topicKey = route.topicKey as string;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    hub.create(bChannelName).postMessage({
+      type: 'ROUTE_RELEASED',
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-b',
+      topic: 'generation-guard',
+      topicKey,
+      generation: 3
+    });
+
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('generation-guard');
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'generation-guard', undefined);
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)).toMatchObject({ generation: 2 });
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
+  });
+
   it('recovers a stranded unconfirmed handoff once the previous owner is dead', async () => {
     // Regression: if the previous owner's ROUTE_RELEASED never arrives
     // (dropped channel message under load, or a crash between the route
