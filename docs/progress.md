@@ -1,3 +1,18 @@
+## 0.20.92 manual recovery parked-operation preservation (2026-09-16)
+
+- 状态：已合并（PR #93，rebase merge 至 `main@1f2eed8`）。
+- 分支 / PR / 合并：`feat/parked-ops-manual-recovery` ← `origin/main@314adca`；PR #93（https://github.com/Sun1090/cross-tab-worker-databus/pull/93），合并提交 `1f2eed8`（`fix(data-bus): preserve parked operations across manual recovery`）。
+- 复现场景：transport 运行期进入 `error` 后自动恢复已调度、recovery gate 关闭，此时 `publish()` 停靠在 gate 上。显式 `start({})` 取代自动 timer，但 replacement transport 的启动也失败；旧实现会在 `resetFailureState()` 中释放 gate，停靠操作的微任务随后看到新的 opening 已开始，却既没有成功 transport 可写，也没有资格继续等待，最终操作被静默丢弃。
+- 修复：显式手动重开时调用 `resetFailureState(true)`，取消旧 timer 并重置失败账本，但保留 recovery gate；`cancelScheduledRecovery()` 增加可选的 `releaseGate` 控制。若手动重开成功仍按原路径释放 gate 并回放操作；若手动重开失败，停靠操作继续等待下一次自动或 demand-driven 恢复，不再与被取代的 opening 一起丢失。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/architecture.md`、`docs/zh/architecture.md`、`docs/capabilities.md`、`docs/zh/capabilities.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：`tests/data-bus.test.ts` — `preserves operations parked on a recovery gate when an explicit start supersedes the automatic attempt`。测试断言 error 后停靠的 publish 不会立即发送，显式 start 失败后仍保留；500 ms 后自动恢复成功且 publish 恰好发送一次。
+- Mutation check：将生产修复临时改回 `resetFailureState()` 时，新回归稳定失败于 `expected [] to have a length of 1 but got 0`；恢复修复后通过。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts tests/lifecycle-invariants.test.ts tests/cluster.test.ts`（3 files，247/247）；`pnpm check`（35 files，779/779）；`pnpm lint`（通过）；`pnpm test:coverage` 单独运行（35 files，779/779；statements 97.69% / branches 93.99% / functions 98% / lines 98.95%；`data-bus.ts` 97.28% / 95.21% / 95.04% / 98.49%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27）；`git diff --check` 通过。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：仅调整显式手动恢复与自动 timer 交替时 recovery gate 的生命周期，不改变 public API、worker protocol、存储 schema/key 或线协议。手动重开成功路径行为不变；若手动重开失败，停靠操作会保留而非丢弃。若发现操作被错误保留或重复回放，回滚 = revert 合并提交 `1f2eed8`。
+- 下一项：继续审计 failed startup 与异步 stop rejection 的统一账本顺序，以及同步 CONNECTING callback 与 open promise settlement 之间的 supersession；随后检查 duplicate stop-failure reporting 与 recovery gate 串代边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 parked recovery cancellation (2026-09-16)
 
 - 状态：已合并（PR #91，rebase merge 至 `main@8a1c911`）。
