@@ -1,3 +1,18 @@
+## 0.20.91 data-bus lifecycle recovery regression coverage (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-lifecycle-recovery-audit` ← `origin/main@4c966f0`。
+- 审计目标：补强 `CrossTabDataBus` 的两条恢复竞态边界：失败的自动 reopen 已拥有异步 stop 时发生 `pagehide`，以及首个 transport open 在被 `pagehide`/`pageshow` 取代后才迟到 reject。
+- 结论 / 加固：生产代码已有正确的 lifecycle 守卫，无需修改。新增回归固定两点：suspend 必须复用 failed-reopen 的 pending stop，不能追加第二次 `transport.stop()`；被取代 open 的迟到 rejection 只能结束旧调用方，不能清除或拆除替代生命周期。
+- 变更文件：`tests/data-bus.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `reuses a failed-reopen stop gate when the tab hides before cleanup settles`、`ignores a rejected superseded open without clobbering the replacement lifecycle`。
+- Mutation check：移除 `openTransport()` 的 stale-lifecycle rejection guard 后，superseded-open 测试失败；将 `suspendTransport()` 的 pending-stop 复用条件改为 false 后，failed-reopen 测试观察到 `transport.stop()` 被调用两次并失败；恢复生产代码后定向 2/2 通过。
+- 验证命令与结果：`pnpm exec vitest run tests/data-bus.test.ts`（144/144）；`pnpm exec vitest run tests/lifecycle-invariants.test.ts`（1/1）；`pnpm check`（35 files，739/739）；`pnpm lint`；`pnpm test:coverage`（35 files，739/739；statements 97.42% / branches 93.15% / functions 97.25% / lines 98.74%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改运行时、public export、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 `reopenTransport()` 的 opening 复用、queued-start readiness、stale recovery timer token 和 stop failure settlement 分支。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 centrifuge subscription callback isolation (2026-09-16)
 
 - 状态：回归约束与完整验证完成，待提交、推送和 PR。

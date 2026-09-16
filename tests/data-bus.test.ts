@@ -1823,6 +1823,110 @@ describe('CrossTabDataBus', () => {
     expect(bus.getHealthSummary()).toMatchObject({ healthy: false, state: 'stopped', started: false });
   });
 
+  it('reuses a failed-reopen stop gate when the tab hides before cleanup settles', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'failed-reopen-hide' });
+    let releaseStop!: () => void;
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'failed-reopen-hide',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 100, maxAttempts: 1 }
+    });
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    // The live transport dies, then the automatic recovery open fails. Unlike
+    // an initial-start failure, this path is not inside performStop(), so a
+    // pagehide can arrive while its cleanup stop is still pending.
+    transport.stopGate = new Promise<void>(resolve => {
+      releaseStop = resolve;
+    });
+    transport.startShouldFail = true;
+    transport.setStatus('error');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(transport.startCalls).toBe(2);
+    expect(transport.stopCalls).toBe(1);
+
+    // The failed reopen already owns the asynchronous stop. Hiding here must
+    // reuse that gate instead of chaining a second stop behind it; otherwise a
+    // later pageshow can invoke transport.stop() again during replacement.
+    environment.pageHide();
+    transport.startShouldFail = false;
+    environment.pageShow();
+    releaseStop();
+    await bus.ready();
+
+    expect(transport.startCalls).toBe(3);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      state: 'healthy',
+      started: true,
+      suspended: false,
+      transport: { ready: true, status: 'connected' }
+    });
+    await bus.stop();
+    vi.useRealTimers();
+  });
+
+  it('ignores a rejected superseded open without clobbering the replacement lifecycle', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'superseded-open-reject' });
+    let rejectFirst!: (error: unknown) => void;
+    let startCalls = 0;
+    let stopCalls = 0;
+    const transport: DataBusTransport<object, number> = {
+      start(_config, handlers) {
+        startCalls += 1;
+        if (startCalls === 1) {
+          return new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject;
+          });
+        }
+        handlers.onStatus(WORKER_STATUS.CONNECTED);
+      },
+      subscribe() {},
+      unsubscribe() {},
+      publish() {},
+      stop() {
+        stopCalls += 1;
+      }
+    };
+    const bus = new CrossTabDataBus({
+      clusterKey: 'superseded-open-reject',
+      environment: environment.environment,
+      transport
+    });
+
+    const firstOpen = bus.start({});
+    const firstFailure = firstOpen.then(() => null, error => error);
+    await vi.waitFor(() => expect(startCalls).toBe(1));
+
+    // Supersede the first open while its start promise is still pending. The
+    // stop gate is chained to that old promise; the resume opening is chained
+    // to the stop. A late rejection from the old open must be swallowed by its
+    // own lifecycle rather than tearing down the replacement.
+    environment.pageHide();
+    environment.pageShow();
+    rejectFirst(new Error('superseded open failed'));
+
+    expect(await firstFailure).toMatchObject({ message: 'superseded open failed' });
+    await bus.ready();
+    expect(startCalls).toBe(2);
+    expect(stopCalls).toBe(1);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      state: 'healthy',
+      started: true,
+      transport: { ready: true, status: 'connected' }
+    });
+    await bus.stop();
+  });
+
   it('keeps a queued resume owned by the bus when a superseded initial open fails', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-open-resume' });
