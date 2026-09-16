@@ -1,3 +1,13 @@
+## 0.20.92 replay persistence cleanup serialization audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：retention `clearBefore` coalescing、在途 cleanup 跨 suspend/resume 的所有权、旧 generation 的排队 cutoff、persistence retry backoff 取消，以及新生命周期 cutoff 在旧 cleanup unwind 后的接力。
+- 结论：`suspend()` 递增 retry generation、清除旧 cutoff 并停止 sweep；旧 cleanup 只能完成已经发出的后端调用，不能继续消费旧队列。若新生命周期在旧 cleanup 占用单一 slot 时产生 cutoff，finally 会把该 cutoff 交给新 generation 的 cleanup。retry loop 在操作前、操作后和 backoff 后均检查 generation，取消会以 `PersistenceRetryCancelledError` 收口且不会继续重试。
+- 验证：`pnpm exec vitest run tests/replay-manager.test.ts tests/data-bus.test.ts`（2 files，229/229），覆盖 suspend 后不运行排队 cleanup、resume 后接力最新 cutoff、retry cancellation、retention timer 停止及 DataBus 生命周期集成。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 cluster pageshow/onResume 同步重入和 route handoff 跨暂停生命周期的所有权边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 RESUME/pageshow and replay hydration audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的实现缺陷。
