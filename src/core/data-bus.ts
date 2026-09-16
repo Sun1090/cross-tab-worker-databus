@@ -1191,8 +1191,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.transportReady = false;
       this.startPromise = null;
       this.pendingStop = null;
-      this.lastError = null;
-      this.lastErrorAt = null;
+      // Keep a stop failure visible in both failure ledgers. `lastFailure`
+      // already survives teardown, and clearing only `lastError` here made the
+      // same health snapshot report a retained transport failure alongside
+      // `recovery.hasError: false`. `resetFailureState()` clears both on the
+      // next explicit start.
       this.activeConfig = undefined;
       this.recoveryAttempt = 0;
       this.recoveryExhausted = false;
