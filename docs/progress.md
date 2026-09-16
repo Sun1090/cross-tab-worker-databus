@@ -1,3 +1,18 @@
+## 0.20.92 stop failure recovery ledger (2026-09-16)
+
+- 状态：已合并（PR #95，rebase merge 至 `main@db45d3a`）。
+- 分支 / PR / 合并：`feat/stop-failure-ledger-order` ← `origin/main@fd54e35`；PR #95（https://github.com/Sun1090/cross-tab-worker-databus/pull/95），合并提交 `db45d3a`（`fix(data-bus): retain stop failures in recovery ledger`）。
+- 复现场景：`transport.stop()` 被拒绝时，`performStop()` 先经 `reportError()` 将失败写入统一的 `lastFailure` 和 recovery 账本，但 `finally` 随即只清空 `lastError` / `lastErrorAt`。结果是同一个 `getHealthSummary()` 快照同时报告 `lastFailure.message === "transport stop failed"` 与 `recovery.hasError === false`、`errorMessage === null`，违反两个账本共享失败生命周期的文档契约。
+- 修复：teardown 不再单独清除 recovery 账本；失败保留在 `lastFailure` 与 recovery 账本中，直到下一次显式 `start()` 调用 `resetFailureState()` 同时清除两者。`stop()` 仍会 resolve，并继续通过 `onError` 报告失败。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 新增测试：扩展 `tests/data-bus.test.ts` 的 `resolves stop() and reports through onError when the transport stop rejects`，断言 stop rejection 后 `recovery.hasError === true`、`errorMessage === "transport stop failed"`，且 `errorAt` 与 `lastFailure.at` 一致。
+- Mutation check：保留旧实现时，新断言稳定失败于 `errorAt` / `errorMessage` / `hasError` 与错误账本不一致；恢复修复后定向测试通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts -t "resolves stop\(\) and reports through onError when the transport stop rejects"`（1/1）；`pnpm exec vitest run tests/data-bus.test.ts tests/lifecycle-invariants.test.ts`（2 files，173/173）；`pnpm check`（35 files，779/779，含 typecheck/build/unit）；`pnpm lint`（通过）；`pnpm test:coverage`（35 files，779/779；statements 97.69% / branches 93.99% / functions 98% / lines 98.95%；`data-bus.ts` 97.27% / 95.21% / 95.04% / 98.48%）；`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）；`pnpm test:e2e`（27/27，45.1s）；`git diff --check`（通过）。PR checks：`analyze`、`verify`、`browser`、CodeQL 全部通过。
+- 阻塞：无。
+- 风险 / 回滚：仅修复 stop rejection 后两个失败账本的生命周期一致性，不改变 public API、worker protocol、存储 schema/key 或线协议。显式 `start()` 仍是清除边界；若发现 teardown 失败应在后续生命周期中更早清除，回滚 = revert 合并提交 `db45d3a`。
+- 下一项：继续审计 `reopenTransport()` 在同步 CONNECTING 回调触发 supersession 时的 opening settlement，以及 duplicate stop-failure reporting / recovery gate waiter 串代边界。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 manual recovery parked-operation preservation (2026-09-16)
 
 - 状态：已合并（PR #93，rebase merge 至 `main@1f2eed8`）。
