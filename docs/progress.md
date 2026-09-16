@@ -1,14 +1,16 @@
 ## 0.20.91 RELEASE_FREEZE (2026-09-16)
 
-- 状态：发布前门禁完成；版本号、CHANGELOG、双语路线图与基准趋势已更新，待 release commit、PR、merge、tag 与已发布包验证。
+- 状态：已发布并完成发布后验证。
 - 分支 / 基线：`feat/release-0.20.91` ← `origin/main@f171122`。
 - 发布范围：`v0.20.90..f171122` 的 11 个提交，包含跨 Tab `EVENT` 边界加固、WebSocket 连接失败后的 socket 清理、Centrifuge token bridge 生命周期隔离、cluster pause 定时器泄漏修复，以及 DataBus/会话生命周期与回放持久化错误路径回归。
 - 版本级别：patch（`0.20.90` → `0.20.91`）；无计划内破坏性 public API、worker protocol、存储 schema/key 或线协议变更。
 - 变更文件：`package.json`、`CHANGELOG.md`、`docs/benchmarks.md`、`docs/zh/benchmarks.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
 - 验证命令与结果：`pnpm check`（35 files，754/754）、`pnpm lint`、`pnpm test:coverage`（statements 97.87% / branches 93.94% / functions 98.16% / lines 99.03%）、`pnpm bench`（3 files，25/25）、`pnpm test:e2e`（27/27）、`pnpm bench:browser`、`pnpm bench:compare --fail-above-pct 50`（无指标回退超过 50%）、`pnpm verify:pack`（ESM/CJS root + subpaths）、`pnpm verify:compat`（对 v0.20.90）、公开 registry `pnpm audit`（无已知漏洞）、`npm pack --dry-run --json`（109 files，`docs/progress.md` 未打包）、`git diff --check` 均通过。
+- 发布结果：PR [#68](https://github.com/Sun1090/cross-tab-worker-databus/pull/68) 经 rebase merge 到 `main@41f0401`；tag `v0.20.91` 精确指向该 commit；GitHub Release 发布成功（https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.20.91）；Release workflow `35045042690` 全部 job 在 53 秒内成功，npm publish 与阻塞式 published-consumer gate 均通过。
+- 发布后 smoke test：`npm view cross-tab-worker-databus version` 返回 `0.20.91`；registry integrity 为 `sha512-Rx4tSFVjpVYVCGjzKlClje2O8ZxruOqgKGU5nDpmtH3n4sNWlXs7m8qly8/L66d9ncMfW+jpLrZdQ1trq5ZHcQ==`；`PUBLISHED_VERSION=0.20.91 pnpm verify:published` 验证已发布 ESM/CJS root 与 public subpath 消费者可导入。
 - 阻塞：无。
-- 风险 / 回滚：发布前回滚 = 放弃本分支；发布后若发现回归，停止传播、保留 tag，按 patch release 修复，不回写已发布版本。
-- 下一项：提交并推送 release 分支，通过 PR 全部门禁后 rebase merge，在合并提交创建并推送 `v0.20.91` tag，等待 Release workflow 与 npm 发布验证。
+- 风险 / 回滚：若 0.20.91 发现回归，停止传播、保留 immutable tag，按 patch release 修复；不删除或重写已发布版本。运行时可回退到 `v0.20.90` 或上一兼容版本，存储 schema/key 与 worker protocol 未发生变化。
+- 下一项：进入 `0.20.92` 可靠性开发线，覆盖 `reopenTransport()` predecessor rejection/settlement、queued-start readiness 与 stop-promise cleanup 等剩余生命周期错误路径。
 - 更新时间：2026-09-16。
 
 ## 0.20.91 superseded start/stop rejection ownership (2026-09-16)
