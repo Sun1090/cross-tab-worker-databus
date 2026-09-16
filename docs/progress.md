@@ -1,3 +1,13 @@
+## 0.20.92 reopen settlement and recovery gate audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：`reopenTransport()` 在同步 `CONNECTING` 回调触发 `stop()`/生命周期 supersession 时的 opening settlement；`createStopPromise()`、`suspendTransport()` 与 `performStop()` 之间的 stop rejection 归档及重复报告；recovery gate waiter 在取消、重建、自动恢复失败和 demand-driven recovery 之间的代际一致性。
+- 结论：当前实现先安装 `startPromise` 与 lifecycle epoch，再发送 `CONNECTING`，因此同步回调触发的 stop 能安全取得同一 opening；epoch guard 会在 `transport.start()` 前放弃旧 opening。stop cleanup 通过 `pendingStop` 单一 gate 串行化，只有拥有 stop 调用的路径报告 rejection；recovery waiter 捕获 gate promise 与 cancellation token，gate 重建不会误放行旧 waiter。
+- 验证：`pnpm test --run`（35 files，779/779）；既有回归覆盖包括 `lets a stop() from the reconnect CONNECTING callback cancel the reopen`、`stops once when an explicit stop follows a failed-open cleanup`、`reuses a failed-reopen stop gate when the tab hides before cleanup settles`、`reuses an in-flight recovery reopen instead of opening a second transport`。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 `RESUME/pageshow` 同步回调重入与 replay hydration 生命周期交错。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 stop failure recovery ledger (2026-09-16)
 
 - 状态：已合并（PR #95，rebase merge 至 `main@db45d3a`）。
