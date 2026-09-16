@@ -1,3 +1,16 @@
+## 0.20.91 RELEASE_FREEZE (2026-09-16)
+
+- 状态：发布前门禁完成；版本号、CHANGELOG、双语路线图与基准趋势已更新，待 release commit、PR、merge、tag 与已发布包验证。
+- 分支 / 基线：`feat/release-0.20.91` ← `origin/main@f171122`。
+- 发布范围：`v0.20.90..f171122` 的 11 个提交，包含跨 Tab `EVENT` 边界加固、WebSocket 连接失败后的 socket 清理、Centrifuge token bridge 生命周期隔离、cluster pause 定时器泄漏修复，以及 DataBus/会话生命周期与回放持久化错误路径回归。
+- 版本级别：patch（`0.20.90` → `0.20.91`）；无计划内破坏性 public API、worker protocol、存储 schema/key 或线协议变更。
+- 变更文件：`package.json`、`CHANGELOG.md`、`docs/benchmarks.md`、`docs/zh/benchmarks.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/progress.md`。
+- 验证命令与结果：`pnpm check`（35 files，754/754）、`pnpm lint`、`pnpm test:coverage`（statements 97.87% / branches 93.94% / functions 98.16% / lines 99.03%）、`pnpm bench`（3 files，25/25）、`pnpm test:e2e`（27/27）、`pnpm bench:browser`、`pnpm bench:compare --fail-above-pct 50`（无指标回退超过 50%）、`pnpm verify:pack`（ESM/CJS root + subpaths）、`pnpm verify:compat`（对 v0.20.90）、公开 registry `pnpm audit`（无已知漏洞）、`npm pack --dry-run --json`（109 files，`docs/progress.md` 未打包）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：发布前回滚 = 放弃本分支；发布后若发现回归，停止传播、保留 tag，按 patch release 修复，不回写已发布版本。
+- 下一项：提交并推送 release 分支，通过 PR 全部门禁后 rebase merge，在合并提交创建并推送 `v0.20.91` tag，等待 Release workflow 与 npm 发布验证。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 superseded start/stop rejection ownership (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
