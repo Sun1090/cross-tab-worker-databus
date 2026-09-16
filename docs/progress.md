@@ -1,3 +1,12 @@
+## 0.20.92 release-readiness verification continuation (2026-09-16)
+
+- 状态：发布前验证继续通过，未触发停止条件。
+- 验证：`pnpm test:e2e`（27/27，含 crash TTL、BFCache、SharedWorker、storage-event fallback、replay persistence、WebSocket、a11y）；`pnpm bench`（3 files，25/25）；`pnpm verify:pack`（ESM/CJS root 与 subpath consumer）；`pnpm verify:compat`（0.20.92 对 0.20.91 的 public exports/type metadata 兼容）。
+- 结果：未发现新的功能、打包或兼容性回归；npm 环境仅报告现有配置弃用 warning，不影响验证结果。
+- 风险 / 回滚：本轮不改变运行时代码、public API 或发布产物来源。
+- 下一项：继续检查发布清单中剩余可执行验证与仓库状态，发现失败立即修复。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 heartbeat TTL/orphan convergence audit (2026-09-16)
 
 - 状态：审计完成，未发现需要修改的运行时代码缺陷。
