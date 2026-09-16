@@ -4,7 +4,7 @@
 
 ## 0.20.92 in progress
 
-The current line continues lifecycle error-path verification around predecessor reopen settlement, queued-start readiness, and stop-promise cleanup.
+The current line continues lifecycle error-path verification around predecessor reopen settlement, queued-start readiness, and stop-promise cleanup. The first landed fix closes a real re-entrancy hole in `stop()`: the shared stop gate is now installed before the synchronous teardown prelude, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the one teardown instead of starting a second one (previously `transport.stop()` ran twice). The synchronous prelude still flips every lifecycle flag and releases handlers in the same tick, and `stop()` keeps resolving even when the transport stop rejects.
 
 ## 0.20.91 delivered scope
 
