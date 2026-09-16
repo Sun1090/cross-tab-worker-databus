@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- A restart queued behind an asynchronous `stop()` now stays suspended when `pagehide` lands during the stop cleanup. `WorkerClusterRuntime.start()` installs its lifecycle listeners before checking document visibility, so a hidden document waits for `pageshow` instead of opening a fresh transport in the background.
 - `ROUTE_RELEASED` handoff acknowledgements are now accepted only when their route generation exactly matches the stored route. A delayed or replayed ACK carrying a newer generation could previously confirm a different handoff and release the new owner's `SUBSCRIBE` before the matching release arrived.
 - Durable replay history loaded asynchronously can no longer overtake or evict publications recorded while `load()` is still pending. Hydration now places the durable snapshot ahead of that live tail before applying the retention/count policy, so a bounded ring keeps the newest messages instead of treating them as older history.
 - Replay hydration now belongs to a replaceable lifecycle instead of one immutable constructor promise. A `clearAll()`, `clearTopic()`, topic unsubscribe, or `clearBefore()` issued while durable `load()` is pending is applied to the loaded snapshot, so cleared history cannot reappear. A load superseded by suspend/restart is cancelled without clobbering the replacement, and an explicit stop/start now performs a fresh hydration instead of leaving the restarted rings empty.
