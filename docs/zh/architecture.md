@@ -86,7 +86,7 @@ graph TB
 | **Sticky**（粘性） | — | 已有 route 在 owner 存活期间保持归属；负载和可见性只影响全新 route 的放置。 |
 | **Heartbeat**（心跳） | `heartbeatAt` | Worker 周期性写入存储的存活标记。超过 `workerTtlMs` 未刷新即视为死亡。 |
 | **Handoff**（交接） | `handoffFromWorkerId` | 把 Topic 从旧 owner 移交给新 owner（如 `pagehide` 时）的流程，使用严格的释放-确认协议，保证同一 Topic 不会被两个 Worker 同时拥有。 |
-| **Generation**（代次） | `generation` | 每条 route 上的单调递增计数器。交接确认必须引用不早于当前 route 的代次，因此过期确认会被忽略。 |
+| **Generation**（代次） | `generation` | 每条 route 上的单调递增计数器。交接确认必须精确引用当前 route 的代次，因此其他交接轮次的迟到确认会被忽略。 |
 | **Local mode**（本地模式） | `coordinated: false` | storage 或 BroadcastChannel 不可用时的降级运行：无跨 Tab 路由，仅使用本 Tab 自己的 transport。 |
 
 ## 存储结构
@@ -509,7 +509,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 以下不变量由回归测试固化（见 `tests/stability.test.ts` 与 `tests/replay-persistence.test.ts`），后续重构必须继续保持：
 
-- **Handoff ACK 有效性。** `ROUTE_RELEASED` 只有在 route 仍指向接收方、释放来自记录的 `handoffFromWorkerId`、且 ACK generation 不小于存储 route 的 generation 时才被接受。来自更早交接轮次的重复 ACK（如 a↔b 反复交接）携带更旧的 generation，会被丢弃。
+- **Handoff ACK 有效性。** `ROUTE_RELEASED` 只有在 route 仍指向接收方、释放来自记录的 `handoffFromWorkerId`、且 ACK generation 与存储 route 的 generation 精确相等时才被接受。来自其他交接轮次的重复或迟到 ACK（如 a↔b 反复交接）会被丢弃，不能确认当前 route。
 - **Replay 持久化清理顺序。** 排队在当前任务之后的批量持久化 flush 会与竞速的清理操作对账：`unsubscribe` 与 `clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 则丢弃整个待写批次，避免它在新生命周期代际下启动。已清理或属于已停止会话的历史不会被在途 flush 复活。
 - **存储写失败恢复。** 合并写入按指数退避重试（50 ms → 1.6 s 封顶）。结构性失败的关键在 5 次尝试后被丢弃（伴随 `console.warn`），且不会永久阻塞其他排队 key；队列完全清空或 `clear()` 取消重试后，退避延迟重置。
 - **Transport 恢复预算。** 自动恢复由冷却时间限速、由 `recovery.maxAttempts` 限量，预算耗尽后标记 `exhausted`。成功的重开会重置尝试计数与 exhausted 标记；transport 宕机时显式 `subscribe` 仍可手动恢复。自动调度本身不会重开连接：后端必须先释放失效连接，重试才能创建或重开 socket。`WebSocketTransport` 只在 socket `open` 后 resolve `start()`；握手前的 `error`/`close` 或 `connectTimeoutMs` 超时都会 reject。它仅在 socket 有效期间将其标记为 active；`error`/`close` 会立即失效，下一次 `start()` 在调用工厂前清除旧引用，因此被取代 socket 的迟到回调会被忽略。
