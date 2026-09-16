@@ -1,6 +1,21 @@
-## 0.20.91 queued transport-operation rejection audit (2026-09-16)
+## 0.20.91 superseded start/stop rejection ownership (2026-09-16)
 
 - 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-superseded-start-stop` ← `origin/main@627a7e9`。
+- 审计目标：验证显式 `stop()` 到达时 initial `transport.start()` 仍未 settle，且该已被取代的 opening 在 stop 等待期间 reject 时，错误是否会错误进入新 lifecycle 的 failure ledger，以及 stop 是否仍只关闭 transport 一次。
+- 结论 / 加固：生产 `openTransport()` 的 `isCurrentLifecycle()` 守卫与 `performStop()` 的 stop-gate 串行化正确；无需修改运行时。新增回归固定：原 `start()` 调用方收到自己的 rejection，`stop()` 仍成功，`transport.stop()` 恰好调用一次，旧 opening 的失败不会进入 `onError`，健康状态最终为 `stopped`。
+- 变更文件：`tests/data-bus.test.ts`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `keeps stop() successful when a superseded in-flight start rejects`。
+- Mutation check：临时移除 `openTransport()` rejection 路径的 `isCurrentLifecycle()` 守卫后，定向测试因旧 start failure 被错误送入 `onError` 而失败；恢复守卫后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（229/229）通过；`pnpm check`（35 files，754/754）、`pnpm lint`、`pnpm test:coverage`（35 files，754/754；statements 97.87% / branches 93.94% / functions 98.16% / lines 99.03%；`data-bus.ts` statements 97.77% / branches 95.01% / functions 95.72% / lines 98.6%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅测试与文档，不改 runtime、public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：提交/合并后继续审计 `reopenTransport()` chaining/settlement、queued-start readiness 等剩余生命周期错误路径。
+- 更新时间：2026-09-16。
+
+## 0.20.91 queued transport-operation rejection audit (2026-09-16)
+
+- 状态：已完成并合并（GitHub PR #66，rebase merge 后 main 为 `627a7e9`）。
 - 分支 / 基线：`feat/data-bus-run-transport-rejection-audit` ← `origin/main@0344246`。
 - 审计目标：验证启动期间排队的 transport 操作（`subscribe()` 在 initial open 尚未 settle 时进入 `runTransport()`）在放行后 reject 时，是否只通过 `onError` 上报一次、是否产生 unhandled rejection，以及失败后监听器/生命周期是否仍可正常停止。
 - 结论 / 加固：生产 `runTransport()` 的 `.then(operation, swallow-open-rejection).catch(reportError)` 链路正确；无需修改运行时。新增回归固定“排队操作 reject 恰好上报一次、且没有 `unhandledRejection`”的契约，并让 `data-bus.ts` 的排队操作失败分支获得覆盖。
