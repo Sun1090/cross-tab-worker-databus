@@ -146,7 +146,7 @@ interface WorkerRoute {
 
 `generation` increments on every re-assignment and must match across the handoff handshake; `handoffFromWorkerId` records the previous owner during a graceful handoff. The interface above matches the current protocol — see [Failover](#failover) for how these two fields drive takeover.
 
-Routes do not store the original topic string or payload. When the actual owner receives `CONTROL/SUBSCRIBE`, the original topic string is only passed through the BroadcastChannel in-memory message. `confirmedAt` is written after the owner processes the control message; before the route is confirmed, the subscriber Runtime holding the original topic string will resend `SUBSCRIBE` to recover from BroadcastChannel message loss that results in "a route without a real subscription".
+Routes do not store the original topic string or payload. When the actual owner receives `CONTROL/SUBSCRIBE`, the original topic string is only passed through the BroadcastChannel in-memory message. The receiver accepts that control frame only when the durable route currently names it; a delayed frame from an earlier assignment round is dropped, and a route awaiting `ROUTE_RELEASED` can be confirmed only by the matching handoff ACK. `confirmedAt` is written after the owner processes the control message; before the route is confirmed, the subscriber Runtime holding the original topic string will resend `SUBSCRIBE` to recover from BroadcastChannel message loss that results in "a route without a real subscription".
 
 ### How `topic`, `topicKey`, `tabId`, `workerId`, and BroadcastChannel relate
 
@@ -316,7 +316,7 @@ All real-time coordination flows through one BroadcastChannel per cluster, whose
 
 | Type | Direction | Purpose |
 |---|---|---|
-| `CONTROL` | point-to-point (A → B) | Ask the target Worker to `SUBSCRIBE`, `UNSUBSCRIBE`, or `PUBLISH` a topic. Carries `action`, `topic`, `topicKey`, `targetWorkerId`, and an optional `data` payload. |
+| `CONTROL` | point-to-point (A → B) | Ask the target Worker to `SUBSCRIBE`, `UNSUBSCRIBE`, or `PUBLISH` a topic. Carries `action`, `topic`, `topicKey`, `targetWorkerId`, and an optional `data` payload. A `SUBSCRIBE` is honored only when the durable route currently names the target and is not awaiting `ROUTE_RELEASED`. |
 | `EVENT` | broadcast (owner → all Tabs) | Fan out a publication that the transport delivered to the owning Worker. Carries `eventType` and `payload`. |
 | `REGISTRY` | broadcast | Nudge every Tab to reconcile immediately after a registry or route write, instead of waiting for the next heartbeat. |
 | `ROUTE_RELEASED` | point-to-point (old owner → new owner) | Acknowledge a graceful handoff; only the new owner whose route `generation` matches may `SUBSCRIBE` (see Failover). |
@@ -539,6 +539,7 @@ This process prevents overlap during graceful owner handoff while retaining avai
 
 These invariants are pinned by regression tests (see `tests/stability.test.ts` and `tests/replay-persistence.test.ts`) and must hold through future refactors:
 
+- **SUBSCRIBE route binding.** An inbound `CONTROL/SUBSCRIBE` is accepted only when the durable route currently names the receiver and is not an unconfirmed graceful handoff. A delayed frame from an earlier assignment round cannot add ownership, subscribe the transport, or confirm the route; only the matching `ROUTE_RELEASED` can authorize a pending handoff. Ownership follows the current route record, not the order in which control frames arrive.
 - **Handoff ACK validity.** A `ROUTE_RELEASED` is accepted only when the route still points at the receiver, the release comes from the recorded `handoffFromWorkerId`, and the ACK generation exactly matches the stored route generation. Replayed ACKs from any other handoff round (e.g. an a↔b ping-pong) are dropped instead of confirming the current route.
 - **Replay persistence cleanup ordering.** A batched persistence flush queued behind the current task is filtered against the cleanup that wins the race: `unsubscribe` and `clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff, and `suspend()`/`stop()` discard the whole queued batch before it can start under the next lifecycle generation. Cleared or stopped-session history is never re-appended by an in-flight flush.
 - **Storage write recovery.** Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap). A structurally failing key is dropped after 5 attempts (with a `console.warn`) without permanently blocking other queued keys, and the backoff delay resets once the queue fully drains or `clear()` cancels the retries.

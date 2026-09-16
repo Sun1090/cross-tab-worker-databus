@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- A delayed or replayed `CONTROL/SUBSCRIBE` can no longer make a worker subscribe when the durable route does not currently name it, and it can no longer confirm a pending graceful handoff before the matching `ROUTE_RELEASED`. Ownership now follows the route record instead of control-frame arrival order, preventing transient double subscriptions when an earlier assignment round is overtaken by a newer one.
 - A restart queued behind an asynchronous `stop()` now stays suspended when `pagehide` lands during the stop cleanup. `WorkerClusterRuntime.start()` installs its lifecycle listeners before checking document visibility, so a hidden document waits for `pageshow` instead of opening a fresh transport in the background.
 - `ROUTE_RELEASED` handoff acknowledgements are now accepted only when their route generation exactly matches the stored route. A delayed or replayed ACK carrying a newer generation could previously confirm a different handoff and release the new owner's `SUBSCRIBE` before the matching release arrived.
 - Durable replay history loaded asynchronously can no longer overtake or evict publications recorded while `load()` is still pending. Hydration now places the durable snapshot ahead of that live tail before applying the retention/count policy, so a bounded ring keeps the newest messages instead of treating them as older history.

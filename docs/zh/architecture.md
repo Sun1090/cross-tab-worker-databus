@@ -136,7 +136,7 @@ interface WorkerRoute {
 
 `generation` 在每次重新分配时递增，交接握手必须匹配该值；`handoffFromWorkerId` 记录优雅迁移时的前任 owner。上面的接口与当前协议一致——这两个字段如何驱动接管见 [故障转移](#故障转移)。
 
-路由不保存原始 Topic 字符串或 payload。真实 owner 收到 `CONTROL/SUBSCRIBE` 时，原始 Topic 字符串只通过 BroadcastChannel 内存消息传递。`confirmedAt` 在 owner 处理控制消息后写入；在路由确认之前，持有原始 Topic 字符串的订阅方 Runtime 会重发 `SUBSCRIBE`，以从"有路由但无真实订阅"的 BroadcastChannel 消息丢失中恢复。
+路由不保存原始 Topic 字符串或 payload。真实 owner 收到 `CONTROL/SUBSCRIBE` 时，原始 Topic 字符串只通过 BroadcastChannel 内存消息传递。接收方只有在持久化 route 当前指向自己时才接受该控制帧；来自较早分配轮的迟到帧会被丢弃，等待 `ROUTE_RELEASED` 的交接也只能由精确匹配的 ACK 确认。`confirmedAt` 在 owner 处理控制消息后写入；在路由确认之前，持有原始 Topic 字符串的订阅方 Runtime 会重发 `SUBSCRIBE`，以从"有路由但无真实订阅"的 BroadcastChannel 消息丢失中恢复。
 
 ### `topic`、`topicKey`、`tabId`、`workerId` 与 BroadcastChannel 的关联
 
@@ -309,7 +309,7 @@ SDK 不依赖 `storage` 事件驱动协调，控制通知使用 BroadcastChannel
 
 | 类型 | 方向 | 用途 |
 |---|---|---|
-| `CONTROL` | 点对点（A → B） | 请求目标 Worker 对某 Topic 执行 `SUBSCRIBE`、`UNSUBSCRIBE` 或 `PUBLISH`。携带 `action`、`topic`、`topicKey`、`targetWorkerId` 和可选 `data`。 |
+| `CONTROL` | 点对点（A → B） | 请求目标 Worker 对某 Topic 执行 `SUBSCRIBE`、`UNSUBSCRIBE` 或 `PUBLISH`。携带 `action`、`topic`、`topicKey`、`targetWorkerId` 和可选 `data`。只有持久化 route 当前指向目标且不在等待 `ROUTE_RELEASED` 时，`SUBSCRIBE` 才会被执行。 |
 | `EVENT` | 广播（owner → 所有 Tab） | 把 transport 投递给 owner Worker 的 publication 扇出到所有 Tab。携带 `eventType` 和 `payload`。 |
 | `REGISTRY` | 广播 | 注册表或路由写入后通知所有 Tab 立即 reconcile，而不是等下一轮心跳。 |
 | `ROUTE_RELEASED` | 点对点（旧 owner → 新 owner） | 确认一次优雅迁移；只有 route `generation` 匹配的新 owner 才允许发送 `SUBSCRIBE`（见故障转移）。 |
@@ -509,6 +509,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 以下不变量由回归测试固化（见 `tests/stability.test.ts` 与 `tests/replay-persistence.test.ts`），后续重构必须继续保持：
 
+- **SUBSCRIBE 路由绑定。** 入站 `CONTROL/SUBSCRIBE` 只有在持久化 route 当前指向接收方、且该 route 不是未确认的优雅交接时才会被接受。来自较早分配轮的迟到帧不能加入 ownership、不能订阅 transport，也不能确认 route；等待中的交接只能由精确匹配的 `ROUTE_RELEASED` 授权。ownership 以当前 route 记录为准，而不以控制帧到达顺序为准。
 - **Handoff ACK 有效性。** `ROUTE_RELEASED` 只有在 route 仍指向接收方、释放来自记录的 `handoffFromWorkerId`、且 ACK generation 与存储 route 的 generation 精确相等时才被接受。来自其他交接轮次的重复或迟到 ACK（如 a↔b 反复交接）会被丢弃，不能确认当前 route。
 - **Replay 持久化清理顺序。** 排队在当前任务之后的批量持久化 flush 会与竞速的清理操作对账：`unsubscribe` 与 `clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 则丢弃整个待写批次，避免它在新生命周期代际下启动。已清理或属于已停止会话的历史不会被在途 flush 复活。
 - **存储写失败恢复。** 合并写入按指数退避重试（50 ms → 1.6 s 封顶）。结构性失败的关键在 5 次尝试后被丢弃（伴随 `console.warn`），且不会永久阻塞其他排队 key；队列完全清空或 `clear()` 取消重试后，退避延迟重置。
