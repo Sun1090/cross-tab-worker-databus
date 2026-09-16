@@ -1,7 +1,17 @@
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## [0.20.91] - 2026-09-16
+
 ### Fixed
 - A malformed cross-tab `EVENT` frame can no longer break publication delivery. Publication payloads that are not objects with a string `topic`, and frames carrying an unknown `eventType`, are now ignored at the DataBus boundary; later valid events continue to dispatch. Legacy payloads without `originTabId` still inherit the frame-level attribution, while an explicit payload value takes precedence.
+- `WebSocketTransport` now best-effort closes a socket after a connection error invalidates it. Automatic recovery can no longer leave a dead connection open when the socket implementation does not follow an `error` event with `close`.
+- Centrifuge token-bridge callbacks are bound to the client lifecycle that created them. A credential request from a replaced client can no longer be routed into the replacement session or satisfy a fresh request with a stale token.
+- `WorkerClusterRuntime.pause()` no longer schedules a deferred channel close when no channel exists, removing a stray timer left behind by an explicit `stop()`.
+
+### Changed
+- The browser benchmark trend documentation was refreshed from 24 archived reports. The release-gate comparison found no metric regression above the 50% ceiling; publish latency improved in both worker modes.
 
 ## [0.20.90] - 2026-09-16
 
