@@ -465,6 +465,132 @@ describe('ReplayManager — hydration', () => {
     expect(persistenceErrors).toEqual([expect.any(PersistenceRetryCancelledError)]);
   });
 
+  it('does not repopulate buffers when hydration resolves after clearAll', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const persistence = new FakePersistence({ clear: true });
+    persistence.load = load;
+    const { manager } = createManager({ persistence });
+
+    await Promise.resolve();
+    const clearing = manager.clearAll();
+    resolveLoad([message('t', 1)]);
+    await clearing;
+    await settle(10);
+
+    expect(manager.getStats()).toMatchObject({ topics: 0, messages: 0 });
+  });
+
+  it('does not repopulate a cleared topic when hydration resolves later', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const persistence = new FakePersistence({ clearTopic: true });
+    persistence.messages = [message('a', 1), message('b', 2)];
+    persistence.load = load;
+    const { manager } = createManager({ persistence });
+
+    await Promise.resolve();
+    const clearing = manager.clearTopic('a');
+    resolveLoad([message('a', 1), message('b', 2)]);
+    await clearing;
+    await settle(10);
+
+    const received: string[] = [];
+    manager.deliverReplay('*', true, item => received.push(item.topic));
+    await settle(10);
+    expect(received).toEqual(['b']);
+    expect(manager.getStats()).toMatchObject({ topics: 1, messages: 1 });
+  });
+
+  it('does not repopulate an unsubscribed topic after hydration resolves', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const persistence = new FakePersistence({ clearTopic: true });
+    persistence.messages = [message('t', 1)];
+    persistence.load = load;
+    const { manager } = createManager({ persistence });
+
+    await Promise.resolve();
+    manager.onTopicUnsubscribed('t');
+    resolveLoad([message('t', 1)]);
+    await settle(10);
+
+    expect(manager.getStats()).toMatchObject({ topics: 0, messages: 0 });
+  });
+
+  it('does not re-add entries pruned by clearBefore while hydration is pending', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const persistence = {
+      load,
+      append: vi.fn(async () => undefined)
+    };
+    const { manager } = createManager({ persistence });
+
+    await Promise.resolve();
+    await manager.clearBefore(5_000);
+    resolveLoad([message('t', 1, 4_000), message('t', 2, 6_000)]);
+    await settle(10);
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(received).toEqual([2]);
+  });
+
+  it('rehydrates when start resumes before an in-flight hydration settles', async () => {
+    let resolveFirstLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn()
+      .mockImplementationOnce(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+        resolveFirstLoad = resolve;
+      }))
+      .mockImplementationOnce(async () => [message('t', 1)]);
+    const persistence = {
+      load,
+      append: vi.fn(async () => undefined)
+    };
+    const { manager, persistenceErrors } = createManager({ persistence });
+
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+    manager.suspend();
+    manager.start();
+    resolveFirstLoad([message('t', 99)]);
+    await settle(20);
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(persistenceErrors).toEqual([expect.any(PersistenceRetryCancelledError)]);
+    expect(received).toEqual([1]);
+  });
+
+  it('rehydrates durable history after an explicit stop/start cycle', async () => {
+    const persistence = new FakePersistence();
+    persistence.messages = [message('t', 1)];
+    const { manager } = createManager({ persistence });
+    await settle();
+
+    manager.suspend();
+    manager.resetBuffers();
+    expect(manager.getStats()).toMatchObject({ topics: 0, messages: 0 });
+
+    manager.start();
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle(10);
+    expect(received).toEqual([1]);
+  });
+
   it('reports a hydration failure without blocking startup', async () => {
     const persistence = new FakePersistence();
     persistence.failures.load = 99;

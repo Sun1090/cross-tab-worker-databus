@@ -85,7 +85,18 @@ export class ReplayManager<TData = unknown> {
   private retryGeneration = 0;
   private pendingReplayPersistence: DataBusMessage<TData>[] = [];
   private persistenceFlushScheduled = false;
-  private readonly hydration: Promise<void>;
+  /** Current hydration operation, if one belongs to the active lifecycle. */
+  private hydration: Promise<void> | null = null;
+  /** Invalidates a load from a superseded suspend/reset lifecycle. */
+  private hydrationEpoch = 0;
+  /** Whether the active lifecycle has finished (or deliberately skipped) hydration. */
+  private hydrationComplete = false;
+  /** A failed load is retried by the next explicit start(), not every replay request. */
+  private hydrationFailed = false;
+  /** Mutations that must be applied to a load already in flight. */
+  private hydrationClearAll = false;
+  private hydrationClearedTopics = new Set<string>();
+  private hydrationClearBefore: number | null = null;
   /** Coalesced retention cleanup: the newest cutoff wins while one is running. */
   private retentionCleanup: Promise<void> | null = null;
   private retentionCutoff: number | null = null;
@@ -104,7 +115,7 @@ export class ReplayManager<TData = unknown> {
     this.trace = deps.trace;
     this.onPersistenceError = deps.onPersistenceError;
     this.onDispatchError = deps.onDispatchError;
-    this.hydration = this.hydrate();
+    void this.requestHydration();
   }
 
   /** True when replay buffering is enabled. */
@@ -168,7 +179,7 @@ export class ReplayManager<TData = unknown> {
       ? Math.min(Math.floor(replayOption), this.maxPerTopic)
       : this.maxPerTopic;
     if (this.persistence) {
-      void this.hydration.then(() => {
+      void this.requestHydration().then(() => {
         if (isHandlerActive?.() ?? true) this.deliver(topic, limit, handler);
       });
       return;
@@ -181,14 +192,18 @@ export class ReplayManager<TData = unknown> {
    * clearTopic), and prune durable history. */
   onTopicUnsubscribed(topic: string): void {
     if (!this.buffers) return;
+    const clearing = this.persistence?.clearTopic
+      ? this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_TOPIC, () => this.persistence!.clearTopic!(topic))
+      : null;
+    // A load started before this unsubscribe may still resolve with the topic.
+    // Record the mutation so the in-flight snapshot filters it out instead of
+    // restoring history after the local subscription is gone.
+    this.hydrationClearedTopics.add(topic);
     this.buffers.delete(topic);
     // A batched persistence flush may still be queued behind this task; drop
     // the topic's pending entries so clearTopic is not undone by the append.
     this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
-    if (this.persistence?.clearTopic) {
-      void this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_TOPIC, () => this.persistence!.clearTopic!(topic))
-        .catch(error => this.onPersistenceError(error));
-    }
+    if (clearing) void clearing.catch(error => this.onPersistenceError(error));
   }
 
   /** Clear all in-memory replay buffers and, when supported, durable history.
@@ -196,12 +211,16 @@ export class ReplayManager<TData = unknown> {
    * contract that callers can observe a failed clear. */
   async clearAll(): Promise<void> {
     if (!this.buffers) return;
+    const clearing = this.persistence?.clear
+      ? this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR, () => this.persistence!.clear!())
+      : null;
+    this.hydrationClearAll = true;
     this.buffers.clear();
     // Cancel any queued batch flush so cleared history is not re-appended.
     this.pendingReplayPersistence = [];
-    if (this.persistence?.clear) {
+    if (clearing) {
       try {
-        await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR, () => this.persistence!.clear!());
+        await clearing;
       } catch (error) {
         this.onPersistenceError(error);
         throw error;
@@ -212,11 +231,15 @@ export class ReplayManager<TData = unknown> {
   /** Clear replay history for one exact topic, including durable storage. */
   async clearTopic(topic: string): Promise<void> {
     if (!this.buffers) return;
+    const clearing = this.persistence?.clearTopic
+      ? this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_TOPIC, () => this.persistence!.clearTopic!(topic))
+      : null;
+    this.hydrationClearedTopics.add(topic);
     this.buffers.delete(topic);
     this.pendingReplayPersistence = this.pendingReplayPersistence.filter(message => message.topic !== topic);
-    if (this.persistence?.clearTopic) {
+    if (clearing) {
       try {
-        await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_TOPIC, () => this.persistence!.clearTopic!(topic));
+        await clearing;
       } catch (error) {
         this.onPersistenceError(error);
         throw error;
@@ -227,7 +250,13 @@ export class ReplayManager<TData = unknown> {
   /** Remove replay entries older than an epoch-millisecond cutoff. */
   async clearBefore(timestamp: number): Promise<void> {
     if (!Number.isFinite(timestamp)) throw new TypeError('timestamp must be finite.');
+    const clearing = this.persistence?.clearBefore
+      ? this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(timestamp))
+      : null;
     if (this.buffers) {
+      this.hydrationClearBefore = this.hydrationClearBefore === null
+        ? timestamp
+        : Math.max(this.hydrationClearBefore, timestamp);
       for (const [topic, messages] of this.buffers) {
         const kept = messages.filter(message => message.timestamp === undefined || message.timestamp >= timestamp);
         if (kept.length) this.buffers.set(topic, kept);
@@ -238,9 +267,9 @@ export class ReplayManager<TData = unknown> {
     this.pendingReplayPersistence = this.pendingReplayPersistence.filter(
       message => message.timestamp === undefined || message.timestamp >= timestamp
     );
-    if (this.persistence?.clearBefore) {
+    if (clearing) {
       try {
-        await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(timestamp));
+        await clearing;
       } catch (error) {
         this.onPersistenceError(error);
         throw error;
@@ -251,6 +280,11 @@ export class ReplayManager<TData = unknown> {
   /** Start the periodic retention sweep. No-op when no durable retention
    * config makes it necessary. */
   start(): void {
+    if (this.hydrationFailed) {
+      this.hydrationComplete = false;
+      this.hydrationFailed = false;
+    }
+    void this.requestHydration();
     if (this.retentionTimer || !this.retentionMs || !this.retentionSweepMs || !this.persistence?.clearBefore) return;
     this.retentionTimer = setInterval(() => {
       this.scheduleRetentionCleanup(this.now() - this.retentionMs!);
@@ -267,6 +301,14 @@ export class ReplayManager<TData = unknown> {
    * or stopped bus does not keep hammering the store) and stop the sweep. */
   suspend(): void {
     this.retryGeneration += 1;
+    // Detach an in-flight hydration so a re-entrant start() can begin a fresh
+    // load instead of observing the cancelled operation. Completed hydration
+    // remains valid: suspend() does not clear the rings it already populated.
+    if (this.hydration) {
+      this.hydrationEpoch += 1;
+      this.hydration = null;
+      this.hydrationComplete = false;
+    }
     this.pendingReplayPersistence = [];
     // A flush that has not reached persistence yet belongs to the session being
     // suspended. Dropping it prevents the queued microtask from starting under
@@ -278,9 +320,16 @@ export class ReplayManager<TData = unknown> {
     this.stop();
   }
 
-  /** Drop all in-memory buffers (used on full teardown). */
+  /** Drop all in-memory buffers and require hydration for the next lifecycle. */
   resetBuffers(): void {
     this.buffers?.clear();
+    this.hydrationEpoch += 1;
+    this.hydration = null;
+    this.hydrationComplete = false;
+    this.hydrationFailed = false;
+    this.hydrationClearAll = false;
+    this.hydrationClearedTopics.clear();
+    this.hydrationClearBefore = null;
   }
 
   /** Buffer occupancy for diagnostics. `bytes` is an approximate in-memory
@@ -337,47 +386,94 @@ export class ReplayManager<TData = unknown> {
     });
   }
 
-  /** Load durable history into the in-memory rings once at startup, pruning
+  /** Start the active lifecycle's one-shot hydration, if it has not completed
+   * or deliberately skipped hydration already. */
+  private requestHydration(): Promise<void> {
+    if (!this.buffers || !this.persistence) {
+      this.hydrationComplete = true;
+      return Promise.resolve();
+    }
+    if (this.hydration) return this.hydration;
+    if (this.hydrationComplete) return Promise.resolve();
+
+    const epoch = this.hydrationEpoch;
+    const generation = this.retryGeneration;
+    const operation = this.hydrate(epoch, generation);
+    this.hydration = operation;
+    return operation;
+  }
+
+  /** Load durable history into the in-memory rings once per lifecycle, pruning
    * entries past the retention window first. Failures are reported but do not
    * block startup — the bus runs with whatever survived. */
-  private async hydrate(): Promise<void> {
+  private async hydrate(epoch: number, generation: number): Promise<void> {
     if (!this.buffers || !this.persistence) {
       return;
     }
     try {
-      if (this.retentionMs !== undefined && this.persistence.clearBefore) {
-        await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(this.now() - this.retentionMs!));
-      }
-      const loaded = await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load());
-      const loadedByTopic = new Map<string, DataBusMessage<TData>[]>();
-      for (const message of loaded) {
-        let buffer = loadedByTopic.get(message.topic);
-        if (!buffer) {
-          buffer = [];
-          loadedByTopic.set(message.topic, buffer);
+      try {
+        if (this.retentionMs !== undefined && this.persistence.clearBefore) {
+          await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(this.now() - this.retentionMs!));
         }
-        buffer.push(message);
+        const loaded = await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load());
+        if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
+        if (epoch !== this.hydrationEpoch) return;
+        const loadedByTopic = new Map<string, DataBusMessage<TData>[]>();
+        for (const message of loaded) {
+          if (
+            this.hydrationClearAll ||
+            this.hydrationClearedTopics.has(message.topic) ||
+            (this.hydrationClearBefore !== null &&
+              message.timestamp !== undefined &&
+              message.timestamp < this.hydrationClearBefore)
+          ) continue;
+          let buffer = loadedByTopic.get(message.topic);
+          if (!buffer) {
+            buffer = [];
+            loadedByTopic.set(message.topic, buffer);
+          }
+          buffer.push(message);
+        }
+        // Publications may be recorded locally while load() is in flight, before
+        // the asynchronous backend can expose them through this snapshot. Put
+        // durable history ahead of that live tail so count pruning retains the
+        // newest messages instead of evicting them as if they were older.
+        for (const [topic, durableBuffer] of loadedByTopic) {
+          const liveBuffer = this.buffers.get(topic);
+          this.buffers.set(topic, liveBuffer ? [...durableBuffer, ...liveBuffer] : durableBuffer);
+        }
+        const hydrationNow = this.now();
+        for (const [topic, buffer] of this.buffers) {
+          const pruned = pruneReplayHistory(buffer, {
+            maxPerTopic: this.maxPerTopic,
+            pruneStrategy: this.pruneStrategy,
+            retentionMs: this.retentionMs,
+            now: hydrationNow
+          });
+          if (pruned !== buffer) this.buffers.set(topic, pruned);
+        }
+        this.hydrationComplete = true;
+        this.hydrationFailed = false;
+      } catch (error) {
+        if (generation !== this.retryGeneration) {
+          this.onPersistenceError(
+            error instanceof PersistenceRetryCancelledError ? error : new PersistenceRetryCancelledError()
+          );
+          return;
+        }
+        // A clear/unsubscribe invalidated this snapshot and owns the observable
+        // error. Do not report it as a second, stale hydration failure.
+        if (epoch !== this.hydrationEpoch) return;
+        this.onPersistenceError(error);
+        this.hydrationComplete = true;
+        this.hydrationFailed = true;
       }
-      // Publications may be recorded locally while load() is in flight, before
-      // the asynchronous backend can expose them through this snapshot. Put
-      // durable history ahead of that live tail so count pruning retains the
-      // newest messages instead of evicting them as if they were older.
-      for (const [topic, durableBuffer] of loadedByTopic) {
-        const liveBuffer = this.buffers.get(topic);
-        this.buffers.set(topic, liveBuffer ? [...durableBuffer, ...liveBuffer] : durableBuffer);
+    } finally {
+      // Only the operation that still owns the current lifecycle slot may clear
+      // it; an invalidated load must not clobber a replacement hydration.
+      if (this.hydrationEpoch === epoch && this.retryGeneration === generation) {
+        this.hydration = null;
       }
-      const hydrationNow = this.now();
-      for (const [topic, buffer] of this.buffers) {
-        const pruned = pruneReplayHistory(buffer, {
-          maxPerTopic: this.maxPerTopic,
-          pruneStrategy: this.pruneStrategy,
-          retentionMs: this.retentionMs,
-          now: hydrationNow
-        });
-        if (pruned !== buffer) this.buffers.set(topic, pruned);
-      }
-    } catch (error) {
-      this.onPersistenceError(error);
     }
   }
 

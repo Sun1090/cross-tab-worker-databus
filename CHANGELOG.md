@@ -2,6 +2,7 @@
 
 ### Fixed
 - Durable replay history loaded asynchronously can no longer overtake or evict publications recorded while `load()` is still pending. Hydration now places the durable snapshot ahead of that live tail before applying the retention/count policy, so a bounded ring keeps the newest messages instead of treating them as older history.
+- Replay hydration now belongs to a replaceable lifecycle instead of one immutable constructor promise. A `clearAll()`, `clearTopic()`, topic unsubscribe, or `clearBefore()` issued while durable `load()` is pending is applied to the loaded snapshot, so cleared history cannot reappear. A load superseded by suspend/restart is cancelled without clobbering the replacement, and an explicit stop/start now performs a fresh hydration instead of leaving the restarted rings empty.
 - A `start()` issued synchronously from the `DISCONNECTED` status callback during `pagehide` can no longer be undone by the stale hide continuation. `suspendTransport()` now abandons its stop chain when the status callback has already installed a newer lifecycle, so the replacement transport stays open and the health snapshot remains truthful instead of reporting `healthy` while the transport has been stopped again.
 - Operations issued while a replacement transport is opening can no longer reach the closed connection. `reopenTransport()` now clears `transportReady` before its synchronous `CONNECTING` notification, so a second `publish()` / `subscribe()` in the same tick parks behind the opening gate instead of bypassing it. This also preserves operation order: the replacement receives the earlier parked operation before the later one.
 - Replay retention cleanup queued after a suspend/resume cycle is no longer dropped when an older cleanup transaction is still unwinding. The old pass now hands a non-null queued cutoff to a fresh cleanup before releasing the in-flight slot, so the newest cutoff runs instead of waiting for an unrelated future publication.
@@ -13,6 +14,7 @@
 
 ### Tests
 - A delayed durable `load()` now has a direct replay ordering regression: a publication recorded while hydration is pending must remain newer than the loaded snapshot and survive a one-entry count cap.
+- Hydration lifecycle regressions now cover `clearAll()`, `clearTopic()`, topic unsubscribe, and `clearBefore()` racing a pending load, plus explicit stop/start and immediate suspend/start re-entry. The replacement load must win, stale results must stay out of the rings, and durable history must be restored after an explicit restart.
 - The documented storage and BroadcastChannel isolation boundary between different `clusterKey` values is now pinned by a two-runtime regression. It proves each tenant can independently own the same topic, publications do not cross, and persisted keys are namespaced under distinct opaque hashes without exposing the plaintext cluster identifier.
 
 ## [0.20.91] - 2026-09-16
