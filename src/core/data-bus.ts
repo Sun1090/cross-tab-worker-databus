@@ -1477,15 +1477,24 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // A resume/recovery means the bus is meant to keep running, even after an
     // initial start failed and then recovered while hidden. Without this, a
     // later stop() would be a no-op and leave the reopened transport running.
-    this.started = true;
-    this.suspended = false;
-    this.updateStatus(WORKER_STATUS.CONNECTING);
     const lifecycleEpoch = ++this.lifecycleEpoch;
     const pending = this.startPromise ?? this.pendingStop ?? Promise.resolve();
     const opening = pending
       .catch(() => undefined)
       .then(() => this.openTransport(config, Promise.resolve(), false, lifecycleEpoch));
     this.startPromise = opening;
+    this.started = true;
+    this.suspended = false;
+    // Install the new lifecycle before publishing CONNECTING: a status handler
+    // can synchronously call stop(), and stop() must see and await this opening
+    // instead of tearing down while reopenTransport() later installs a fresh
+    // transport. openTransport()'s epoch guard then abandons the superseded
+    // opening before transport.start() is reached.
+    this.updateStatus(WORKER_STATUS.CONNECTING);
+    if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping || this.suspended) {
+      void opening.catch(() => undefined);
+      return opening;
+    }
     // Reset the gate on success too, so a later runtime failure can schedule a
     // fresh reopen instead of reusing this settled promise.
     void opening.then(
