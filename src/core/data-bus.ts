@@ -1050,20 +1050,49 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
       return Promise.resolve();
     }
+    // Install the shared gate before running the synchronous prelude. The
+    // teardown has not started yet, so this placeholder is what a stop()
+    // re-entered from a synchronous trace sink receives: beginStop() below
+    // emits the STOP lifecycle event, and `stopping` is already true by then,
+    // so the nested call shares this gate instead of starting a second
+    // teardown. The placeholder settles once the real teardown does, so every
+    // caller observes the same completion.
+    let resolveGate!: () => void;
+    const stopGate = new Promise<void>(resolve => {
+      resolveGate = resolve;
+    });
+    this.stopPromise = stopGate;
+    // Run the synchronous prelude in the same tick as the gate installation:
+    // every lifecycle flag and handler is flipped exactly as before, but the
+    // STOP event emitted here already observes the shared gate.
+    this.beginStop();
     const stopPromise = this.performStop();
-    this.stopPromise = stopPromise;
+    // performStop() renders transport failures through reportError() and never
+    // rejects, so the gate resolves in both branches and the swallow keeps an
+    // unexpected teardown rejection from surfacing as an unhandled rejection
+    // for fire-and-forget callers. The public stop() contract stays
+    // non-rejecting.
     void stopPromise.then(
       () => {
-        if (this.stopPromise === stopPromise) this.stopPromise = null;
+        if (this.stopPromise === stopGate) this.stopPromise = null;
+        resolveGate();
       },
       () => {
-        if (this.stopPromise === stopPromise) this.stopPromise = null;
+        if (this.stopPromise === stopGate) this.stopPromise = null;
+        resolveGate();
       }
     );
-    return stopPromise;
+    return stopGate;
   }
 
-  private async performStop(): Promise<void> {
+  /**
+   * Synchronous teardown prelude. Flips `stopping` (the authoritative
+   * in-flight signal), cancels scheduled work, releases handlers, and emits the
+   * observable STOP lifecycle event. stop() calls it after the shared gate is
+   * installed but in the same tick, so the stop still takes effect immediately
+   * while a re-entrant stop() from the STOP event shares the one teardown.
+   */
+  private beginStop(): void {
     this.lifecycleEpoch += 1;
     this.stopping = true;
     this.cancelScheduledRecovery();
@@ -1074,6 +1103,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.topicHandlers.clear();
     this.replayManager.resetBuffers();
     this.cluster.stop();
+  }
+
+  private async performStop(): Promise<void> {
+    // `stopping` is already true and handlers are released; this half awaits the
+    // transport shutdown and completes the teardown.
     try {
       await this.startPromise?.catch(() => undefined);
       // A failed-open or suspend cleanup already stopped the transport;

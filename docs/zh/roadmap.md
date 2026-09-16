@@ -4,7 +4,7 @@
 
 ## 0.20.92 进行中
 
-当前开发线继续验证 predecessor reopen 结算、排队启动就绪与 stop promise 清理等生命周期错误路径。
+当前开发线继续验证 predecessor reopen 结算、排队启动就绪与 stop promise 清理等生命周期错误路径。首个落地修复补上 `stop()` 的一处真实重入漏洞：共享 stop gate 现在先于同步 teardown 前奏安装，因此从同步 STOP lifecycle trace 事件重入的 `stop()` 会共享同一次 teardown，而不是再启动第二次（此前 `transport.stop()` 会被调用两次）。同步前奏仍会在同一 tick 内翻转全部生命周期标记并释放 handler；transport stop 失败时 `stop()` 仍会 resolve。
 
 ## 0.20.91 已完成范围
 

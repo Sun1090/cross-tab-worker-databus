@@ -1,3 +1,18 @@
+## 0.20.92 re-entrant stop teardown sharing (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-reopen-predecessor-rejection` ← `origin/main@d8c51ed`。
+- 审计目标：验证 explicit `stop()` 期间同步可观测的 trace 回调（STOP lifecycle event）在 `stopPromise` 安装前重入 `stop()` 时，是否会启动第二次 teardown。
+- 结论 / 加固：确认为真实缺陷。此前的 `stop()` 先调用 `performStop()` 再赋值 `this.stopPromise`，而 `performStop()` 体内的同步前奏会同步抛出 STOP trace event；trace sink 若在此同步重入 `stop()`，重入调用看到 `stopPromise === null`，于是开始第二次 teardown（`transport.stop()` 被调用两次）。修复方式：把同步前奏抽到 `beginStop()`，在 `stop()` 内先安装一个 deferred 共享 gate（`stopPromise = stopGate`），再执行 `beginStop()` 与 `performStop()`；重入调用现在看到 `stopping && stopPromise`，共享同一个 teardown，`stopGate` 以真实 teardown promise 结算。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `shares one teardown when stop() is re-entered from a trace sink`（断言重入 `stop()` 返回同一 promise、`transport.stopCalls === 1`、仅发出一次 STOP trace、最终 `DISCONNECTED`/`stopped`）。
+- Mutation check：把 `stop()`/`performStop()` 恢复为「先 `performStop()` 再赋值 `stopPromise`」的旧实现后，该回归因重入 `stop()` 返回不同 promise 而失败；恢复修复后通过。
+- 验证命令与结果：定向 `pnpm exec vitest run tests/data-bus.test.ts tests/cluster.test.ts`（230/230）通过；`pnpm check`（35 files，755/755）、`pnpm lint`、`pnpm typecheck`、`pnpm test:coverage`（35 files，755/755；statements 97.84% / branches 93.94% / functions 98.17% / lines 98.99%；`data-bus.ts` statements 97.62% / branches 95.01% / functions 95.79% / lines 98.42%，未覆盖仅剩 new-lifecycle 防御性 reject 分支）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅修改 `stop()` 的 gate 安装顺序与同步前奏抽取，保持单 tick 生效、per-tick 状态翻转、transport stop 失败仍经 `onError` 收敛且 `stop()` 不 reject、并发/重复 `stop()` 共享同一 promise 等契约。不改 public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 `getQueuedStartReady()` 与 `createStopPromise()` 剩余可达生命周期错误路径。
+- 更新时间：2026-09-16。
+
 ## 0.20.91 RELEASE_FREEZE (2026-09-16)
 
 - 状态：已发布并完成发布后验证。

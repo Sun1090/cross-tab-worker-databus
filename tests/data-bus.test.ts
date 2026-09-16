@@ -4,7 +4,13 @@ import type { DataBusTraceEvent } from '../src/core/trace';
 import { CrossTabDataBus } from '../src/core/data-bus';
 import type { DataBusTransport, DataBusTransportHandlers, WorkerClusterMessage } from '../src/core/types';
 import { SDK_VERSION } from '../src/core/version';
-import { CLUSTER_MESSAGE_TYPE, PUBLICATION_EVENT, WORKER_STATUS } from '../src/utils/constants';
+import {
+  CLUSTER_MESSAGE_TYPE,
+  PUBLICATION_EVENT,
+  TRACE_EVENT_TYPE,
+  TRACE_LIFECYCLE_ACTION,
+  WORKER_STATUS
+} from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
@@ -1947,6 +1953,50 @@ describe('CrossTabDataBus', () => {
     });
     expect(transport.stopCalls).toBe(2);
     await Promise.allSettled([firstStop]);
+  });
+
+  it('shares one teardown when stop() is re-entered from a trace sink', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reentrant-stop' });
+    const transport = new FakeTransport<number>();
+    let nestedStop: Promise<void> | undefined;
+    let stopSinkHits = 0;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-stop',
+      environment: environment.environment,
+      transport,
+      trace: {
+        enabled: true,
+        sink: event => {
+          if (
+            event.type === TRACE_EVENT_TYPE.LIFECYCLE &&
+            event.action === TRACE_LIFECYCLE_ACTION.STOP
+          ) {
+            stopSinkHits += 1;
+            // The STOP lifecycle event is emitted synchronously from stop();
+            // a re-entrant stop() must not kick off a second teardown.
+            if (stopSinkHits === 1) nestedStop = bus.stop();
+          }
+        }
+      }
+    });
+    await bus.start({});
+    expect(transport.startCalls).toBe(1);
+
+    const stopping = bus.stop();
+    expect(nestedStop).toBe(stopping);
+    await stopping;
+    await Promise.resolve();
+
+    expect(stopSinkHits).toBe(1);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getStatus()).toBe(WORKER_STATUS.DISCONNECTED);
+    expect(bus.getHealthSummary()).toMatchObject({
+      started: false,
+      state: 'stopped',
+      suspended: false,
+      transport: { ready: false }
+    });
   });
 
   it('does not report a healthy bus while an explicit stop is still tearing down', async () => {
