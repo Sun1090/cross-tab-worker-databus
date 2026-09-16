@@ -381,6 +381,27 @@ describe('ReplayManager — hydration', () => {
     expect(received).toEqual([2, 3, 4]);
   });
 
+  it('keeps publications recorded during hydration newer than loaded history', async () => {
+    let resolveLoad!: (messages: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    const load = vi.fn(() => new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+      resolveLoad = resolve;
+    }));
+    const persistence = {
+      load,
+      append: vi.fn(async () => undefined)
+    };
+    const { manager } = createManager({ persistence, maxPerTopic: 1 });
+
+    manager.record(message('t', 2));
+    resolveLoad([message('t', 1)]);
+    await settle(10);
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(received).toEqual([2]);
+  });
+
   it('prunes past the retention window before loading', async () => {
     const persistence = new FakePersistence({ clearBefore: true });
     persistence.messages = [message('t', 1, 5_000), message('t', 2, 9_900)];

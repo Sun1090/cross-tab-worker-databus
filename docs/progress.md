@@ -1,3 +1,18 @@
+## 0.20.92 replay hydration ordering (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/replay-hydration-order` ← `origin/main@3a58bd5`。
+- 复现场景：durable replay 的异步 `load()` 尚未完成时，本地已经 `record()` 了一条新 publication。旧 hydration 在 resolve 后把已加载历史追加到现有 live buffer 尾部，使旧历史反而成为“最新”条目；当 `maxPerTopic` 为 1 时，数量裁剪会删除刚产生的实时消息并保留旧历史。
+- 修复：`ReplayManager.hydrate()` 先按 topic 收集 durable snapshot，再将它放在 hydration 期间已存在的 live tail 之前，最后统一执行 retention/count pruning。持久历史保持原始顺序，实时消息保持原始顺序，并始终被视为更新的尾部。
+- 变更文件：`src/core/replay-manager.ts`、`tests/replay-manager.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/replay-manager.test.ts` — `keeps publications recorded during hydration newer than loaded history`，用延迟 resolve 的 `load()` 在 hydration 期间写入 live 消息，并将上限设为 1，断言 replay 得到 live 消息而不是 durable 旧消息。
+- Mutation check：恢复旧的“把 loaded 追加到现有 buffer 后直接 prune”逻辑后，新测试稳定收到 `[1]`（旧历史）并期望 `[2]`（live 消息）；恢复修复后定向 51/51 通过。
+- 验证命令与结果：`pnpm check`（35 files，767/767）、`pnpm lint`、`pnpm test:coverage`（35 files，767/767；statements 97.77% / branches 94% / functions 98% / lines 99.04%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：只调整 hydration 合并顺序，不改变 persistence 接口、存储 schema/key、public API 或 wire protocol；正常无并发记录的 hydration 结果不变。回滚 = revert 本任务提交。
+- 下一项：继续审计 hydration 在 clear/unsubscribe/suspend/restart 交错下的取消与重新加载语义。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 stale suspend continuation cancellation (2026-09-16)
 
 - 状态：已合并（PR #79，rebase merge 至 `main@3a58bd5`）。

@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
+- Durable replay history loaded asynchronously can no longer overtake or evict publications recorded while `load()` is still pending. Hydration now places the durable snapshot ahead of that live tail before applying the retention/count policy, so a bounded ring keeps the newest messages instead of treating them as older history.
 - A `start()` issued synchronously from the `DISCONNECTED` status callback during `pagehide` can no longer be undone by the stale hide continuation. `suspendTransport()` now abandons its stop chain when the status callback has already installed a newer lifecycle, so the replacement transport stays open and the health snapshot remains truthful instead of reporting `healthy` while the transport has been stopped again.
 - Operations issued while a replacement transport is opening can no longer reach the closed connection. `reopenTransport()` now clears `transportReady` before its synchronous `CONNECTING` notification, so a second `publish()` / `subscribe()` in the same tick parks behind the opening gate instead of bypassing it. This also preserves operation order: the replacement receives the earlier parked operation before the later one.
 - Replay retention cleanup queued after a suspend/resume cycle is no longer dropped when an older cleanup transaction is still unwinding. The old pass now hands a non-null queued cutoff to a fresh cleanup before releasing the in-flight slot, so the newest cutoff runs instead of waiting for an unrelated future publication.
@@ -11,6 +12,7 @@
 - `stop()` is now re-entrancy safe against a synchronous trace sink. The shared in-flight stop gate is installed before the teardown prelude runs, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the single teardown instead of starting a second one. Previously the nested call ran before `stopPromise` was assigned and invoked `transport.stop()` a second time. The teardown still takes effect in the same tick, concurrent and repeated `stop()` calls keep returning the same promise, and a rejecting transport stop still resolves `stop()` through `onError`.
 
 ### Tests
+- A delayed durable `load()` now has a direct replay ordering regression: a publication recorded while hydration is pending must remain newer than the loaded snapshot and survive a one-entry count cap.
 - The documented storage and BroadcastChannel isolation boundary between different `clusterKey` values is now pinned by a two-runtime regression. It proves each tenant can independently own the same topic, publications do not cross, and persisted keys are namespaced under distinct opaque hashes without exposing the plaintext cluster identifier.
 
 ## [0.20.91] - 2026-09-16
