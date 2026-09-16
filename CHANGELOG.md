@@ -7,6 +7,9 @@
 - A re-entrant `stop()` from the synchronous START lifecycle trace event now supersedes the outer `start()` before it can open the transport. Lifecycle ownership and the shared start promise are installed before the trace event, and `start()` aborts the remaining timer/cluster setup if a callback stops or suspends the new lifecycle. Previously the stop settled while the outer start continued into `transport.start()`, leaving health reported as `stopped` with a live `connected` transport.
 - `stop()` is now re-entrancy safe against a synchronous trace sink. The shared in-flight stop gate is installed before the teardown prelude runs, so a `stop()` re-entered from the synchronous STOP lifecycle trace event shares the single teardown instead of starting a second one. Previously the nested call ran before `stopPromise` was assigned and invoked `transport.stop()` a second time. The teardown still takes effect in the same tick, concurrent and repeated `stop()` calls keep returning the same promise, and a rejecting transport stop still resolves `stop()` through `onError`.
 
+### Tests
+- The documented storage and BroadcastChannel isolation boundary between different `clusterKey` values is now pinned by a two-runtime regression. It proves each tenant can independently own the same topic, publications do not cross, and persisted keys are namespaced under distinct opaque hashes without exposing the plaintext cluster identifier.
+
 ## [0.20.91] - 2026-09-16
 
 ### Fixed
