@@ -2,6 +2,10 @@
 
 0.20.91 已发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
 
+## 0.20.92 进行中
+
+当前开发线继续验证 predecessor reopen 结算、排队启动就绪与 stop promise 清理等生命周期错误路径。
+
 ## 0.20.91 已完成范围
 
 可靠性开发线继续补强错误路径覆盖并维护发布门禁。IndexedDB replay 清理现在覆盖 `clear()`、`clearTopic()`、`clearBefore()` 的事务级错误，包括连接失效后的恢复，以及浏览器未提供 transaction error 对象时的领域级 fallback 拒绝信息。WebSocket transport 也会在连接失活后 best-effort 关闭 socket，避免自动恢复遗留死连接；已发布包验证的正常路径经审计确认没有固定等待或多余 registry 往返。Centrifuge token bridge provider 现在绑定到创建它的 client lifecycle，已被替换的 client 无法把迟到凭证请求送入新会话。旧 client 的 subscription 回调与 publish rejection 也已有回归约束，不能修改或上报到替代会话。

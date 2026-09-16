@@ -2,6 +2,10 @@
 
 0.20.91 is released. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
+## 0.20.92 in progress
+
+The current line continues lifecycle error-path verification around predecessor reopen settlement, queued-start readiness, and stop-promise cleanup.
+
 ## 0.20.91 delivered scope
 
 The reliability line continues with error-path coverage and release-gate maintenance. IndexedDB replay cleanup now has regressions for transaction-level errors on `clear()`, `clearTopic()`, and `clearBefore()`, including connection invalidation/recovery and fallback rejections when the browser exposes no transaction error object. The WebSocket transport now best-effort closes a socket after connection invalidation so automatic recovery cannot orphan a dead connection; the published-consumer gate normal path was audited with no fixed wait or redundant registry round-trip found. Centrifuge token-bridge providers are now bound to the lifecycle of the client that created them, so a replaced client cannot route a late credential request into a new session. Subscription-level callbacks and publish rejections from a replaced client are also pinned not to mutate or report into its replacement.
