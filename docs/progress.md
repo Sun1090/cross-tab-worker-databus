@@ -1,7 +1,7 @@
 ## 0.20.92 stale suspend continuation cancellation (2026-09-16)
 
-- 状态：实现与完整验证完成，待提交、推送和 PR。
-- 分支 / 基线：`feat/data-bus-suspend-reentrancy` ← `origin/main@fff5317`。
+- 状态：已合并（PR #79，rebase merge 至 `main@3a58bd5`）。
+- 分支 / PR / 合并：`feat/data-bus-suspend-reentrancy` ← `origin/main@fff5317`；PR #79，合并提交 `3a58bd5`（`fix(data-bus): abandon stale suspend on reentrant start`）。
 - 复现场景：已连接的数据总线触发 `pagehide` 时，`suspendTransport()` 先同步发布 `DISCONNECTED` 状态，再安排 transport stop。若 `onStatus(DISCONNECTED)` 按公开恢复路径立即调用 `start({})`，新的 opening 会被安装并让 transport 恢复连接；但旧 `suspendTransport()` 调用栈返回后仍继续把 stop 链到该 opening 上，随后关闭刚恢复的 transport。由于 `transportReady` 可能已被新 opening 标记为 true，总线还会错误报告 `healthy`。
 - 修复：`suspendTransport()` 记录本次 suspend 的 lifecycle epoch，并在同步 `updateStatus(DISCONNECTED)` 返回后确认它仍拥有 suspend、未进入 stopping 且计划未被显式 start/pageshow 接管；否则立即放弃旧 stop 续体，由更新的生命周期处理 transport。
 - 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
