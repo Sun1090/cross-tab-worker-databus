@@ -1448,12 +1448,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    */
   private suspendTransport(): void {
     if (this.stopping) return;
-    this.lifecycleEpoch += 1;
+    const suspensionEpoch = ++this.lifecycleEpoch;
     this.suspended = true;
     this.cancelScheduledRecovery();
     this.transportReady = false;
     this.transportSubscribedTopics.clear();
     this.updateStatus(WORKER_STATUS.DISCONNECTED);
+    // Status handlers run synchronously and may call start(), stop(), or
+    // trigger another suspend. If that happened, the newer lifecycle owns the
+    // transport; do not let this stale hide continuation stop it after a
+    // replacement opening completes.
+    if (suspensionEpoch !== this.lifecycleEpoch || this.stopping || !this.suspended) return;
     // Repeated hide/show rounds can leave a resume opening queued behind an
     // older stop gate. If this suspend is already represented by that gate,
     // reuse it. Otherwise the current startPromise is a newer opening (which

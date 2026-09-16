@@ -1905,6 +1905,50 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('lets start() from the suspend status callback supersede the pending hide', async () => {
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'reentrant-suspend-start' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-suspend-start',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    let restart: Promise<void> | null = null;
+    bus.onStatus(status => {
+      if (status === WORKER_STATUS.DISCONNECTED && restart === null) restart = bus.start({});
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    // The pagehide path publishes DISCONNECTED synchronously before it chains
+    // its transport stop. A status handler may use public start() as the
+    // documented resume path; that newer intent must prevent the stale hide
+    // continuation from stopping the replacement transport after it opens.
+    environment.pageHide();
+    expect(restart).not.toBeNull();
+    await restart;
+    // Let the stale suspend continuation run. Awaiting openTransport's promise
+    // alone can resume before its chained stop callback executes.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.startCalls).toBe(2);
+    expect(transport.stopCalls).toBe(0);
+    expect(bus.getHealthSummary()).toMatchObject({
+      healthy: true,
+      state: 'healthy',
+      started: true,
+      suspended: false,
+      transport: { ready: true, status: WORKER_STATUS.CONNECTED }
+    });
+
+    await bus.stop();
+  });
+
   it('explicit start() waits for an in-flight stop() and restarts', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'start-during-stop' });

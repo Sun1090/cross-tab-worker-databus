@@ -1,3 +1,18 @@
+## 0.20.92 stale suspend continuation cancellation (2026-09-16)
+
+- 状态：实现与完整验证完成，待提交、推送和 PR。
+- 分支 / 基线：`feat/data-bus-suspend-reentrancy` ← `origin/main@fff5317`。
+- 复现场景：已连接的数据总线触发 `pagehide` 时，`suspendTransport()` 先同步发布 `DISCONNECTED` 状态，再安排 transport stop。若 `onStatus(DISCONNECTED)` 按公开恢复路径立即调用 `start({})`，新的 opening 会被安装并让 transport 恢复连接；但旧 `suspendTransport()` 调用栈返回后仍继续把 stop 链到该 opening 上，随后关闭刚恢复的 transport。由于 `transportReady` 可能已被新 opening 标记为 true，总线还会错误报告 `healthy`。
+- 修复：`suspendTransport()` 记录本次 suspend 的 lifecycle epoch，并在同步 `updateStatus(DISCONNECTED)` 返回后确认它仍拥有 suspend、未进入 stopping 且计划未被显式 start/pageshow 接管；否则立即放弃旧 stop 续体，由更新的生命周期处理 transport。
+- 变更文件：`src/core/data-bus.ts`、`tests/data-bus.test.ts`、`CHANGELOG.md`、`docs/progress.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`。
+- 新增测试：`tests/data-bus.test.ts` — `lets start() from the suspend status callback supersede the pending hide`，在 `pagehide` 的同步 DISCONNECTED 回调中调用 `start()`，等待完整微任务链后断言 replacement 只启动一次、未被旧 suspend 停止，且健康状态为 `healthy` / `ready` / `suspended: false`。
+- Mutation check：修复前回归在排空 stop 续体后稳定观察到 `transport.stopCalls === 1`（预期 0）；加入 epoch/still-suspended guard 后通过，证明旧 hide 续体确实会错误拆除 replacement。
+- 验证命令与结果：`pnpm check`（35 files，766/766）、`pnpm lint`、`pnpm test:coverage`（35 files，766/766；statements 97.76% / branches 93.99% / functions 98% / lines 99.04%）、`pnpm exec vitest run tests/documentation.test.ts tests/workflows.test.ts`（22/22）、`pnpm test:e2e`（27/27）、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：仅让 suspend 续体在同步状态回调已接管生命周期时退出，不改 public API、worker protocol、存储 schema/key 或线协议；无重入的正常 pagehide 仍按原路径停止 transport。回滚 = revert 本任务提交。
+- 下一项：继续审计 `resumeTransport()` / `reopenTransport()` 与恢复 timer、queued start、pending stop 的剩余可达交错。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 park operations behind every demanded transport reopen (2026-09-16)
 
 - 状态：已合并（PR #77，rebase merge 至 `main@40a2ef0`）。
