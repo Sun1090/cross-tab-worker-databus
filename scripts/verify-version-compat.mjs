@@ -39,9 +39,15 @@ for (const key of Object.keys(baselineExports)) {
   if (!(key in currentExports)) throw new Error(`removed public export ${key} since ${baseTag}`);
   const baselineEntry = baselineExports[key];
   const currentEntry = currentExports[key];
-  if (typeof baselineEntry === 'object' && typeof currentEntry === 'object') {
-    for (const field of ['types', 'import', 'require']) {
-      if (field in baselineEntry && !(field in currentEntry)) {
+  if (baselineEntry != null && currentEntry == null) {
+    throw new Error(`disabled public export ${key} since ${baseTag}`);
+  }
+  if (baselineEntry != null && typeof baselineEntry === 'object' && !Array.isArray(baselineEntry)) {
+    for (const field of ['types', 'import', 'require', 'default']) {
+      if (baselineEntry[field] != null && (
+        currentEntry == null || typeof currentEntry !== 'object' ||
+        Array.isArray(currentEntry) || currentEntry[field] == null
+      )) {
         throw new Error(`removed ${field} condition from export ${key} since ${baseTag}`);
       }
     }

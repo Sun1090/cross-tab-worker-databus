@@ -1,3 +1,16 @@
+## Next milestone — public export gate correctness (2026-09-18)
+
+- 状态：实现完成，独立于冻结的 0.20.92 发布；不为单项 tooling 修复立即发布新版本。
+- 分支：`feat/compat-export-gates`；PR #97 已全绿 squash 合入 `c31ae25`。
+- 缺陷证据：临时 Git 仓库真实运行兼容性 CLI，原实现 5 项测试中 4 项失败；错误放过 conditional export 变 string、public export 变 null、worker default 被删除、types target 变 null。
+- 修复：显式拒绝禁用已有导出，检查非空条件对象，加入 default 条件；保留新增导出与更改目标文件名的兼容行为。
+- 文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
+- 验证：修复后定向 5/5 通过；lint、typecheck、真实 package verify:compat、diff-check 通过（上一轮定向验证）。提交前再次运行同组检查。
+- 风险 / 回滚：只改变 CI/release gate，不改运行时、API、协议或 storage；可独立 revert。该门禁仍是 metadata 校验，不宣称完整 TypeScript 语义兼容性证明。
+- 阻塞：无；本机未配置 tag 签名，不伪造签名，按项目既有版本 tag 流程发布。
+- 下一项：合入此原子修复；0.20.92 从 c31ae25 精确 tag 发布并做 published consumer smoke；继续检查 export 条件边界。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
 ## 0.20.92 RELEASE_FREEZE — local gates complete (2026-09-18)
 
 - 状态：本地必需门禁全部通过，待 PR CI / squash 合入 / 精确 tag / 发布消费者验证；未宣称已发布。
