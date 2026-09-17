@@ -1,6 +1,11 @@
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## [0.20.92] - 2026-09-18
+
 ### Fixed
+- Release automation now rejects mismatched tag/package versions and missing, duplicate or empty release notes before creating a release or publishing. Release guidance uses feature-branch PRs and immutable version tags.
 - A rejected transport `stop()` is now retained consistently in both failure ledgers. `stop()` still resolves after reporting through `onError`, but `getRecoveryStats()` no longer reports `hasError: false` while `getHealthSummary().lastFailure` still describes the same stop failure; an explicit `start()` remains the boundary that clears both.
 - Operations parked behind the recovery gate now remain queued when an explicit `start()` supersedes the automatic recovery timer. If that manual open also fails, the operations stay behind the still-closed gate and flush after the next successful automatic or demand-driven reopen instead of being silently dropped with the superseded opening.
 - A transport operation parked behind the recovery gate is now invalidated when `stop()` / page-hide supersedes the recovery cycle. An immediate explicit `start()` can re-establish subscriptions on the replacement transport, but the stale waiter no longer replays its operation afterward, preventing a duplicate subscription from racing the restarted cluster.

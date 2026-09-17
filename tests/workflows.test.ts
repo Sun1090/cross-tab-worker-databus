@@ -15,6 +15,14 @@ function readWorkflow(name: string): string {
 }
 
 describe('release workflow', () => {
+  it('validates tag, package version and notes before publishing or creating a release', () => {
+    const workflow = readWorkflow('release.yml');
+    const gate = workflow.indexOf('run: node scripts/verify-release-version.mjs');
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(workflow.indexOf('- name: Create GitHub release'));
+    expect(gate).toBeLessThan(workflow.indexOf('- name: Publish to npm'));
+  });
+
   it('derives the release tag from the dispatch input, not the branch', () => {
     // On workflow_dispatch `github.ref_name` is the selected BRANCH, so a raw
     // `$GITHUB_REF_NAME` in the release/publish steps created a GitHub release

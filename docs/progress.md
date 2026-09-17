@@ -1,3 +1,130 @@
+## 0.20.92 RELEASE_FREEZE — local gates complete (2026-09-18)
+
+- 状态：本地必需门禁全部通过，待 PR CI / squash 合入 / 精确 tag / 发布消费者验证；未宣称已发布。
+- 分支 / commit：`feat/release-0.20.92`；发布门禁修复 `97dc681`，本条随 release preparation commit。
+- 完成：791 单测（36 文件），类型 / build / lint；coverage 97.69% statements、93.95% branches、98% functions、98.95% lines；27/27 browser E2E；25/25 microbenchmark；packed consumer ESM/CJS；compat 对 v0.20.91；依赖 audit 无已知漏洞。
+- Browser benchmark：两次运行均成功，七项指标全部在 50% 回归阈值内。未用微基准替换真实 browser 测量。报告存于本地 ignored `bench-results/browser-2026-09-17T22-45-{14-110,31-009}Z.json`。
+- 打包：`npm pack --dry-run --json` 109 files，无 src/tests/scripts/.github/progress 私有文件；`RELEASE_TAG=v0.20.92 node scripts/verify-release-version.mjs` 通过。
+- 变更：package.json 版本草稿定稿，CHANGELOG 更新实际日期与门禁修复，双语 roadmap 保持真实冻结状态。
+- 阻塞：无。后续不重复全量本地验证，只有新代码或失败证据才追加定向验证。
+- 风险 / migration / rollback：patch 无公共 API、worker 协议或 storage schema 变更；消费者可固定回 0.20.91。tag 不移动，发布产物修复使用新 patch。
+- 下一项：fetch/rebase、提交 feature branch PR、等待 CI 并 squash 合入；随后精确 tag 发布和 npm consumer smoke。下一 milestone 检查兼容性验证器的 export 条件边界。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
+## 0.20.92 RELEASE_FREEZE — version identity gate (2026-09-18)
+
+- 状态：完成发布身份校验修复；0.20.92 仍未发布，现有 package/CHANGELOG/roadmap 发布草稿保留，等待全量门禁与 PR。
+- 分支 / 基线：`feat/release-0.20.92` / `e4d9343`；本条随原子修复提交，准确提交可用 `git log --grep="validate release tag"` 查询。
+- 完成：发布工作流在任何 release/publish 操作之前校验 tag 与 package 版本严格一致，并要求唯一非空 CHANGELOG 章节；新增真实子进程回归用例。中英文清单改为功能分支 PR、精确 tag 推送和不可变发布 tag，不再建议直接推送 main 或重用坏产物的 tag。
+- 变更文件：`.github/workflows/release.yml`、`scripts/verify-release-version.mjs`、`tests/release-version.test.ts`、`tests/workflows.test.ts`、`docs/release-checklist.md`、`docs/zh/release-checklist.md`、本文件。
+- 验证：基线 `pnpm check` 780/780；`pnpm lint`、public-registry `pnpm audit` 通过；修复后 release/workflow/documentation 定向测试 33/33，lint、typecheck、diff-check 通过。远端最近 CI/CodeQL 均成功，无打开 PR 或 milestone。
+- 阻塞：无。
+- 风险 / 回滚：只影响发布前验证，不改 runtime/API/storage；误拒绝时修正校验后重跑不变 tag，产物缺陷使用新的 patch，不移动已发布 tag。
+- 下一项：全量 coverage、E2E、benchmark、compat 和 packed consumer 门禁，再完成 0.20.92 发布。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
+## 0.20.92 release-readiness verification continuation (2026-09-16)
+
+- 状态：发布前验证继续通过，未触发停止条件。
+- 验证：`pnpm test:e2e`（27/27，含 crash TTL、BFCache、SharedWorker、storage-event fallback、replay persistence、WebSocket、a11y）；`pnpm bench`（3 files，25/25）；`pnpm verify:pack`（ESM/CJS root 与 subpath consumer）；`pnpm verify:compat`（0.20.92 对 0.20.91 的 public exports/type metadata 兼容）。
+- 结果：未发现新的功能、打包或兼容性回归；npm 环境仅报告现有配置弃用 warning，不影响验证结果。
+- 风险 / 回滚：本轮不改变运行时代码、public API 或发布产物来源。
+- 下一项：继续检查发布清单中剩余可执行验证与仓库状态，发现失败立即修复。
+- 更新时间：2026-09-16。
+
+## 0.20.92 heartbeat TTL/orphan convergence audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的运行时代码缺陷。
+- 审计范围：共享 fake clock 下的 worker TTL pruning、orphan subscriber/route cleanup 顺序、dead-owner route recovery、`BatchingStorageWriter` pending delete 与后续同 key write 的覆盖语义，以及 heartbeat/registry nudge 后的 projected-load 收敛。
+- 结论：`reconcileWorkers()` 先移除 stale workers，再清理 subscriber，最后清理无 subscriber 的过期 route，确保 route 判断使用最新 tab 集合；dead-owner 仍有 live subscriber 时由 `reconcileSubscriptions()` 立即 re-elect，完全 orphan 的 route 则 TTL 后删除。批写器对同 key 的 pending mutation 采用最后写入覆盖，删除不会被旧 pending write 重新引入；后续 route recovery 会明确写入新 assignment。storage-less 模式也保持本地 route 自洽。
+- 验证：`pnpm check`（typecheck、build、35 files / 780 tests）通过；`pnpm lint` 通过；`git diff --check` 通过。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、storage schema/key 或线协议。
+- 下一项：继续执行发布前验证（E2E、bench、打包兼容性）并修复任何实际失败。
+- 更新时间：2026-09-16。
+
+## 0.20.92 role/load recovery and degradation audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的运行时代码缺陷；同时补强了中途 storage failure 回归测试的真实装配。
+- 审计范围：worker role 刷新与 record 写入、assigned-topic load 更新、stranded multi-topic recovery 的 projected load、无本地 subscriber 的 elected owner liveness、storage retry exhaustion 后的 local/coordinated degradation。
+- 结论：reconcile 在每轮先清理孤儿记录再刷新 role；load 以本地 assignedTopics 为准并通过即时 registry nudge 传播；recovery pass 使用 projected loads 防止多个 stranded route 堆叠到同一 survivor，并在 elected owner 没有 local subscription 时由当前协调者直接写 route/发送 SUBSCRIBE，避免永远 stand down。storage writer 失败不会抛穿 cluster 控制面，pending writes 按 key 重试并最终丢弃故障 key，内存 assignment/subscription intent 仍可用。
+- 测试改进：修正 `keeps the runtime usable when storage writes start failing mid-session`，让 runtime 构造时真正包装 flaky storage 并保持 ChannelHub 协调；fake timers 驱动 retry，避免假阳性。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts tests/routing.test.ts tests/storage-batch.test.ts`（3 files，122/122）；全量 `pnpm test --run`（35 files，780/780）；`pnpm typecheck` 和 `git diff --check` 均通过。
+- 风险 / 回滚：本轮不改变 public API、worker protocol 或 storage schema/key；测试修正可独立回滚。
+- 下一项：继续审计 worker heartbeat TTL、orphan cleanup 与 route recovery 在共享 fake clock / delayed storage flush 下的收敛性。
+- 更新时间：2026-09-16。
+
+## 0.20.92 storage degradation regression harness correction (2026-09-16)
+
+- 状态：已完成测试修复与验证。
+- 发现：`keeps the runtime usable when storage writes start failing mid-session` 原测试并未覆盖其声称的故障。runtime 构造时包装的是另一份正常 storage，之后替换 `environment.storage` 不会改变已捕获的 adapter；同时未提供 BroadcastChannel hub 会使 activate 主动降级并丢弃 storage。因此测试即使 storage failure 路径失效也会通过。
+- 修复：在构造 runtime 时直接传入 flaky storage 和 ChannelHub，使 `BatchingStorageWriter` 实际包装故障 adapter 且协调模式保持启用；用 fake timers 驱动失败 flush/retry，断言后端确实收到失败写尝试，同时本地 topic assignment 和 subscription intent 继续可用。teardown 前恢复 storage，避免测试遗留 retry timer。
+- 变更文件：`tests/cluster.test.ts`、`docs/progress.md`。
+- 验证：定向回归 1/1；`pnpm exec vitest run tests/cluster.test.ts tests/routing.test.ts tests/storage-batch.test.ts`（3 files，122/122）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅修正测试装配和断言，不改变运行时代码或 public API。回滚 = revert 本任务提交。
+- 下一项：继续审计 role/load 更新与 storage retry exhaustion 后的跨 tab 收敛语义，必要时补充双 runtime 故障回归。
+- 更新时间：2026-09-16。
+
+## 0.20.92 storage flush and registry nudge visibility audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：`BatchingStorageWriter` 的 pending-read 一致性、microtask coalescing、失败重试与单 timer 约束；cluster 在 route/worker/subscriber 写入后发送 REGISTRY nudge 的顺序；pagehide handoff 的显式 flush、route 持久化可见性与 channel 延迟关闭。
+- 结论：handoff 会在发送 ROUTE_RELEASED 前显式 flush 新 route 和删除/更新元数据，随后发送 REGISTRY；pagehide 最后再次 flush 并延迟关闭 channel，避免丢弃排队 ACK。writer 的 pending map 对读取立即可见，失败写入按 key 保留并共享指数退避 timer；clear 会同步取消 pending/retry，避免旧写入继续污染新状态。状态/role/load 变化的 nudge 与周期 heartbeat 分离，避免 heartbeat 引起 REGISTRY storm。
+- 验证：`pnpm exec vitest run tests/storage-batch.test.ts tests/cluster.test.ts`（2 files，88/88）；`pnpm test --run` 前轮为 35 files、780/780。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 worker role/load 更新与多 topic recovery 的 projected-load 一致性，以及 storage failure degradation 边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 route handoff ownership across rapid lifecycle transitions (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：pagehide/pageshow 快速交错、延迟或丢失 `ROUTE_RELEASED` ACK、旧 owner 回归、handoff route generation、`handoffFromWorkerId` 与 confirmed marker 的所有权校验。
+- 结论：graceful handoff 先持久化新 owner 与递增 generation，再释放旧 transport subscription；新 owner 只有收到来源和 generation 均精确匹配的 ACK 才能确认，延迟 ACK 会被 route marker/generation 拒绝。旧 owner 回归只恢复 subscriber intent，不会夺回 sticky route。ACK 丢失时，只有 previous owner 已不存活且 handoff 超过 worker TTL 才允许单 writer re-election；活跃 previous owner 始终保留严格 no-overlap 语义。快速 pagehide/pageshow 由 lifecycle generation 防止旧回调重新 activate，且回归测试覆盖了 ACK 丢失、多轮 handoff 和页面恢复。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts`（75/75）；`pnpm test --run`（35 files，780/780）；此前新增的 re-entrant pagehide regression 也通过。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 storage writer 的 registry nudge、flush 顺序与 pagehide handoff 的持久化可见性边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 re-entrant pageshow re-hide ownership (2026-09-16)
+
+- 状态：已完成实现、回归测试与验证。
+- 复现场景：cluster 已因 `pagehide` 暂停，随后 `pageshow` 先把 `suspended` 暂时清为 false，再同步调用 `onResume`。若回调期间文档再次触发 `pagehide`，`pause()` 因 cluster 尚未重新 `started` 而直接返回，导致 runtime 落在 `started: false / suspended: false` 的失活状态；后续真正的 `pageshow` 也不会再激活 cluster。
+- 修复：`pause()` 在尚未 started 但 lifecycle listeners 仍安装时保留 `suspended: true`，让重入的 pagehide 成为最新生命周期意图；外层 pageshow 由 generation guard 放弃 activate，下一次 pageshow 可正常恢复协调。
+- 新增测试：`tests/cluster.test.ts` — `preserves a pagehide re-entered from onResume for the next pageshow`，覆盖 re-hide 后保持 suspended，以及下一次 pageshow 恢复 channel、协调和 topic assignment。
+- 验证：定向回归 1/1；`pnpm exec vitest run tests/cluster.test.ts tests/lifecycle-invariants.test.ts`（2 files，76/76）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅修复 cluster lifecycle 的同步重入状态，不改变 public API、worker protocol、存储 schema/key 或线协议。回滚 = revert 本任务提交。
+- 下一项：继续审计 route handoff 在 pagehide/pageshow 快速交错和延迟 ROUTE_RELEASED ACK 下的 generation ownership。
+- 更新时间：2026-09-16。
+
+## 0.20.92 replay persistence cleanup serialization audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：retention `clearBefore` coalescing、在途 cleanup 跨 suspend/resume 的所有权、旧 generation 的排队 cutoff、persistence retry backoff 取消，以及新生命周期 cutoff 在旧 cleanup unwind 后的接力。
+- 结论：`suspend()` 递增 retry generation、清除旧 cutoff 并停止 sweep；旧 cleanup 只能完成已经发出的后端调用，不能继续消费旧队列。若新生命周期在旧 cleanup 占用单一 slot 时产生 cutoff，finally 会把该 cutoff 交给新 generation 的 cleanup。retry loop 在操作前、操作后和 backoff 后均检查 generation，取消会以 `PersistenceRetryCancelledError` 收口且不会继续重试。
+- 验证：`pnpm exec vitest run tests/replay-manager.test.ts tests/data-bus.test.ts`（2 files，229/229），覆盖 suspend 后不运行排队 cleanup、resume 后接力最新 cutoff、retry cancellation、retention timer 停止及 DataBus 生命周期集成。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 cluster pageshow/onResume 同步重入和 route handoff 跨暂停生命周期的所有权边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 RESUME/pageshow and replay hydration audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：显式 `start()` 与原生 `pageshow` 的 RESUME trace 同步重入；RESUME 回调触发 `stop()` 后的 cluster/transport 复活；replay hydration 在 `pagehide`、显式恢复、重复 `start()`、clear/unsubscribe 与 live record 交错时的 epoch、retry generation 和缓冲区归属。
+- 结论：RESUME trace 发出前捕获 lifecycle epoch，回调返回后再次校验 epoch/stopping，避免旧恢复流程重启 cluster；ReplayManager 在 suspend/reset/clear 时使 hydration epoch 或 retry generation 失效，旧 load 不能覆盖新一代 hydration 或清除后的 buffer；已完成 hydration 在普通 BFCache suspend 中保留，显式 stop 则 reset buffers 并要求下一生命周期重新加载。
+- 验证：现有 RESUME/pageshow 重入回归与 hydration 回归均覆盖；此前全量 `pnpm test --run` 为 35 files、779/779。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 replay persistence cleanup 与 suspend/resume、失败重试之间的串行化边界。
+- 更新时间：2026-09-16。
+
+## 0.20.92 reopen settlement and recovery gate audit (2026-09-16)
+
+- 状态：审计完成，未发现需要修改的实现缺陷。
+- 审计范围：`reopenTransport()` 在同步 `CONNECTING` 回调触发 `stop()`/生命周期 supersession 时的 opening settlement；`createStopPromise()`、`suspendTransport()` 与 `performStop()` 之间的 stop rejection 归档及重复报告；recovery gate waiter 在取消、重建、自动恢复失败和 demand-driven recovery 之间的代际一致性。
+- 结论：当前实现先安装 `startPromise` 与 lifecycle epoch，再发送 `CONNECTING`，因此同步回调触发的 stop 能安全取得同一 opening；epoch guard 会在 `transport.start()` 前放弃旧 opening。stop cleanup 通过 `pendingStop` 单一 gate 串行化，只有拥有 stop 调用的路径报告 rejection；recovery waiter 捕获 gate promise 与 cancellation token，gate 重建不会误放行旧 waiter。
+- 验证：`pnpm test --run`（35 files，779/779）；既有回归覆盖包括 `lets a stop() from the reconnect CONNECTING callback cancel the reopen`、`stops once when an explicit stop follows a failed-open cleanup`、`reuses a failed-reopen stop gate when the tab hides before cleanup settles`、`reuses an in-flight recovery reopen instead of opening a second transport`。
+- 风险 / 回滚：本轮仅更新审计记录，不改变 public API、worker protocol、存储 schema/key 或线协议。
+- 下一项：继续审计 `RESUME/pageshow` 同步回调重入与 replay hydration 生命周期交错。
+- 更新时间：2026-09-16。
+
 ## 0.20.92 stop failure recovery ledger (2026-09-16)
 
 - 状态：已合并（PR #95，rebase merge 至 `main@db45d3a`）。

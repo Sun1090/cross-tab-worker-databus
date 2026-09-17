@@ -47,6 +47,10 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Validate release version and notes
+        # Fail before any release or publish side effect on a mismatched tag.
+        run: node scripts/verify-release-version.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

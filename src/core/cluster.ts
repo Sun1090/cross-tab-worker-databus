@@ -335,7 +335,14 @@ export class WorkerClusterRuntime {
    */
   private pause(): void {
     this.lifecycleGeneration += 1;
-    if (!this.started) return;
+    // A pagehide can re-enter synchronously from the pageshow onResume
+    // callback after handlePageShow() has tentatively cleared `suspended` but
+    // before activate() marks the runtime started. Preserve that newer hidden
+    // intent so the outer pageshow is cancelled and a later pageshow can retry.
+    if (!this.started) {
+      if (this.lifecycleListening) this.suspended = true;
+      return;
+    }
     this.started = false;
     this.suspended = true;
     if (this.heartbeatHandle !== null) this.environment.clearInterval(this.heartbeatHandle);

@@ -607,6 +607,45 @@ describe('WorkerClusterRuntime', () => {
     expect(onControl).toHaveBeenCalledWith('SUBSCRIBE', 'topic', undefined);
   });
 
+  it('preserves a pagehide re-entered from onResume for the next pageshow', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'resume-rehide' });
+    let rehideOnResume = false;
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'resume-rehide',
+      environment: env.environment,
+      tabId: 'tab-resume-rehide',
+      workerId: 'worker-resume-rehide',
+      handlers: {
+        onControl: vi.fn(),
+        onEvent: vi.fn(),
+        onResume: () => {
+          if (rehideOnResume) env.pageHide();
+        }
+      }
+    });
+
+    runtime.start();
+    runtime.subscribe('topic');
+    await Promise.resolve();
+    env.pageHide();
+    expect(runtime.getSnapshot().suspended).toBe(true);
+
+    // The document hides again while pageshow is synchronously notifying its
+    // resume callback. That newer lifecycle must keep the cluster suspended
+    // instead of leaving it inactive with `suspended: false`.
+    rehideOnResume = true;
+    env.pageShow();
+    expect(runtime.getSnapshot()).toMatchObject({ suspended: true, coordinated: false });
+
+    rehideOnResume = false;
+    env.pageShow();
+    expect(runtime.getSnapshot()).toMatchObject({ suspended: false, coordinated: true });
+    expect(runtime.isAssigned('topic')).toBe(true);
+    runtime.stop();
+  });
+
   it('flushes batched storage writes before pagehide returns', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
@@ -1241,30 +1280,48 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(runtime.isAssigned('topic-a')).toBe(true);
   });
 
-  it('keeps the runtime usable when storage writes start failing mid-session', () => {
-    const storage = new MemoryStorage();
-    let failWrites = false;
-    const flaky = new (class extends MemoryStorage {
-      override setItem(key: string, value: string): void {
-        if (failWrites) throw new Error('QuotaExceededError');
-        super.setItem(key, value);
-      }
-      override removeItem(key: string): void {
-        if (failWrites) throw new Error('QuotaExceededError');
-        super.removeItem(key);
-      }
-    })();
-    // Seed the shared storage so canUseStorage passes at construction.
-    const { env, runtime } = makeRuntime({ storage, tabId: 'tab-a', workerId: 'worker-a' });
-    env.environment.storage = flaky;
-    runtime.start();
-    runtime.subscribe('topic-a');
-    failWrites = true;
-    expect(() => {
-      runtime.subscribe('topic-b');
-      env.runIntervals();
-      runtime.unsubscribe('topic-a');
-    }).not.toThrow();
+  it('keeps the runtime usable when storage writes start failing mid-session', async () => {
+    vi.useFakeTimers();
+    try {
+      let failWrites = false;
+      const flaky = new (class extends MemoryStorage {
+        override setItem(key: string, value: string): void {
+          if (failWrites) throw new Error('QuotaExceededError');
+          super.setItem(key, value);
+        }
+        override removeItem(key: string): void {
+          if (failWrites) throw new Error('QuotaExceededError');
+          super.removeItem(key);
+        }
+      })();
+      const setItemSpy = vi.spyOn(flaky, 'setItem');
+      // Pass the flaky adapter at construction so the runtime's batching writer
+      // actually wraps it. Replacing environment.storage afterwards would only
+      // mutate the test harness; the runtime has already captured its adapter.
+      const { env, runtime } = makeRuntime({ storage: flaky, hub: new ChannelHub(), tabId: 'tab-a', workerId: 'worker-a' });
+      runtime.start();
+      runtime.subscribe('topic-a');
+      await vi.advanceTimersByTimeAsync(0);
+      const successfulWrites = setItemSpy.mock.calls.length;
+
+      failWrites = true;
+      expect(() => {
+        runtime.subscribe('topic-b');
+        env.runIntervals();
+        runtime.unsubscribe('topic-a');
+      }).not.toThrow();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // Coordination persistence is best-effort: repeated quota failures are
+      // contained, while the local assignment and control plane remain usable.
+      expect(runtime.isAssigned('topic-b')).toBe(true);
+      expect(runtime.getSnapshot().subscribedTopics).toEqual(['topic-b']);
+      expect(setItemSpy.mock.calls.length).toBeGreaterThan(successfulWrites);
+      failWrites = false;
+      runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('prunes a crashed worker and its records after the TTL expires', async () => {
