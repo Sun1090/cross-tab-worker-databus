@@ -1,3 +1,15 @@
+## 0.20.92 RELEASE_FREEZE — version identity gate (2026-09-18)
+
+- 状态：完成发布身份校验修复；0.20.92 仍未发布，现有 package/CHANGELOG/roadmap 发布草稿保留，等待全量门禁与 PR。
+- 分支 / 基线：`feat/release-0.20.92` / `e4d9343`；本条随原子修复提交，准确提交可用 `git log --grep="validate release tag"` 查询。
+- 完成：发布工作流在任何 release/publish 操作之前校验 tag 与 package 版本严格一致，并要求唯一非空 CHANGELOG 章节；新增真实子进程回归用例。中英文清单改为功能分支 PR、精确 tag 推送和不可变发布 tag，不再建议直接推送 main 或重用坏产物的 tag。
+- 变更文件：`.github/workflows/release.yml`、`scripts/verify-release-version.mjs`、`tests/release-version.test.ts`、`tests/workflows.test.ts`、`docs/release-checklist.md`、`docs/zh/release-checklist.md`、本文件。
+- 验证：基线 `pnpm check` 780/780；`pnpm lint`、public-registry `pnpm audit` 通过；修复后 release/workflow/documentation 定向测试 33/33，lint、typecheck、diff-check 通过。远端最近 CI/CodeQL 均成功，无打开 PR 或 milestone。
+- 阻塞：无。
+- 风险 / 回滚：只影响发布前验证，不改 runtime/API/storage；误拒绝时修正校验后重跑不变 tag，产物缺陷使用新的 patch，不移动已发布 tag。
+- 下一项：全量 coverage、E2E、benchmark、compat 和 packed consumer 门禁，再完成 0.20.92 发布。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
 ## 0.20.92 release-readiness verification continuation (2026-09-16)
 
 - 状态：发布前验证继续通过，未触发停止条件。

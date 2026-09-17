@@ -22,7 +22,7 @@
 3. 依赖安全门禁：`pnpm audit --registry=https://registry.npmjs.org`（配置的镜像 registry 缺少 audit 端点；CI 在 verify job 中于公共 registry 运行）。任一已知漏洞公告即视为发布失败；`pnpm-workspace.yaml` overrides 钉住补丁版本。
 4. 浏览器基准回归门禁：运行两次 `pnpm bench:browser` 后执行 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的无关噪声，参见已知的共享 runner 抖动说明）；基线迁移（例如某指标从空操作变为真实路径）属预期内的一次性失败。用 `pnpm bench:trend` 刷新长期趋势文档，表格变化时一并提交。
 5. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。
-6. 提交、给精确版本打 tag，并推送 `main --tags`。
+6. 在功能分支提交并推送该分支，PR 验证通过后使用 squash 或 fast-forward 合入（不创建 merge commit）。获取合入后的精确提交并打 tag，只推送该版本 tag；禁止直接推送 `main`/`master` 或 force-push。工作流运行 `node scripts/verify-release-version.mjs`，要求 `RELEASE_TAG` 等于 `v` 加 package 版本，且 CHANGELOG 中恰好有一个非空的对应版本章节。
 
 ## 安全与依赖扫描
 
@@ -30,7 +30,7 @@
 
 ## 打 tag 的发布工作流
 
-推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行与手动执行相同预算的**阻塞式**消费者验证（`PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`，即 6 分钟上限）。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败，修复后重新发布该 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
+推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行与手动执行相同预算的**阻塞式**消费者验证（`PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`，即 6 分钟上限）。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败。若为 registry 传播延迟或基础设施故障，针对不变的 tag 重跑工作流；若为产物缺陷，发布新的 patch 版本。禁止移动或重用已发布 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
 
 ## 发布（手动场景）
 

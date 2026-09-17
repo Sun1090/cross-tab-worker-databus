@@ -22,7 +22,7 @@ Only `pnpm bench:browser` / `pnpm bench:compare` stay local-only: shared-runner 
 3. Gate dependency security: `pnpm audit --registry=https://registry.npmjs.org` (the configured mirror registry lacks the audit endpoint; CI runs it on the public registry in the verify job). Fail the release on any known-vulnerability advisory; `pnpm-workspace.yaml` overrides pin patched ranges.
 4. Gate browser benchmark regressions: `pnpm bench:compare --fail-above-pct 50` after two `pnpm bench:browser` runs, using a 50% ceiling so unrelated runner noise (see the known shared-runner jitter note) cannot fail the gate; a baseline shift (e.g. a metric becoming real instead of a no-op) is an expected one-time failure. Refresh the long-run trend doc with `pnpm bench:trend` and commit it when the tables change.
 5. Confirm the package contains only intended files with `npm pack --dry-run --json`.
-6. Commit, tag the exact version, and push `main --tags`.
+6. Commit on a feature branch, push that branch, and merge its green PR using squash or fast-forward (no merge commit). Fetch the merged commit, tag that exact commit, and push only the specific version tag; never push `main`/`master` directly or force-push. The workflow runs `node scripts/verify-release-version.mjs` to require `RELEASE_TAG` to equal `v` + the package version and to require exactly one non-empty CHANGELOG section.
 
 ## Security and dependency scanning
 
@@ -30,7 +30,7 @@ The repository runs CodeQL (`javascript-typescript`; on push, on pull request, a
 
 ## Tagged-release workflow
 
-Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check` and `pnpm lint` (a tag can point at a commit that never passed CI's lint step), runs `verify:compat` and `verify:pack`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=48`, `PUBLISHED_VERIFY_DELAY_MS=7500`, a 6-minute ceiling). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release and republish the tag after fixing it. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
+Pushing a version tag triggers the `Release` GitHub Action: it runs `pnpm check` and `pnpm lint` (a tag can point at a commit that never passed CI's lint step), runs `verify:compat` and `verify:pack`, opens the GitHub release from the `CHANGELOG` section, publishes to npm when the `NPM_TOKEN` secret is set, and then runs the **blocking** published-consumer verification with the same budget as a manual run (`PUBLISHED_VERIFY_ATTEMPTS=48`, `PUBLISHED_VERIFY_DELAY_MS=7500`, a 6-minute ceiling). A release whose published package cannot be imported by a clean consumer fails the workflow — treat every `verify:published` failure as a failed release. For registry propagation or infrastructure failures, rerun the workflow against the unchanged tag; for artifact defects, ship a new patch version. Never move or reuse a published tag. When no token is configured the publish step is skipped, but verification still passes against whatever version is already on npm (e.g. one published manually).
 
 ## Publishing
 
