@@ -1,3 +1,16 @@
+## 0.20.92 RELEASE_FREEZE — local gates complete (2026-09-18)
+
+- 状态：本地必需门禁全部通过，待 PR CI / squash 合入 / 精确 tag / 发布消费者验证；未宣称已发布。
+- 分支 / commit：`feat/release-0.20.92`；发布门禁修复 `97dc681`，本条随 release preparation commit。
+- 完成：791 单测（36 文件），类型 / build / lint；coverage 97.69% statements、93.95% branches、98% functions、98.95% lines；27/27 browser E2E；25/25 microbenchmark；packed consumer ESM/CJS；compat 对 v0.20.91；依赖 audit 无已知漏洞。
+- Browser benchmark：两次运行均成功，七项指标全部在 50% 回归阈值内。未用微基准替换真实 browser 测量。报告存于本地 ignored `bench-results/browser-2026-09-17T22-45-{14-110,31-009}Z.json`。
+- 打包：`npm pack --dry-run --json` 109 files，无 src/tests/scripts/.github/progress 私有文件；`RELEASE_TAG=v0.20.92 node scripts/verify-release-version.mjs` 通过。
+- 变更：package.json 版本草稿定稿，CHANGELOG 更新实际日期与门禁修复，双语 roadmap 保持真实冻结状态。
+- 阻塞：无。后续不重复全量本地验证，只有新代码或失败证据才追加定向验证。
+- 风险 / migration / rollback：patch 无公共 API、worker 协议或 storage schema 变更；消费者可固定回 0.20.91。tag 不移动，发布产物修复使用新 patch。
+- 下一项：fetch/rebase、提交 feature branch PR、等待 CI 并 squash 合入；随后精确 tag 发布和 npm consumer smoke。下一 milestone 检查兼容性验证器的 export 条件边界。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
 ## 0.20.92 RELEASE_FREEZE — version identity gate (2026-09-18)
 
 - 状态：完成发布身份校验修复；0.20.92 仍未发布，现有 package/CHANGELOG/roadmap 发布草稿保留，等待全量门禁与 PR。
