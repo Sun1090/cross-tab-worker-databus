@@ -1,7 +1,7 @@
 ## [Unreleased]
 
 ### Fixed
-- The compatibility gate now rejects disabled public exports, removed worker default conditions, and conditional exports replaced with untyped strings or null type targets.
+- The compatibility gate now rejects disabled public exports, removed worker default conditions, and conditional exports replaced with untyped strings or null type targets, including package-level `types`/`typesVersions` metadata.
 
 ## [0.20.92] - 2026-09-18
 

@@ -6,16 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 const script = resolve('scripts/verify-version-compat.mjs');
 
-function checkExports(baselineExports: unknown, currentExports: unknown): string {
+function checkExports(
+  baselineExports: unknown,
+  currentExports: unknown,
+  metadata: { baseline: Record<string, unknown>; current: Record<string, unknown> } = { baseline: {}, current: {} }
+): string {
   const cwd = mkdtempSync(join(tmpdir(), 'databus-compat-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
   try {
     git('init', '--quiet');
-    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ version: '0.1.0', exports: baselineExports }));
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ version: '0.1.0', exports: baselineExports, ...metadata.baseline }));
     git('add', 'package.json');
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'baseline');
     git('-c', 'tag.gpgsign=false', 'tag', 'v0.1.0');
-    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ version: '0.1.1', exports: currentExports }));
+    writeFileSync(join(cwd, 'package.json'), JSON.stringify({ version: '0.1.1', exports: currentExports, ...metadata.current }));
     return execFileSync(process.execPath, [script], {
       cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, COMPAT_BASE_TAG: 'v0.1.0' }
     });
@@ -29,6 +33,13 @@ describe('version compatibility export gate', () => {
     expect(checkExports({ '.': { types: './old.d.ts', import: './old.js' } }, {
       '.': { types: './new.d.ts', import: './new.js', require: './new.cjs' }, './extra': './extra.js'
     })).toContain('preserves public exports');
+  });
+
+  it.each(['types', 'typesVersions'])('rejects disabling package %s metadata with null', field => {
+    const target = field === 'types' ? './index.d.ts' : { '*': { '*': ['./index.d.ts'] } };
+    expect(() => checkExports({}, {}, {
+      baseline: { [field]: target }, current: { [field]: null }
+    })).toThrow(`removed package field ${field}`);
   });
 
   it('rejects replacing typed conditional exports with an untyped string', () => {

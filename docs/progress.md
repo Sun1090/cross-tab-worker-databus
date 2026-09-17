@@ -1,3 +1,15 @@
+## 0.20.92 published / compatibility follow-up (2026-09-18)
+
+- 状态：接手中断变基后恢复干净 feature 分支；仅回放下一阶段修复，未重复回放 PR #97 已 squash 的旧提交。冲突现场备份在 `/tmp/databus-progress-rebase-conflict-20260918.md`，原提交保留于 `codex/backup-compat-before-rebase-20260918`。
+- 发布：PR #97 全部 CI 成功并合入 `c31ae25`；远端不可变 `v0.20.92` 指向该提交，Release run `35284238208` 已 success。npm 0.20.92 可见，本地 `PUBLISHED_VERSION=0.20.92 PUBLISHED_VERIFY_ATTEMPTS=2 pnpm verify:published` ESM/CJS smoke 成功。部署为 npm package，无独立服务部署。
+- 下一阶段：`feat/compat-export-gates` / PR #98；已有修复重定位为 `8f4aee3`，与 release tag 严格分离。全量 `pnpm check` 37 files / 796 tests 通过，lint/typecheck/compat 通过。
+- 新缺陷与修复：新增两个 CLI 用例证明顶层 types/typesVersions 从有效值变 null 仍被放过；修正 package metadata 检查，保持缺字段检测，新增 2 项从红变绿。
+- 变更文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
+- 验证：定向测试 7/7；typecheck、lint、verify:compat、diff-check 成功。
+- 风险 / 回滚：仅 CI gate，无 runtime/API/storage 变化；修复可独立 revert；发布消费者可固定 0.20.91，不移动 0.20.92 tag。
+- 阻塞：无；下一项：等待 PR #98 最新提交 CI，失败则修复，全绿后 squash 合入。不为单项 tooling 修改立即再发布。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
 ## Next milestone — public export gate correctness (2026-09-18)
 
 - 状态：实现完成，独立于冻结的 0.20.92 发布；不为单项 tooling 修复立即发布新版本。

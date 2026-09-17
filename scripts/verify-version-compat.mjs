@@ -55,6 +55,8 @@ for (const key of Object.keys(baselineExports)) {
 }
 
 for (const field of ['types', 'typesVersions']) {
-  if (field in baseline && !(field in current)) throw new Error(`removed package field ${field} since ${baseTag}`);
+  if (field in baseline && (!(field in current) || (baseline[field] != null && current[field] == null))) {
+    throw new Error(`removed package field ${field} since ${baseTag}`);
+  }
 }
 console.log(`[compat] ${current.version} preserves public exports and type metadata from ${baseTag}`);
