@@ -254,6 +254,38 @@ describe('getOrCreateTabId', () => {
     expect(get(env)).toBe('tab-fresh-1');
   });
 
+  it('keeps one in-memory id when sessionStorage is write-only', async () => {
+    const { getOrCreateTabId: get } = await freshModule();
+    const sessionStorage = new MemoryStorage();
+    sessionStorage.getItem = () => null;
+    let counter = 0;
+    const env = { sessionStorage, randomId: () => `write-only-${++counter}` } as never;
+
+    expect(get(env)).toBe('tab-write-only-1');
+    expect(get(env)).toBe('tab-write-only-1');
+    expect(counter).toBe(1);
+  });
+
+  it('keeps one in-memory fallback id across repeated storage failures', async () => {
+    const { getOrCreateTabId: get } = await freshModule();
+    let counter = 0;
+    const env = {
+      sessionStorage: {
+        getItem: () => {
+          throw new Error('storage blocked');
+        },
+        setItem: () => {
+          throw new Error('storage blocked');
+        }
+      },
+      randomId: () => `fallback-${++counter}`
+    } as never;
+
+    expect(get(env)).toBe('tab-fallback-1');
+    expect(get(env)).toBe('tab-fallback-1');
+    expect(counter).toBe(1);
+  });
+
   it('falls back to a random id when sessionStorage throws', async () => {
     const { getOrCreateTabId: get } = await freshModule();
     const env = {

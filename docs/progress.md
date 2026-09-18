@@ -1,3 +1,15 @@
+## 0.21 stable in-memory tab identity fallback (2026-09-19)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：`getOrCreateTabId()` 在 sessionStorage 缺失、持续抛错或写入后不可读时，每次调用都会生成不同 ID；同一 document 创建多个 bus runtime 会被误认为不同 tab，破坏 subscriber 清理与 tab-scoped 协调语义。
+- 修复：模块级缓存已签发的 tab ID；正常 storage 读取、首次创建和异常 fallback 均同步缓存，后续调用在 storage 不可用或值缺失时复用同一 document identity。opener clone 的首次再生规则保持不变。
+- 测试：新增 write-only sessionStorage 与持续抛错 adapter 的重复调用回归，验证 random ID 只生成一次。
+- 变更文件：`src/core/environment.ts`、`tests/environment.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/environment.test.ts tests/cluster.test.ts`（98/98）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：缓存仅限当前 JS document/module 实例，不跨 tab；正常 sessionStorage 与 opener clone 行为不变。回滚 = revert 本任务提交。
+- 下一项：审计 cluster teardown/pagehide 在 storage flush 持续失败时是否遗留 retry timer，并验证 restart 收敛。
+- 更新时间：2026-09-19。
+
 ## 0.21 channel-construction failure degradation (2026-09-19)
 
 - 状态：已完成实现、回归测试与验证。

@@ -167,6 +167,7 @@ export function createStorageEventChannel(options: {
 // notice connections). Regenerate a copied opener id only on the first lookup
 // in that document; subsequent runtimes must continue sharing the same tabId.
 let tabIdentityInitialized = false;
+let cachedTabId: string | null = null;
 
 /**
  * Default environment adapter for browser runtimes.
@@ -266,13 +267,23 @@ export function getOrCreateTabId(
     const hasOpener = typeof window !== 'undefined' && Boolean(window.opener);
     if (existing && (!hasOpener || tabIdentityInitialized)) {
       tabIdentityInitialized = true;
+      cachedTabId = existing;
       return existing;
     }
+    // A storage adapter can become unreadable, be cleared externally, or be
+    // absent altogether. Preserve the document's already-issued identity in
+    // memory so multiple runtimes in the same tab never diverge.
+    if (tabIdentityInitialized && cachedTabId) return cachedTabId;
     const created = `tab-${environment.randomId()}`;
     storage?.setItem(key, created);
     tabIdentityInitialized = true;
+    cachedTabId = created;
     return created;
   } catch {
-    return `tab-${environment.randomId()}`;
+    if (cachedTabId) return cachedTabId;
+    const created = `tab-${environment.randomId()}`;
+    tabIdentityInitialized = true;
+    cachedTabId = created;
+    return created;
   }
 }
