@@ -33,6 +33,14 @@ try {
   );
 }
 
+
+function hasUnconditionalExportTarget(entry) {
+  if (typeof entry === 'string') return entry.length > 0;
+  if (Array.isArray(entry)) return entry.some(hasUnconditionalExportTarget);
+  return entry != null && typeof entry === 'object' && entry.default != null &&
+    hasUnconditionalExportTarget(entry.default);
+}
+
 const currentExports = current.exports ?? {};
 const baselineExports = baseline.exports ?? {};
 for (const key of Object.keys(baselineExports)) {
@@ -42,12 +50,12 @@ for (const key of Object.keys(baselineExports)) {
   if (baselineEntry != null && currentEntry == null) {
     throw new Error(`disabled public export ${key} since ${baseTag}`);
   }
-  // A string export is the shorthand for an unconditional target. Replacing
-  // it with a conditional object that has no `default` silently removes the
-  // export for every condition not named by that object (for example require).
-  if (typeof baselineEntry === 'string' && currentEntry != null &&
-      typeof currentEntry === 'object' && !Array.isArray(currentEntry) &&
-      currentEntry.default == null) {
+  // Strings and fallback arrays are unconditional targets. A later mapping
+  // must retain an unconditional path (directly, through a non-empty fallback
+  // array, or through `default`) so unknown conditions and CommonJS callers do
+  // not silently lose an export that previously resolved for everyone.
+  if ((typeof baselineEntry === 'string' || Array.isArray(baselineEntry)) &&
+      hasUnconditionalExportTarget(baselineEntry) && !hasUnconditionalExportTarget(currentEntry)) {
     throw new Error(`removed default availability from export ${key} since ${baseTag}`);
   }
   if (baselineEntry != null && typeof baselineEntry === 'object' && !Array.isArray(baselineEntry)) {
