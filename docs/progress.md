@@ -1,3 +1,15 @@
+## 0.21 storage capability round-trip probe (2026-09-18)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：`canUseStorage()` 文档声明执行 write-read-delete，但实现只 write-delete；接受写入却无法读回的受限/异常 adapter 会被误判为可协调，随后 cluster 在不可读 registry 上运行。
+- 修复：probe 写入后必须精确读回 sentinel，再删除 probe；read mismatch、read throw、delete throw 均降级为 storage unavailable。
+- 测试：新增 write-only adapter、读取抛错、删除抛错三类故障注入；正常 round-trip 仍清除 probe。
+- 变更文件：`src/core/environment.ts`、`tests/environment.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/environment.test.ts tests/cluster.test.ts`（95/95）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：只会让不满足完整 Storage 契约的环境更早进入既有 local-mode 降级路径；正常 browser storage 行为不变。回滚 = revert 本任务提交。
+- 下一项：继续验证 probe 失败后的 cluster/channel 降级不会残留协调写入，并审计 sessionStorage tab-id 的同类 read-back 边界。
+- 更新时间：2026-09-18。
+
 ## 0.21 storage clear failure cleanup (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。
