@@ -1,3 +1,13 @@
+## 0.21 development dependency refresh (2026-09-19)
+
+- 状态：已完成依赖更新与全量本地验证。
+- 更新：`@types/node 26.5.1 → 26.6.1`、`eslint 10.10.0 → 10.11.0`、`jsdom 30.0.1 → 30.1.0`、`vue 3.5.42 → 3.5.43`；TypeScript 7 属于 major，当前不纳入本轮 patch/minor refresh。
+- 变更文件：`package.json`、`pnpm-lock.yaml`、`docs/progress.md`。
+- 验证：`pnpm check`（37 files / 818 tests）；`pnpm lint`；`pnpm audit --registry=https://registry.npmjs.org --audit-level high`（无已知漏洞）；`git diff --check` 均通过。
+- 风险 / 回滚：仅开发/测试依赖，不改变发布包 runtime dependencies 或 public API；CI 使用 Node 22，更新后的 jsdom engine 满足。回滚 = revert 本任务提交。
+- 下一项：通过 CI/浏览器门禁后合入；继续 lifecycle/adapter 异步隔离审计，不单独触发发布。
+- 更新时间：2026-09-19。
+
 ## 0.21 cluster teardown retry regression (2026-09-19)
 
 - 状态：已完成 cluster 级故障注入与验证。
