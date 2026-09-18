@@ -63,6 +63,17 @@ export class BatchingStorageWriter implements StorageLike {
     this.storage.clear();
   }
 
+  /** Drop queued mutations and cancel retry state without clearing storage.
+   * Used when the owning runtime is torn down: final best-effort writes have
+   * already been flushed, and failed writes must not keep timers alive. */
+  discardPending(): void {
+    this.pending.clear();
+    this.flushScheduled = false;
+    this.cancelRetry();
+    this.retryCount.clear();
+    this.retryDelayMs = INITIAL_RETRY_DELAY_MS;
+  }
+
   // Reads always see the pending value first (task-local consistency), then
   // fall back to the underlying storage.
   getItem(key: string): string | null {

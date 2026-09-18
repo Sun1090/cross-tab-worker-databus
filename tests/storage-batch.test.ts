@@ -166,6 +166,31 @@ describe('BatchingStorageWriter', () => {
     }
   });
 
+  it('discards pending teardown retries without clearing persisted storage', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      storage.setItem('persisted', 'keep');
+      storage.setItem = () => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      };
+      const writer = new BatchingStorageWriter(storage);
+
+      writer.setItem('route', 'pending');
+      await Promise.resolve();
+      expect(writer.pendingSize).toBe(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      writer.discardPending();
+
+      expect(writer.pendingSize).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(storage.getItem('persisted')).toBe('keep');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('drops a persistently failing key after MAX_RETRY_ATTEMPTS', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

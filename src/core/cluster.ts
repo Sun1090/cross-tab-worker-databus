@@ -375,6 +375,11 @@ export class WorkerClusterRuntime {
     // let peers observe the completed handoff immediately.
     this.flushStorage();
     this.notifyRegistry();
+    // A failed final write arms the batching writer's retry timer. The runtime
+    // is now suspended/stopped, so discard that retry state instead of leaving
+    // background work attached to a torn-down coordination session. Stale
+    // metadata remains covered by the normal TTL recovery path.
+    if (this.storage instanceof BatchingStorageWriter) this.storage.discardPending();
     const channel = this.channel;
     this.channel = null;
     this.handlers.onSuspend?.();
