@@ -2,20 +2,20 @@
 
 # 浏览器基准趋势
 
-> 数据截至 2026-09-17，基于 27 份归档的 `bench-results/browser-*.json` 报告（运行 `pnpm bench:browser` 追加一份；用 `node scripts/bench-trend.mjs` 重新生成本文档）。
+> 数据截至 2026-09-18，基于 29 份归档的 `bench-results/browser-*.json` 报告（运行 `pnpm bench:browser` 追加一份；用 `node scripts/bench-trend.mjs` 重新生成本文档）。
 
 发布门禁的对比基线是最近两份报告之间的 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的噪声）。本文记录长期趋势：数值为逐指标延迟，越低越好；历史最优为本机观察到的最健康一次运行。
 
 <!-- BENCH-TREND:BEGIN (machine-generated table) -->
 | 指标 | 上次 (ms) | 本次 (ms) | Δ | 历史最优 (ms) |
 |---|---|---|---|---|
-| publish per-message (ms, lower is better) — dedicated | 52.4371 | 50.838 | -1.60 | 35.3543 |
-| publish per-message (ms, lower is better) — shared | 34.2414 | 34.4971 | +0.26 | 33.6784 |
-| wildcard dispatch ×1000 (ms, lower is better) | 5.7 | 6.4 | +0.70 | 0.1 |
-| publishBatch ×1000 (ms, lower is better) | 4.2 | 4.3 | +0.10 | 0.4 |
-| dedup ×1000 (ms, lower is better) | 23.2 | 13.3 | -9.90 | 0 |
-| trace + publish ×1000 (ms, lower is better) | 5 | 5 | +0.00 | 4.5 |
-| first-packet cold dispatch (ms, lower is better) | 0.1 | 0.1 | +0.00 | 0 |
+| publish per-message (ms, lower is better) — dedicated | 44.6507 | 42.3497 | -2.30 | 35.3543 |
+| publish per-message (ms, lower is better) — shared | 34.3823 | 34.1675 | -0.21 | 33.6784 |
+| wildcard dispatch ×1000 (ms, lower is better) | 6.6 | 6.8 | +0.20 | 0.1 |
+| publishBatch ×1000 (ms, lower is better) | 4.9 | 4.7 | -0.20 | 0.4 |
+| dedup ×1000 (ms, lower is better) | 17.3 | 11.7 | -5.60 | 0 |
+| trace + publish ×1000 (ms, lower is better) | 5 | 4.8 | -0.20 | 4.5 |
+| first-packet cold dispatch (ms, lower is better) | 0 | 0 | +0.00 | 0 |
 <!-- BENCH-TREND:END -->
 
 说明：

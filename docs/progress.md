@@ -1,3 +1,16 @@
+## 0.20.93 release freeze (2026-09-19)
+
+- Milestone / 版本：`0.20.93` patch reliability release。
+- 状态：`RELEASE_FREEZE`；版本、release notes 与全量本地发布门禁均已完成，待 release PR/CI。
+- 分支 / commit：`feat/release-0.20.93`；基线 `32e8f1e`。
+- 完成内容：汇总 package compatibility gate、storage capability/degradation、稳定 tab identity、teardown retry cleanup 与开发工具链 patch 更新。
+- 变更文件：`package.json`、`CHANGELOG.md`、`docs/roadmap.md`、`docs/zh/roadmap.md`、`docs/benchmarks.md`、`docs/zh/benchmarks.md`、`docs/progress.md`。
+- 验证：`pnpm check`（37 files / 818 tests）、`pnpm lint`、`pnpm test:coverage`（97.71% statements / 93.97% branches）、`pnpm bench`（3 files / 25 benchmarks）、`pnpm test:e2e`（27/27）、两次 `pnpm bench:browser`、`pnpm bench:compare --fail-above-pct 50`、`pnpm bench:trend`、`pnpm verify:pack`、`pnpm verify:compat`、`pnpm audit --registry=https://registry.npmjs.org`（无已知漏洞）、`npm pack --dry-run --json`、`RELEASE_TAG=v0.20.93 node scripts/verify-release-version.mjs`、`git diff --check` 均通过。
+- 阻塞：无。
+- 风险 / 回滚：patch release 不改变 public API；如发布门禁失败则在当前 feature branch 修复，不创建或移动 tag。发布后回滚采用后续 patch，不复用 `v0.20.93`。
+- 下一项：提交 release commit，创建 PR，等待 CI 后 squash 合入并从精确 main commit 创建不可变 `v0.20.93` tag。
+- 更新时间：2026-09-19。
+
 ## 0.21 development dependency refresh (2026-09-19)
 
 - 状态：已完成依赖更新与全量本地验证。

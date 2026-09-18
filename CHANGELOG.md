@@ -1,7 +1,15 @@
 ## [Unreleased]
 
+## [0.20.93] - 2026-09-19
+
 ### Fixed
-- The compatibility gate now rejects disabled public exports, removed worker default conditions, and conditional exports replaced with untyped strings or null type targets, including package-level `types`/`typesVersions` metadata.
+- The compatibility gate now rejects disabled public exports, removed worker default conditions, conditional exports replaced with untyped strings or null type targets, incompatible package-level `types`/`typesVersions` metadata, unavailable unconditional targets, destructive fallback-array changes, and removed nested or custom export conditions.
+- Storage capability detection now requires a complete write-read-delete round trip, so write-only or unreadable adapters enter the existing local-mode fallback instead of starting coordination against an unusable registry.
+- Cluster startup now degrades safely when channel construction throws, and tab identity remains stable within the document when session storage is unavailable or unreadable.
+- Storage writer cleanup now cancels pending retries and resets backoff before a failing clear and after final cluster teardown flushes, preventing background writes from surviving page hide or stop.
+
+### Changed
+- Refreshed patch-level development dependencies used by the test and lint toolchain.
 
 ## [0.20.92] - 2026-09-18
 

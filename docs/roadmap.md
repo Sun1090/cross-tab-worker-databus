@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.92 is released on September 18, 2026; the compatibility-gate follow-up merged separately after the release tag. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.93 is in release freeze on September 19, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.20.93 frozen scope
+
+- Strengthen package compatibility checks across package metadata, unconditional and fallback-array targets, and recursive nested or custom export conditions.
+- Require a readable storage capability probe, degrade safely when channel construction fails, and preserve a stable in-memory tab identity when session storage is unavailable.
+- Cancel failed storage retries during clear and cluster teardown, with cluster-level restart regression coverage.
+- Refresh patch-level development dependencies and complete the full release, browser, packaging, compatibility, and security gates.
 
 ## 0.20.92 frozen scope
 
