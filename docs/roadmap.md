@@ -1,6 +1,6 @@
 # Roadmap
 
-0.20.91 is released; 0.20.92 is in RELEASE_FREEZE pending PR and registry verification. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.92 is released on September 18, 2026; the compatibility-gate follow-up merged separately after the release tag. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
 ## 0.20.92 frozen scope
 
