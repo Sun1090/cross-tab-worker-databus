@@ -301,7 +301,18 @@ export class WorkerClusterRuntime {
     // null out storage too: without a channel the storage writes have no
     // peer to observe them, so the BatchingStorageWriter would write for
     // nothing and the degraded code paths must take over.
-    this.channel = this.storage ? this.environment.createChannel(this.channelName) : null;
+    if (this.storage) {
+      try {
+        this.channel = this.environment.createChannel(this.channelName);
+      } catch {
+        // Custom environments are allowed to wrap capability APIs directly.
+        // Treat a synchronous constructor failure like an unavailable channel
+        // rather than leaving start() half-active with `started === true`.
+        this.channel = null;
+      }
+    } else {
+      this.channel = null;
+    }
     if (!this.channel) this.storage = null;
     this.channel?.addEventListener('message', this.handleMessage);
     const now = this.environment.now();

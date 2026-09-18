@@ -8,6 +8,33 @@ import { CLUSTER_MESSAGE_TYPE, DEFAULT_STORAGE_PREFIX } from '../src/utils/const
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
+  it('degrades to local mode when channel construction throws', () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'channel-throw' });
+    env.environment.createChannel = () => {
+      throw new DOMException('BroadcastChannel blocked', 'SecurityError');
+    };
+    const onControl = vi.fn();
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'channel-construction-failure',
+      environment: env.environment,
+      tabId: 'tab-channel-throw',
+      workerId: 'worker-channel-throw',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+
+    expect(() => runtime.start()).not.toThrow();
+    runtime.subscribe('local-topic');
+
+    expect(runtime.getSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+    expect(runtime.isAssigned('local-topic')).toBe(true);
+    expect(onControl).toHaveBeenCalledWith('SUBSCRIBE', 'local-topic', undefined);
+    expect(storage.entries()).toEqual([]);
+
+    runtime.stop();
+  });
+
   it('keeps one topic owner and migrates it when the owner stops', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
