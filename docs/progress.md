@@ -1,3 +1,14 @@
+## 0.21 unconditional export compatibility gate (2026-09-19)
+
+- 状态：已完成实现、回归测试与验证。
+- 修复：版本兼容性门禁把字符串 export 视为无条件 target；当后续版本改为 conditional object 时，必须保留非空 `default`，避免 import-only 映射静默移除 CommonJS 或未知条件消费者的入口。
+- 测试：覆盖 string → `{ import, default }` 的兼容迁移，以及 string → `{ import }` 的破坏性迁移拒绝。
+- 变更文件：`scripts/verify-version-compat.mjs`、`tests/version-compat.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/version-compat.test.ts`（12/12）；`pnpm typecheck`；`pnpm verify:compat`；`git diff --check` 均通过。
+- 风险 / 回滚：仅强化发布前门禁，不改变 runtime、public API 或 package 当前 exports；回滚 = revert 本任务提交。
+- 下一项：继续审计 export 数组与嵌套 conditional target 的兼容语义，再转回 cluster lifecycle/recovery 深度回归。
+- 更新时间：2026-09-19。
+
 ## 0.21 package metadata compatibility gate (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。

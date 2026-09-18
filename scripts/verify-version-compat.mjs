@@ -42,6 +42,14 @@ for (const key of Object.keys(baselineExports)) {
   if (baselineEntry != null && currentEntry == null) {
     throw new Error(`disabled public export ${key} since ${baseTag}`);
   }
+  // A string export is the shorthand for an unconditional target. Replacing
+  // it with a conditional object that has no `default` silently removes the
+  // export for every condition not named by that object (for example require).
+  if (typeof baselineEntry === 'string' && currentEntry != null &&
+      typeof currentEntry === 'object' && !Array.isArray(currentEntry) &&
+      currentEntry.default == null) {
+    throw new Error(`removed default availability from export ${key} since ${baseTag}`);
+  }
   if (baselineEntry != null && typeof baselineEntry === 'object' && !Array.isArray(baselineEntry)) {
     for (const field of ['types', 'import', 'require', 'default']) {
       if (baselineEntry[field] != null && (

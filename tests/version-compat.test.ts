@@ -69,6 +69,18 @@ describe('version compatibility export gate', () => {
     })).toThrow('removed types condition');
   });
 
+  it('permits replacing a string export with a conditional object that keeps a default', () => {
+    expect(checkExports({ './feature': './feature.js' }, {
+      './feature': { import: './feature.mjs', default: './feature.js' }
+    })).toContain('preserves public exports');
+  });
+
+  it('rejects replacing an unconditional string export with import-only conditions', () => {
+    expect(() => checkExports({ './feature': './feature.js' }, {
+      './feature': { import: './feature.mjs' }
+    })).toThrow('removed default availability');
+  });
+
   it('rejects disabling a public string export with null', () => {
     expect(() => checkExports({ './package.json': './package.json' }, {
       './package.json': null
