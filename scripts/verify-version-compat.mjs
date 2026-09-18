@@ -58,5 +58,15 @@ for (const field of ['types', 'typesVersions']) {
   if (field in baseline && (!(field in current) || (baseline[field] != null && current[field] == null))) {
     throw new Error(`removed package field ${field} since ${baseTag}`);
   }
+  // Keep the metadata container compatible as well as present. A non-null
+  // object (notably `typesVersions`) cannot be replaced by a scalar without
+  // making the previous TypeScript resolution contract unusable.
+  if (field in baseline && baseline[field] != null && current[field] != null) {
+    const baselineIsObject = typeof baseline[field] === 'object' && !Array.isArray(baseline[field]);
+    const currentIsObject = typeof current[field] === 'object' && !Array.isArray(current[field]);
+    if (baselineIsObject !== currentIsObject) {
+      throw new Error(`changed package field ${field} shape since ${baseTag}`);
+    }
+  }
 }
 console.log(`[compat] ${current.version} preserves public exports and type metadata from ${baseTag}`);
