@@ -1,8 +1,8 @@
 # Roadmap
 
-0.20.93 is in release freeze on September 19, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.93 was released on September 19, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
-## 0.20.93 frozen scope
+## 0.20.93 delivered scope
 
 - Strengthen package compatibility checks across package metadata, unconditional and fallback-array targets, and recursive nested or custom export conditions.
 - Require a readable storage capability probe, degrade safely when channel construction fails, and preserve a stable in-memory tab identity when session storage is unavailable.

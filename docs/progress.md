@@ -1,3 +1,16 @@
+## 0.20.93 release completed (2026-09-19)
+
+- Milestone / 版本：`0.20.93` patch reliability release。
+- 状态：已发布；release workflow、npm publish 与发布后 consumer smoke 全部成功。
+- 分支 / commit：release PR #113 squash 合入 `d7d67d3`；tag `v0.20.93` 精确指向该提交。
+- 完成内容：发布 package compatibility gate、storage/environment degradation、稳定 tab identity、teardown retry cleanup 与开发工具链 patch 更新。
+- 发布结果：GitHub Release `v0.20.93`；npm `cross-tab-worker-databus@0.20.93`；Release workflow run `35407094756` 成功。
+- 验证：PR #113 的 verify、browser、CodeQL 全绿；release workflow 全绿；`npm view cross-tab-worker-databus@0.20.93 version --registry=https://registry.npmjs.org` 返回 `0.20.93`；`PUBLISHED_VERSION=0.20.93 pnpm verify:published` 通过 ESM/CJS consumer smoke。
+- 阻塞：无。
+- 风险 / 回滚：tag 不移动、不复用；若发现发布缺陷，使用后续 patch 修复。runtime 无 schema migration，消费者可固定回 `0.20.92`。
+- 下一项：进入下一 reliability milestone，继续审计 storage-event fallback 的 postMessage 写入异常与 lifecycle 收敛。
+- 更新时间：2026-09-19。
+
 ## 0.20.93 release freeze (2026-09-19)
 
 - Milestone / 版本：`0.20.93` patch reliability release。
