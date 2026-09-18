@@ -41,6 +41,26 @@ function hasUnconditionalExportTarget(entry) {
     hasUnconditionalExportTarget(entry.default);
 }
 
+function assertExportCompatibility(baselineEntry, currentEntry, exportKey, conditionPath = []) {
+  if ((typeof baselineEntry === 'string' || Array.isArray(baselineEntry)) &&
+      hasUnconditionalExportTarget(baselineEntry) && !hasUnconditionalExportTarget(currentEntry)) {
+    throw new Error(`removed default availability from export ${exportKey} since ${baseTag}`);
+  }
+  if (baselineEntry == null || typeof baselineEntry !== 'object' || Array.isArray(baselineEntry)) return;
+
+  for (const field of Object.keys(baselineEntry)) {
+    if (baselineEntry[field] == null) continue;
+    if (currentEntry == null || typeof currentEntry !== 'object' ||
+        Array.isArray(currentEntry) || currentEntry[field] == null) {
+      const condition = [...conditionPath, field].join('.');
+      throw new Error(`removed ${condition} condition from export ${exportKey} since ${baseTag}`);
+    }
+    assertExportCompatibility(
+      baselineEntry[field], currentEntry[field], exportKey, [...conditionPath, field]
+    );
+  }
+}
+
 const currentExports = current.exports ?? {};
 const baselineExports = baseline.exports ?? {};
 for (const key of Object.keys(baselineExports)) {
@@ -50,24 +70,7 @@ for (const key of Object.keys(baselineExports)) {
   if (baselineEntry != null && currentEntry == null) {
     throw new Error(`disabled public export ${key} since ${baseTag}`);
   }
-  // Strings and fallback arrays are unconditional targets. A later mapping
-  // must retain an unconditional path (directly, through a non-empty fallback
-  // array, or through `default`) so unknown conditions and CommonJS callers do
-  // not silently lose an export that previously resolved for everyone.
-  if ((typeof baselineEntry === 'string' || Array.isArray(baselineEntry)) &&
-      hasUnconditionalExportTarget(baselineEntry) && !hasUnconditionalExportTarget(currentEntry)) {
-    throw new Error(`removed default availability from export ${key} since ${baseTag}`);
-  }
-  if (baselineEntry != null && typeof baselineEntry === 'object' && !Array.isArray(baselineEntry)) {
-    for (const field of ['types', 'import', 'require', 'default']) {
-      if (baselineEntry[field] != null && (
-        currentEntry == null || typeof currentEntry !== 'object' ||
-        Array.isArray(currentEntry) || currentEntry[field] == null
-      )) {
-        throw new Error(`removed ${field} condition from export ${key} since ${baseTag}`);
-      }
-    }
-  }
+  assertExportCompatibility(baselineEntry, currentEntry, key);
 }
 
 for (const field of ['types', 'typesVersions']) {

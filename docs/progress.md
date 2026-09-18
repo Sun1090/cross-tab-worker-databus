@@ -1,3 +1,14 @@
+## 0.21 recursive export-condition compatibility gate (2026-09-18)
+
+- 状态：已完成实现、回归测试与验证。
+- 修复：export compatibility 检查改为递归遍历既有 condition tree，除标准 `types`/`import`/`require`/`default` 外，也保护 custom condition 与嵌套条件；嵌套无条件 target 改为 import-only object 同样会失败。
+- 测试：新增 custom `browser` condition 删除、嵌套 `node.require` 删除、嵌套 string → import-only object 三类真实 Git baseline 回归。
+- 变更文件：`scripts/verify-version-compat.mjs`、`tests/version-compat.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/version-compat.test.ts`（18/18）；`pnpm typecheck`；`pnpm verify:compat`；`git diff --check` 均通过。
+- 风险 / 回滚：门禁对既有自定义条件执行更严格的向后兼容约束，但不改变 runtime 或当前发布包；回滚 = revert 本任务提交。
+- 下一项：结束本轮 package gate 深挖，转回 cluster lifecycle/recovery 的运行时故障注入与收敛审计。
+- 更新时间：2026-09-18。
+
 ## 0.21 fallback-array export compatibility gate (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。
