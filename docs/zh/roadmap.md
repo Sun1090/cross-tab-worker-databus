@@ -1,6 +1,13 @@
 # 路线图
 
-0.20.92 已于 2026 年 9 月 18 日发布；兼容性门禁后续修复在发布 tag 之后独立合入。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+0.20.93 已于 2026 年 9 月 19 日进入发布冻结。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+
+## 0.20.93 冻结范围
+
+- 强化 package 元数据、无条件与 fallback array target、递归嵌套及自定义 export condition 的兼容性门禁。
+- storage 能力探测必须完成可读的写入-读取-删除往返；channel 构造失败时安全降级；sessionStorage 不可用时保持稳定的内存 tab identity。
+- 在 clear 与 cluster teardown 时取消失败的 storage retry，并用 cluster 级 restart 回归覆盖收敛行为。
+- 更新 patch 级开发依赖，完成发布、浏览器、打包、兼容性与安全全量门禁。
 
 ## 0.20.92 冻结范围
 
