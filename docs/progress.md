@@ -2,7 +2,7 @@
 
 - 状态：接手中断变基后恢复干净 feature 分支；仅回放下一阶段修复，未重复回放 PR #97 已 squash 的旧提交。冲突现场备份在 `/tmp/databus-progress-rebase-conflict-20260918.md`，原提交保留于 `codex/backup-compat-before-rebase-20260918`。
 - 发布：PR #97 全部 CI 成功并合入 `c31ae25`；远端不可变 `v0.20.92` 指向该提交，Release run `35284238208` 已 success。npm 0.20.92 可见，本地 `PUBLISHED_VERSION=0.20.92 PUBLISHED_VERIFY_ATTEMPTS=2 pnpm verify:published` ESM/CJS smoke 成功。部署为 npm package，无独立服务部署。
-- 下一阶段：`feat/compat-export-gates` / PR #98；已有修复重定位为 `8f4aee3`，与 release tag 严格分离。全量 `pnpm check` 37 files / 796 tests 通过，lint/typecheck/compat 通过。
+- 下一阶段：`feat/compat-export-gates` / PR #98；已有修复重定位为 `8f4aee3`，与 release tag 严格分离。全量 `pnpm check` 37 files / 798 tests 通过，lint/typecheck/compat 通过；发布后在 `main@6cc17ec` 再次完成 check、lint、public-registry audit 与 published consumer smoke。
 - 新缺陷与修复：新增两个 CLI 用例证明顶层 types/typesVersions 从有效值变 null 仍被放过；修正 package metadata 检查，保持缺字段检测，新增 2 项从红变绿。
 - 变更文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
 - 验证：定向测试 7/7；typecheck、lint、verify:compat、diff-check 成功。
@@ -13,7 +13,7 @@
 ## Next milestone — public export gate correctness (completed 2026-09-18)
 
 - 状态：实现完成，独立于冻结的 0.20.92 发布；不为单项 tooling 修复立即发布新版本。
-- 分支：`feat/compat-export-gates`；PR #97 已全绿 squash 合入 `c31ae25`。
+- 分支：`feat/compat-export-gates`；PR #98 已全绿 squash 合入 `45134c3`。
 - 缺陷证据：临时 Git 仓库真实运行兼容性 CLI，原实现 5 项测试中 4 项失败；错误放过 conditional export 变 string、public export 变 null、worker default 被删除、types target 变 null。
 - 修复：显式拒绝禁用已有导出，检查非空条件对象，加入 default 条件；保留新增导出与更改目标文件名的兼容行为。
 - 文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
