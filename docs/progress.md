@@ -1,3 +1,15 @@
+## 0.21 storage retry teardown cleanup (2026-09-19)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：cluster pagehide/stop 的最终 best-effort storage flush 若失败，会由 `BatchingStorageWriter` 启动 retry timer；runtime 已停止协调后仍遗留后台写入与 backoff 状态。
+- 修复：新增不触碰持久化数据的 `discardPending()`，清除 queued mutations、retry timer/counters 与 backoff；pause 在最终 flush/registry 通知后调用。失败清理仍由既有 worker/subscriber TTL 收敛。
+- 测试：故障注入永久 quota failure，验证 teardown discard 清空 pending 与 timer、保留已持久化数据。
+- 变更文件：`src/core/storage-batch.ts`、`src/core/cluster.ts`、`tests/storage-batch.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-batch.test.ts tests/cluster.test.ts`（91/91）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅停止 runtime teardown 后的失败重试；正常成功 flush 不变，遗留 metadata 仍按 TTL 清理。回滚 = revert 本任务提交。
+- 下一项：增加 cluster 级 pagehide/stop 故障注入，验证 adapter 持续失败时 restart 不继承旧 retry/backoff。
+- 更新时间：2026-09-19。
+
 ## 0.21 stable in-memory tab identity fallback (2026-09-19)
 
 - 状态：已完成实现、回归测试与验证。
