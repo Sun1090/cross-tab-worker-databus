@@ -62,9 +62,8 @@ for (const field of ['types', 'typesVersions']) {
   // object (notably `typesVersions`) cannot be replaced by a scalar without
   // making the previous TypeScript resolution contract unusable.
   if (field in baseline && baseline[field] != null && current[field] != null) {
-    const baselineIsObject = typeof baseline[field] === 'object' && !Array.isArray(baseline[field]);
-    const currentIsObject = typeof current[field] === 'object' && !Array.isArray(current[field]);
-    if (baselineIsObject !== currentIsObject) {
+    const shape = value => Array.isArray(value) ? 'array' : typeof value;
+    if (shape(baseline[field]) !== shape(current[field])) {
       throw new Error(`changed package field ${field} shape since ${baseTag}`);
     }
   }
