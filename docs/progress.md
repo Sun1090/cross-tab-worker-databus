@@ -1,3 +1,28 @@
+## 0.20.92 published / compatibility follow-up (2026-09-18)
+
+- 状态：接手中断变基后恢复干净 feature 分支；仅回放下一阶段修复，未重复回放 PR #97 已 squash 的旧提交。冲突现场备份在 `/tmp/databus-progress-rebase-conflict-20260918.md`，原提交保留于 `codex/backup-compat-before-rebase-20260918`。
+- 发布：PR #97 全部 CI 成功并合入 `c31ae25`；远端不可变 `v0.20.92` 指向该提交，Release run `35284238208` 已 success。npm 0.20.92 可见，本地 `PUBLISHED_VERSION=0.20.92 PUBLISHED_VERIFY_ATTEMPTS=2 pnpm verify:published` ESM/CJS smoke 成功。部署为 npm package，无独立服务部署。
+- 下一阶段：`feat/compat-export-gates` / PR #98；已有修复重定位为 `8f4aee3`，与 release tag 严格分离。全量 `pnpm check` 37 files / 796 tests 通过，lint/typecheck/compat 通过。
+- 新缺陷与修复：新增两个 CLI 用例证明顶层 types/typesVersions 从有效值变 null 仍被放过；修正 package metadata 检查，保持缺字段检测，新增 2 项从红变绿。
+- 变更文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
+- 验证：定向测试 7/7；typecheck、lint、verify:compat、diff-check 成功。
+- 风险 / 回滚：仅 CI gate，无 runtime/API/storage 变化；修复可独立 revert；发布消费者可固定 0.20.91，不移动 0.20.92 tag。
+- 阻塞：无；下一项：等待 PR #98 最新提交 CI，失败则修复，全绿后 squash 合入。不为单项 tooling 修改立即再发布。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
+## Next milestone — public export gate correctness (2026-09-18)
+
+- 状态：实现完成，独立于冻结的 0.20.92 发布；不为单项 tooling 修复立即发布新版本。
+- 分支：`feat/compat-export-gates`；PR #97 已全绿 squash 合入 `c31ae25`。
+- 缺陷证据：临时 Git 仓库真实运行兼容性 CLI，原实现 5 项测试中 4 项失败；错误放过 conditional export 变 string、public export 变 null、worker default 被删除、types target 变 null。
+- 修复：显式拒绝禁用已有导出，检查非空条件对象，加入 default 条件；保留新增导出与更改目标文件名的兼容行为。
+- 文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
+- 验证：修复后定向 5/5 通过；lint、typecheck、真实 package verify:compat、diff-check 通过（上一轮定向验证）。提交前再次运行同组检查。
+- 风险 / 回滚：只改变 CI/release gate，不改运行时、API、协议或 storage；可独立 revert。该门禁仍是 metadata 校验，不宣称完整 TypeScript 语义兼容性证明。
+- 阻塞：无；本机未配置 tag 签名，不伪造签名，按项目既有版本 tag 流程发布。
+- 下一项：合入此原子修复；0.20.92 从 c31ae25 精确 tag 发布并做 published consumer smoke；继续检查 export 条件边界。
+- 更新时间：2026-09-18 Asia/Shanghai。
+
 ## 0.20.92 RELEASE_FREEZE — local gates complete (2026-09-18)
 
 - 状态：本地必需门禁全部通过，待 PR CI / squash 合入 / 精确 tag / 发布消费者验证；未宣称已发布。
