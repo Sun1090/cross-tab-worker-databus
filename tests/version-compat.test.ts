@@ -35,6 +35,20 @@ describe('version compatibility export gate', () => {
     })).toContain('preserves public exports');
   });
 
+  it('rejects replacing object-shaped typesVersions metadata with a scalar', () => {
+    expect(() => checkExports({}, {}, {
+      baseline: { typesVersions: { '*': { '*': ['./index.d.ts'] } } },
+      current: { typesVersions: './index.d.ts' }
+    })).toThrow('changed package field typesVersions shape');
+  });
+
+  it('rejects replacing scalar types metadata with an object', () => {
+    expect(() => checkExports({}, {}, {
+      baseline: { types: './index.d.ts' },
+      current: { types: { path: './index.d.ts' } }
+    })).toThrow('changed package field types shape');
+  });
+
   it.each(['types', 'typesVersions'])('rejects disabling package %s metadata with null', field => {
     const target = field === 'types' ? './index.d.ts' : { '*': { '*': ['./index.d.ts'] } };
     expect(() => checkExports({}, {}, {

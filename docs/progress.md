@@ -1,3 +1,14 @@
+## 0.21 package metadata compatibility gate (2026-09-18)
+
+- 状态：已完成实现、回归测试与验证。
+- 修复：版本兼容性门禁现在不仅拒绝删除或置空 `types` / `typesVersions`，也拒绝将既有 metadata 容器从对象改成标量或反向改变形状，避免 TypeScript 解析契约被静默破坏。
+- 测试：新增 `typesVersions` 对象→标量和 `types` 标量→对象的真实临时 Git 仓库回归。
+- 变更文件：`scripts/verify-version-compat.mjs`、`tests/version-compat.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/version-compat.test.ts`（9/9）；`pnpm typecheck`；`pnpm verify:compat`；`git diff --check` 均通过。
+- 风险 / 回滚：仅扩大发布前兼容性门禁，不改变运行时 API；回滚 = revert 本任务提交。
+- 下一项：继续检查 0.21 reliability/deepening 的未覆盖边界，并在累计变更达到发布阈值前保持独立原子提交。
+- 更新时间：2026-09-18。
+
 ## 0.20.92 published / compatibility follow-up (2026-09-18)
 
 - 状态：接手中断变基后恢复干净 feature 分支；仅回放下一阶段修复，未重复回放 PR #97 已 squash 的旧提交。冲突现场备份在 `/tmp/databus-progress-rebase-conflict-20260918.md`，原提交保留于 `codex/backup-compat-before-rebase-20260918`。
