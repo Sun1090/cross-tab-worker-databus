@@ -173,6 +173,29 @@ describe('canUseStorage', () => {
     expect(storage.getItem('probe-key')).toBeNull();
   });
 
+  it('rejects storage that accepts writes but cannot read them back', () => {
+    const storage = new MemoryStorage();
+    storage.getItem = () => null;
+    expect(canUseStorage(storage, 'probe-key')).toBe(false);
+    expect(storage.entries()).toEqual([]);
+  });
+
+  it('rejects storage that throws on read', () => {
+    const storage = new MemoryStorage();
+    storage.getItem = () => {
+      throw new Error('SecurityError');
+    };
+    expect(canUseStorage(storage, 'probe-key')).toBe(false);
+  });
+
+  it('rejects storage that cannot delete the probe', () => {
+    const storage = new MemoryStorage();
+    storage.removeItem = () => {
+      throw new Error('SecurityError');
+    };
+    expect(canUseStorage(storage, 'probe-key')).toBe(false);
+  });
+
   it('rejects storage that throws on write (quota / private mode)', () => {
     const storage = new MemoryStorage();
     storage.setItem = () => {

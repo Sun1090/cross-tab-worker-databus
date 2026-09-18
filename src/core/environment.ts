@@ -237,8 +237,9 @@ export function canUseStorage(storage: StorageLike | null, probeKey: string): st
   if (!storage) return false;
   try {
     storage.setItem(probeKey, '1');
+    const readable = storage.getItem(probeKey) === '1';
     storage.removeItem(probeKey);
-    return true;
+    return readable;
   } catch {
     return false;
   }
