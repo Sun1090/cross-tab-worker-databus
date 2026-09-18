@@ -42,6 +42,13 @@ describe('version compatibility export gate', () => {
     })).toThrow('changed package field typesVersions shape');
   });
 
+  it('rejects replacing typesVersions metadata with an array', () => {
+    expect(() => checkExports({}, {}, {
+      baseline: { typesVersions: { '*': { '*': ['./index.d.ts'] } } },
+      current: { typesVersions: ['./index.d.ts'] }
+    })).toThrow('changed package field typesVersions shape');
+  });
+
   it('rejects replacing scalar types metadata with an object', () => {
     expect(() => checkExports({}, {}, {
       baseline: { types: './index.d.ts' },
