@@ -696,6 +696,48 @@ describe('WorkerClusterRuntime', () => {
     expect(storage.entries()).toEqual([]);
   });
 
+  it('does not retry failed storage removals after pagehide teardown', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const hub = new ChannelHub();
+      const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'failed-hide' });
+      const runtime = new WorkerClusterRuntime({
+        clusterKey: 'failed-pagehide-flush',
+        environment: env.environment,
+        tabId: 'tab-failed-hide',
+        workerId: 'worker-failed-hide',
+        handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+      });
+      runtime.start();
+      runtime.subscribe('topic');
+      await Promise.resolve();
+
+      const originalRemoveItem = storage.removeItem.bind(storage);
+      let failedRemovals = 0;
+      storage.removeItem = () => {
+        failedRemovals += 1;
+        throw new DOMException('storage blocked', 'SecurityError');
+      };
+
+      env.pageHide();
+      const attemptsAtTeardown = failedRemovals;
+      expect(attemptsAtTeardown).toBeGreaterThan(0);
+
+      // The zero-delay channel close may still run, but the discarded batching
+      // state must not perform any delayed storage retry after teardown.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(failedRemovals).toBe(attemptsAtTeardown);
+
+      storage.removeItem = originalRemoveItem;
+      env.pageShow();
+      expect(runtime.getSnapshot()).toMatchObject({ suspended: false, coordinated: true });
+      runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a live topic owner when its tab becomes hidden', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

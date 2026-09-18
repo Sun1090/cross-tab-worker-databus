@@ -1,3 +1,14 @@
+## 0.21 cluster teardown retry regression (2026-09-19)
+
+- 状态：已完成 cluster 级故障注入与验证。
+- 覆盖：runtime 正常启动并持久化后，将底层 `removeItem` 切换为持续 `SecurityError`；pagehide 最终 flush 确实失败，但推进 10 秒 timer 不再产生任何 storage retry。
+- 恢复：恢复 adapter 后 pageshow 可重新进入 coordinated 状态并正常 stop，证明 teardown reset 不会污染下一 lifecycle。
+- 变更文件：`tests/cluster.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts`（77/77）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅新增故障回归，不改变 runtime；回滚 = revert 本任务提交。
+- 下一项：审计 storage-event fallback 的 postMessage 写入异常是否会破坏 cluster control dispatch 或 lifecycle 收敛。
+- 更新时间：2026-09-19。
+
 ## 0.21 storage retry teardown cleanup (2026-09-19)
 
 - 状态：已完成实现、回归测试与验证。
