@@ -1,3 +1,14 @@
+## 0.21 fallback-array export compatibility gate (2026-09-18)
+
+- 状态：已完成实现、回归测试与验证。
+- 修复：兼容性门禁现在识别 package `exports` 的 fallback array；既有无条件 string/array target 迁移后必须仍有可解析的无条件路径，空数组或 import-only conditional object 会被拒绝。
+- 测试：覆盖 string → 非空 fallback array 的兼容迁移、string → 空数组，以及 array → import-only object 的破坏性迁移。
+- 变更文件：`scripts/verify-version-compat.mjs`、`tests/version-compat.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/version-compat.test.ts`（15/15）；`pnpm typecheck`；`pnpm verify:compat`；`git diff --check` 均通过。
+- 风险 / 回滚：仅强化发布前门禁；不改变 runtime、当前 package exports 或 public API。回滚 = revert 本任务提交。
+- 下一项：审计嵌套 conditional/fallback export 的递归兼容性，然后回到 cluster lifecycle/recovery 故障注入。
+- 更新时间：2026-09-18。
+
 ## 0.21 unconditional export compatibility gate (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。

@@ -81,6 +81,24 @@ describe('version compatibility export gate', () => {
     })).toThrow('removed default availability');
   });
 
+  it('permits moving an unconditional export into a non-empty fallback array', () => {
+    expect(checkExports({ './feature': './feature.js' }, {
+      './feature': ['./feature-modern.js', './feature.js']
+    })).toContain('preserves public exports');
+  });
+
+  it('rejects replacing an unconditional export with an empty fallback array', () => {
+    expect(() => checkExports({ './feature': './feature.js' }, {
+      './feature': []
+    })).toThrow('removed default availability');
+  });
+
+  it('rejects replacing an unconditional fallback array with import-only conditions', () => {
+    expect(() => checkExports({ './feature': ['./feature.js'] }, {
+      './feature': { import: './feature.mjs' }
+    })).toThrow('removed default availability');
+  });
+
   it('rejects disabling a public string export with null', () => {
     expect(() => checkExports({ './package.json': './package.json' }, {
       './package.json': null
