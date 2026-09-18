@@ -105,6 +105,28 @@ describe('version compatibility export gate', () => {
     })).toThrow('disabled public export');
   });
 
+  it('rejects removing a custom export condition', () => {
+    expect(() => checkExports({ './feature': { browser: './browser.js', default: './node.js' } }, {
+      './feature': { default: './node.js' }
+    })).toThrow('removed browser condition');
+  });
+
+  it('rejects removing a condition nested under another condition', () => {
+    expect(() => checkExports({ './feature': {
+      node: { import: './node.mjs', require: './node.cjs' }, default: './browser.js'
+    } }, { './feature': {
+      node: { import: './node.mjs' }, default: './browser.js'
+    } })).toThrow('removed node.require condition');
+  });
+
+  it('rejects replacing a nested unconditional target with import-only conditions', () => {
+    expect(() => checkExports({ './feature': {
+      node: './node.js', default: './browser.js'
+    } }, { './feature': {
+      node: { import: './node.mjs' }, default: './browser.js'
+    } })).toThrow('removed default availability');
+  });
+
   it('rejects removing the default condition used by worker entries', () => {
     expect(() => checkExports({ './worker': { types: './worker.d.ts', default: './worker.js' } }, {
       './worker': { types: './worker.d.ts' }
