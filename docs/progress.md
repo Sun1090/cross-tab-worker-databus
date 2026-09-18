@@ -7,10 +7,10 @@
 - 变更文件：scripts/verify-version-compat.mjs、tests/version-compat.test.ts、CHANGELOG.md、本文件。
 - 验证：定向测试 7/7；typecheck、lint、verify:compat、diff-check 成功。
 - 风险 / 回滚：仅 CI gate，无 runtime/API/storage 变化；修复可独立 revert；发布消费者可固定 0.20.91，不移动 0.20.92 tag。
-- 阻塞：无；下一项：等待 PR #98 最新提交 CI，失败则修复，全绿后 squash 合入。不为单项 tooling 修改立即再发布。
+- 阻塞：无；PR #98 已全绿 squash 合入 `45134c3`。下一项：进入 0.21 reliability/deepening 任务池；不为单项 tooling 修复重新发布 0.20.92。
 - 更新时间：2026-09-18 Asia/Shanghai。
 
-## Next milestone — public export gate correctness (2026-09-18)
+## Next milestone — public export gate correctness (completed 2026-09-18)
 
 - 状态：实现完成，独立于冻结的 0.20.92 发布；不为单项 tooling 修复立即发布新版本。
 - 分支：`feat/compat-export-gates`；PR #97 已全绿 squash 合入 `c31ae25`。
