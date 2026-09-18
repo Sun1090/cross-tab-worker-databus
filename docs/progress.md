@@ -1,3 +1,15 @@
+## 0.21 channel-construction failure degradation (2026-09-19)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：`WorkerClusterRuntime.activate()` 直接调用自定义 environment 的 `createChannel()`；同步抛错会让 `start()` 向外失败，并遗留 `started = true` 的半激活状态，与注释和既有 local-mode 降级契约不符。
+- 修复：捕获 channel construction 异常并按 unavailable channel 处理，关闭协调 storage，继续使用本地 owner/control 路径。
+- 测试：故障注入 `createChannel()` 抛 `SecurityError`，验证 start 不抛、snapshot 为非协调模式、本地订阅正常、无 registry metadata 写入且 stop 可完成。
+- 变更文件：`src/core/cluster.ts`、`tests/cluster.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/cluster.test.ts`（76/76）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅将同步 channel capability failure 收敛到已有 local-mode；正常 channel 与 storage 协调路径不变。回滚 = revert 本任务提交。
+- 下一项：审计 `getOrCreateTabId()` 的 sessionStorage read-back/复制 opener 边界，以及 teardown 时失败 storage flush 的 retry 生命周期。
+- 更新时间：2026-09-19。
+
 ## 0.21 storage capability round-trip probe (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。
