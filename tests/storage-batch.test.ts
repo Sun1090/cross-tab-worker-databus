@@ -128,6 +128,44 @@ describe('BatchingStorageWriter', () => {
     expect(storage.entries()).toEqual([]);
   });
 
+  it('cancels retries even when the underlying clear throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      storage.setItem = () => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      };
+      storage.clear = () => {
+        throw new DOMException('SecurityError', 'SecurityError');
+      };
+      const writer = new BatchingStorageWriter(storage);
+
+      writer.setItem('route', 'pending');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(writer.pendingSize).toBe(1);
+      expect(vi.getTimerCount()).toBe(1);
+
+      expect(() => writer.clear()).toThrow('SecurityError');
+      expect(writer.pendingSize).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // A later write starts from the initial backoff rather than inheriting
+      // state from the failed clear.
+      writer.setItem('route-next', 'pending');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(49);
+      expect(writer.pendingSize).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(writer.pendingSize).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
+
   it('drops a persistently failing key after MAX_RETRY_ATTEMPTS', async () => {
     vi.useFakeTimers();
     const storage = new MemoryStorage();

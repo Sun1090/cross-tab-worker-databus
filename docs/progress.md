@@ -1,3 +1,15 @@
+## 0.21 storage clear failure cleanup (2026-09-18)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：`BatchingStorageWriter.clear()` 在底层 storage adapter 的 `clear()` 抛错前尚未取消 retry timer/计数，失败清理会遗留后台 timer 和升高的 backoff 状态。
+- 修复：先清空 pending 状态、取消 timer、清除 retry counters 并重置 backoff，再调用可能抛错的 adapter clear；adapter 错误仍按原语义向调用者传播。
+- 测试：故障注入 `setItem` 持续失败并让 `clear` 抛 `SecurityError`，验证 pending 与 timer 均被清理，后续写入从 50ms 初始 backoff 重新开始。
+- 变更文件：`src/core/storage-batch.ts`、`tests/storage-batch.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-batch.test.ts`（14/14）；`pnpm typecheck`；`git diff --check` 均通过。
+- 风险 / 回滚：仅改变 adapter clear 失败时的内部清理顺序；错误仍抛出，正常路径行为不变。回滚 = revert 本任务提交。
+- 下一项：继续审计 storage adapter remove/clear 异常与 cluster teardown/restart 的 timer、pending metadata 收敛。
+- 更新时间：2026-09-18。
+
 ## 0.21 recursive export-condition compatibility gate (2026-09-18)
 
 - 状态：已完成实现、回归测试与验证。
