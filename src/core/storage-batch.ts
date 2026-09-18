@@ -50,14 +50,17 @@ export class BatchingStorageWriter implements StorageLike {
   }
 
   clear(): void {
+    // Reset internal state before touching the adapter. Storage implementations
+    // may throw (privacy mode, quota/security failures); a failed clear must not
+    // leave a retry timer armed or stale retry counters that outlive the call.
     this.pending.clear();
     this.flushScheduled = false;
-    this.storage.clear();
     this.cancelRetry();
     this.retryCount.clear();
     // Reset backoff so a burst of clear()/flush() cycles does not leave the
     // writer stuck at an elevated retry delay.
     this.retryDelayMs = INITIAL_RETRY_DELAY_MS;
+    this.storage.clear();
   }
 
   // Reads always see the pending value first (task-local consistency), then
