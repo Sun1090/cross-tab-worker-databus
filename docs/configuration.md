@@ -204,6 +204,8 @@ When `BroadcastChannel` is unavailable (some WebViews, older browsers), the clus
 
 `createBrowserEnvironment({ channelFallback: 'storage-event' })` opts into a fallback `ClusterChannel` backed by localStorage `storage` events, preserving cross-tab coordination. It is opt-in because of a security trade-off: BroadcastChannel messages live in memory only, while the fallback writes coordination payloads (which carry plaintext topic names) to localStorage under the `cross-tab-worker-databus:channel:` key namespace — at least transiently, and indefinitely after a tab crash. The key is removed when the channel closes.
 
+Storage events are delivered to other documents only. Two bus runtimes in the *same* document that share a `clusterKey` therefore do not exchange channel frames through the fallback; they still converge through the shared localStorage coordination records and the reconcile loop (bounded by the heartbeat interval). Give each runtime a distinct `clusterKey` — or keep BroadcastChannel — when you need same-document coordination.
+
 ## SharedWorker Session Reaper
 
 A `MessagePort` has no `close` event, so the SharedWorker cannot know when a tab has crashed or been closed without sending a `STOP` message. To avoid leaking a `CentrifugeSession` (and its WebSocket) for a dead tab, the transport sends a periodic **PING heartbeat** to the SharedWorker, and the SharedWorker runs a **reaper** that closes any session whose port has been silent for longer than its timeout.

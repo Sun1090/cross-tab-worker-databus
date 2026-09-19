@@ -187,6 +187,27 @@ describe('createStorageEventChannel', () => {
     expect(received).toHaveLength(2);
   });
 
+  it('does not deliver to a sibling channel in the same document', async () => {
+    // Storage events fire in other documents only, so two bus runtimes sharing
+    // a clusterKey within one document do not exchange channel frames here.
+    // They still converge through the shared localStorage coordination records
+    // and the reconcile loop; this test pins the cross-document-only boundary
+    // (and guards against accidentally double-delivering if same-document
+    // dispatch were ever added).
+    const hub = new StorageEventHub(new MemoryStorage());
+    const win = hub.register(new FakeStorageWindow());
+    const a = createStorageEventChannel({ name: 'same-doc', storage: hub.writerStorage(win), win });
+    const b = createStorageEventChannel({ name: 'same-doc', storage: hub.writerStorage(win), win });
+    if (!a || !b) throw new Error('storage-event channel creation failed');
+    const received: WorkerClusterMessage[] = [];
+    b.addEventListener('message', event => received.push(event.data));
+
+    a.postMessage({ type: 'REGISTRY', sourceWorkerId: 'worker-a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual([]);
+  });
+
   it('surfaces a write failure so the frame is not mistaken for delivered, then recovers', async () => {
     // localStorage can reject a write (quota, private mode, security policy).
     // The channel must propagate the failure rather than swallow it: the

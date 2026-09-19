@@ -197,6 +197,8 @@ const bus = createCentrifugeDataBus({
 
 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 可选择启用基于 localStorage `storage` 事件的降级 `ClusterChannel`，保留跨 Tab 协调能力。该能力为 opt-in，原因是安全权衡：BroadcastChannel 消息仅存在于内存，而降级通道会把协调载荷（含明文 Topic 名称）写入 localStorage 的 `cross-tab-worker-databus:channel:` 键空间——至少短暂落盘，Tab 崩溃后可能长期留存。通道关闭时会清除该键。
 
+storage 事件只在其他 document 中派发。因此同一 document 内共享同一 `clusterKey` 的两个 bus runtime 不会通过该降级通道交换 channel 帧；它们仍会通过共享的 localStorage 协调记录与 reconcile 循环收敛（上界为一个心跳间隔）。若需要同 document 内协调，请为每个 runtime 使用不同的 `clusterKey`，或保留 BroadcastChannel。
+
 ## SharedWorker 会话回收
 
 `MessagePort` 没有 `close` 事件，因此 SharedWorker 无法在 Tab 崩溃或关闭时获知（除非收到 `STOP` 消息）。为避免泄漏已死 Tab 的 `CentrifugeSession`（及其 WebSocket），transport 定期向 SharedWorker 发送 **PING 心跳**，SharedWorker 运行一个**回收器**来关闭超过静默超时的端口会话。
