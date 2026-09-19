@@ -1,3 +1,15 @@
+## 0.21 storage-event sender collision hardening (2026-09-19)
+
+- 状态：已完成实现、故障回归与验证。
+- 缺陷：storage-event fallback 仅用每个 sender 自增的 `seq` 区分写入；两个 tab 的首帧均为 `seq=1`，若 payload 相同就会写出完全相同的 localStorage value，浏览器按 Web Storage 语义抑制第二次 storage event。
+- 修复：channel envelope 新增每个 channel 实例的随机 `senderId`，与 `seq` 共同保证跨 tab 的相同帧仍改变存储值。
+- 测试：StorageEventHub 现在真实模拟 same-value `setItem` 不派发事件；新增两个 writer 各自首发相同 frame、第三个 observer 必须收到两次的回归。
+- 变更文件：`src/core/environment.ts`、`tests/storage-channel.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-channel.test.ts`（9/9）、`pnpm typecheck`、`git diff --check` 均通过。
+- 风险 / 回滚：只改变 opt-in storage-event fallback 的内部 envelope；接收端仍读取同一 `message` 字段，BroadcastChannel 与协调存储格式不变。回滚 = revert 本任务提交。
+- 下一项：运行全量门禁并通过 PR/CI 合入；继续审计 storage-event close/exception 与多 runtime 隔离。
+- 更新时间：2026-09-19。
+
 ## 0.20.93 release completed (2026-09-19)
 
 - Milestone / 版本：`0.20.93` patch reliability release。

@@ -39,8 +39,11 @@ class StorageEventHub {
       get: (target, prop) => {
         if (prop === 'setItem') {
           return (key: string, value: string) => {
+            const previous = target.getItem(key);
             target.setItem(key, value);
-            queueMicrotask(() => this.dispatch(writer, key));
+            // Per Web Storage, assigning the same value is a no-op and does
+            // not emit a storage event in other documents.
+            if (previous !== value) queueMicrotask(() => this.dispatch(writer, key));
           };
         }
         const value = Reflect.get(target, prop);
@@ -111,6 +114,27 @@ describe('createStorageEventChannel', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(received).toEqual([]);
+  });
+
+  it('keeps identical first writes from different tabs distinct', async () => {
+    const hub = new StorageEventHub(new MemoryStorage());
+    const a = makeTab(hub, 'chan');
+    const b = makeTab(hub, 'chan');
+    const observer = makeTab(hub, 'chan');
+    const received: WorkerClusterMessage[] = [];
+    observer.channel.addEventListener('message', event => received.push(event.data));
+
+    // Both channels begin at seq=1. A sender nonce is required or the second
+    // identical setItem would preserve the existing value and emit no event.
+    const message: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'same-worker' };
+    a.channel.postMessage(message);
+    await Promise.resolve();
+    await Promise.resolve();
+    b.channel.postMessage(message);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(received).toEqual([message, message]);
   });
 
   it('keeps delivering after consecutive writes and cleans up on close', async () => {
