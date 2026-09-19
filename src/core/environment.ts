@@ -115,16 +115,18 @@ export function createStorageEventChannel(options: {
   if (!storage || !win) return null;
   const key = `${STORAGE_CHANNEL_PREFIX}${name}`;
   const listeners = new Set<(event: MessageEvent<WorkerClusterMessage>) => void>();
-  // A per-sender monotonically increasing sequence guarantees every write has
-  // a distinct value, so a browser that suppresses same-value storage events
-  // still delivers every message.
+  // Include a per-channel sender nonce as well as a monotonically increasing
+  // sequence. Sequence alone is insufficient because two tabs can both write
+  // their first identical frame with seq=1, producing the same stored value;
+  // browsers suppress storage events when setItem does not change that value.
+  const senderId = randomId();
   let sequence = 0;
 
   const onStorage = (event: { key: string | null; newValue: string | null }) => {
     if (event.key !== key || event.newValue === null) return;
     let message: WorkerClusterMessage;
     try {
-      const parsed = JSON.parse(event.newValue) as { seq?: unknown; message?: WorkerClusterMessage };
+      const parsed = JSON.parse(event.newValue) as { senderId?: unknown; seq?: unknown; message?: WorkerClusterMessage };
       if (!parsed || typeof parsed !== 'object' || typeof parsed.seq !== 'number' || !parsed.message) return;
       message = parsed.message;
     } catch {
@@ -148,7 +150,7 @@ export function createStorageEventChannel(options: {
       // A closed channel must not resurrect the payload in storage.
       if (closed) return;
       sequence += 1;
-      storage.setItem(key, JSON.stringify({ seq: sequence, message }));
+      storage.setItem(key, JSON.stringify({ senderId, seq: sequence, message }));
     },
     close(): void {
       closed = true;
