@@ -26,6 +26,9 @@ class StorageEventHub {
   /** When true, the next dispatch is silently dropped — modelling the lossy
    * delivery a storage-event channel can exhibit. */
   dropNextDispatch = false;
+  /** When > 0, the next N writes throw (quota/security) instead of landing,
+   * modelling a full or blocked localStorage. */
+  failWrites = 0;
   constructor(readonly storage: MemoryStorage) {}
 
   register(win: FakeStorageWindow): FakeStorageWindow {
@@ -39,6 +42,10 @@ class StorageEventHub {
       get: (target, prop) => {
         if (prop === 'setItem') {
           return (key: string, value: string) => {
+            if (this.failWrites > 0) {
+              this.failWrites -= 1;
+              throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+            }
             const previous = target.getItem(key);
             target.setItem(key, value);
             // Per Web Storage, assigning the same value is a no-op and does
@@ -179,6 +186,32 @@ describe('createStorageEventChannel', () => {
     await Promise.resolve();
     expect(received).toHaveLength(2);
   });
+
+  it('surfaces a write failure so the frame is not mistaken for delivered, then recovers', async () => {
+    // localStorage can reject a write (quota, private mode, security policy).
+    // The channel must propagate the failure rather than swallow it: the
+    // cluster's `send()` relies on the throw to report an undelivered frame.
+    const storage = new MemoryStorage();
+    const hub = new StorageEventHub(storage);
+    const a = makeTab(hub, 'chan');
+    const b = makeTab(hub, 'chan');
+    const received: WorkerClusterMessage[] = [];
+    b.channel.addEventListener('message', event => received.push(event.data));
+
+    const message: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'worker-a' };
+    hub.failWrites = 1;
+    expect(() => a.channel.postMessage(message)).toThrow('QuotaExceededError');
+    // The failed frame must not have reached the peer...
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual([]);
+
+    // ...and the channel stays usable: the next write lands normally.
+    a.channel.postMessage(message);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual([message]);
+  });
 });
 
 describe('cluster over storage-event channels', () => {
@@ -220,6 +253,59 @@ describe('cluster over storage-event channels', () => {
     // Exactly one owner was elected over the storage-event channel.
     const owners = [runtimeA, runtimeB].filter(runtime => runtime.isAssigned('topic.shared'));
     expect(owners).toHaveLength(1);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
+  it('reports a failed remote publish without throwing when the fallback write is rejected', async () => {
+    // `publish()` documents that it returns false when the CONTROL frame could
+    // not be posted to a remote owner. Over the storage-event fallback a
+    // rejected localStorage write must surface as that false (via the
+    // cluster's `send()` catch), not as an exception through the caller.
+    const storage = new MemoryStorage();
+    const hub = new StorageEventHub(storage);
+    const makeEnv = (tabId: string) => {
+      const env = createFakeEnvironment({ storage, now: () => 1_000, randomId: tabId });
+      const win = hub.register(new FakeStorageWindow());
+      env.environment.createChannel = name => createStorageEventChannel({ name, storage: hub.writerStorage(win), win });
+      return env;
+    };
+    const envA = makeEnv('tab-a');
+    const envB = makeEnv('tab-b');
+    const { WorkerClusterRuntime } = await import('../src/core/cluster');
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'storage-channel-publish-fail',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'storage-channel-publish-fail',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('topic.publish');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    runtimeB.start();
+    runtimeB.subscribe('topic.publish');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const owner = runtimeA.isAssigned('topic.publish') ? runtimeA : runtimeB;
+    const nonOwner = owner === runtimeA ? runtimeB : runtimeA;
+
+    hub.failWrites = 1;
+    // The blocked frame is reported as undelivered (no throw)...
+    expect(nonOwner.publish('topic.publish', { value: 1 })).toBe(false);
+    // ...and the next frame (storage recovered) is posted successfully.
+    expect(nonOwner.publish('topic.publish', { value: 2 })).toBe(true);
+
     runtimeA.stop();
     runtimeB.stop();
   });
