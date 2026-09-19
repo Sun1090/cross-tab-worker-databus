@@ -1,3 +1,13 @@
+## 0.21 storage-event same-document boundary (2026-09-20)
+
+- 状态：已完成文档与回归（无 runtime 行为改动）。
+- 边界：storage 事件只在其他 document 派发，因此同一 document 内共享同一 `clusterKey` 的两个 bus runtime 不会经降级通道交换 channel 帧；它们仍通过共享 localStorage 协调记录与 reconcile 循环收敛（上界为一个心跳间隔）。
+- 变更：`docs/configuration.md` 与 `docs/zh/configuration.md` 明确该边界与规避方式（每个 runtime 使用不同 `clusterKey`，或保留 BroadcastChannel）；`tests/storage-channel.test.ts` 新增同 document 兄弟 channel 不投递的回归（同时防止未来误加同 document 派发导致双投递）。
+- 验证：`pnpm check`（37 files / 823 tests）、`pnpm typecheck`、`pnpm lint`、`git diff --check` 均通过。
+- 风险 / 回滚：仅文档与测试；回滚 = revert 本任务提交。
+- 下一项：审计 `close()` 清除共享 channel key 与并发写入的交互时机。
+- 更新时间：2026-09-20。
+
 ## 0.21 storage-event write-failure containment (2026-09-20)
 
 - 状态：已完成故障注入回归与验证（无生产代码改动）。
