@@ -134,7 +134,14 @@ export function createStorageEventChannel(options: {
     }
     // Cluster messages are read-only downstream; deliver a plain envelope.
     const event_ = { data: message } as MessageEvent<WorkerClusterMessage>;
-    for (const listener of [...listeners]) listener(event_);
+    for (const listener of [...listeners]) {
+      try {
+        listener(event_);
+      } catch {
+        // Match EventTarget dispatch isolation: one consumer must not prevent
+        // the remaining listeners on this channel from observing the frame.
+      }
+    }
   };
 
   win.addEventListener('storage', onStorage);

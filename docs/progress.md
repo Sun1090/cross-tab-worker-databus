@@ -1,3 +1,15 @@
+## 0.21 storage-event listener isolation (2026-09-19)
+
+- 状态：已完成实现、回归测试与验证。
+- 缺陷：storage-event fallback 在单个 channel 上依次调用 listeners；任一 consumer 抛错会中断循环，使后续 consumer 丢失同一 frame，与 EventTarget 的 listener 隔离语义不一致。
+- 修复：逐 listener 隔离异常，失败 consumer 不再阻断其余订阅者。
+- 测试：首个 listener 主动抛错，验证后注册的 listener 仍收到完整 REGISTRY frame。
+- 变更文件：`src/core/environment.ts`、`tests/storage-channel.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-channel.test.ts`（10/10）、`pnpm typecheck`、`pnpm check`（37 files / 820 tests）、`pnpm lint`、`git diff --check` 均通过。
+- 风险 / 回滚：仅隔离 opt-in storage-event channel 的 consumer 异常；正常 dispatch 与 BroadcastChannel 路径不变。回滚 = revert 本任务提交。
+- 下一项：完成门禁、原子提交并通过 PR/CI 合入。
+- 更新时间：2026-09-19。
+
 ## 0.21 storage-event sender collision hardening (2026-09-19)
 
 - 状态：已完成实现、故障回归与验证。

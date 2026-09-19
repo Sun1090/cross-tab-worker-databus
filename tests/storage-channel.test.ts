@@ -100,6 +100,24 @@ describe('createStorageEventChannel', () => {
     expect(receivedA).toEqual([]);
   });
 
+  it('isolates listener failures so later consumers still receive the frame', async () => {
+    const hub = new StorageEventHub(new MemoryStorage());
+    const a = makeTab(hub, 'chan');
+    const b = makeTab(hub, 'chan');
+    const received: WorkerClusterMessage[] = [];
+    b.channel.addEventListener('message', () => {
+      throw new Error('consumer failed');
+    });
+    b.channel.addEventListener('message', event => received.push(event.data));
+
+    const message: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'worker-a' };
+    a.channel.postMessage(message);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(received).toEqual([message]);
+  });
+
   it('ignores malformed payloads and foreign keys', async () => {
     const hub = new StorageEventHub(new MemoryStorage());
     const a = makeTab(hub, 'chan');
