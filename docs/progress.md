@@ -1,3 +1,14 @@
+## 0.21 storage-event write-failure containment (2026-09-20)
+
+- 状态：已完成故障注入回归与验证（无生产代码改动）。
+- 覆盖：storage-event fallback 的 `postMessage` 在 localStorage 写入被拒（quota/security/private mode）时必须上抛——`WorkerClusterRuntime.send()` 依赖该异常把帧报告为未投递（`publish()` 返回 false），而不是让一个丢帧看起来像成功。
+- 测试：`StorageEventHub` 新增 `failWrites` 故障注入（下一次写入抛 `QuotaExceededError`）。channel 级回归验证失败帧不达 peer 且随后写入恢复；cluster 级回归验证非 owner `publish()` 在写入失败时返回 false 且不抛出、写入恢复后返回 true。
+- 变更文件：`tests/storage-channel.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-channel.test.ts`（12/12）、`pnpm check`（37 files / 822 tests）、`pnpm typecheck`、`pnpm lint`、`git diff --check` 均通过；变异校验：删除 `cluster.send()` 的 try/catch 后 cluster 回归失败。
+- 风险 / 回滚：仅测试与故障注入，无 runtime 行为变化；回滚 = revert 本任务提交。
+- 下一项：继续审计 storage-event close 后的关闭竞态与同文档多 runtime 隔离。
+- 更新时间：2026-09-20。
+
 ## 0.21 storage-event listener isolation (2026-09-19)
 
 - 状态：已完成实现、回归测试与验证。
