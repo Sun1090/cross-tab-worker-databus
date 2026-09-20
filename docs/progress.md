@@ -1,3 +1,13 @@
+## 0.21 roadmap 0.13.0 candidates closure (2026-09-20)
+
+- 状态：已完成（roadmap 0.13.0 候选全部关闭）。
+- 依据：候选 1（冻结公共导出面 + transport 无关信封）由根导出面回归、tag 间 `verify:compat`、协议 fixture 覆盖；候选 3（长时浏览器浸泡）由真实 Chromium 多 Tab 浸泡与重复 BFCache/reload/owner-handoff 场景覆盖；候选 4（迁移指南与弃用策略）由发布清单策略 + 两语言 getting-started「Upgrading & Deprecation」+ legacy 帧一小版本兼容 + `getDiagnostics().protocol` 组成。
+- 变更：`docs/roadmap.md`、`docs/zh/roadmap.md` 将 0.13.0 候选 1/3/4 标记为已交付（保持列表项数与结构一致，通过双语 parity 护栏）。
+- 验证：`pnpm exec vitest run tests/documentation.test.ts`（17/17）通过。
+- 风险 / 回滚：仅文档；回滚 = revert 本任务提交。
+- 下一项：roadmap 公开候选已全部交付；后续仅剩常规依赖/安全巡检与 typescript-eslint 就绪后的 TypeScript 7 评估。
+- 更新时间：2026-09-20。
+
 ## 0.21 dependency patch refresh (2026-09-20)
 
 - 状态：已完成。

@@ -538,10 +538,10 @@ The line continues the async-callback isolation audit: every fix below binds a c
 
 ## 0.13.0 candidates
 
-1. Freeze the public export surface and transport-neutral publication envelope.
+1. ~~Freeze the public export surface and transport-neutral publication envelope.~~ Delivered: the root export surface is pinned by a regression test and the tag-to-tag `verify:compat` gate, and the transport-neutral publication envelope (with legacy/nested frame compatibility) is documented and covered by protocol fixtures.
 2. ~~Document at-least-once delivery and deduplication guarantees precisely.~~ Delivered: architecture/API/capability docs now distinguish at-most-once local fan-out per accepted transport publication from end-to-end delivery, document transport/server loss and redelivery, and describe bounded opt-in `messageId` dedup without claiming at-least-once or exactly-once.
-3. Add long-running browser soak coverage for replay retention, reconnect, BFCache, and owner migration.
-4. Publish a migration guide and deprecation policy for any pre-1.0 protocol aliases.
+3. ~~Add long-running browser soak coverage for replay retention, reconnect, BFCache, and owner migration.~~ Delivered: the real-Chromium multi-tab soak and the repeated BFCache/reload/owner-handoff scenarios exercise one continuous session across the full lifecycle.
+4. ~~Publish a migration guide and deprecation policy for any pre-1.0 protocol aliases.~~ Delivered: the deprecation policy lives in the release checklist, the "Upgrading & Deprecation" guide is published in both getting-started references, and legacy protocol frames are parsed for one minor with the active version surfaced in `getDiagnostics().protocol`.
 
 ## Longer-term candidates
 
