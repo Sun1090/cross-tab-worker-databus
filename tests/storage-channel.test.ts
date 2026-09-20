@@ -125,6 +125,27 @@ describe('createStorageEventChannel', () => {
     expect(received).toEqual([message]);
   });
 
+  it('accepts a legacy envelope without senderId from an older peer', async () => {
+    // `senderId` was added to the envelope so two tabs writing the same first
+    // frame still change the stored value. A peer on an older version omits it;
+    // the receiver must still deliver the frame (the sequence alone is enough
+    // to parse), keeping mixed-version tabs compatible.
+    const hub = new StorageEventHub(new MemoryStorage());
+    const b = makeTab(hub, 'chan');
+    const received: WorkerClusterMessage[] = [];
+    b.channel.addEventListener('message', event => received.push(event.data));
+
+    const rawWriter = hub.writerStorage(hub.register(new FakeStorageWindow()));
+    const frame: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'worker-legacy' };
+    rawWriter.setItem(
+      'cross-tab-worker-databus:channel:chan',
+      JSON.stringify({ seq: 1, message: frame })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual([frame]);
+  });
+
   it('ignores malformed payloads and foreign keys', async () => {
     const hub = new StorageEventHub(new MemoryStorage());
     const a = makeTab(hub, 'chan');
@@ -185,6 +206,27 @@ describe('createStorageEventChannel', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(received).toHaveLength(2);
+  });
+
+  it('keeps other channels delivering after one channel closes', async () => {
+    // close() removes the shared channel key. In a browser that removal fires a
+    // storage event with a null newValue, which onStorage ignores; regardless,
+    // a closing channel must not disturb frames between the remaining tabs.
+    const hub = new StorageEventHub(new MemoryStorage());
+    const a = makeTab(hub, 'chan');
+    const b = makeTab(hub, 'chan');
+    const c = makeTab(hub, 'chan');
+    const receivedB: WorkerClusterMessage[] = [];
+    b.channel.addEventListener('message', event => receivedB.push(event.data));
+
+    a.channel.close();
+    // close() is idempotent: a second call must not throw or re-run cleanup.
+    expect(() => a.channel.close()).not.toThrow();
+    const frame: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'worker-c' };
+    c.channel.postMessage(frame);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(receivedB).toEqual([frame]);
   });
 
   it('does not deliver to a sibling channel in the same document', async () => {
