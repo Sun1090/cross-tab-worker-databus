@@ -1,3 +1,14 @@
+## 0.21 storage-event close isolation (2026-09-20)
+
+- 状态：已完成回归（无 runtime 行为改动）。
+- 覆盖：一个 channel `close()` 会清除共享 channel key（浏览器会触发 newValue 为 null 的 storage 事件，`onStorage` 已忽略），回归验证它不影响其余 tab 之间的投递；同时验证 `close()` 幂等（重复调用不抛错、不重复清理）。
+- 覆盖（同批）：混合版本 envelope 兼容——缺少 `senderId` 的旧版 peer 帧（仅含 `seq` + `message`）仍被解析并投递，保证跨版本 tab 兼容。
+- 变更文件：`tests/storage-channel.test.ts`、`docs/progress.md`。
+- 验证：`pnpm exec vitest run tests/storage-channel.test.ts`（15/15）、`pnpm check`（37 files / 825 tests）、`pnpm lint`、`git diff --check` 通过。
+- 风险 / 回滚：仅测试；回滚 = revert 本任务提交。
+- 下一项：继续审计 storage-event channel 在 pagehide 期间写入与 close 的交错。
+- 更新时间：2026-09-20。
+
 ## 0.21 storage-event same-document boundary (2026-09-20)
 
 - 状态：已完成文档与回归（无 runtime 行为改动）。
