@@ -140,6 +140,28 @@ describe('data bus advanced hot paths', () => {
     }).run();
   });
 
+  test('adaptive dedup / 1000 publications with 50% duplicates', async ({ bench }) => {
+    await bench('adaptive dedup / 1000 publications with 50% duplicates', () => {
+      const environment = makeEnvironment('bench-dedup-adaptive');
+      const transport = new FakeTransport<{ value: number }>();
+      let clock = 1_000;
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-dedup-adaptive',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        dedup: { maxEntries: 2_000, ttlMs: 60_000, adaptiveTtl: { minMs: 1_000, maxMs: 60_000 }, now: () => clock }
+      });
+      bus.subscribe('bench.dedup.adaptive', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        clock += 5;
+        const messageId = `message-${index % 500}`;
+        transport.emit('bench.dedup.adaptive', { value: index }, messageId);
+      }
+      bus.stop();
+    }).run();
+  });
+
   test('replay prune / 1000 retained publications', async ({ bench }) => {
     await bench('replay prune / 1000 retained publications', () => {
       const environment = makeEnvironment('bench-replay-prune');
@@ -154,6 +176,25 @@ describe('data bus advanced hot paths', () => {
       bus.subscribe('bench.replay', () => {});
       for (let index = 0; index < 1_000; index += 1) {
         transport.emit('bench.replay', { value: index });
+      }
+      bus.stop();
+    }).run();
+  });
+
+  test('replay prune / age strategy / 1000 retained publications', async ({ bench }) => {
+    await bench('replay prune / age strategy / 1000 retained publications', () => {
+      const environment = makeEnvironment('bench-replay-age');
+      const transport = new FakeTransport<{ value: number }>();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'bench-replay-age',
+        environment: environment.environment,
+        initialConfig: {},
+        transport,
+        replay: { maxPerTopic: 1_000, pruneStrategy: PRUNE_STRATEGY.AGE, retentionMs: 1 }
+      });
+      bus.subscribe('bench.replay.age', () => {});
+      for (let index = 0; index < 1_000; index += 1) {
+        transport.emit('bench.replay.age', { value: index }, undefined, index);
       }
       bus.stop();
     }).run();

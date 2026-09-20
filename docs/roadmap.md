@@ -534,7 +534,7 @@ The line continues the async-callback isolation audit: every fix below binds a c
 1. ~~Publish a peer capability matrix and expose SDK/backend/transport identity in diagnostics.~~ Delivered: `getDiagnostics()` carries protocol version, unknown-message stats, peer protocol versions, and transport identity; `getHealthSummary()`/`getMetrics()` now ship live trace metrics and sink state.
 2. ~~Unify replay, deduplication, trace, recovery, and cluster health counters.~~ Delivered: `getDiagnostics()` + `getMetrics()` + `getHealthSummary()` cover lifecycle, recovery, dedup, replay, persistence, protocol, transport, cluster, trace metrics, and sink back-pressure in single snapshots.
 3. ~~Optimize IndexedDB concurrent append and cleanup paths.~~ Delivered: adjacent `appendBatch` mutations coalesce into one transaction; clear/clearTopic/clearBefore ordering preserved.
-4. ~~Add performance baselines for adaptive dedup, async trace, pruning, and long-running multi-tab workloads.~~ Partially delivered: bench covers load-weighting scoring, `getMetrics`, publishBatch batch-size sensitivity, and the existing dedup/async-sink/persistence cases.
+4. ~~Add performance baselines for adaptive dedup, async trace, pruning, and long-running multi-tab workloads.~~ Delivered: bench covers load-weighting scoring, `getMetrics`, publishBatch batch-size sensitivity, adaptive dedup TTL, age-strategy replay pruning, a two-worker cross-tab fan-out, and the existing dedup/async-sink/persistence cases.
 
 ## 0.13.0 candidates
 
