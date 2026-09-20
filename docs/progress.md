@@ -1,3 +1,13 @@
+## 0.21 dependency patch refresh (2026-09-20)
+
+- 状态：已完成。
+- 变更：`@types/node` `^26.6.1` → `^26.6.2`；将 `centrifuge` 加入 devDependencies 并固定为 `^5.7.4`（此前仅为 optional peer，与 `react`/`vue` 的 peer+dev 模式不一致；dev 固定后可针对最新 patch 运行测试），锁文件由 5.7.0 升到 5.7.4。
+- 未变更：TypeScript `^6.0.3` 保持——7.0.2 仍受 typescript-eslint 支持矩阵阻塞；`centrifuge` peer 范围保持 `^5.5.3`，对下游完全兼容。
+- 验证：`pnpm check`（37 files / 825 tests）、`pnpm lint`、`pnpm test:e2e` 27/27、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm audit`（无已知漏洞）均通过。
+- 风险 / 回滚：patch 级升级；回滚 = revert 本任务提交并重装。
+- 下一项：在 typescript-eslint 支持后评估 TypeScript 7；继续常规依赖与安全巡检。
+- 更新时间：2026-09-20。
+
 ## 0.21 benchmark coverage for adaptive dedup, pruning, multi-tab (2026-09-20)
 
 - 状态：已完成（关闭 roadmap 0.20.69 候选 4 剩余项）。
