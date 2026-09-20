@@ -538,10 +538,10 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 
 ## 0.13.0 候选
 
-1. 冻结公共导出面与 transport 无关的 publication 信封。
+1. ~~冻结公共导出面与 transport 无关的 publication 信封。~~ 已交付：根导出面由回归测试与 tag 间 `verify:compat` 门禁固定，transport 无关的 publication 信封（含 legacy/nested 帧兼容）已有文档与协议 fixture 覆盖。
 2. ~~精确记录 at-least-once 投递与去重保证。~~ 已交付：architecture/API/capability 文档现在明确区分「每条已接受 transport publication 的本地至多一次扇出」与端到端投递，记录 transport/服务端的丢失与重复投递，并说明有界、可选 `messageId` 去重的边界，不再宣称 at-least-once 或 exactly-once。
-3. 增加长时浏览器浸泡覆盖：replay 留存、重连、BFCache 与 owner 迁移。
-4. 为 1.0 前的协议别名发布迁移指南与弃用策略。
+3. ~~增加长时浏览器浸泡覆盖：replay 留存、重连、BFCache 与 owner 迁移。~~ 已交付：真实 Chromium 多 Tab 浸泡与重复 BFCache/reload/owner-handoff 场景在完整生命周期上连续运行。
+4. ~~为 1.0 前的协议别名发布迁移指南与弃用策略。~~ 已交付：弃用策略位于发布清单，「Upgrading & Deprecation」指南已在两语言 getting-started 发布，legacy 协议帧在一个小版本内继续解析，当前版本通过 `getDiagnostics().protocol` 暴露。
 
 ## 更长期候选
 
