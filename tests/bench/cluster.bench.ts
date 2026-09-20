@@ -6,12 +6,28 @@
  */
 import { describe, test } from 'vitest';
 import { WorkerClusterRuntime } from '../../src/core/cluster';
-import { createFakeEnvironment, MemoryStorage } from '../fakes';
+import { createFakeEnvironment, ChannelHub, MemoryStorage } from '../fakes';
 
 function makeRuntime(workerId: string, storage: MemoryStorage, now: () => number) {
   const env = createFakeEnvironment({ storage, now, randomId: workerId });
   return new WorkerClusterRuntime({
     clusterKey: 'bench',
+    environment: env.environment,
+    tabId: `tab-${workerId}`,
+    workerId,
+    handlers: { onControl: () => {}, onEvent: () => {} }
+  });
+}
+
+function makeHubRuntime(
+  workerId: string,
+  storage: MemoryStorage,
+  hub: ChannelHub,
+  now: () => number
+) {
+  const env = createFakeEnvironment({ storage, hub, now, randomId: workerId });
+  return new WorkerClusterRuntime({
+    clusterKey: 'bench-fanout',
     environment: env.environment,
     tabId: `tab-${workerId}`,
     workerId,
@@ -62,5 +78,24 @@ describe('cluster coordination', () => {
         runtime.isAssigned(`bench.subscribe.${index % 100}`);
       }
     }).run();
+  });
+
+  test('multi-tab fan-out / 2 workers / 1000 publications', async ({ bench }) => {
+    const sharedStorage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const peerNow = () => now;
+    const owner = makeHubRuntime('fanout-owner', sharedStorage, hub, peerNow);
+    const peer = makeHubRuntime('fanout-peer', sharedStorage, hub, peerNow);
+    owner.start();
+    peer.start();
+    owner.subscribe('bench.fanout');
+    peer.subscribe('bench.fanout');
+    await bench('multi-tab fan-out / 2 workers / 1000 publications', () => {
+      for (let index = 0; index < 1000; index += 1) {
+        owner.publish('bench.fanout', { value: index });
+      }
+    }).run();
+    owner.stop();
+    peer.stop();
   });
 });

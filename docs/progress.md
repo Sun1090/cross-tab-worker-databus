@@ -1,3 +1,13 @@
+## 0.21 benchmark coverage for adaptive dedup, pruning, multi-tab (2026-09-20)
+
+- 状态：已完成（关闭 roadmap 0.20.69 候选 4 剩余项）。
+- 变更：`tests/bench/data-bus.bench.ts` 新增 adaptive dedup（推进时钟驱动自适应速率窗口）与 age 策略 replay prune 两个基線；`tests/bench/cluster.bench.ts` 新增双 worker 跨 Tab fan-out 基線（共享 `MemoryStorage` + `ChannelHub`，owner publish → peer EVENT 同步 fan-out）。
+- 文档：`docs/roadmap.md`、`docs/zh/roadmap.md` 将 0.20.69 候选 4 由“部分交付”更新为“已交付”，列入 adaptive dedup、age prune、双 worker fan-out。
+- 验证：`pnpm bench`（3 files / 28 tests）、`pnpm typecheck`、`pnpm lint`、`git diff --check` 通过。
+- 风险 / 回滚：仅基准与文档；回滚 = revert 本任务提交。
+- 下一项：继续跟踪依赖升级（`@types/node` 26.6.2、`centrifuge` 5.7.4），TypeScript 7 仍受 typescript-eslint 阻塞。
+- 更新时间：2026-09-20。
+
 ## 0.21 storage-event close isolation (2026-09-20)
 
 - 状态：已完成回归（无 runtime 行为改动）。
