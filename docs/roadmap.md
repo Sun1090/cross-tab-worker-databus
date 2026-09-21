@@ -557,6 +557,7 @@ The line continues the async-callback isolation audit: every fix below binds a c
 3. **Publication deduplication** — design and implement an opt-in, bounded message-ID window that works across local dispatch, BroadcastChannel fan-out, WebSocket, and replay without changing the default behavior.
 4. **Adapter and protocol parity** — align React/Vue lifecycle and type contracts, document binary framing and recovery semantics, and add compatibility fixtures for custom transports.
 5. **Operational validation** — extend browser and package-consumption tests, add regression benchmarks for dedup/recovery/replay cleanup, and keep push CI as a release gate.
+6. **TypeScript 7 toolchain migration** — blocked upstream, not here: as of 2026-09-22 `typescript-eslint` is released only up to 8.70.1, whose peer range is `typescript >=4.8.4 <6.1.0`, so installing TypeScript 7 breaks the lint gate before it breaks our own types. Re-check when a typescript-eslint release widens that ceiling, then migrate in an isolated branch (TS 7 still exposes a `tsc` bin, so `pnpm typecheck` itself needs no change).
 
 ## Release checklist
 

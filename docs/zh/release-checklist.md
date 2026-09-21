@@ -20,7 +20,7 @@
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
 2. 运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS。`verify:compat` 从最近的发布 tag 解析基线，因此浅克隆或缺少 tag 的克隆需先执行 `git fetch --tags`，否则会以 "no version tag found" 失败）。
 3. 依赖安全门禁：`pnpm audit --registry=https://registry.npmjs.org`（配置的镜像 registry 缺少 audit 端点；CI 在 verify job 中于公共 registry 运行）。任一已知漏洞公告即视为发布失败；`pnpm-workspace.yaml` overrides 钉住补丁版本。
-4. 浏览器基准回归门禁：运行两次 `pnpm bench:browser` 后执行 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的无关噪声，参见已知的共享 runner 抖动说明）；基线迁移（例如某指标从空操作变为真实路径）属预期内的一次性失败。用 `pnpm bench:trend` 刷新长期趋势文档，表格变化时一并提交。
+4. 浏览器基准回归门禁：运行 `pnpm bench:browser`（至少两次；门禁将最新报告与之前最多五份归档报告中同一指标的中位数比较），随后执行 `pnpm bench:compare --fail-above-pct 50`。采用中位数基线是因为页内热路径指标在同一份代码上会在快/慢两档之间来回跳——`dedup1000Ms` 相邻两次实测分别为 12.7 ms 与 25.6 ms，只看"上一份报告"时，一次偶发噪声就能在无代码改动的情况下击穿既定上限。基线迁移（例如某指标从空操作变为真实路径）属预期内的一次性失败。用 `pnpm bench:trend` 刷新长期趋势文档，表格变化时一并提交。
 5. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。
 6. 在功能分支提交并推送该分支，PR 验证通过后使用 squash 或 fast-forward 合入（不创建 merge commit）。获取合入后的精确提交并打 tag，只推送该版本 tag；禁止直接推送 `main`/`master` 或 force-push。工作流运行 `node scripts/verify-release-version.mjs`，要求 `RELEASE_TAG` 等于 `v` 加 package 版本，且 CHANGELOG 中恰好有一个非空的对应版本章节。
 

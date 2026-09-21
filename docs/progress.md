@@ -3514,17 +3514,48 @@ corroborates the 26-spec collection.)
   bench / test:e2e / bench:browser + compare / verify:pack / verify:compat /
   audit / `npm pack --dry-run`), plus `node scripts/verify-release-version.mjs`
   with `RELEASE_TAG=v0.20.94`.
-- Release mechanics: commit → PR → squash merge → tag the exact merged commit →
-  push only `v0.20.94` → the `Release` workflow (NPM_TOKEN is configured) lints,
-  re-verifies compat + pack, creates the GitHub release from the CHANGELOG
-  section, publishes, then runs the blocking `verify:published` consumer gate.
-  This repository does not run `npm publish` from the assistant; CI publishes.
+- Release mechanics: commit `0b31ac8` → PR #128 (verify 1m34s / analyze 1m6s /
+  browser 2m7s all green) → squash merged as `9b8f889` → annotated tag
+  `v0.20.94` pushed at that exact commit; the topic branch and its remote were
+  deleted immediately.
+- Release workflow outcome (run 35631119188, watched with `--exit-status`): lint
+  plus `verify:compat` / `verify:pack` re-run, GitHub release created from the
+  CHANGELOG section, **Publish to npm ✓**, **Verify published npm consumers ✓**
+  (the blocking consumer gate), verification context recorded.
+- Post-release smoke test: `npm view cross-tab-worker-databus dist-tags`
+  reports `latest: 0.20.94`.
 - Risk / rollback: patch-level, behavior-preserving for consumers. Rollback is a
   forward fix — npm versions are immutable, so a defect ships as 0.20.95; the
   tag is never moved or reused.
-- Next: continue the reliability line (median-of-N benchmark baseline; then the
-  TypeScript 6 → 7 devDependency major, the only outstanding update).
+- Next: the median-of-N benchmark baseline landed right after this release
+  (see Phase 56); after it, the TypeScript 6 → 7 devDependency major is the only
+  outstanding dependency update.
 - Update date: 2026-09-22.
+
+## Phase 56 (benchmark gate could fail with no code change)
+
+- While cutting 0.20.94 the documented performance gate tripped:
+  `bench:compare --fail-above-pct 50` reported `dedup1000Ms +101.6%` between two
+  consecutive runs. It was not a regression — five consecutive runs of identical
+  code measured 12.7 / 25.6 / 10.1 / 25.3 / 25.5 ms for that metric (and
+  4.6 / 7.5 / 4.8 / 7.5 / 7.5 for `traceAndPublish1000Ms`) while
+  wildcard/publishBatch stayed within ±10%, and the archive shows the same
+  11.7–28.9 ms spread since 2026-09-15. Two in-page metrics alternate between a
+  fast and a slow mode on this machine, so comparing the newest report with the
+  **single previous one** made the gate a coin flip.
+- `bench:compare` now compares the newest report against the per-metric median of
+  up to the five preceding archived reports. A median baseline both removes the
+  false alarm and *increases* sensitivity to a real shift, since a genuine
+  regression is measured against typical recent runs rather than whatever the
+  last run happened to be. Naming two report paths still performs a direct A/B.
+- Six new cases in `tests/bench-compare.test.ts` pin the median (odd/even,
+  unsorted), the noise case, a sustained doubling that must still fail, the
+  five-report window, the missing-sample skip, and the two-report degeneration.
+  Mutation check: narrowing the window to the single previous report fails three
+  of them.
+- Verified against real data (`node scripts/bench-compare.mjs --fail-above-pct 50`
+  on the 36-report archive), then typecheck, lint, and 840 unit tests green. Both
+  release checklists and the generated trend-doc prose updated in both languages.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
