@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.20.94] - 2026-09-22
+
+### Fixed
+- `useCrossTabSubscription` in the Vue adapter no longer registers a watcher on its own `handler` parameter. That binding cannot change, so the effect was permanently inert while implying handlers could be swapped in place; the subscription now binds the handler directly with identical delivery behavior.
+- The CI `verify` gate no longer fails on runner load. The package/compat gates spawn five subprocesses per case against vitest's 5000ms default and the seeded lifecycle fuzzer ran at 98% of its own 30s budget under coverage instrumentation; the unit-suite ceiling is now 15s and the fuzzer holds an explicit 120s.
+
+### Changed
+- Coverage thresholds moved from advisory to enforced: the floors were 85/80/90/85 while the suite measured 98.13/94.59/98.17/99.19, so a change could lose ten points of branch coverage and still pass the release gate. They are now 96/92/96/97.
+- Nine previously unasserted behaviors now have mutation-verified regressions: route-owner-cache eviction and its LRU ordering (the old test passed with the eviction loop deleted outright), the failed-hydration retry on the next `start()`, the metadata-less item of an unpacked remote batch, the `replay.maxPerTopic` / `pruneStrategy` option guards, `serializeError`'s no-`structuredClone` branch, superseded-client `state` / `disconnected` isolation, the async credential-provider rejection reply, the WebSocket shared handshake gate, and the single-item batch frame shapes.
+
 ## [0.20.93] - 2026-09-19
 
 ### Fixed
