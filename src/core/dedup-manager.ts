@@ -119,10 +119,10 @@ export class DedupManager {
     this.windowAccepted += 1;
     this.trace.recordDedupAccepted();
     // Cap growth: evict oldest (FIFO) entries when the map exceeds the cap, so a
-    // high-cardinality burst of distinct IDs cannot exhaust memory.
-    while (this.seenMessageIds.size > this.maxEntries) {
-      const oldest = this.seenMessageIds.keys().next().value;
-      if (oldest === undefined) break;
+    // high-cardinality burst of distinct IDs cannot exhaust memory. Insertion
+    // order is the Map's iteration order, so the first keys are the oldest.
+    for (const oldest of this.seenMessageIds.keys()) {
+      if (this.seenMessageIds.size <= this.maxEntries) break;
       this.seenMessageIds.delete(oldest);
     }
     return false;

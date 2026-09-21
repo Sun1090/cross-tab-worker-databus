@@ -141,6 +141,34 @@ describe('DedupManager — sweep lifecycle', () => {
     }
   });
 
+  it('prunes only the entries that are past the TTL, keeping recent IDs', () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, advance } = createManager({ ttlMs: 1_000, sweepMs: 500 });
+      manager.start();
+      expect(manager.isDuplicate('old', 't')).toBe(false);
+      // 600ms later: inside the TTL on the hot path, so nothing is expired
+      // before the sweep even runs.
+      advance(600);
+      expect(manager.isDuplicate('fresh', 't')).toBe(false);
+      expect(manager.getStats().tracked).toBe(2);
+
+      advance(500);
+      vi.advanceTimersByTime(500);
+
+      // Cutoff is now - ttl = 1100: 'old' (1000) is gone, 'fresh' (1600) is
+      // not. A sweep that expired everything would silently turn duplicate
+      // re-deliveries into second acceptances, which is the whole thing dedup
+      // exists to prevent.
+      expect(manager.getStats().tracked).toBe(1);
+      expect(manager.isDuplicate('old', 't')).toBe(false);
+      expect(manager.isDuplicate('fresh', 't')).toBe(true);
+      manager.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not start a sweep timer when disabled or unconfigured', () => {
     vi.useFakeTimers();
     try {
