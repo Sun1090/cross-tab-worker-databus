@@ -1227,14 +1227,18 @@ describe('WorkerClusterRuntime publishBatch', () => {
     expect(runtimeB.publishBatch('remote.feed', [
       { data: { i: 0 }, messageId: 'm0' },
       { data: { i: 1 }, timestamp: 11 },
-      { data: { i: 2 }, messageId: 'm2', timestamp: 22 }
+      { data: { i: 2 }, messageId: 'm2', timestamp: 22 },
+      { data: { i: 3 } }
     ])).toBe(true);
     await Promise.resolve();
     const publishCalls = controlA.mock.calls.filter(call => call[0] === 'PUBLISH');
-    expect(publishCalls).toHaveLength(3);
+    expect(publishCalls).toHaveLength(4);
     expect(publishCalls[0]).toEqual(['PUBLISH', 'remote.feed', { i: 0 }, 'm0', undefined]);
     expect(publishCalls[1]).toEqual(['PUBLISH', 'remote.feed', { i: 1 }, undefined, 11]);
     expect(publishCalls[2]).toEqual(['PUBLISH', 'remote.feed', { i: 2 }, 'm2', 22]);
+    // The plain item is the common case (publishBatch without any metadata),
+    // and it must still dispatch — the receiver's metadata-less branch.
+    expect(publishCalls[3]).toEqual(['PUBLISH', 'remote.feed', { i: 3 }]);
     runtimeA.stop();
     runtimeB.stop();
   });
