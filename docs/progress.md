@@ -3611,6 +3611,46 @@ corroborates the 26-spec collection.)
   lines; whole-suite branch coverage 94.64% → 94.69%. Verified with typecheck,
   lint, and 841 unit tests.
 
+## Phase 59 (storage-batch: an unreachable guard, and two enumeration contracts with no test)
+
+- `src/core/storage-batch.ts` was the weakest file in `src/core` for branch
+  coverage (86.66%). Four uncovered branches, three distinct findings:
+- **A provably unreachable guard.** `scheduleRetry()` opened with
+  `if (this.retryHandle !== null) return;` and a comment claiming "the guard
+  ensures only one retry is in flight at a time; subsequent scheduleRetry calls
+  during the wait are no-ops". Its true leg had never been taken in any run of
+  the suite, and it cannot be: `scheduleRetry` has exactly one call site, inside
+  `flush()`, which calls `cancelRetry()` on entry and `break`s right after
+  re-arming — so `retryHandle` is always `null` there. The real mechanism was
+  already pinned by 'keeps at most one retry timer pending while writes keep
+  failing', whose own comment conceded the guard was not what it tested. Removed
+  the dead branch and made the comment describe the invariant that actually
+  holds.
+- **`key(index)` had no out-of-range pin.** `this.keys()[index] ?? null` was only
+  ever exercised in range. `storage-utils`' `listKeys`/`readAllByPrefix` loop
+  `for (index < length)` and rely on the specified `null` past the end, so
+  dropping the coercion (`undefined`) is a real consumer-visible break. Pinned,
+  including that a pending write extends the enumerable range before it flushes.
+- **`keys()` had no null-slot pin.** `if (key !== null) keys.add(key)` never saw
+  a storage that reports a length it no longer backs — possible for an injected
+  `StorageLike` adapter racing a clear. Pinned that the null slot is dropped
+  rather than becoming an enumerable entry.
+- **The give-up warning had no console-less pin.** The `typeof console.warn ===
+  'function'` guard's false leg was uncovered; a webview shell with a stripped
+  `console` must still drop the doomed key, not throw inside a timer callback.
+  Pinned with `console` stubbed to `{ log }`.
+- Mutation evidence, `npx vitest run tests/storage-batch.test.ts` exit code:
+  `?? null` coercion removed → 1 (2 cases fail); `if (key !== null)` dropped → 1
+  (1 case); the console guard forced true → 1 (`TypeError: console.warn is not a
+  function`). All three new cases fail their mutant; the suite is green with the
+  dead guard deleted, which is the proof it was dead.
+- Two cases ('schedules a single retry timer…' and 'keeps at most one retry
+  timer…') also sat **outside** their `describe` because a `});` closed it early;
+  regrouped. They still ran, so their assertions were real — but they no longer
+  report under the file's suite.
+- `src/core/storage-batch.ts` is now 100% on all four metrics; whole-suite
+  branches 94.69% → 94.89%. Verified with typecheck, lint, and 844 unit tests.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

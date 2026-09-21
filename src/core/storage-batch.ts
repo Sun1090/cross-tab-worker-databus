@@ -169,11 +169,11 @@ export class BatchingStorageWriter implements StorageLike {
     else setTimeout(flush, 0);
   }
 
-  // Schedule a single retry timer. The guard ensures only one retry is in
-  // flight at a time; subsequent scheduleRetry calls during the wait are
-  // no-ops because the first retry will re-flush all pending keys together.
+  // Arm the single backoff timer for the pass that just failed. Exactly one
+  // retry can be in flight because flush() — the only caller — cancels any
+  // armed retry on entry and stops at the first failing key, so this always
+  // runs with `retryHandle` cleared.
   private scheduleRetry(): void {
-    if (this.retryHandle !== null) return;
     this.retryHandle = setTimeout(() => {
       this.retryHandle = null;
       this.flush();
