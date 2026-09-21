@@ -4352,6 +4352,11 @@ corroborates the 26-spec collection.)
 - Follow-up now owned by a later minor: turn the empty-topic warning into a
   `TypeError` at `subscribe()` / `publish()` / `publishBatch()`, called out in
   that release's CHANGELOG per the deprecation policy.
+- Record correction shipped with this entry (PR #147): the published `0.20.96`
+  CHANGELOG line enumerated seven of the eleven mutation-verified behaviors in
+  its range. The released section is left untouched — the tarball is immutable —
+  and the four missing pins are named in a new `Unreleased → Docs` note, while
+  both roadmap delivered-scope sections now list all eleven.
 - Update date: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
