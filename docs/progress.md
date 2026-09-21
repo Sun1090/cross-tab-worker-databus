@@ -3557,6 +3557,60 @@ corroborates the 26-spec collection.)
   on the 36-report archive), then typecheck, lint, and 840 unit tests green. Both
   release checklists and the generated trend-doc prose updated in both languages.
 
+## Phase 57 (vacuous negative assertion in the storage-event channel)
+
+- `tests/storage-channel.test.ts` → 'ignores malformed payloads and foreign
+  keys' queued three `setItem` calls in one tick. `StorageEventHub.dispatch`
+  reads the value *currently* stored under the key, so all three microtasks
+  delivered the last write: the `'{broken json'` payload never reached the
+  listener, and the `JSON.parse` guard at `src/core/environment.ts:133` was
+  never executed.
+- Proof it was decorative: replacing `catch { return; }` with
+  `catch { throw new Error('MUTANT'); }` left all 15 tests passing and
+  `vitest run` exiting **0**.
+- The case now settles after each write, asserts each rejection separately
+  with a message naming the invariant, and ends with a `postMessage` that must
+  still be delivered — containment, not a one-way listener shutdown. Same
+  mutant is killed (exit 1, line 133 covered).
+- Verified: typecheck, lint, 840 unit tests, and the full CI gate set green.
+  Shipped as PR #130 (squash commit `7906253`); no production code changed.
+
+## Phase 58 (the storage-event fallback wiring had an assertion that could not fail)
+
+- `tests/storage-channel.test.ts` → 'returns a storage-event channel when the
+  fallback is enabled' read:
+  `if (channel) expect(typeof channel.postMessage).toBe('function'); else expect(channel).toBeNull();`
+  Both legs of the union were accepted, so **no value of `channel` could fail
+  the case** — and in bare Node `channel` was always `null`, so the browser path
+  the test names (and `docs/getting-started.md` documents as
+  `environment: createBrowserEnvironment({ channelFallback: 'storage-event' })`)
+  had never been executed by any test.
+- Rewritten with a stubbed window that exposes `localStorage` plus an
+  `addEventListener` set, which is what the fallback needs and what the
+  documented usage provides. It now asserts the wiring rather than the type:
+  the channel is non-null, the envelope lands in **window.localStorage** under
+  `cross-tab-worker-databus:channel:<name>`, a `storage` event from the window
+  delivers it to listeners, and `close()` detaches the listener and removes the
+  key.
+- Added the complementary degradation case: a window with `localStorage` but no
+  event source yields `null`, so the runtime falls back to local mode instead
+  of building a channel that can never fire.
+- Mutation evidence. Each row is a mutation of `src/core/environment.ts` and the
+  exit code of `npx vitest run tests/storage-channel.test.ts` before / after this
+  change:
+
+  | Mutant | Old case | New case |
+  |---|---|---|
+  | fallback passes `win: null` | survives (0) | killed (1) |
+  | envelope routed to `sessionStorage` | survives (0) | killed (1) |
+  | `channelFallback` option ignored | survives (0) | killed (1) |
+  | `close()` skips `removeEventListener` | survives (0) | killed (1) |
+  | `typeof window.addEventListener` guard removed | n/a | killed (1) |
+
+- `src/core/environment.ts` is now at 100% statements / branches / functions /
+  lines; whole-suite branch coverage 94.64% → 94.69%. Verified with typecheck,
+  lint, and 841 unit tests.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
