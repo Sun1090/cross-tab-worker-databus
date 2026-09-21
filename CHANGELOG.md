@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.96] - 2026-09-22
+
 ### Deprecated
 - An empty topic string (`""`) is deprecated in `subscribe()`, `publish()` and `publishBatch()`. It is still accepted and still flows through routing as a literal channel, but no transport can address such a channel, so the subscription it creates can never receive anything. The bus now logs one `console.warn` per instance the first time any of the three is called with `""`. Following the pre-1.0 deprecation policy, a future minor will reject it at that boundary with a `TypeError`, like the existing option guards. Callers using `""` as a topic should move to a real channel name.
 
