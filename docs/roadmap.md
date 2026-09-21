@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.93 was released on September 19, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.94 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.20.94 delivered scope
+
+- Fixed the Vue subscription composable's permanently inert watcher on its own handler parameter, and pinned the same-target rebind guard that prevents a torn-down-and-recreated subscription when the bus and topic change in one tick.
+- Made the CI unit gate survivable under runner load: a 15s ceiling for the subprocess-spawning package/compat gates and an explicit 120s budget for the seeded lifecycle fuzzer, which had reached 98% of its own limit under coverage instrumentation.
+- Raised the coverage floors from advisory to enforced, keeping them a few points under the measured values instead of ten.
+- Added mutation-verified regressions for nine behaviors that had no effective test, including a route-owner-cache eviction assertion that passed with the eviction loop deleted, the failed-hydration retry on the next start, the metadata-less item of an unpacked remote batch, and superseded-client status isolation.
 
 ## 0.20.93 delivered scope
 

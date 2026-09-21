@@ -3455,6 +3455,77 @@ corroborates the 26-spec collection.)
   accumulated test-integrity work warrants a patch release on its own.
 - Update date: 2026-09-22.
 
+## Phase 54 (WebSocket handshake gate + batch frame pins)
+
+- `WebSocketTransport.start()` documented that a second call while the handshake
+  is pending shares the in-flight gate; nothing asserted it. Disabling the reuse
+  branch opened a **second socket and left the first, still connecting, unclosed**
+  (a leaked connection the transport no longer owns). Pinned with promise
+  identity + socket-count assertions.
+- Extended the single-item `publishBatch` delegation pin from the messageId-only
+  shape to timestamp-only and metadata-free, so an absent key cannot start
+  serialising as `undefined`.
+- Verified by mutation (disabling gate reuse; disabling the single-item
+  delegation) and merged as #125. 833 unit tests green.
+
+## Phase 55 (advisory gates made real)
+
+- Coverage floors were 85/80/90/85 against a measured 98.13/94.59/98.17/99.19,
+  so the `verify` job's threshold step could not fail for anything short of a
+  ten-point collapse. Raised to 96/92/96/97 with the CI comment and both release
+  checklists updated (#126); CI's `verify` passed against the new floors in 1m28s
+  and `pnpm test:coverage` passes locally.
+- Fixed a shipped-doc defect found while refreshing the benchmark trend for this
+  release: `bench-trend.mjs` computed "All-time best" as a minimum over the
+  entire archive, but the in-page matrix changed measurement semantics twice in
+  early September 2026 (no-op runs, then `publishBatch` without a server echo)
+  and reports carry no harness version, so `docs/benchmarks.md` published
+  `dedup ×1000 = 0 ms` and `wildcard dispatch = 0.1 ms` as records beside 25 ms
+  and 6 ms latest values. The column is now the best of the last 5 reports, both
+  languages say so, and a new test pins that a stale report outside the window
+  cannot set it (#127).
+- Measured, not assumed: five consecutive `pnpm bench:browser` runs today gave
+  dedup1000Ms = 12.7 / 25.6 / 10.1 / 25.3 / 25.5 ms and trace+publish =
+  4.6 / 7.5 / 4.8 / 7.5 / 7.5, while wildcard/publishBatch stayed within
+  ±10%. Two metrics therefore flip between a fast and a slow mode ~2x run to
+  run with no code change, which is why one pair tripped the 50% ceiling and the
+  next pair (25.3 → 25.5) passed it. The archive confirms the same spread since
+  2026-09-15 (11.7–28.9 ms), so this is runner behaviour, not a regression from
+  any change in this line. Follow-up candidate: give `bench:compare` a
+  median-of-N baseline instead of the single previous report, which lowers false
+  alarms and increases sensitivity to a real shift at the same time.
+- Nothing else was padded: the remaining uncovered lines were checked for
+  reachability first and left alone (`websocket.ts` 147's cleared-timer guard,
+  `port-reaper.ts` 148/149 — its three maps are only ever mutated together,
+  `cluster.ts` 296 — `pause()` always clears `started` before `suspended` is
+  observable, `storage-batch.ts` 85 — `length` and `key()` share `keys()`,
+  `trace.ts` 449, `hooks.ts` 45, and the IDB `settled` re-entry guards).
+
+## Release 0.20.94 (2026-09-22)
+
+- Milestone: 0.20.x reliability line, patch bump from 0.20.93 — one production
+  adapter fix plus gate/test integrity, no API or protocol change.
+- Branch `chore/release-0.20.94` from main @ `f506dfe`.
+- Scope delivered since v0.20.93: #124 (phase 53), #125 (phase 54),
+  #126 (coverage floors), #127 (benchmark trend doc).
+- Changed files in the release commit: `package.json`, `CHANGELOG.md`,
+  `docs/roadmap.md`, `docs/zh/roadmap.md`, `docs/progress.md`.
+- Verification: see the gate transcript below (check / lint / test:coverage /
+  bench / test:e2e / bench:browser + compare / verify:pack / verify:compat /
+  audit / `npm pack --dry-run`), plus `node scripts/verify-release-version.mjs`
+  with `RELEASE_TAG=v0.20.94`.
+- Release mechanics: commit → PR → squash merge → tag the exact merged commit →
+  push only `v0.20.94` → the `Release` workflow (NPM_TOKEN is configured) lints,
+  re-verifies compat + pack, creates the GitHub release from the CHANGELOG
+  section, publishes, then runs the blocking `verify:published` consumer gate.
+  This repository does not run `npm publish` from the assistant; CI publishes.
+- Risk / rollback: patch-level, behavior-preserving for consumers. Rollback is a
+  forward fix — npm versions are immutable, so a defect ships as 0.20.95; the
+  tag is never moved or reused.
+- Next: continue the reliability line (median-of-N benchmark baseline; then the
+  TypeScript 6 → 7 devDependency major, the only outstanding update).
+- Update date: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
