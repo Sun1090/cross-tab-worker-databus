@@ -4318,6 +4318,42 @@ corroborates the 26-spec collection.)
   `verify:published` gate.
 - **Updated:** 2026-09-22.
 
+## Release 0.20.96 completed (2026-09-22)
+
+- Version `0.20.96` published. Release commit on `main`: `ba9c07f`
+  (`chore(release): prepare 0.20.96 (#146)`, PR #146 squash-merged). Annotated
+  tag `v0.20.96` (object `fc3fe05`, dereferencing to exactly that commit) pushed
+  as the only ref; local and remote tag objects match, and the tag has not been
+  moved since.
+- Scope: everything since `v0.20.95` — Phases 63-74, PRs #137-#146. Eleven
+  behaviors that no test could previously detect were given mutation-verified
+  regressions (opt-out handshake budget, private-topic handoff rule, trace sink
+  containment without `console.warn`, unserved-route handoff drop,
+  last-subscriber transport release, cancelled retention sweep, superseded
+  hydration snapshot, default `WebSocket` construction, `ready()`'s recorded
+  recovery error, unrelated-wildcard batch capture, Vue `ready()` rejection
+  containment); one documented boundary gap was closed (empty topic now warns
+  once per bus), and `typescript-eslint` moved to 8.70.1. The published artifact
+  differs from `0.20.95` by `src/core/data-bus.ts` only (+20 lines).
+- Release workflow run `35660663344` → job `release :: success` in 5m51s, with
+  every named step green: validate release version and notes, install
+  dependencies, verify (typecheck +
+  build + unit tests), lint, public export compatibility, packed consumer smoke,
+  extract changelog, create GitHub release, **publish to npm**, **verify
+  published npm consumers** (the blocking gate), record release verification
+  context.
+- Smoke test after publishing: `npm view cross-tab-worker-databus version
+  dist-tags.latest` → `version = '0.20.96'`, `dist-tags.latest = '0.20.96'`, and
+  the registry version list ends `"0.20.94", "0.20.95", "0.20.96"`.
+- Rollback: npm versions are immutable, so a defect ships as `0.20.97` and
+  `v0.20.96` is never moved or reused; `0.20.95` stays published for consumers
+  that need to pin back. The only new user-visible behavior is a `console.warn`,
+  which a consumer can silence by passing a non-empty topic.
+- Follow-up now owned by a later minor: turn the empty-topic warning into a
+  `TypeError` at `subscribe()` / `publish()` / `publishBatch()`, called out in
+  that release's CHANGELOG per the deprecation policy.
+- Update date: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
@@ -4332,6 +4368,9 @@ corroborates the 26-spec collection.)
   local-only: shared-runner timing noise makes numeric CI gates unreliable.)
 - Release-readiness: run the full release checklist dry (verify:published needs a
   published version; everything else verified locally).
+  -> DONE for 0.20.96: the checklist ran end to end against the real publish,
+  including the previously unrunnable `verify:published` gate (Release run
+  35660663344, every named step green).
 
 ## Recovery entry
 
