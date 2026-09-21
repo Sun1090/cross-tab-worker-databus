@@ -45,7 +45,6 @@ export function useCrossTabSubscription<TConfig, TData>(
   let currentBus: CrossTabDataBus<TConfig, TData> | null = null;
   let currentTopic: string | null = null;
   let cleanup: (() => void) | undefined;
-  let latestHandler = handler;
   const stop = () => { cleanup?.(); cleanup = undefined; currentBus = null; currentTopic = null; };
   const sync = () => {
     const nextBus = bus.value;
@@ -55,11 +54,10 @@ export function useCrossTabSubscription<TConfig, TData>(
     if (!nextBus) return;
     currentBus = nextBus;
     currentTopic = nextTopic;
-    cleanup = nextBus.subscribe(nextTopic, message => latestHandler(message));
+    cleanup = nextBus.subscribe(nextTopic, handler);
   };
   watch(bus, sync, { immediate: true });
   if (typeof topic !== 'string') watch(topic, sync);
-  watch(() => handler, value => { latestHandler = value; });
   onBeforeUnmount(stop);
 }
 
