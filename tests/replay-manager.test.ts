@@ -634,6 +634,46 @@ describe('ReplayManager — hydration', () => {
     await settle();
     expect(received).toEqual([1]);
   });
+
+  it('drops a hydrated snapshot that a buffer reset had already superseded', async () => {
+    // resetBuffers() bumps the hydration epoch but not the retry generation, so
+    // an in-flight load stays "current" by generation while belonging to a dead
+    // snapshot. Merging it would repopulate exactly what the reset cleared, and
+    // the replacement hydration would then merge it a second time — delivering
+    // every durable message twice.
+    const loaded = [message('t', 1)];
+    let releaseLoad!: (value: ReadonlyArray<DataBusMessage<Payload>>) => void;
+    let loadCalls = 0;
+    const persistence = {
+      load: () =>
+        new Promise<ReadonlyArray<DataBusMessage<Payload>>>(resolve => {
+          loadCalls += 1;
+          releaseLoad = resolve;
+        }),
+      append: async (_item: DataBusMessage<Payload>) => undefined
+    };
+    const { manager } = createManager({ persistence });
+    manager.start();
+    await settle(4);
+    expect(loadCalls).toBe(1);
+
+    manager.resetBuffers();
+    releaseLoad(loaded);
+    await settle(10);
+    // The superseded snapshot must neither repopulate what the reset cleared nor
+    // mark hydration done for the session that replaces it.
+    expect(manager.getStats()).toMatchObject({ topics: 0, messages: 0 });
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle(4);
+    expect(loadCalls).toBe(2);
+    releaseLoad(loaded);
+    await settle(20);
+
+    expect(received).toEqual([1]);
+    expect(manager.getStats()).toMatchObject({ messages: 1 });
+  });
 });
 
 describe('ReplayManager — persistence appends', () => {
@@ -911,6 +951,39 @@ describe('ReplayManager — retention sweep', () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(harness.persistenceErrors).toHaveLength(1);
     expect(persistence.clearBeforeCalls.length).toBeGreaterThanOrEqual(2);
+    harness.manager.stop();
+  });
+
+  it('reports nothing when a suspend cancels the sweep it had already issued', async () => {
+    // suspend() bumps the retry generation, so an in-flight `clearBefore` belongs
+    // to a pass nobody waits for any more. Reporting its rejection would surface a
+    // failure for cancelled work — the pair of the test above, where the same
+    // rejection from a still-live generation is reported exactly once.
+    let hang = false;
+    let rejectSweep!: (error: unknown) => void;
+    const clearBefore = vi.fn(() => {
+      if (!hang) return Promise.resolve();
+      return new Promise<void>((_, reject) => {
+        rejectSweep = reject;
+      });
+    });
+    const harness = createManager({
+      persistence: { load: vi.fn(async () => []), append: vi.fn(async () => undefined), clearBefore },
+      retentionMs: 1_000,
+      retentionSweepMs: 100
+    });
+    harness.manager.start();
+    await vi.advanceTimersByTimeAsync(0);
+    // Only the periodic sweep is left hanging; the startup prune settles.
+    hang = true;
+    await vi.advanceTimersByTimeAsync(150);
+    expect(clearBefore).toHaveBeenCalledTimes(2);
+
+    harness.manager.suspend();
+    rejectSweep(new Error('transaction aborted while the page was frozen'));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(harness.persistenceErrors).toEqual([]);
     harness.manager.stop();
   });
 });
