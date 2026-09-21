@@ -154,12 +154,31 @@ describe('createStorageEventChannel', () => {
     b.channel.addEventListener('message', event => received.push(event.data));
 
     const writer = hub.writerStorage(a.win);
+    // Each write has to settle before the next one: the hub dispatches with the
+    // value currently stored under the key, so three writes queued in the same
+    // tick would all deliver the last value and the invalid JSON below would
+    // never reach the listener at all.
     writer.setItem('cross-tab-worker-databus:channel:chan', '{broken json');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received, 'a frame that cannot be parsed must be ignored').toEqual([]);
+
     writer.setItem('unrelated:key', JSON.stringify({ seq: 1, message: { type: 'REGISTRY', sourceWorkerId: 'x' } }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received, 'another tenant key must be ignored').toEqual([]);
+
     writer.setItem('cross-tab-worker-databus:channel:chan', JSON.stringify({ nope: true }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(received).toEqual([]);
+    expect(received, 'a valid frame with no seq/message must be ignored').toEqual([]);
+
+    // The channel is still usable afterwards: containment, not a one-way shut
+    // down of the listener.
+    a.channel.postMessage({ type: 'REGISTRY', sourceWorkerId: 'worker-a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received).toEqual([{ type: 'REGISTRY', sourceWorkerId: 'worker-a' }]);
   });
 
   it('keeps identical first writes from different tabs distinct', async () => {
