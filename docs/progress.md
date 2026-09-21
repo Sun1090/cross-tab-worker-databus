@@ -4195,8 +4195,10 @@ corroborates the 26-spec collection.)
 - **Lesson for the ledger:** an uncovered *line* inside a multi-field object
   literal means the field is untested even when a test with the right name
   covers the neighbouring line.
-- **Verification:** `pnpm test:coverage` after this entry; the two assertions pass
-  and fail under the mutation as shown.
+- **Verification:** `pnpm check` (37 files / 859 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `websocket.ts` branch 95.93% → 97.56%,
+  all-files branch 95.90% → 96.01%. Still uncovered there: `113`, `147`, `379`
+  (the superseded-socket arms, each already analysed in the Phase 61 note).
 - **Risks / rollback:** test only.
 - **Updated:** 2026-09-22.
 
