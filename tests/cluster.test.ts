@@ -333,6 +333,70 @@ describe('WorkerClusterRuntime', () => {
     expect(control).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic', undefined);
   });
 
+  it('keeps a tab\'s private topic from migrating to a peer on pagehide', async () => {
+    // A's solo topic must not reach a peer: migrating it would open a server
+    // subscription nothing serves, and the route would outlive every subscriber.
+    // The observable contract is what is pinned here — whichever teardown pass
+    // drops the record first (releaseSubscription's own no-subscribers branch,
+    // or handoffAssignedTopics' guard) both satisfy it, and only this case
+    // exercises "owns a private topic across a pagehide" at all.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'orphan-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'orphan-b' });
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'orphaned-route-handoff',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'orphaned-route-handoff',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: controlB, onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    now += 1;
+    runtimeB.start();
+    runtimeA.subscribe('solo-topic');
+    runtimeA.subscribe('shared-topic');
+    await Promise.resolve();
+    runtimeB.subscribe('shared-topic');
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('solo-topic')).toBe(true);
+    controlA.mockClear();
+    controlB.mockClear();
+
+    envA.pageHide();
+    await Promise.resolve();
+
+    // The shared topic migrates; the solo one disappears with its route record.
+    expect(runtimeB.isAssigned('shared-topic')).toBe(true);
+    expect(runtimeB.isAssigned('solo-topic')).toBe(false);
+    expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'solo-topic', undefined);
+    // Routes are keyed by an opaque hash, so count the surviving records instead
+    // of matching plaintext: only the migrated shared topic may remain.
+    const routeRecords = storage
+      .entries()
+      .filter(([key]) => key.includes(':route:'))
+      .map(([, value]) => JSON.parse(value as string) as {
+        workerId?: string;
+        handoffFromWorkerId?: string;
+        generation?: number;
+      });
+    expect(routeRecords.map(record => [record.workerId, record.handoffFromWorkerId, record.generation])).toEqual([
+      ['worker-b', 'worker-a', 2]
+    ]);
+
+    runtimeB.stop();
+  });
+
   it('completes a four-tab handoff when the pagehide control message is lost', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

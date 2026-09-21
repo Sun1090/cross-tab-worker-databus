@@ -696,6 +696,46 @@ describe('WebSocketTransport', () => {
     transport.stop();
   });
 
+  it('waits indefinitely when the handshake budget is 0 or Infinity', async () => {
+    // docs/api.md and docs/transports.md both promise "`0` or `Infinity` waits
+    // indefinitely", and the armed-timeout branch is the only thing that can
+    // fail an attempt on its own. Nothing pinned that the budget can be turned
+    // off, so a change to the guard would silently start timing out consumers
+    // that opt out.
+    vi.useFakeTimers();
+    try {
+      for (const budget of [0, Number.POSITIVE_INFINITY]) {
+        const sockets: FakeWebSocket[] = [];
+        const transport = new WebSocketTransport({
+          url: 'wss://example.test/ws',
+          webSocketFactory: url => {
+            const socket = new FakeWebSocket(url);
+            sockets.push(socket);
+            return socket;
+          }
+        });
+        const onStatus = vi.fn();
+        const opening = Promise.resolve(
+          transport.start(
+            { url: 'wss://example.test/ws', connectTimeoutMs: budget },
+            { onMessage: () => {}, onStatus, onError: () => {} }
+          )
+        ).then(() => 'resolved', error => error as Error);
+
+        await vi.advanceTimersByTimeAsync(3_600_000);
+        expect(onStatus).not.toHaveBeenCalledWith('error');
+        expect(sockets[0]!.readyState).not.toBe(3);
+
+        sockets[0]!.open();
+        expect(await opening).toBe('resolved');
+        expect(onStatus).toHaveBeenCalledWith('connected');
+        transport.stop();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects start() and reports an error when the handshake times out', async () => {
     vi.useFakeTimers();
     try {
