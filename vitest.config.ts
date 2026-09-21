@@ -30,10 +30,15 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.worker.ts', 'src/workers/centrifuge*.ts'],
       thresholds: {
-        statements: 85,
-        branches: 80,
-        functions: 90,
-        lines: 85
+        // Measured at HEAD: 98.13 / 94.59 / 98.17 / 99.19. The previous
+        // 85/80/90/85 floors were advisory only — a change could lose 10 points
+        // of branch coverage and still pass the release gate. These sit a few
+        // points under the measured values so real regressions fail CI while
+        // ordinary feature work still fits.
+        statements: 96,
+        branches: 92,
+        functions: 96,
+        lines: 97
       }
     }
   }

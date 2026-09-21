@@ -35,7 +35,7 @@ jobs:
       - name: Lint
         run: pnpm lint
       - name: Coverage thresholds
-        # vitest.config.ts carries the coverage floors (85/80/90/85). Running
+        # vitest.config.ts carries the coverage floors (96/92/96/97). Running
         # the gate in CI keeps them enforced instead of advisory.
         run: pnpm test:coverage
       - name: Public export compatibility
