@@ -4178,6 +4178,28 @@ corroborates the 26-spec collection.)
 - **Next:** merge PR #143, then `port-reaper.ts:119` and `trace.ts:449`.
 - **Updated:** 2026-09-22.
 
+## Phase 72 (a binary publication could lose its dedup ID)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Gap found by the line ledger.** `websocket.ts:339` was still listed uncovered
+  although a test named 'propagates complete publication metadata in JSON and
+  metadata-bearing binary frames' existed: that test only ever sent a
+  *timestamp* on the binary frame, so the `messageId` arm of the JSON envelope —
+  the field the comment at `333` exists to protect — had never run.
+- **Pin:** extended the test with a binary publish carrying only `messageId`, and
+  one carrying both fields.
+
+  | Mutation | Result |
+  |---|---|
+  | `...(messageId === undefined ? {} : { messageId })` deleted from the binary envelope | `expected '{"op":"publish","topic":"market.bin",…' to be …` — the frame ships without its dedup ID |
+- **Lesson for the ledger:** an uncovered *line* inside a multi-field object
+  literal means the field is untested even when a test with the right name
+  covers the neighbouring line.
+- **Verification:** `pnpm test:coverage` after this entry; the two assertions pass
+  and fail under the mutation as shown.
+- **Risks / rollback:** test only.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

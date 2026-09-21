@@ -303,6 +303,25 @@ describe('WebSocketTransport', () => {
       data: [1, 2],
       timestamp: 43
     }));
+
+    // The dedup ID is the field a binary frame has the most reason to keep: the
+    // compact wire form has no room for it, so it must ride in the JSON envelope
+    // — with or without a timestamp alongside.
+    transport.publish('market.bin', new Uint8Array([3, 4]).buffer, { messageId: 'm-2' });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.bin',
+      data: [3, 4],
+      messageId: 'm-2'
+    }));
+    transport.publish('market.bin', new Uint8Array([5]).buffer, { messageId: 'm-3', timestamp: 44 });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.bin',
+      data: [5],
+      messageId: 'm-3',
+      timestamp: 44
+    }));
   });
 
   it('accepts nested publication envelopes for forward-compatible servers', () => {
