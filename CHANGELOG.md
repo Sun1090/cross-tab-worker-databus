@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Deprecated
+- An empty topic string (`""`) is deprecated in `subscribe()`, `publish()` and `publishBatch()`. It is still accepted and still flows through routing as a literal channel, but no transport can address such a channel, so the subscription it creates can never receive anything. The bus now logs one `console.warn` per instance the first time any of the three is called with `""`. Following the pre-1.0 deprecation policy, a future minor will reject it at that boundary with a `TypeError`, like the existing option guards. Callers using `""` as a topic should move to a real channel name.
+
+### Changed
+- Documentation and tests only, otherwise: seven behaviors that could not fail their tests are now mutation-verified — the departing-owner handoff that deletes an unserved route instead of migrating it onto a live peer, the owner's release of its transport subscription when the last remote subscriber leaves, a cancelled durable-retention sweep staying silent, a superseded hydration snapshot being dropped rather than merged, the default platform `WebSocket` construction (subprotocols included), `ready()` surfacing the recorded transport error once the recovery budget is spent, and the Vue adapter containing a rejected `ready()`. `docs/architecture.md` (en + zh) gains the **Unserved route drop** and **Last-subscriber release** invariants; `AGENTS.md` records the two `ChannelHub`/batching-writer traps and the duplicated-guard mutation trap that made early drafts decorative. `vue.ts` and `hooks.ts` are now at 100% on all four coverage metrics, and `cluster.ts` is down to one uncovered line.
+- `typescript-eslint` refreshed to `8.70.1`. TypeScript stays at `6.0.3`: the lint toolchain's peer range is still `typescript >=4.8.4 <6.1.0`, so a 7.x install breaks the lint gate before it touches this project's own types.
+
 ## [0.20.95] - 2026-09-22
 
 ### Fixed

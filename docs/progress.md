@@ -4230,6 +4230,50 @@ corroborates the 26-spec collection.)
   `port-reaper.ts:119`, `data-bus.ts` remaining legs).
 - **Updated:** 2026-09-22.
 
+## Phase 74 (why no release, and the first deprecation cycle)
+
+- **Release decision: deferred.** `git diff v0.20.95..HEAD -- src/` is empty:
+  phases 63-73 changed tests, documentation and a dev dependency only, so the
+  published artifact would be byte-identical apart from the version string. A
+  release now is npm churn with no consumer benefit, so 0.20.96 waits until there
+  is a runtime change to ship. Task entries for the freeze were closed rather than
+  left dangling, and this record is the reason.
+- **The ledger sweep is done.** Every remaining zero-count `if` leg in `src` is
+  now classified by proof rather than assumption: dominated
+  (`replay-manager` `410/419/466/483/525`, `data-bus` `528`, `cluster` `491`),
+  unreachable-by-construction (`centrifuge` `341` — `start()` returns early when a
+  backend exists and every teardown path calls `clearHeartbeat()`; `centrifuge`
+  `286`'s synchronous arm — the provider cannot swap the backend before throwing),
+  or a missing boundary check rather than a missing test (`centrifuge-session`
+  `219`, which motivated the work below).
+- **New: the empty-topic deprecation cycle.** `bus.subscribe('')` was verified to
+  be accepted end-to-end today: the opaque route/subscriber records are written and
+  `transport.subscribe('')` is issued for a channel no transport can address, so
+  the subscription silently never fires. `CrossTabDataBus` now warns once per
+  instance (latch `emptyTopicWarned`, called from `subscribe`/`publish`/
+  `publishBatch`) and changes no behavior; `docs/api.md` + `docs/zh/api.md`
+  document the contract and `CHANGELOG.md` gains the first `### Deprecated`
+  section, which is what makes the next release worth cutting.
+- **Mutations run against the new code:**
+
+  | Mutation | Result |
+  |---|---|
+  | all three `warnEmptyTopic` call sites removed | `expected \"warn\" to be called 1 times, but got 0 times` |
+  | the `emptyTopicWarned` latch removed | `expected \"warn\" to be called 1 times, but got 4 times` |
+- **Two drafts dropped as decorative before commit:** a WebSocket stale-handshake-
+  budget case (`start()` shares the in-flight gate instead of replacing the socket,
+  so `websocket.ts:147`'s stale arm has no reachable construction) and a Blob
+  decode-failure case that passed with its guard deleted, because stopping the
+  transport removes the handler pair the mutant reports through. Both are recorded
+  here instead of shipped.
+- **Verification:** `pnpm check`, `pnpm lint`, `pnpm test:coverage` with the new
+  test — numbers recorded in the commit.
+- **Risks / rollback:** additive warning plus docs; rollback = revert the commit.
+  Callers that treat `console.warn` output as an error condition would notice the
+  new line, but only for input that already could not work.
+- **Next:** with the deprecation shipped, cut 0.20.96 through the full checklist.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
