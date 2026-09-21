@@ -4147,6 +4147,37 @@ corroborates the 26-spec collection.)
   `cluster.ts` (`355`, `360`, `582`, `1347`) and `port-reaper.ts:119`.
 - **Updated:** 2026-09-22.
 
+## Phase 71 (a batch could be captured by an unrelated wildcard — and the mutant that nearly proved it wrong)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Pin — `does not let an unrelated owned pattern capture a batch for a remote
+  topic`** (`cluster.ts:582`). `publishBatch()`'s wildcard probe walks every
+  pattern the worker owns; A owns `chat.*`, B owns `metrics.cpu`. Dropping
+  `topicMatchesPattern` from that condition lets A's first owned pattern win, so
+  the batch is dispatched locally and never reaches its owner.
+- Phase 65 had this leg as "defensive"; it is the only place the batch path
+  consults the matcher, and the pre-existing wildcard tests all use
+  single-item `publish()`, which runs the *other* copy of the block (`541`).
+
+  | Mutation | Result |
+  |---|---|
+  | matcher dropped from **both** probe blocks | `expected [] to have a length of 2 but got +0` — A keeps both `PUBLISH` frames, B receives none |
+- **How nearly this was recorded as a negative result:** the first mutation
+  attempt used a non-global `perl -0pi -e 's/…/…/'`, which edited only the
+  `publish()` twin. The test stayed green, the draft was about to be deleted as
+  decoration, and the `console.log` probe that finally explained it needed two
+  tries because its anchor indentation was wrong (a substitution that matches
+  nothing reports success). Restored with `git checkout -- src/core/cluster.ts`
+  each time; `git diff --stat src/` is empty before this commit. The lesson —
+  verify the mutant landed before trusting a green result — is now written into
+  `AGENTS.md` next to the two ChannelHub traps from Phase 67.
+- **Verification:** `pnpm check` (37 files / 859 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `cluster.ts` branch 93.63% → 93.89%
+  (still one uncovered line, `397`), all-files branch 95.85% → 95.90%.
+- **Risks / rollback:** one test plus documentation; rollback = revert.
+- **Next:** merge PR #143, then `port-reaper.ts:119` and `trace.ts:449`.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
