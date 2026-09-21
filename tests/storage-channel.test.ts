@@ -456,19 +456,63 @@ describe('createBrowserEnvironment channel fallback', () => {
     }
   });
 
-  it('returns a storage-event channel when the fallback is enabled', () => {
-    const env = createBrowserEnvironment({ channelFallback: 'storage-event' });
-    const original = globalThis.BroadcastChannel;
+  it('returns a working storage-event channel when the fallback is enabled', () => {
+    // This case used to read `if (channel) expect(...postMessage...).toBe
+    // ('function'); else expect(channel).toBeNull();` — both branches of the
+    // union were accepted, so no value of `channel` could fail it and the
+    // browser path it names was unpinned. Stub a live window + localStorage so
+    // the fallback has what a real document provides, then assert the wiring:
+    // which storage the envelope lands in and which event source delivers it.
+    const localStorage = new MemoryStorage();
+    const listeners = new Set<(event: { key: string | null; newValue: string | null }) => void>();
+    vi.stubGlobal('window', {
+      localStorage,
+      addEventListener: (_type: string, listener: (event: { key: string | null; newValue: string | null }) => void) => {
+        listeners.add(listener);
+      },
+      removeEventListener: (_type: string, listener: (event: { key: string | null; newValue: string | null }) => void) => {
+        listeners.delete(listener);
+      }
+    });
+    vi.stubGlobal('BroadcastChannel', undefined);
     try {
-      // @ts-expect-error - simulate absence
-      globalThis.BroadcastChannel = undefined;
-      const channel = env.createChannel('probe');
-      // jsdom/node may lack window storage events; null is acceptable, and a
-      // real browser yields a working channel. Only assert the type contract.
-      if (channel) expect(typeof channel.postMessage).toBe('function');
-      else expect(channel).toBeNull();
+      const env = createBrowserEnvironment({ channelFallback: 'storage-event' });
+      const channel = env.createChannel('probe-fb');
+      expect(channel, 'a window with localStorage must yield the fallback channel').not.toBeNull();
+
+      const key = 'cross-tab-worker-databus:channel:probe-fb';
+      const received: WorkerClusterMessage[] = [];
+      channel!.addEventListener('message', event => received.push(event.data));
+      const frame: WorkerClusterMessage = { type: 'REGISTRY', sourceWorkerId: 'worker-fb' };
+      channel!.postMessage(frame);
+
+      const stored = localStorage.getItem(key);
+      expect(stored, 'the envelope must travel through window.localStorage').toBeTruthy();
+      expect(JSON.parse(stored!).message).toEqual(frame);
+
+      for (const listener of [...listeners]) listener({ key, newValue: stored });
+      expect(received).toEqual([frame]);
+
+      channel!.close();
+      expect(listeners.size, 'close must detach the window storage listener').toBe(0);
+      expect(localStorage.getItem(key), 'close must not leave the payload behind').toBeNull();
     } finally {
-      globalThis.BroadcastChannel = original;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('degrades to null when the window has no event source to listen on', () => {
+    // A storage-event channel needs both a store and an event source. With a
+    // window that exposes localStorage but cannot dispatch `storage` (a
+    // stripped webview shell), the fallback must return null so the runtime
+    // degrades to local mode instead of building a channel that never fires.
+    vi.stubGlobal('window', { localStorage: new MemoryStorage() });
+    vi.stubGlobal('BroadcastChannel', undefined);
+    try {
+      const env = createBrowserEnvironment({ channelFallback: 'storage-event' });
+      expect(env.createChannel('probe-no-events')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });
