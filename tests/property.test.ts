@@ -31,18 +31,8 @@ import { PRUNE_STRATEGY } from '../src/utils/constants';
 import { BatchingStorageWriter } from '../src/core/storage-batch';
 import { createOpaqueKey } from '../src/core/hash';
 import { TAB_VISIBILITY, WORKER_ROLE, WORKER_STATUS } from '../src/utils/constants';
+import { mulberry32 } from './fakes';
 
-/** Small deterministic PRNG (mulberry32). */
-function rng(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const pick = <T>(random: () => number, values: readonly T[]): T =>
   values[Math.floor(random() * values.length)] as T;
@@ -116,7 +106,7 @@ function arbitraryValue(random: () => number, depth = 0): unknown {
 
 describe('selectActiveWorkers invariants', () => {
   it('returns a non-empty subset of the input, bounded by maxActiveWorkers, and never throws', () => {
-    const random = rng(0xac71);
+    const random = mulberry32(0xac71);
     for (let i = 0; i < 500; i += 1) {
       const size = Math.floor(random() * 8);
       const workers = Array.from({ length: size }, () => arbitraryWorker(random));
@@ -134,7 +124,7 @@ describe('selectActiveWorkers invariants', () => {
 
 describe('selectRebalanceTarget invariants', () => {
   it('returns a member of the input or null, and never throws', () => {
-    const random = rng(0x2e6b);
+    const random = mulberry32(0x2e6b);
     for (let i = 0; i < 500; i += 1) {
       const size = 1 + Math.floor(random() * 6);
       const workers = Array.from({ length: size }, () => arbitraryWorker(random));
@@ -149,7 +139,7 @@ describe('selectRebalanceTarget invariants', () => {
 
 describe('approximatePayloadBytes is a total function', () => {
   it('returns a non-negative finite estimate for arbitrary values, including cycles', () => {
-    const random = rng(0xbeef);
+    const random = mulberry32(0xbeef);
     for (let i = 0; i < 1_000; i += 1) {
       const value = arbitraryValue(random);
       const estimate = approximatePayloadBytes(value);
@@ -166,7 +156,7 @@ describe('approximatePayloadBytes is a total function', () => {
 
 describe('effectiveWorkerLoad is a total function', () => {
   it('always returns a finite score for arbitrary (corrupt) worker records and weights', () => {
-    const random = rng(0x5eed);
+    const random = mulberry32(0x5eed);
     for (let i = 0; i < 2_000; i += 1) {
       const worker = arbitraryWorker(random);
       const options = arbitraryWeighting(random);
@@ -181,7 +171,7 @@ describe('effectiveWorkerLoad is a total function', () => {
 
 describe('selectLeastLoadedWorker is order-independent and total', () => {
   it('returns the minimum score with the workerId tie-break, regardless of input order', () => {
-    const random = rng(0xc0ffee);
+    const random = mulberry32(0xc0ffee);
     for (let i = 0; i < 500; i += 1) {
       const size = 1 + Math.floor(random() * 6);
       const workers = Array.from({ length: size }, () => arbitraryWorker(random));
@@ -209,7 +199,7 @@ describe('selectLeastLoadedWorker is order-independent and total', () => {
 
 describe('parseDataBusPublication never throws and yields a valid topic', () => {
   it('returns null or a publication whose topic is a non-empty string', () => {
-    const random = rng(0x1dea);
+    const random = mulberry32(0x1dea);
     for (let i = 0; i < 2_000; i += 1) {
       const value = arbitraryValue(random);
       const fallback = random() < 0.5 ? pick(random, [undefined, '', 'fallback.topic', 'x'] as const) : undefined;
@@ -234,7 +224,7 @@ describe('parseDataBusPublication never throws and yields a valid topic', () => 
 
 describe('parseDataBusPublication metadata normalization', () => {
   it('only ever emits a non-empty string messageId and a finite timestamp', () => {
-    const random = rng(0x0b1e);
+    const random = mulberry32(0x0b1e);
     for (let i = 0; i < 2_000; i += 1) {
       const value = arbitraryValue(random);
       const result = parseDataBusPublication(value, 'fallback.topic');
@@ -281,7 +271,7 @@ describe('topicMatchesPattern invariants', () => {
 
 describe('serializeError is always structured-cloneable', () => {
   it('survives structuredClone for arbitrary values, including functions and symbols', () => {
-    const random = rng(0xe44);
+    const random = mulberry32(0xe44);
     const extras: unknown[] = [() => undefined, Symbol('s'), { fn: () => undefined }];
     for (let i = 0; i < 1_000; i += 1) {
       const value = i % 5 === 0 ? extras[i % extras.length] : arbitraryValue(random);
@@ -293,7 +283,7 @@ describe('serializeError is always structured-cloneable', () => {
 
 describe('DedupManager invariants under random sequences', () => {
   it('never exceeds maxEntries and keeps accepted+suppressed accounting exact', () => {
-    const random = rng(0xdead);
+    const random = mulberry32(0xdead);
     for (let round = 0; round < 200; round += 1) {
       const maxEntries = 1 + Math.floor(random() * 8);
       let now = 0;
@@ -319,7 +309,7 @@ describe('DedupManager invariants under random sequences', () => {
 
 describe('ReplayManager ring invariants under random sequences', () => {
   it('never exceeds the per-topic cap and never throws', () => {
-    const random = rng(0xfeed);
+    const random = mulberry32(0xfeed);
     for (let round = 0; round < 100; round += 1) {
       const maxPerTopic = 1 + Math.floor(random() * 5);
       const manager = new ReplayManager<number>({
@@ -350,7 +340,7 @@ describe('BatchingStorageWriter drains under random storage failures', () => {
   it('never throws, stays bounded, and drops every stuck key', async () => {
     vi.useFakeTimers();
     try {
-      const random = rng(0x51ab);
+      const random = mulberry32(0x51ab);
       for (let round = 0; round < 25; round += 1) {
         const failProbability = random();
         const backing = {
@@ -384,7 +374,7 @@ describe('BatchingStorageWriter drains under random storage failures', () => {
 
 describe('createOpaqueKey', () => {
   it('is deterministic and always a 32-char lowercase hex digest', () => {
-    const random = rng(0xf00d);
+    const random = mulberry32(0xf00d);
     for (let i = 0; i < 1_000; i += 1) {
       const value = String(arbitraryValue(random));
       const key = createOpaqueKey(value);
