@@ -3782,6 +3782,34 @@ corroborates the 26-spec collection.)
 - Whole-suite functions 98.17% → 98.36%. Verified with typecheck, lint, build,
   and 849 unit tests.
 
+## Phase 63 (a documented option nobody tested, and a route contract with no case)
+
+- `docs/api.md:412` and `docs/transports.md:164` both promise `connectTimeoutMs`
+  "`0` or `Infinity` waits indefinitely", and `src/websocket.ts:145`'s
+  `Number.isFinite(timeoutMs) && timeoutMs > 0` guard had never taken its false
+  leg — no test ever disabled the handshake budget. Added
+  'waits indefinitely when the handshake budget is 0 or Infinity': it advances
+  the fake clock an hour, asserts no `error` status and no close, then opens and
+  expects `start()` to resolve. Mutating the guard to `if (true)` — which arms a
+  `0 ms`/`Infinity ms` timer — leaves the existing suite green (exit 0) and fails
+  the new case (exit 1).
+- `WorkerClusterRuntime` had no case combining "owns a topic nobody else
+  subscribes to" with a `pagehide`. The existing pagehide tests all subscribe on
+  both tabs. Added 'keeps a tab's private topic from migrating to a peer on
+  pagehide': the shared topic migrates (one route record, `worker-b`,
+  `handoffFromWorkerId: worker-a`, generation bumped) and the private one leaves
+  no record behind.
+- Investigated the handoff guard at `cluster.ts:482-485` (drop the route when no
+  remaining tab subscribes). Deleting it keeps the whole cluster and data-bus
+  suite green, and the new case passes either way: `pause()` releases local
+  subscriptions *before* `handoffAssignedTopics()` runs, so
+  `releaseSubscription()`'s own no-subscribers branch has already removed the
+  record and the handoff loop then skips it at `previous?.workerId !==
+  this.workerId`. Kept as a durable-storage guard (another tab can drop the last
+  subscriber record between a read and a write) and the new test is named after
+  the contract rather than that branch, since either path satisfies it.
+- 851 unit tests, typecheck, and lint green.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
