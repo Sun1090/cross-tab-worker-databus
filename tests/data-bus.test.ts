@@ -1588,6 +1588,40 @@ describe('CrossTabDataBus', () => {
     expect(() => new CrossTabDataBus({ clusterKey: 'bad-max-float', transport: new FakeTransport(), recovery: { maxAttempts: 1.5 } })).toThrow('recovery.maxAttempts');
   });
 
+  it('warns once per bus about an empty topic and keeps the legacy behavior', async () => {
+    // The deprecation is announced, not enforced: `''` still flows through
+    // routing as a literal channel that reaches the transport. Two things have to
+    // hold — exactly one warning however many empty-topic calls follow, and the
+    // calls themselves behave exactly as they did before.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'empty-topic' });
+      const transport = new FakeTransport<unknown>();
+      const bus = new CrossTabDataBus({
+        clusterKey: 'empty-topic',
+        environment: environment.environment,
+        initialConfig: {},
+        transport
+      });
+      bus.subscribe('', vi.fn());
+      await bus.ready();
+      bus.subscribe('', vi.fn());
+      bus.publish('', { a: 1 });
+      bus.publishBatch('', [{ data: { b: 2 } }, { data: { c: 3 } }]);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0]![0])).toContain('no transport can route');
+      expect(transport.subscribeCalls).toEqual(['']);
+      expect(transport.publishCalls.length).toBeGreaterThan(0);
+      // A non-empty topic never warns.
+      bus.subscribe('real.topic', vi.fn());
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      await bus.stop();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('resets recovery diagnostics after an explicit stop and restart', async () => {
     vi.useFakeTimers();
     const events: unknown[] = [];

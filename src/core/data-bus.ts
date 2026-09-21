@@ -256,6 +256,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // themselves demand: the failure path starts an on-demand reopen instead of
   // stranding them until some unrelated future operation arrives.
   private recoveryWaiters = 0;
+  // Latch for the empty-topic deprecation warning so a hot publish path cannot
+  // fill the console. It is per-bus and never reset: the warning is about the
+  // caller's code, not about a transient runtime condition.
+  private emptyTopicWarned = false;
   /** Monotonic generation incremented on every successful transport open.
    * Stays in lockstep with `lastSuccessAt` so callers can detect that the
    * transport has been reopened even if the timestamp window is short. */
@@ -829,6 +833,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       return () => {};
     }
     this.ensureStarted();
+    if (topic === '') this.warnEmptyTopic('subscribe');
     const handlers = this.topicHandlers.get(topic) ?? new Set<DataBusMessageHandler<TData>>();
     const wasUnused = handlers.size === 0;
     handlers.add(handler);
@@ -887,8 +892,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.dedupManager.reset();
   }
 
+  /** Warn (once per bus) that an empty topic is deprecated, without changing
+   * behavior yet. `''` flows through routing as a literal channel, so the
+   * subscription it creates can never be addressed by a transport: the message
+   * silently goes nowhere. A future minor rejects it at this boundary. */
+  private warnEmptyTopic(operation: string): void {
+    if (this.emptyTopicWarned) return;
+    this.emptyTopicWarned = true;
+    console.warn(
+      `cross-tab-worker-databus: ${operation}("") addresses a channel no transport can route. ` +
+      'Use a non-empty topic; passing "" is planned to throw in a future minor.'
+    );
+  }
+
   /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
+    if (topic === '') this.warnEmptyTopic('publish');
     this.ensureStarted();
     if (this.rejectPublishDuringStop('publish')) return;
     if (!this.cluster.publish(topic, data, options)) {
@@ -911,6 +930,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   ): void {
     this.ensureStarted();
     if (items.length === 0) return;
+    if (topic === '') this.warnEmptyTopic('publishBatch');
     if (this.rejectPublishDuringStop('publishBatch')) return;
     if (items.length === 1) {
       const first = items[0]!;
