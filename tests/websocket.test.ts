@@ -880,6 +880,39 @@ describe('WebSocketTransport', () => {
     );
     expect(seen).toEqual([['chat.v1']]);
   });
+
+  it('resolves the platform WebSocket constructor when no factory is injected', () => {
+    // Every other case injects a factory, so the default resolution — the path an
+    // actual browser takes — never ran. Dropping the `protocols` argument there
+    // would silently disable subprotocol negotiation.
+    const constructed: Array<{
+      socket: FakeWebSocket;
+      args: [string, string | string[] | undefined];
+    }> = [];
+    class PlatformWebSocket extends FakeWebSocket {
+      constructor(url: string, protocols?: string | string[]) {
+        super(url, protocols);
+        constructed.push({ socket: this, args: [url, protocols] });
+      }
+    }
+    vi.stubGlobal('WebSocket', PlatformWebSocket);
+    try {
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        protocols: ['chat.v1']
+      });
+      void transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
+      );
+      expect(constructed.map(entry => entry.args)).toEqual([['wss://example.test/ws', ['chat.v1']]]);
+      // Let the handshake settle so the pending connect budget is released.
+      constructed[0]!.socket.open();
+      void transport.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('createWebSocketDataBus', () => {
