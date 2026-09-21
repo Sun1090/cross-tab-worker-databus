@@ -42,6 +42,35 @@ describe('Vue composables adapter', () => {
     expect(bus.stop).toHaveBeenCalled();
   });
 
+  it('contains a rejected ready() on the bus it publishes', async () => {
+    // The composable fires `ready()` for diagnostics only, so a transport that
+    // refuses to open must neither escape as an unhandled rejection nor stop the
+    // bus from being handed to the caller — the caller owns the retry. Pinned
+    // with a thenable that records whether a rejection handler was installed
+    // (deleting `.catch(…)`, or handing it a non-function, fails here).
+    let handlerInstalled = false;
+    const bus = fakeBus();
+    bus.ready = vi.fn(() => ({
+      catch: (handler: (reason: unknown) => void) => {
+        handlerInstalled = typeof handler === 'function';
+        if (handlerInstalled) handler(new Error('transport refused'));
+        return { catch: () => undefined };
+      }
+    })) as unknown as typeof bus.ready;
+    const host = document.createElement('div');
+    let active: Ref<CrossTabDataBus<unknown, unknown> | null> | null = null;
+    const app = createApp(defineComponent({ setup() {
+      active = useCrossTabDataBus(() => bus) as Ref<CrossTabDataBus<unknown, unknown> | null>;
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+
+    expect(handlerInstalled).toBe(true);
+    expect(active!.value).toBe(bus);
+    app.unmount();
+  });
+
   it('rebinds when the bus ref changes', async () => {
     const first = fakeBus();
     const second = fakeBus();
