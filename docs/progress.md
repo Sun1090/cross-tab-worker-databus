@@ -3782,6 +3782,48 @@ corroborates the 26-spec collection.)
 - Whole-suite functions 98.17% → 98.36%. Verified with typecheck, lint, build,
   and 849 unit tests.
 
+## Release 0.20.95 (2026-09-22)
+
+- Version `0.20.95` (patch). Release commit on `main`: `b1dbc72`
+  (`chore(release): prepare 0.20.95 (#136)`, PR #136 squash-merged). Annotated
+  tag `v0.20.95` pushed at that exact commit; Release workflow run
+  `35642947419` finished with conclusion `success`.
+- Scope: the test-integrity run since 0.20.94 — Phases 57-63, PRs #130-#137.
+  Unreachable defensive branches removed from `BatchingStorageWriter`,
+  `DedupManager`, `WorkerClusterRuntime` and `CentrifugeWorkerTransport`; the
+  React adapter's unreachable lifecycle generation ref removed; the Vitest
+  `rejects.toThrow` nullish-reason hole closed with `expectRejectionMessage()`;
+  ten behaviors given mutation-verified regressions.
+- Verification before tagging, all green: `pnpm check`, `pnpm lint`,
+  `pnpm test:coverage` (849 tests; 98.42 / 95.38 / 98.36 / 99.22 against floors
+  96 / 92 / 96 / 97), `pnpm bench` (28 hot-path cases), `pnpm test:e2e` (27
+  passed), `pnpm verify:pack`, `pnpm verify:compat` (`0.20.95 preserves public
+  exports and type metadata from v0.20.94`),
+  `pnpm audit --registry=https://registry.npmjs.org` (no known vulnerabilities),
+  `git diff --check`, and `npm pack --dry-run --json` (109 files: dist, docs,
+  READMEs, CHANGELOG, LICENSE — no `docs/progress.md`, no tests, no bench
+  archive).
+- Benchmark gate: the first attempt failed at `publish/dedicated/perMessageMs
+  +75.7%`. Investigated rather than waved off — identical code measured 49.86 ms
+  then 71.07 ms on consecutive runs while `dedup1000Ms` and
+  `traceAndPublish1000Ms` *improved* 42% and 31% in the same report, and a
+  micro-benchmark of the only hot paths touched (the bounded-map eviction
+  rewrites) measured 80–86 ns/op for all three loop variants, inside that
+  variant's own run-to-run variance. Two further runs gave 49.4 ms and the gate
+  reported `OK`. Recorded in both release checklists.
+- Workflow steps, each `success`: validate release version and notes, verify,
+  lint, public export compatibility, packed consumer smoke, extract changelog,
+  create GitHub release, **publish to npm**, **verify published npm consumers**,
+  record release verification context.
+- Smoke test after publishing: the public registry lists `0.20.95` with
+  `dist-tags.latest = 0.20.95`, and an independent local repeat of the
+  published-consumer gate reported
+  `[npm] verified published cross-tab-worker-databus@0.20.95 ESM/CJS consumers`.
+- Rollback: npm versions are immutable, so a defect ships as `0.20.96` and the
+  tag is never moved or reused; `0.20.94` remains published for consumers that
+  need to pin back.
+- Update date: 2026-09-22.
+
 ## Phase 63 (a documented option nobody tested, and a route contract with no case)
 
 - `docs/api.md:412` and `docs/transports.md:164` both promise `connectTimeoutMs`
