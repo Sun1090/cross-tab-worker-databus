@@ -4274,6 +4274,50 @@ corroborates the 26-spec collection.)
 - **Next:** with the deprecation shipped, cut 0.20.96 through the full checklist.
 - **Updated:** 2026-09-22.
 
+## Release 0.20.96 freeze (2026-09-22)
+
+- **Version / status:** 0.20.96, frozen on branch `chore/release-0.20.96`
+  (from main at `7e73273`, the merge of #145). Release content is the
+  empty-topic deprecation cycle plus the phases 63-74 verification sweep; the
+  artifact differs from 0.20.95 only by `src/core/data-bus.ts`.
+- **Completed work:** version bump; `## [0.20.96] - 2026-09-22` CHANGELOG
+  section (first `### Deprecated` entry in this project); `## 0.20.96 delivered
+  scope` added to both roadmap files with the release line updated; benchmark
+  trend docs regenerated from the 42-report archive.
+- **Changed files:** `package.json`, `CHANGELOG.md`, `docs/roadmap.md`,
+  `docs/zh/roadmap.md`, `docs/benchmarks.md`, `docs/zh/benchmarks.md`,
+  `docs/progress.md`.
+- **Verification (all run locally on this branch):**
+  `pnpm check` → typecheck + build + 37 files / 861 tests;
+  `pnpm lint` → clean; `pnpm test:coverage` → floors hold (98.62 / 96.02 /
+  98.54 / 99.38 measured against 96 / 92 / 96 / 97);
+  `pnpm bench` → 3 files / 28 baselines;
+  `pnpm test:e2e` → 27/27 in real Chromium, including the BFCache and
+  dropped-ACK handoff cases;
+  `pnpm bench:browser` twice → `pnpm bench:compare --fail-above-pct 50` →
+  `OK: no metric regressed more than 50%` (worst `traceAndPublish1000Ms`
+  +44.9%, `publish/shared/perMessageMs` +31.3%, `publish/dedicated` improved
+  6.2%; the known bimodal hot-path metrics measured 24.3 ms then 15.3 ms for
+  `dedup1000Ms` across the two runs);
+  `pnpm verify:compat` → `0.20.96 preserves public exports and type metadata
+  from v0.20.95`; `pnpm verify:pack` → ESM/CJS root and every subpath import
+  from `cross-tab-worker-databus-0.20.96.tgz`;
+  `pnpm audit --registry=https://registry.npmjs.org` → no known vulnerabilities;
+  `npm pack --dry-run --json` → 109 files, 912 kB unpacked, dist + shipped docs
+  only (no `tests/`, `e2e/`, `scripts/`, `docs/progress.md`);
+  `git diff --check` → clean.
+- **Migration / rollback check:** no public export, subpath, type field or
+  protocol frame changed. The only behavioral change is additive: a
+  `console.warn` on empty-topic calls, with the removal planned for a later
+  minor per the deprecation policy. Rollback = revert the release commit and
+  never move a published tag.
+- **Blockers:** none. Publishing happens through the tag-triggered Release
+  workflow (`NPM_TOKEN`); the repository does not publish from the assistant.
+- **Next:** merge this PR, tag the exact merged commit as `v0.20.96`, push only
+  the tag, and watch the Release workflow through the blocking
+  `verify:published` gate.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
