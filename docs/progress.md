@@ -4008,6 +4008,72 @@ corroborates the 26-spec collection.)
   mutation.
 - **Updated:** 2026-09-22.
 
+## Phase 68 (the cancelled retention sweep, and the replay-manager legs that are actually dominated)
+
+- **Status:** complete. Branch `test/replay-cancelled-sweep-silence`.
+- **Pin — `reports nothing when a suspend cancels the sweep it had already
+  issued`** (`replay-manager.ts:496`). The retention loop swallows a rejection
+  once the retry generation has moved on. The leg had zero counts, so the
+  suppression was untested — and this is the one persistence-cancellation path
+  whose failure is *not* covered by a nearby check, because the pass reports
+  through the injected `onPersistenceError` sink directly.
+
+  | Mutation | Result |
+  |---|---|
+  | `if (generation === this.retryGeneration) …` → report unconditionally | `expected [ …(1) ] to deeply equal []` |
+
+  The pass is left in flight by replacing `clearBefore` with a promise the test
+  rejects itself, after the startup prune has settled. The pair test
+  ('reports a sweep failure without stopping the loop') pins the opposite leg, so
+  the two together pin the condition rather than one outcome.
+- **Pin — `drops a hydrated snapshot that a buffer reset had already superseded`**
+  (`replay-manager.ts:420`). `resetBuffers()` bumps the hydration epoch *without*
+  touching the retry generation, so an in-flight `load()` still looks current by
+  generation while belonging to a dead snapshot. Merging it repopulates exactly
+  what the reset cleared and marks hydration complete for the session that should
+  replace it.
+
+  | Mutation | Result |
+  |---|---|
+  | `if (epoch !== this.hydrationEpoch) return;` deleted | `expected { enabled: true, topics: 1, … } to match object { topics: 0, messages: 0 }` — the superseded snapshot is back in the rings |
+- **Ledger closed for `replay-manager.ts`.** Phase 65 recorded the remaining
+  zero-count legs as "re-checks after each `await`" without proving domination.
+  They are now proven, each by the mutation that would have to happen first:
+  - `419` (`generation !== retryGeneration` after `load()`) — `load()` is called
+    through `withPersistenceRetry`, whose own post-operation check (`530`) throws
+    for exactly the same condition before `hydrate()` ever sees the result. Proved
+    by deleting `419`: a third draft test that watched the reported cancellation
+    stayed green, i.e. it duplicated the existing
+    'suspend() cancels an in-flight retry' pin, so it was dropped rather than
+    shipped as decoration.
+  - `410` (`!this.buffers || !this.persistence`) — `hydrate()` is reached only
+    from the guarded `ensureHydrated()` path, which returns before this when no
+    persistence backend exists.
+  - `466` — the hydration catch reports a cancelled generation at `458` first, so
+    the epoch arm below it needs a bump that leaves the generation alone *and* an
+    operation that fails rather than resolving; the only epoch-only bump
+    (`resetBuffers`) also clears `hydration`, and the retry wrapper cancels the
+    in-flight failure the same way `419` is cancelled. Left in place as the
+    belt-and-braces guard it is documented to be.
+  - `483` (`!this.persistence?.clearBefore`) — the scheduling callers
+    (`156`, `290`, `415`) test that capability first.
+  - `525` (top-of-loop generation check) — `544` throws on the same condition
+    before the loop can re-enter, so the guard cannot fire first.
+- **Incident while verifying:** one mutation command carried a stray
+  `cp /tmp/rm.bak src/core/cluster.ts`, overwriting the cluster source with the
+  replay-manager backup. It was caught by `git diff --stat src/` immediately after
+  the run, restored with `git checkout -- src/core/cluster.ts`, and re-verified
+  (80/80 cluster tests, full suite below). No commit ever contained it.
+- **Verification:** `pnpm typecheck`, `pnpm lint`, `pnpm test:coverage` —
+  37 files / 856 tests, floors hold; `replay-manager.ts` branch
+  93.93% → 95.15% and all-files branch 95.69% → 95.80%, with only the dominated
+  legs listed above left. `cluster.ts` reported its post-#141 numbers unchanged
+  (98.93 / 93.63), which is also the check that the restore above was complete.
+- **Risks / rollback:** test only; rollback = revert the commit.
+- **Next:** the same leg-triage for `data-bus.ts` (`528/621/802/1291` carry
+  behaviour, not just defensiveness) and `websocket.ts:411`.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
