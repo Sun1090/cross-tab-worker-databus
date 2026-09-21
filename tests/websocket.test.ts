@@ -303,6 +303,25 @@ describe('WebSocketTransport', () => {
       data: [1, 2],
       timestamp: 43
     }));
+
+    // The dedup ID is the field a binary frame has the most reason to keep: the
+    // compact wire form has no room for it, so it must ride in the JSON envelope
+    // — with or without a timestamp alongside.
+    transport.publish('market.bin', new Uint8Array([3, 4]).buffer, { messageId: 'm-2' });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.bin',
+      data: [3, 4],
+      messageId: 'm-2'
+    }));
+    transport.publish('market.bin', new Uint8Array([5]).buffer, { messageId: 'm-3', timestamp: 44 });
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({
+      op: 'publish',
+      topic: 'market.bin',
+      data: [5],
+      messageId: 'm-3',
+      timestamp: 44
+    }));
   });
 
   it('accepts nested publication envelopes for forward-compatible servers', () => {
@@ -879,6 +898,39 @@ describe('WebSocketTransport', () => {
       { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
     );
     expect(seen).toEqual([['chat.v1']]);
+  });
+
+  it('resolves the platform WebSocket constructor when no factory is injected', () => {
+    // Every other case injects a factory, so the default resolution — the path an
+    // actual browser takes — never ran. Dropping the `protocols` argument there
+    // would silently disable subprotocol negotiation.
+    const constructed: Array<{
+      socket: FakeWebSocket;
+      args: [string, string | string[] | undefined];
+    }> = [];
+    class PlatformWebSocket extends FakeWebSocket {
+      constructor(url: string, protocols?: string | string[]) {
+        super(url, protocols);
+        constructed.push({ socket: this, args: [url, protocols] });
+      }
+    }
+    vi.stubGlobal('WebSocket', PlatformWebSocket);
+    try {
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        protocols: ['chat.v1']
+      });
+      void transport.start(
+        { url: 'wss://example.test/ws' },
+        { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
+      );
+      expect(constructed.map(entry => entry.args)).toEqual([['wss://example.test/ws', ['chat.v1']]]);
+      // Let the handshake settle so the pending connect budget is released.
+      constructed[0]!.socket.open();
+      void transport.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

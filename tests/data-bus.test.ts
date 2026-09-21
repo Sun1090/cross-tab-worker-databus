@@ -11,7 +11,7 @@ import {
   TRACE_LIFECYCLE_ACTION,
   WORKER_STATUS
 } from '../src/utils/constants';
-import { ChannelHub, createFakeEnvironment, FakeTransport, MemoryStorage } from './fakes';
+import { ChannelHub, createFakeEnvironment, expectRejectionMessage, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
   afterEach(() => vi.useRealTimers());
@@ -1510,6 +1510,40 @@ describe('CrossTabDataBus', () => {
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();
     expect(transport.startCalls).toBe(4);
+    await bus.stop();
+  });
+
+  it('surfaces the recorded transport error from ready() once recovery is spent', async () => {
+    // With no start in flight and the transport down, ready() has two possible
+    // rejections: the real failure or a generic "not ready" string. The docs
+    // promise callers can tell a transient retry from a dead transport, so the
+    // recorded error must win.
+    vi.useFakeTimers();
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'ready-last-error'
+    });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'ready-last-error',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 250, maxAttempts: 1 }
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    transport.startShouldFail = true;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      transport.setStatus('error');
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    const { errorMessage } = bus.getRecoveryStats();
+    expect(errorMessage, 'the exhausted transport must carry a recorded failure').toBeTypeOf('string');
+    expect(errorMessage).not.toContain('no start operation is in flight');
+
+    await expectRejectionMessage(bus.ready(), errorMessage!);
     await bus.stop();
   });
 

@@ -4074,6 +4074,134 @@ corroborates the 26-spec collection.)
   behaviour, not just defensiveness) and `websocket.ts:411`.
 - **Updated:** 2026-09-22.
 
+## Phase 69 (the default WebSocket path, and ready() swallowing the real error)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Pin — `resolves the platform WebSocket constructor when no factory is
+  injected`** (`websocket.ts:414`). Every other WebSocket test injects
+  `webSocketFactory`, so the default resolution — the branch a real browser
+  takes — had only ever run its *failure* arm (`typeof WebSocket === 'undefined'`
+  has counts `[1, 0]`, i.e. the happy path never did).
+
+  | Mutation | Result |
+  |---|---|
+  | `new WebSocket(url, protocols)` → `new WebSocket(url)` | the recorded constructor args no longer match — subprotocol negotiation is silently gone |
+- **Pin — `surfaces the recorded transport error from ready() once recovery is
+  spent`** (`data-bus.ts:802`). The docs promise callers can tell a transient
+  retry from a dead transport, but the leg that returns `this.lastError` had never
+  run: every existing failure test still had a `startPromise` in flight, so
+  `ready()` resolved/rejected through an earlier arm. Driving recovery to
+  exhaustion (`maxAttempts: 1`, three `error` status flips past the cooldown)
+  reaches it.
+
+  | Mutation | Result |
+  |---|---|
+  | `if (this.lastError !== null) return Promise.reject(this.lastError);` deleted | `expected 'Transport is not ready and no start o…' to contain 'Transport failed during startup.'` |
+- **Ledger correction.** Phase 65 dismissed `529/803` as "public-looking
+  rejections behind an `if (x !== null)` that the caller already tested". For
+  `528/529` that is right and now proven: `ready()` checks `if (this.queuedStart)`
+  at `769` and `getQueuedStartReady()` re-reads the same field with no `await`
+  between, so its rejection is unreachable. For `802` it was wrong — that leg is
+  reachable, observable, and was untested (above).
+- **Still open from the leg triage:** `data-bus.ts:621` (`startDemandRecovery`'s
+  status/suspended/stopping guard) — both callers reach it with the demand token
+  armed, and no interleaving in the suite has yet produced a stale demand. Needs
+  an explicit "transport recovered underneath a parked waiter" construction, not
+  a guess; left for the next pass rather than written up as dominated.
+- **Verification:** `pnpm check` (37 files / 858 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `websocket.ts` lines 100% / branch
+  95.12% → 95.93%, all-files branch 95.80% → 95.85%. Mutant backups were kept
+  under per-file names (`/tmp/websocket.bak`, `/tmp/data-bus.bak`) after the
+  Phase 68 mix-up, and `git diff --stat src/` was confirmed empty before each
+  commit.
+- **Risks / rollback:** tests only; rollback = revert the commits.
+- **Next:** the `data-bus.ts:621` stale-demand construction, then
+  `centrifuge-session.ts:219` (empty-topic drop, documented but never exercised).
+- **Updated:** 2026-09-22.
+
+## Phase 70 (negative results: the stale-demand guard, and the empty-topic drop)
+
+- **`data-bus.ts:621` — attempted, not shipped.** The guard is
+  `startDemandRecovery()`'s "demand is stale" check: a failed automatic attempt
+  arms demand recovery, and the next transport operation reopens instead of
+  waiting. The uncovered leg is the case where the transport has meanwhile
+  reported a non-error status, so the reopen must not happen. Built it: error →
+  automatic attempt fails (`getRecoveryStats().attempt === 2`, gate closed,
+  demand armed) → `setStatus('disconnected')` → `bus.publish(...)`. It does park
+  and it does bump `transport.startCalls` — but the publish path reopens the
+  transport through its own route, so the same increment happens whether or not
+  `621` returns early. The draft could not distinguish its mutant, so it was
+  deleted instead of shipping an assertion that cannot fail; the guard stays
+  unexercised and is recorded here as unsolved rather than dominated.
+- **`centrifuge-session.ts:219` — a missing input check, not a missing test.**
+  Both `postPublication` call sites already exclude an empty topic (`137`
+  explicitly, `169` by capturing the topic it subscribed with), so the drop leg
+  can only be reached by feeding a `SUBSCRIBE` frame with `topic: ''` — which no
+  in-repo producer emits. Making that state impossible at the boundary (rejecting
+  an empty topic when the frame is read) is a behaviour change to the worker
+  protocol, not coverage, so it is left as a deliberate design question.
+- **Risks / rollback:** documentation only; both drafts were reverted
+  (`git checkout -- tests/data-bus.test.ts`), and the two committed pins from
+  Phase 69 were confirmed present afterwards (174 data-bus tests, 858 total).
+- **Next:** PR #143 to green + merge, then the remaining zero-count legs in
+  `cluster.ts` (`355`, `360`, `582`, `1347`) and `port-reaper.ts:119`.
+- **Updated:** 2026-09-22.
+
+## Phase 71 (a batch could be captured by an unrelated wildcard — and the mutant that nearly proved it wrong)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Pin — `does not let an unrelated owned pattern capture a batch for a remote
+  topic`** (`cluster.ts:582`). `publishBatch()`'s wildcard probe walks every
+  pattern the worker owns; A owns `chat.*`, B owns `metrics.cpu`. Dropping
+  `topicMatchesPattern` from that condition lets A's first owned pattern win, so
+  the batch is dispatched locally and never reaches its owner.
+- Phase 65 had this leg as "defensive"; it is the only place the batch path
+  consults the matcher, and the pre-existing wildcard tests all use
+  single-item `publish()`, which runs the *other* copy of the block (`541`).
+
+  | Mutation | Result |
+  |---|---|
+  | matcher dropped from **both** probe blocks | `expected [] to have a length of 2 but got +0` — A keeps both `PUBLISH` frames, B receives none |
+- **How nearly this was recorded as a negative result:** the first mutation
+  attempt used a non-global `perl -0pi -e 's/…/…/'`, which edited only the
+  `publish()` twin. The test stayed green, the draft was about to be deleted as
+  decoration, and the `console.log` probe that finally explained it needed two
+  tries because its anchor indentation was wrong (a substitution that matches
+  nothing reports success). Restored with `git checkout -- src/core/cluster.ts`
+  each time; `git diff --stat src/` is empty before this commit. The lesson —
+  verify the mutant landed before trusting a green result — is now written into
+  `AGENTS.md` next to the two ChannelHub traps from Phase 67.
+- **Verification:** `pnpm check` (37 files / 859 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `cluster.ts` branch 93.63% → 93.89%
+  (still one uncovered line, `397`), all-files branch 95.85% → 95.90%.
+- **Risks / rollback:** one test plus documentation; rollback = revert.
+- **Next:** merge PR #143, then `port-reaper.ts:119` and `trace.ts:449`.
+- **Updated:** 2026-09-22.
+
+## Phase 72 (a binary publication could lose its dedup ID)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Gap found by the line ledger.** `websocket.ts:339` was still listed uncovered
+  although a test named 'propagates complete publication metadata in JSON and
+  metadata-bearing binary frames' existed: that test only ever sent a
+  *timestamp* on the binary frame, so the `messageId` arm of the JSON envelope —
+  the field the comment at `333` exists to protect — had never run.
+- **Pin:** extended the test with a binary publish carrying only `messageId`, and
+  one carrying both fields.
+
+  | Mutation | Result |
+  |---|---|
+  | `...(messageId === undefined ? {} : { messageId })` deleted from the binary envelope | `expected '{"op":"publish","topic":"market.bin",…' to be …` — the frame ships without its dedup ID |
+- **Lesson for the ledger:** an uncovered *line* inside a multi-field object
+  literal means the field is untested even when a test with the right name
+  covers the neighbouring line.
+- **Verification:** `pnpm check` (37 files / 859 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `websocket.ts` branch 95.93% → 97.56%,
+  all-files branch 95.90% → 96.01%. Still uncovered there: `113`, `147`, `379`
+  (the superseded-socket arms, each already analysed in the Phase 61 note).
+- **Risks / rollback:** test only.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
