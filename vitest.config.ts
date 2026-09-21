@@ -19,6 +19,12 @@ export default defineConfig({
   },
   test: {
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    // The package/compat gates shell out to `git` and `node` per case (18 cases,
+    // ~1.7s worst unloaded). At the 5000ms default a loaded runner pushed 11 of
+    // them past the ceiling while every one passed in isolation, so the gate
+    // failed on scheduling rather than on behavior. The seeded lifecycle fuzzer
+    // keeps its own explicit budget; see tests/lifecycle-invariants.test.ts.
+    testTimeout: 15_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

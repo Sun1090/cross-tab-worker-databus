@@ -3374,6 +3374,87 @@ corroborates the 26-spec collection.)
 - No production code changed in this phase; the new tests pin existing
   lifecycle behavior and make future regressions detectable.
 
+## Phase 53 (test-integrity audit: gates that could not fail)
+
+- Milestone: 0.20.x reliability line (post-0.20.93), status complete on branch
+  `fix/test-timeout-headroom` (based on `7011d6d`, direct follow-ups on `main`).
+- Started from a real failure, not a hypothesis: the first full `pnpm test` of
+  the session produced **11 timeout failures across 4 files** while every one of
+  those tests passed in isolation. Root cause is budget, not behavior: the
+  package/compat gates spawn 4 `git` + 1 `node` subprocess per case (18 cases,
+  worst 1.7s unloaded) against vitest's 5000ms default, and the seeded lifecycle
+  fuzzer measured **13.2s idle / 29.6s under load / 33.7s under load + V8
+  coverage** against its own explicit 30s budget — i.e. the release gate
+  (`pnpm test:coverage`, which doubles that runtime by design) was already
+  overrunning it. Unit `testTimeout` is now 15s and the fuzzer's explicit budget
+  120s; the same loaded run that had failed is green (37 files, 825→832 tests).
+- Then audited uncovered lines for the "test that cannot fail" class, and found
+  five, each mutation-checked:
+  1. `tests/cluster.test.ts` "evicts the oldest route owner cache entry once the
+     cap is reached" never subscribed, so every publish took the `assignedTopics`
+     fast path, `resolvePublishTarget()` never ran, the cache stayed empty, and
+     the size assertion held with the eviction loop deleted outright (verified).
+     Rewritten to drive three peer-owned topics from a second runtime with
+     `routeOwnerCacheMax: 2`, asserting exact size/hits/misses and LRU order —
+     it fails both when eviction is disabled (size 3) and when the recency touch
+     is removed (a FIFO evict drops the wrong entry).
+  2. `replay-manager` `start()`'s failed-hydration latch reset had no pin:
+     deleting the latch passed the whole suite, which is exactly the bug that
+     leaves durable history unloaded for the lifetime of an instance after one
+     transient store error plus a BFCache resume (suspend/start never calls
+     `resetBuffers()`).
+  3. The receiver's metadata-less branch of an unpacked remote batch was
+     unasserted, while plain `publishBatch` items are the common case; deleting
+     it silently dropped one of four messages.
+  4. `validation.ts` `replay.maxPerTopic` and `replay.pruneStrategy` had no
+     assertion anywhere (siblings in the same block are pinned, `adaptiveTtl`
+     is): a typo'd strategy would fall through to count pruning silently.
+  5. `error-utils` `serializeError`'s no-`structuredClone` runtime branch (the
+     twin of the `assertStructuredCloneable` guard pinned in phase 46).
+  6. `CentrifugeSession`'s connection-level `state`/`disconnected` lifecycle
+     guards were unpinned although 0.20.89 claims client-callback isolation was
+     closed, and the credential provider's *async rejection* reply (a token
+     endpoint returning 500) was untested; without that reply the Worker waits
+     for a `TOKEN_RESPONSE` that never comes.
+- Real source change (1): `src/vue.ts` registered `watch(() => handler, …)` on a
+  parameter binding that cannot change, so it was a permanently inert reactive
+  effect that also implied the composable supported swapping handlers; the
+  subscription now passes the handler directly. The surviving same-target guard
+  in that composable was unpinned, and without it changing `bus` and `topic` in
+  one tick tore down and re-created a subscription that had just been
+  established (route release + re-election for a rebind that already happened).
+- Deliberately NOT changed after reachability analysis (documented rather than
+  padded): `centrifuge.ts` 339/354/359/364 (heartbeat double-arm and the
+  stale-backend error guards — every path that changes `generation` detaches or
+  terminates the old backend's listeners first), `hooks.ts` 45 (a re-entrancy
+  guard whose body would in fact leak the created bus, but which React's effect
+  scheduling makes unreachable), `replay-persistence.ts` 208/244/268/292
+  (`settled` re-entry guards; the real protection is the `current === db` check
+  in `invalidate()`), `trace.ts` 449 (percentile bucket ceiling fallback,
+  unreachable because `sampleCount` is the bucket total), `cluster.ts` 296/816/
+  990/1245 and `data-bus.ts`'s defensive guards.
+- Changed files: `vitest.config.ts`, `src/vue.ts`, `tests/cluster.test.ts`,
+  `tests/centrifuge-session.test.ts`, `tests/centrifuge.test.ts`,
+  `tests/data-bus.test.ts`, `tests/error-utils.test.ts`,
+  `tests/lifecycle-invariants.test.ts`, `tests/replay-manager.test.ts`,
+  `tests/vue.test.ts`.
+- Verification (2026-09-21/22): `pnpm typecheck` green; `pnpm lint` green;
+  `npx vitest run` 37 files / **832 tests** green, and green a second time under
+  an artificial load (8 spinning CPUs, load average 350+) both with and without
+  `--coverage`; `pnpm test:e2e` 27/27 (1.2m); `pnpm bench`, `pnpm verify:pack`,
+  `pnpm verify:compat` green; `git diff --check` clean.
+- Blocker, external: the GitHub API is unreachable from this network
+  (`api.github.com` → `unexpected EOF`, GraphQL → connection reset), so CI status
+  and PR creation cannot be verified right now. Push/PR retried below.
+- Risk/rollback: low. One production line-count change in an optional-peer
+  adapter (behavior-preserving; the mutation check proves the guard that remains
+  is load-bearing) plus test/config budgets. Rollback = revert the branch's
+  commits individually.
+- Next: continue the same audit against `data-bus.ts`'s remaining defensive
+  branches and the IndexedDB adapter's open-failure path, then decide whether the
+  accumulated test-integrity work warrants a patch release on its own.
+- Update date: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

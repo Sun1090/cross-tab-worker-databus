@@ -4,7 +4,7 @@
  * exact branch behavior: stack preservation, non-Error shapes, undefined
  * context omission, and round-trip reconstruction.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { deserializeWorkerError, serializeError } from '../src/utils/error-utils';
 
 describe('error-utils', () => {
@@ -98,5 +98,22 @@ describe('error-utils', () => {
     // Cloneable contexts are still preserved for diagnostics.
     expect(serializeError({ code: 42 })).toMatchObject({ context: { code: 42 } });
     expect(serializeError('boom')).toMatchObject({ context: 'boom' });
+  });
+
+  it('keeps the context when the runtime has no structuredClone to probe with', () => {
+    // The cloneability probe is best effort: an older browser without
+    // `structuredClone` must keep whatever context it can (the eventual
+    // postMessage fails either way) rather than silently discard diagnostics.
+    const original = globalThis.structuredClone;
+    vi.stubGlobal('structuredClone', undefined);
+    try {
+      const serialized = serializeError(() => undefined);
+      expect(serialized).toHaveProperty('context');
+      expect(typeof serialized.context).toBe('function');
+      expect(serializeError({ code: 42 })).toMatchObject({ context: { code: 42 } });
+    } finally {
+      vi.stubGlobal('structuredClone', original);
+      vi.unstubAllGlobals();
+    }
   });
 });

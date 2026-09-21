@@ -4009,6 +4009,35 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     }
   });
 
+  it('rejects an invalid replay ring size and prune strategy through the public options', () => {
+    // These two documented guards had no assertion at all. Dropping the
+    // `pruneStrategy` check would let a typo ('ages') fall through to count
+    // pruning silently, and an invalid `maxPerTopic` would size every ring to
+    // 0/NaN instead of failing on construction.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'replay-validation' });
+    const build = (replay: Record<string, unknown>) => () =>
+      new CrossTabDataBus({
+        autoStart: true,
+        clusterKey: 'replay-validation',
+        environment: environment.environment,
+        initialConfig: {},
+        transport: new FakeTransport<unknown>(),
+        replay
+      } as never);
+
+    for (const maxPerTopic of [0, -1, 1.5, NaN, Infinity]) {
+      expect(build({ maxPerTopic })).toThrow(/replay\.maxPerTopic must be a positive safe integer/);
+    }
+    for (const pruneStrategy of ['ages', '', null, 0, {}]) {
+      expect(build({ pruneStrategy })).toThrow(/pruneStrategy must be count, age, or both/);
+    }
+    // The documented value set stays accepted, with the optional fields alone.
+    for (const pruneStrategy of ['count', 'age', 'both']) {
+      expect(build({ pruneStrategy })).not.toThrow();
+    }
+    expect(build({ maxPerTopic: 1 })).not.toThrow();
+  });
+
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
     const { bus, transport } = makeReplayBus(undefined, { maxEntries: 2 });
     const seen: unknown[] = [];

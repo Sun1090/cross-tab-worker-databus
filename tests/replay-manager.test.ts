@@ -591,6 +591,34 @@ describe('ReplayManager — hydration', () => {
     expect(received).toEqual([1]);
   });
 
+  it('retries a failed hydration on the next start', async () => {
+    // A BFCache cycle only suspends and resumes; it never calls resetBuffers().
+    // Without clearing the failure latch here, one transient store error during
+    // the first lifecycle would leave durable history unloaded for the whole
+    // lifetime of the instance.
+    const persistence = new FakePersistence();
+    persistence.failures.load = 5;
+    const { manager, persistenceErrors } = createManager({
+      persistence,
+      persistenceRetryMaxAttempts: 1
+    });
+    await settle(10);
+    expect(persistenceErrors.length).toBeGreaterThan(0);
+    expect(persistence.loadCalls).toBe(1);
+
+    persistence.failures.load = 0;
+    persistence.messages = [message('t', 7)];
+    manager.suspend();
+    manager.start();
+    await settle(10);
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle(10);
+    expect(persistence.loadCalls).toBe(2);
+    expect(received).toEqual([7]);
+  });
+
   it('reports a hydration failure without blocking startup', async () => {
     const persistence = new FakePersistence();
     persistence.failures.load = 99;

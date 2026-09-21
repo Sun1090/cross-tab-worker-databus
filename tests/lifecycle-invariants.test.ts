@@ -104,8 +104,11 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('CrossTabDataBus lifecycle invariants', () => {
-  // V8 coverage instrumentation roughly doubles this fuzzer's runtime. Keep all
-  // 1,500 seeds and give the release gate an explicit budget instead of shrinking it.
+  // V8 coverage instrumentation roughly doubles this fuzzer's runtime, and a
+  // loaded runner doubles it again: the same sweep measured 13.2s idle and
+  // 29.6s under load, so the previous 30s budget was already 98% consumed
+  // before CI entered the picture. Keep all 1,500 seeds and give the release
+  // gate an explicit budget instead of shrinking it.
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
     for (let seed = 1; seed <= 1_500 && failures.length < 5; seed += 1) {
@@ -255,5 +258,5 @@ describe('CrossTabDataBus lifecycle invariants', () => {
       }
     }
     expect(failures).toEqual([]);
-  }, 30_000);
+  }, 120_000);
 });

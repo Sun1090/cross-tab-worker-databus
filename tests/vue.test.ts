@@ -81,6 +81,37 @@ describe('Vue composables adapter', () => {
     app.unmount();
   });
 
+  it('rebinds exactly once when the bus and topic change in the same tick', async () => {
+    // The bus watcher reads the live topic value, so by the time the topic
+    // watcher flushes the subscription is already correct. Without the
+    // same-target check the second flush tears the subscription down and
+    // re-creates it, which in a cluster means a route release/re-election for
+    // a rebind that just happened.
+    const first = fakeBus();
+    const second = fakeBus();
+    const active = ref(first) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+    const topic = ref('a');
+    const received: unknown[] = [];
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      useCrossTabSubscription(active, topic, message => received.push(message.data));
+      return () => null;
+    }}));
+    app.mount(host);
+    await nextTick();
+    expect(first.subscribe).toHaveBeenCalledTimes(1);
+
+    active.value = second;
+    topic.value = 'b';
+    await nextTick();
+
+    expect(second.subscribe).toHaveBeenCalledTimes(1);
+    expect(second.subscribe).toHaveBeenLastCalledWith('b', expect.any(Function));
+    second.emit('b', 'new');
+    expect(received).toEqual(['new']);
+    app.unmount();
+  });
+
   it('does not resurrect a stale bus after rapid dependency changes', async () => {
     const first = fakeBus();
     const second = fakeBus();

@@ -1308,6 +1308,31 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 2, token: 'channel-token-chat.room.1' });
   });
 
+  it('reports a rejecting credential provider as TOKEN_ERROR', async () => {
+    // A provider that rejects (a token endpoint returning 500) is the common
+    // failure, not a provider that throws synchronously. Without this the
+    // Worker would wait for a TOKEN_RESPONSE that never arrives, so the
+    // connection would hang instead of surfacing the error.
+    const worker = new WorkerDouble();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => Promise.reject(new Error('token endpoint is down')) }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 4, kind: 'token' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(worker.messages).not.toContainEqual(expect.objectContaining({ type: 'TOKEN_RESPONSE' }));
+    expect(worker.messages).toContainEqual({
+      type: 'TOKEN_ERROR',
+      requestId: 4,
+      error: { name: 'Error', message: 'token endpoint is down', stack: expect.any(String) }
+    });
+  });
+
   it('does not deliver a stale credential reply to a replacement worker', async () => {
     const workers: WorkerDouble[] = [];
     let resolveStale!: (token: string) => void;
