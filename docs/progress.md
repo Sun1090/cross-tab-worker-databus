@@ -4074,6 +4074,51 @@ corroborates the 26-spec collection.)
   behaviour, not just defensiveness) and `websocket.ts:411`.
 - **Updated:** 2026-09-22.
 
+## Phase 69 (the default WebSocket path, and ready() swallowing the real error)
+
+- **Status:** complete. Branch `test/websocket-default-factory`.
+- **Pin — `resolves the platform WebSocket constructor when no factory is
+  injected`** (`websocket.ts:414`). Every other WebSocket test injects
+  `webSocketFactory`, so the default resolution — the branch a real browser
+  takes — had only ever run its *failure* arm (`typeof WebSocket === 'undefined'`
+  has counts `[1, 0]`, i.e. the happy path never did).
+
+  | Mutation | Result |
+  |---|---|
+  | `new WebSocket(url, protocols)` → `new WebSocket(url)` | the recorded constructor args no longer match — subprotocol negotiation is silently gone |
+- **Pin — `surfaces the recorded transport error from ready() once recovery is
+  spent`** (`data-bus.ts:802`). The docs promise callers can tell a transient
+  retry from a dead transport, but the leg that returns `this.lastError` had never
+  run: every existing failure test still had a `startPromise` in flight, so
+  `ready()` resolved/rejected through an earlier arm. Driving recovery to
+  exhaustion (`maxAttempts: 1`, three `error` status flips past the cooldown)
+  reaches it.
+
+  | Mutation | Result |
+  |---|---|
+  | `if (this.lastError !== null) return Promise.reject(this.lastError);` deleted | `expected 'Transport is not ready and no start o…' to contain 'Transport failed during startup.'` |
+- **Ledger correction.** Phase 65 dismissed `529/803` as "public-looking
+  rejections behind an `if (x !== null)` that the caller already tested". For
+  `528/529` that is right and now proven: `ready()` checks `if (this.queuedStart)`
+  at `769` and `getQueuedStartReady()` re-reads the same field with no `await`
+  between, so its rejection is unreachable. For `802` it was wrong — that leg is
+  reachable, observable, and was untested (above).
+- **Still open from the leg triage:** `data-bus.ts:621` (`startDemandRecovery`'s
+  status/suspended/stopping guard) — both callers reach it with the demand token
+  armed, and no interleaving in the suite has yet produced a stale demand. Needs
+  an explicit "transport recovered underneath a parked waiter" construction, not
+  a guess; left for the next pass rather than written up as dominated.
+- **Verification:** `pnpm check` (37 files / 858 tests), `pnpm lint`,
+  `pnpm test:coverage` — floors hold; `websocket.ts` lines 100% / branch
+  95.12% → 95.93%, all-files branch 95.80% → 95.85%. Mutant backups were kept
+  under per-file names (`/tmp/websocket.bak`, `/tmp/data-bus.bak`) after the
+  Phase 68 mix-up, and `git diff --stat src/` was confirmed empty before each
+  commit.
+- **Risks / rollback:** tests only; rollback = revert the commits.
+- **Next:** the `data-bus.ts:621` stale-demand construction, then
+  `centrifuge-session.ts:219` (empty-topic drop, documented but never exercised).
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
