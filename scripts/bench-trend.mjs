@@ -47,6 +47,19 @@ function collect(report) {
 }
 
 /**
+ * How many of the most recent reports the "best" column considers.
+ *
+ * A whole-archive minimum is not a health signal here: the in-page benchmark
+ * matrix changed measurement semantics twice in early September 2026 (it first
+ * measured no-ops at all, then measured `publishBatch` without a server echo),
+ * and no report records which harness produced it. The archived best column
+ * therefore published an impossible `dedup ×1000 = 0 ms` next to a 25 ms latest
+ * value. A short rolling window keeps the column a "what this machine just
+ * achieved" reference and never compares across a semantics change.
+ */
+const BEST_WINDOW = 5;
+
+/**
  * The date the latest report was produced: its own `generatedAt` when present,
  * otherwise the date embedded in the `browser-<ISO>.json` filename. Derived
  * from the data so regeneration is deterministic.
@@ -58,7 +71,9 @@ function reportDate(entry) {
 }
 
 function buildTable(entries, cur, prev, best, locale) {
-  const th = locale === 'zh' ? ['指标', '上次 (ms)', '本次 (ms)', 'Δ', '历史最优 (ms)'] : ['Metric', 'Previous (ms)', 'Latest (ms)', 'Δ', 'All-time best (ms)'];
+  const th = locale === 'zh'
+    ? ['指标', '上次 (ms)', '本次 (ms)', 'Δ', `近 ${BEST_WINDOW} 次最优 (ms)`]
+    : ['Metric', 'Previous (ms)', 'Latest (ms)', 'Δ', `Best of last ${BEST_WINDOW} runs (ms)`];
   const lines = [
     `| ${th[0]} | ${th[1]} | ${th[2]} | ${th[3]} | ${th[4]} |`,
     `|---|---|---|---|---|`
@@ -96,10 +111,10 @@ export function buildDocs(entries) {
   const current = entries.at(-1);
   const previous = entries.at(-2);
 
-  // All-time best per metric across the archive (min, since every metric is a
-  // latency where lower is better).
+  // Best per metric over the most recent `BEST_WINDOW` reports (min, since
+  // every metric is a latency where lower is better).
   const best = {};
-  for (const { report } of entries) {
+  for (const { report } of entries.slice(-BEST_WINDOW)) {
     for (const [key, value] of Object.entries(collect(report))) {
       if (typeof value === 'number' && (best[key] === undefined || value < best[key])) best[key] = value;
     }
@@ -117,7 +132,7 @@ export function buildDocs(entries) {
     '',
     `> Data through ${stamp}, from the ${count} archived \`bench-results/browser-*.json\` reports (run \`pnpm bench:browser\` to add one; regenerate this doc with \`node scripts/bench-trend.mjs\`).`,
     '',
-    'The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50` between the two most recent reports (50% ceiling absorbs shared-runner noise). This doc records the long-run picture: values are per-metric latencies where lower is better, and the all-time best marks the healthiest observed run on this machine.',
+    'The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50` between the two most recent reports (50% ceiling absorbs shared-runner noise). This doc records the long-run picture: values are per-metric latencies where lower is better, and the last column is the best run inside the most recent ' + BEST_WINDOW + ' reports — not an all-time record, because the in-page matrix changed measurement semantics in early September 2026 and older reports are not comparable.',
     '',
     '<!-- BENCH-TREND:BEGIN (machine-generated table) -->',
     buildTable(entries, cur, prev, best, 'en'),
@@ -136,7 +151,7 @@ export function buildDocs(entries) {
     '',
     `> 数据截至 ${stamp}，基于 ${count} 份归档的 \`bench-results/browser-*.json\` 报告（运行 \`pnpm bench:browser\` 追加一份；用 \`node scripts/bench-trend.mjs\` 重新生成本文档）。`,
     '',
-    '发布门禁的对比基线是最近两份报告之间的 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的噪声）。本文记录长期趋势：数值为逐指标延迟，越低越好；历史最优为本机观察到的最健康一次运行。',
+    '发布门禁的对比基线是最近两份报告之间的 `pnpm bench:compare --fail-above-pct 50`（50% 上限用于吸收共享 runner 的噪声）。本文记录长期趋势：数值为逐指标延迟，越低越好；最后一列是最近 ' + BEST_WINDOW + ' 份报告内的最优值，而不是历史纪录——页内基准矩阵在 2026 年 9 月初变更过测量语义，更早的报告不可比。',
     '',
     '<!-- BENCH-TREND:BEGIN (machine-generated table) -->',
     buildTable(entries, cur, prev, best, 'zh'),
