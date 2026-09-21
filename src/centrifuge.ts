@@ -101,12 +101,13 @@ export class CentrifugeWorkerTransport<TData = unknown>
   private heartbeatHandle: ReturnType<typeof setInterval> | null = null;
   private localSession: CentrifugeSession<TData> | null = null;
   private handlers: DataBusTransportHandlers<TData> | null = null;
-  // Monotonically increasing counter, bumped each time a backend is created.
-  // Used to ignore late error events from a superseded Worker.
+  // Monotonically increasing counter, bumped each time a backend is created or
+  // the transport stops. Only the asynchronous credential bridge compares it:
+  // a provider may settle after the Worker it was answering is gone. Worker
+  // error events need no such check — stop() and onWorkerFailed() remove those
+  // listeners before the generation moves on, so a superseded backend can no
+  // longer reach this object at all.
   private generation = 0;
-  // Generation captured when the current backend was created. Error handlers
-  // only act when the backend that registered them is still current.
-  private backendGeneration = 0;
 
   get diagnosticsBackend(): string {
     return this.backend ?? 'uninitialized';
@@ -213,7 +214,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
 
   /** Create and initialise a dedicated Worker, then send the INIT message. */
   private startDedicatedWorker(input: CentrifugeWorkerInput): void {
-    this.backendGeneration = ++this.generation;
+    this.generation += 1;
     const worker = (this.workerFactory ?? createDefaultWorker)();
     this.worker = worker;
     worker.addEventListener('message', this.handleMessage);
@@ -223,7 +224,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
 
   /** Create and initialise a SharedWorker, open the MessagePort, and send the INIT message. */
   private startSharedWorker(input: CentrifugeWorkerInput): void {
-    this.backendGeneration = ++this.generation;
+    this.generation += 1;
     const shared = (this.sharedWorkerFactory ?? createDefaultSharedWorker)();
     this.sharedWorker = shared;
     const port = shared.port;
@@ -309,9 +310,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
 
   /** Handle a Worker-level failure (crash, message decode error). Discards the
    * dead backend so a later start()/reopen can rebuild from scratch, and
-   * signals an error status so the DataBus can trigger recovery.
-   * Only invoked when the generation guard confirms the failing backend is
-   * still current — late errors from a superseded Worker are silently dropped. */
+   * signals an error status so the DataBus can trigger recovery. A superseded
+   * backend cannot reach this: its listeners are removed before the transport
+   * moves on, which is what keeps late Worker errors from tearing down a fresh
+   * session (pinned by 'ignores error events from a superseded worker'). */
   private onWorkerFailed(message: string): void {
     // Remove the message listener and release the old backend before recovery
     // reopens, so late messages from the failed Worker/port cannot be routed
@@ -351,17 +353,14 @@ export class CentrifugeWorkerTransport<TData = unknown>
   }
 
   private readonly handleWorkerError = () => {
-    if (this.generation !== this.backendGeneration) return;
     this.onWorkerFailed('Centrifuge worker failed.');
   };
 
   private readonly handlePortError = () => {
-    if (this.generation !== this.backendGeneration) return;
     this.onWorkerFailed('Centrifuge shared worker message decoding failed.');
   };
 
   private readonly handleSharedWorkerError = () => {
-    if (this.generation !== this.backendGeneration) return;
     this.onWorkerFailed('Centrifuge shared worker failed.');
   };
 

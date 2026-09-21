@@ -3694,6 +3694,47 @@ corroborates the 26-spec collection.)
   non-null assertion. Off-by-one (`<=` → `<`) and never-evict mutants fail the
   suite before and after, so the restructure preserved the existing pins.
 
+## Phase 61 (Centrifuge: a guard that cannot fire, and the stale-failure path that could)
+
+- **Three unreachable guards removed.** `handleWorkerError`, `handlePortError`
+  and `handleSharedWorkerError` each opened with
+  `if (this.generation !== this.backendGeneration) return;`, and the
+  `onWorkerFailed` doc claimed "late errors from a superseded Worker are
+  silently dropped" by it. Neither holds:
+  - `generation` and `backendGeneration` are only ever unequal inside `stop()`,
+    between the `this.generation++` and `resetBackend()` — and `stop()` removes
+    the Worker/port/SharedWorker listeners before it bumps anything, so no
+    handler can observe that window. `start()` returns early when a backend is
+    live, so a second start cannot leave two backends' listeners attached either.
+  - The comparison is between two scalars on `this`, so it could not tell *which*
+    Worker fired anyway.
+  Containment comes from the listener removal, which the suite already pinned for
+  the dedicated backend. Deleted the guards and the now write-only
+  `backendGeneration` field, and rewrote both comments to name the real
+  mechanism.
+- **Pinned the mechanism that replaced them.** New case
+  'ignores SharedWorker error and decode events from a superseded backend'
+  covers the port-level `messageerror` and the SharedWorker-level `error` after a
+  stop/start, and asserts the replacement still reports its own failure. The
+  `stop()`-keeps-listeners mutant was already caught by the old suite and stays
+  caught. Renamed the describe from 'backend generation guard' — it described the
+  removed mechanism — to 'superseded backend containment'.
+- **The reachable stale-callback path had no pin.** `resolveTokenRequest`'s
+  success arm was covered by 'does not deliver a stale credential reply to a
+  replacement worker'; its **rejection** arm (`if (!isCurrentBackend()) return;`
+  before posting `TOKEN_ERROR`) was not, so a late provider failure could post an
+  error onto a session that never asked. Mirror case added; deleting the guard is
+  killed by it (old suite exit 0 → new suite exit 1).
+- `centrifuge.ts` remaining uncovered statements are the two default-factory SSR
+  throws (444/465) and their `new URL` catch arms (450/471). They are
+  unreachable from the unit suite: `start()` only selects a Worker backend when
+  `typeof Worker !== 'undefined'` (or a factory is injected), which is exactly
+  the condition the throw tests, and `selectWorkerBackend` degrades to the local
+  session rather than calling the default factory when the capability is missing.
+  Recorded rather than padded.
+- Whole-suite branches 95.05% → 95.24%, statements 98.23% → 98.35%. Verified
+  with typecheck, lint, build, and 848 unit tests.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
