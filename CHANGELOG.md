@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.20.95] - 2026-09-22
+
+### Fixed
+- The React adapter's `useCrossTabDataBus` no longer carries a lifecycle generation counter. React runs an effect's cleanup before its next invocation for the same hook and nothing inside the effect body yields, so neither comparison arm could ever be reached; the hook now relies on that ordering directly and behaves identically. `docs/configuration.md` claimed the adapter "applies the same generation guard … so stale effect cleanup cannot clear a newer bus" — that described the removed code and now states what the adapter actually depends on. The Vue adapter's guard is genuinely load-bearing (its body awaits a stop) and is unchanged.
+- `docs/getting-started.md`'s opt-in storage-event coordination fallback is now known to work: the environment wiring that builds the fallback channel from `window.localStorage` and the window's `storage` events had never been executed by any test.
+
+### Changed
+- Unreachable defensive branches removed, with no behavior change: `BatchingStorageWriter.scheduleRetry`'s already-armed retry guard (`flush()` cancels any armed retry on entry and breaks right after re-arming), and the `oldest === undefined` breaks in `DedupManager`'s and `WorkerClusterRuntime`'s bounded-map eviction loops (`size > max` implies a non-empty map). `CentrifugeWorkerTransport`'s three Worker/port error handlers lost their `generation !== backendGeneration` checks — those two scalars are only unequal inside `stop()`, which detaches the listeners first, and a scalar comparison could not identify which Worker fired in any case.
+- Six behaviors that could not fail their tests are now mutation-verified: the storage-event channel's malformed-payload guard, the BroadcastChannel-less fallback channel wiring, `BatchingStorageWriter.key()`/`keys()` enumeration, `DedupManager`'s partial sweep expiry (a sweep that expired everything passed the whole suite), `CentrifugeWorkerTransport`'s late credential failure, and `useCrossTabDataBus` publishing the newest bus across dependency changes.
+- `await expect(promise).rejects.toThrow('message')` is documented as insufficient in this project: on the pinned Vitest it also passes when the rejection reason is `null` or `undefined`, which silently voided every `reason ?? new Error(...)` fallback-message assertion in the IndexedDB replay tests. `expectRejectionMessage()` in `tests/fakes.ts` asserts both the `Error` instance and the message, and the convention is recorded in `AGENTS.md`.
+- Coverage floors hold with more margin: `src/core/environment.ts`, `storage-batch.ts`, `dedup-manager.ts` and `hooks.ts` are now at 100% on all four metrics, and whole-suite branch coverage rose from 94.59% to 95.38%.
+
 ## [0.20.94] - 2026-09-22
 
 ### Fixed
