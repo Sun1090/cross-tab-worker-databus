@@ -3921,6 +3921,31 @@ corroborates the 26-spec collection.)
   - `dedup-manager` and `storage-batch` and `environment` and `hooks` have no
     remaining uncovered lines.
 
+## Phase 66 (dependency sweep: one refresh, two deliberate non-updates)
+
+- **Status:** complete. Branch `chore/deps-refresh-typescript-eslint`, commit `5257ff8`.
+- **Changed:** `package.json` + `pnpm-lock.yaml` — `typescript-eslint`
+  `8.70.0` → `8.70.1` (the only actionable row in `pnpm outdated`).
+- **Deliberately not changed**, each checked rather than assumed:
+  - `typescript` stays at `6.0.3` — `7.0.2` exists but `typescript-eslint`
+    (even at `8.70.1`) still declares peer `typescript >=4.8.4 <6.1.0`, so the
+    lint gate would break before our own types did. Roadmap candidate 6 stays open.
+  - The `pnpm-workspace.yaml` overrides need no bump: `nanoid` resolves to
+    `3.3.19` and the `glob ^10.5.0` override targets a package that is not in
+    the installed tree at all.
+  - `packageManager: pnpm@10.14.0` is a deliberate pin, not a stale constraint.
+- **Verification:** `pnpm lint` clean, `pnpm typecheck` clean,
+  `npx vitest run` → 37 files / 852 tests passed, and
+  `pnpm audit --registry=https://registry.npmjs.org` → no known vulnerabilities.
+  No source, test or documentation file is touched by this change, so the
+  coverage floors and the compat/pack gates are unaffected by construction.
+- **Risks / rollback:** patch-level dev dependency; rollback = revert this
+  commit and reinstall.
+- **Next:** re-inspect the remaining uncovered ledger from Phase 65 for anything
+  that yields an observable mutation, and re-check the `typescript-eslint` peer
+  ceiling before any future TypeScript 7 attempt.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
