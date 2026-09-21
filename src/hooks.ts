@@ -38,15 +38,16 @@ export function useCrossTabDataBus<TConfig, TData>(
   deps: DependencyList = []
 ): CrossTabDataBus<TConfig, TData> | null {
   const [bus, setBus] = useState<CrossTabDataBus<TConfig, TData> | null>(null);
-  const lifecycleGeneration = useRef(0);
   useEffect(() => {
-    const generation = ++lifecycleGeneration.current;
+    // No "is this effect still current?" check is needed: React runs an
+    // effect's cleanup before its next invocation, and nothing between the
+    // lines below yields, so `create()` cannot be interleaved with a newer
+    // mount and this cleanup always stops the instance its own run created.
     const instance = create();
-    if (generation !== lifecycleGeneration.current) return;
     setBus(instance);
     void instance.ready().catch(() => {});
     return () => {
-      if (generation === lifecycleGeneration.current) setBus(null);
+      setBus(null);
       void instance.stop();
     };
     // The factory is intentionally not a dependency: callers pass an inline

@@ -188,9 +188,10 @@ export class WorkerClusterRuntime {
   private touchRouteOwnerCache(topicKey: string, value: { workerId: string; generation: number }): void {
     if (this.routeOwnerCache.has(topicKey)) this.routeOwnerCache.delete(topicKey);
     this.routeOwnerCache.set(topicKey, value);
-    while (this.routeOwnerCache.size > this.routeOwnerCacheMax) {
-      const oldest = this.routeOwnerCache.keys().next().value;
-      if (oldest === undefined) break;
+    // Insertion order is the Map's iteration order and the cache is at least
+    // one entry over the cap here, so the iterator always yields a key to drop.
+    for (const oldest of this.routeOwnerCache.keys()) {
+      if (this.routeOwnerCache.size <= this.routeOwnerCacheMax) break;
       this.routeOwnerCache.delete(oldest);
     }
   }
