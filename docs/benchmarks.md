@@ -4,7 +4,7 @@
 
 > Data through 2026-09-21, from the 36 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
 
-The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50` between the two most recent reports (50% ceiling absorbs shared-runner noise). This doc records the long-run picture: values are per-metric latencies where lower is better, and the last column is the best run inside the most recent 5 reports — not an all-time record, because the in-page matrix changed measurement semantics in early September 2026 and older reports are not comparable.
+The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50`, which compares the newest report against the median of the same metric in the preceding reports (50% ceiling absorbs shared-runner noise; a single previous report was a fragile baseline because the in-page hot-path metrics alternate between a fast and a slow mode on identical code). This doc records the long-run picture: values are per-metric latencies where lower is better, and the last column is the best run inside the most recent 5 reports — not an all-time record, because the in-page matrix changed measurement semantics in early September 2026 and older reports are not comparable.
 
 <!-- BENCH-TREND:BEGIN (machine-generated table) -->
 | Metric | Previous (ms) | Latest (ms) | Δ | Best of last 5 runs (ms) |
