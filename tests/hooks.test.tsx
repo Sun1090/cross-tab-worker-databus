@@ -155,24 +155,67 @@ describe('React hooks adapter', () => {
     expect(socket.sent.filter(frame => frame.includes('"subscribe"'))).toEqual(subscribeFrames);
   });
 
-  it('does not let a superseded effect clear the newest bus during rapid dependency changes', async () => {
+  it('stops the previous bus and publishes the newest one across dependency changes', async () => {
     const buses = [
       { ready: vi.fn(async () => {}), stop: vi.fn(async () => {}), getStatus: () => 'connecting', onStatus: () => () => {} },
       { ready: vi.fn(async () => {}), stop: vi.fn(async () => {}), getStatus: () => 'connecting', onStatus: () => () => {} }
     ] as unknown as Array<ReturnType<typeof createWebSocketDataBus>>;
     let index = 0;
     let tick = 0;
+    let rendered: ReturnType<typeof useCrossTabDataBus> | null = null;
     function Demo() {
-      useCrossTabDataBus(() => buses[index++]!, [tick]);
+      rendered = useCrossTabDataBus(() => buses[index++]!, [tick]);
       return null;
     }
     const view = render(<Demo />);
     await waitFor(() => expect(index).toBe(1));
+    expect(rendered).toBe(buses[0]!);
+
     tick = 1;
     act(() => view.rerender(<Demo />));
     await waitFor(() => expect(index).toBe(2));
-    expect(buses[0]!.stop).toHaveBeenCalled();
+
+    // The superseded instance is stopped, the live one is untouched, and the
+    // hook hands back the newest bus rather than a stopped one.
+    expect(buses[0]!.stop).toHaveBeenCalledTimes(1);
+    expect(buses[1]!.stop).not.toHaveBeenCalled();
+    expect(rendered).toBe(buses[1]!);
     view.unmount();
+    expect(buses[1]!.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches a rejection handler to ready() so a failed start cannot leak', async () => {
+    // The hook fires `ready()` for its own side effects and never exposes the
+    // promise, so an unhandled rejection is the only failure mode — and neither
+    // Vitest's runner nor a process-level `unhandledRejection` listener surfaces
+    // it here. Observe the contract directly instead: the promise the hook gets
+    // back must have a rejection handler attached to it.
+    let handled = false;
+    const bus = {
+      ready: vi.fn(() => ({
+        catch: (handler: (reason: unknown) => void) => {
+          handled = typeof handler === 'function';
+          // Deliver the failure the way a rejected ready() would: the handler
+          // must consume it without throwing back into the effect.
+          if (handled) handler(new Error('transport refused'));
+          return { catch: () => undefined };
+        }
+      })),
+      stop: vi.fn(async () => {}),
+      getStatus: () => 'connecting',
+      onStatus: () => () => {}
+    } as unknown as ReturnType<typeof createWebSocketDataBus>;
+    function Demo() {
+      useCrossTabDataBus(() => bus);
+      return null;
+    }
+
+    const view = render(<Demo />);
+    await waitFor(() => expect(bus.ready).toHaveBeenCalledTimes(1));
+    expect(handled, 'ready() must be given a rejection handler').toBe(true);
+
+    view.unmount();
+    await waitFor(() => expect(bus.stop).toHaveBeenCalledTimes(1));
   });
 
   it('rebinds the subscription when the React topic changes', async () => {

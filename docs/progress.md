@@ -3735,6 +3735,53 @@ corroborates the 26-spec collection.)
 - Whole-suite branches 95.05% → 95.24%, statements 98.23% → 98.35%. Verified
   with typecheck, lint, build, and 848 unit tests.
 
+## Phase 62 (React adapter: a test named after a guard it never reached)
+
+- `tests/hooks.test.tsx` → 'does not let a superseded effect clear the newest
+  bus during rapid dependency changes' discarded the hook's return value
+  (`useCrossTabDataBus(() => buses[index++], [tick])`), so nothing it asserted
+  involved the bus identity or the generation comparison its title describes.
+  `src/hooks.ts`'s mismatch arms (`45` and `49:1`) stayed uncovered — React runs
+  an effect's cleanup before its next invocation for the same hook, and nothing
+  between `const generation = ++ref.current` and the comparison yields, so no
+  component can reach them. The idiom is for effect bodies that `await`.
+- Replaced it with 'stops the previous bus and publishes the newest one across
+  dependency changes', which renders the returned value and asserts the
+  observable contract: the first run exposes `buses[0]`, a dep change stops
+  `buses[0]` exactly once, leaves `buses[1]` alone, publishes `buses[1]` as the
+  current bus, and unmount stops it. Mutation check — change `setBus(instance)`
+  to `if (!bus) setBus(instance)` so the hook keeps handing back a stopped bus:
+  the old case exits **0**, the new one **1**.
+- Deleted the dead `lifecycleGeneration` ref and both comparisons (behaviour
+  identical for the reasons above) and left a comment naming the React ordering
+  it relied on. `docs/configuration.md:90` and its zh counterpart claimed the
+  React adapter "applies the same generation guard … so stale effect cleanup
+  cannot clear a newer bus"; that described the removed code, and it is now
+  replaced with the accurate statement. The Vue adapter's guard (vue.ts:18-20)
+  *is* load-bearing — its body awaits a stop — and its doc paragraph is
+  untouched.
+- Added 'attaches a rejection handler to ready() …'. `src/hooks.ts`'s
+  `.catch(() => {})` was the last uncovered function in the file, and the first
+  two attempts at pinning it were themselves decorative: neither an unhandled
+  rejection failing the run, nor a `process.on('unhandledRejection')` listener,
+  observes the leak under Vitest's jsdom runner (both survived the mutant that
+  deletes the `.catch`). The case now hands `ready()` a thenable that records
+  whether a rejection handler was attached and invokes it, so removing
+  `.catch(() => {})` fails with `ready() must be given a rejection handler:
+  expected false to be true`. hooks.ts is now 100% on all four metrics.
+- `src/core/cluster.ts`'s route-owner LRU carried the same unreachable
+  `if (oldest === undefined) break;` that Phase 60 removed from
+  `DedupManager` — `size > routeOwnerCacheMax` implies a non-empty map. Rewritten
+  as a `for...of` over the key iterator with the bound checked at the top; the
+  over-evict and never-evict mutants fail the suite before and after.
+- Deliberately kept: `activate()`'s `if (this.started) return;` (line 296) and
+  `pause()`'s counterpart. Neither is reachable today — `start()` guards itself
+  and `handlePageShow` cancels via the lifecycle generation before re-activating
+  — but unlike the removed set, each states exactly the invariant it protects and
+  would still hold if a third call site appeared. Recorded rather than churned.
+- Whole-suite functions 98.17% → 98.36%. Verified with typecheck, lint, build,
+  and 849 unit tests.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

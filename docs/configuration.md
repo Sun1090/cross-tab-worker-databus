@@ -87,7 +87,7 @@ Retry waits are lifecycle-aware: `stop()` and pagehide suspension cancel pending
 
 The Vue adapter serializes bus replacement and ignores stale stop completions when reactive dependencies change rapidly, preserving the newest component lifecycle.
 
-The React adapter applies the same generation guard across StrictMode and dependency-driven recreation, so stale effect cleanup cannot clear a newer bus.
+The React adapter relies on React's own effect ordering instead of a generation counter: an effect's cleanup always runs before its next invocation, and nothing inside the effect yields, so each run stops exactly the instance it created.
 
 IndexedDB replay persistence closes connections receiving `versionchange` and lazily reopens them for the next operation, which keeps multi-tab schema upgrades recoverable.
 
