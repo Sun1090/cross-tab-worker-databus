@@ -4359,6 +4359,56 @@ corroborates the 26-spec collection.)
   both roadmap delivered-scope sections now list all eleven.
 - Update date: 2026-09-22.
 
+## Phase 75 (a fuzz harness for the promise no test checked between tabs)
+
+- `lifecycle-invariants.test.ts` fuzzes one bus. Every multi-tab scenario before
+  this one picked its ordering by hand. The bug class in between the tabs — two
+  transports subscribing a topic, so every handler fires twice, or none
+  subscribing it, so the topic goes silent while all three tabs look healthy —
+  had no exploration behind it. `tests/coordination-invariants.test.ts` now
+  drives three buses over one `MemoryStorage` + `ChannelHub` through random
+  sub/unsub/publish/hide/show/stop/start/heartbeat/dropped-frame sequences plus
+  forged `CONTROL/SUBSCRIBE` frames, lets them settle for twelve heartbeats,
+  then asserts three arms: one owner and one transport holder and the same tab
+  for every live topic; no owner, holder or route record for a topic nobody
+  subscribes; and exactly-once fan-out when the owner's transport delivers.
+- First run failed six seeds, all of them the harness's fault: `stop()` clears
+  `topicHandlers`, so a restarted tab is subscribed to nothing and the model has
+  to forget its own subscriptions on a stop. Fixed in the model, not the code —
+  5,000 seeds green afterwards (9.0s idle; coverage doubles it), and the whole
+  suite is 38 files / 862 tests.
+- Mutation evidence (each applied alone, `src/` restored and verified empty
+  after every run): dropping `transport.unsubscribe` kills arm 2 (six stale
+  holders), dropping `transport.subscribe` kills arm 1, duplicating the exact-
+  topic `invokeHandlers` kills arm 3, never pruning orphan routes kills arm 2,
+  and emptying `reconcileAssignedTopics`' sweep kills arms 1 and 2 together.
+- Three guards survive the harness, and that is the finding worth keeping:
+  `handleControlMessage`'s "the durable route authorizes SUBSCRIBE" check, the
+  route write in `subscribe()`, and `subscribe()`'s ownership return value.
+  Removing any of them corrupts ownership transiently and the reconcile sweep
+  repairs it before quiescence — verified with the forged frames removed too, so
+  the repair, not the frame shape, is what hides them. Two earlier draft arms —
+  "no route names a worker outside the registry", and separate owner-vs-holder
+  and route-vs-owner comparisons — were deleted after no mutation of any kind
+  could make them fail; the surviving check is the single composite condition.
+- Docs: `docs/architecture.md` (en + zh) gains the **Assignment drift repair**
+  invariant; `AGENTS.md` records the third reason a mutation survives (the
+  sweep repairs it), the harness's model-of-retention trap, and that
+  `mulberry32()` / `flushMicrotasks()` now live in `tests/fakes.ts` — both
+  existing fuzzers import them instead of carrying private copies.
+- Changed files: `tests/coordination-invariants.test.ts` (new), `tests/fakes.ts`,
+  `tests/lifecycle-invariants.test.ts`, `tests/property.test.ts`, `AGENTS.md`,
+  `docs/architecture.md`, `docs/zh/architecture.md`, `CHANGELOG.md`,
+  `docs/progress.md`. No `src/` change.
+- Verification: `pnpm typecheck` clean; `pnpm check` → 38 files / 862 tests;
+  `pnpm lint` clean; `pnpm test:coverage` → 98.62 / 96.02 / 98.54 / 99.38
+  (unchanged against the 96 / 92 / 96 / 97 floors); `git diff --check` clean.
+- Risks / rollback: test-only; a false failure would be a harness bug, and every
+  seed is reproducible from its `seed=` line. Rollback = delete the file.
+- Next: open this as a docs/test PR, then the remaining `data-bus.ts:621`
+  stale-demand construction and `centrifuge.ts:286` synchronous arm.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

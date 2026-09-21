@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CrossTabDataBus } from '../src/core/data-bus';
-import { MemoryStorage, ChannelHub, createFakeEnvironment } from './fakes';
+import { MemoryStorage, ChannelHub, createFakeEnvironment, flushMicrotasks, mulberry32 } from './fakes';
 import type { DataBusTransport, DataBusTransportHandlers } from '../src/core/types';
 import { WORKER_STATUS } from '../src/utils/constants';
 
@@ -85,22 +85,6 @@ class PendingTransport implements DataBusTransport<object, number> {
   setStatus(status: (typeof WORKER_STATUS)[keyof typeof WORKER_STATUS]): void {
     this.handlers?.onStatus(status);
   }
-}
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Let every already-scheduled microtask continuation run. */
-async function flushMicrotasks(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) await Promise.resolve();
 }
 
 describe('CrossTabDataBus lifecycle invariants', () => {
