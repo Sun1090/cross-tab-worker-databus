@@ -249,7 +249,6 @@ describe('BatchingStorageWriter', () => {
     expect(setItemSpy).toHaveBeenCalledTimes(3);
     expect(writer.pendingSize).toBe(0);
   });
-});
 
   it('schedules a single retry timer for multiple failing keys in one flush', async () => {
     vi.useFakeTimers();
@@ -290,9 +289,8 @@ describe('BatchingStorageWriter', () => {
       expect(vi.getTimerCount()).toBe(1);
 
       // A write that fails while the retry is still pending must not stack a
-      // second timer. (flush() cancels any pending retry before re-arming, so
-      // the invariant holds even without scheduleRetry's own guard; this test
-      // pins the observable invariant rather than that one mechanism.)
+      // second timer: flush() cancels the armed retry on entry and re-arms
+      // exactly once, so the observable timer count stays at one.
       writer.setItem('b', '2');
       await Promise.resolve();
       await Promise.resolve();
@@ -307,3 +305,60 @@ describe('BatchingStorageWriter', () => {
       vi.useRealTimers();
     }
   });
+
+  it('reports no key past the end of the enumerated range', () => {
+    // StorageLike.key(index) is specified to return null once the index is out
+    // of range, and storage-utils' listKeys/readAllByPrefix loop `for
+    // (index < length)` and stop on that null. Returning undefined instead
+    // would leave those callers reading `undefined` as if it were a key.
+    const storage = new MemoryStorage();
+    storage.setItem('a', '1');
+    const writer = new BatchingStorageWriter(storage);
+
+    expect(writer.key(0)).toBe('a');
+    expect(writer.key(1)).toBeNull();
+    // A pending write is enumerated too, so the range grows before it flushes.
+    writer.setItem('b', '2');
+    expect(writer.key(1)).toBe('b');
+    expect(writer.key(2)).toBeNull();
+  });
+
+  it('skips a null slot reported while enumerating the underlying storage', () => {
+    // A storage adapter can report a length it no longer backs (a concurrent
+    // clear between the length read and the key read). The null slot must be
+    // dropped, not added to the key set as an enumerable entry.
+    const storage = new MemoryStorage();
+    storage.setItem('a', '1');
+    storage.setItem('b', '2');
+    storage.key = index => (index === 1 ? null : 'a');
+    const writer = new BatchingStorageWriter(storage);
+
+    expect(writer.length).toBe(1);
+    expect(writer.key(0)).toBe('a');
+    expect(writer.key(1)).toBeNull();
+  });
+
+  it('still drops a doomed key when the runtime has no console to warn with', async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      storage.setItem = () => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      };
+      const writer = new BatchingStorageWriter(storage);
+      // Some webview shells strip console methods. Losing the last write must
+      // be reported when it can be, but never at the cost of throwing inside
+      // the retry path — that surfaces as an unhandled error on a timer.
+      vi.stubGlobal('console', { log: () => {} });
+
+      writer.setItem('doomed', 'x');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(writer.pendingSize).toBe(0);
+      expect(storage.getItem('doomed')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+});
