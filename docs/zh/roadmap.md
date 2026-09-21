@@ -1,6 +1,13 @@
 # 路线图
 
-0.20.94 已于 2026 年 9 月 22 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+0.20.95 已于 2026 年 9 月 22 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+
+## 0.20.95 已完成范围
+
+- 删掉只用来抬高覆盖率的不可达防御分支：存储写入器"重试已排程"守卫、两处有界映射淘汰循环里的 `undefined` 判断，以及 Centrifuge 传输层的三个 Worker/port generation 检查——后者即使可达也无法分辨是哪个 Worker 报的错。
+- 移除 React 适配层的 lifecycle generation ref（React 的 effect 顺序永远不会走到它的任一分支），并修正配置文档中描述该机制的说法。Vue 适配层的守卫确实起作用（其函数体会 await 一次 stop），保持不变。
+- 堵上 Vitest 断言漏洞：`rejects.toThrow('message')` 在 reject 原因为 `null` 或 `undefined` 时同样通过，这使 IndexedDB 回放测试里所有 `reason ?? new Error(...)` 兜底消息断言形同虚设。新增 `expectRejectionMessage()` 同时校验 Error 实例与消息，并把该约定写入 `AGENTS.md`。
+- 再有六个行为获得经变异验证的回归用例：存储事件通道的畸形载荷守卫、入门指南中描述的无 BroadcastChannel 回退接线、存储写入器的键枚举、去重清扫的过期保留、迟到的凭据失败路径，以及 React hook 在依赖变化后交出最新 bus。`environment.ts`、`storage-batch.ts`、`dedup-manager.ts`、`hooks.ts` 四项指标均已达 100%。
 
 ## 0.20.94 已完成范围
 

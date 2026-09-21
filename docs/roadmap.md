@@ -1,6 +1,13 @@
 # Roadmap
 
-0.20.94 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.95 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.20.95 delivered scope
+
+- Removed unreachable defensive branches instead of leaving them to inflate coverage: the storage writer's already-armed retry guard, the `undefined` breaks in both bounded-map eviction loops, and the Centrifuge transport's three Worker/port generation checks — the last of which could not identify which Worker fired even when reachable.
+- Dropped the React adapter's lifecycle generation ref, which no React effect ordering can reach, and corrected the configuration doc that had been describing it. The Vue adapter's guard is genuinely load-bearing and stays.
+- Closed a Vitest assertion hole that had voided every `reason ?? new Error(...)` fallback-message test in the IndexedDB replay suite: `rejects.toThrow('message')` also passes on a `null` or `undefined` rejection reason. `expectRejectionMessage()` now asserts the `Error` instance as well, and the convention is recorded in `AGENTS.md`.
+- Six more behaviors are pinned by mutation-verified regressions — the storage-event channel's malformed-payload guard, the BroadcastChannel-less fallback wiring documented in the getting-started guide, storage-writer key enumeration, dedup sweep partial expiry, the late credential failure path, and the React hook publishing the newest bus. `environment.ts`, `storage-batch.ts`, `dedup-manager.ts` and `hooks.ts` are now at 100% coverage on all four metrics.
 
 ## 0.20.94 delivered scope
 
