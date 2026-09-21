@@ -3851,6 +3851,24 @@ corroborates the 26-spec collection.)
   subscriber record between a read and a write) and the new test is named after
   the contract rather than that branch, since either path satisfies it.
 - 851 unit tests, typecheck, and lint green.
+## Phase 64 (trace: a console-less containment pin, and an option the type already forbids)
+
+- Added 'still contains a throwing sink when the runtime has no console.warn'.
+  Sink-error isolation is documented (`docs/api.md`: a throwing sink never
+  interrupts dispatch but is reported through `console.warn`), and the guard's
+  false leg — a webview shell that strips `console.warn` — had never run. Forcing
+  the guard to `if (true)` fails the new case; the existing suite passes either
+  way.
+- Attempted the sibling pin for `trace.ts:211`'s default no-op sink and the type
+  checker rejected it: `sink` is a **required** member of `DataBusTraceOptions`
+  and `docs/configuration.md:49` documents it as Required, so
+  `new DataBusTraceReporter({ enabled: true })` is not a supported call. The
+  default arm is therefore reachable only from untyped JavaScript, where it
+  keeps every emission from throwing inside `emitSync` and being swallowed as a
+  phantom "sink threw" warning. Kept the constructor default, dropped the test,
+  and recorded the reachability here instead of writing a cast to fake coverage.
+- Whole-suite numbers after the phase: statements 98.42%, branches 95.49%,
+  functions 98.36%, lines 99.22% across 852 tests.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
