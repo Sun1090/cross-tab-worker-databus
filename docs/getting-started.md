@@ -197,6 +197,8 @@ The fallback is opt-in because coordination payloads (plaintext topic names) the
 
 Before `1.0.0` the SDK is allowed to grow additively and, behind an explicit deprecation cycle, remove APIs. The root export surface is pinned by the regression suite and a tag-to-tag compatibility gate, so an unintended removal fails CI rather than silently breaking consumers.
 
+Currently deprecated: an empty topic string in `subscribe()`, `publish()` and `publishBatch()`. Calls with `""` still work and the bus warns once per instance, but no transport can address an empty channel, so nothing is ever delivered through it — the warning is about a subscription that cannot function, and a future minor will reject it outright.
+
 When you upgrade:
 
 - Read the CHANGELOG for each version between your current and target version. Every removal is called out there, and the deprecation cycle itself only forwards through minor versions.
