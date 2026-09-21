@@ -4119,6 +4119,34 @@ corroborates the 26-spec collection.)
   `centrifuge-session.ts:219` (empty-topic drop, documented but never exercised).
 - **Updated:** 2026-09-22.
 
+## Phase 70 (negative results: the stale-demand guard, and the empty-topic drop)
+
+- **`data-bus.ts:621` — attempted, not shipped.** The guard is
+  `startDemandRecovery()`'s "demand is stale" check: a failed automatic attempt
+  arms demand recovery, and the next transport operation reopens instead of
+  waiting. The uncovered leg is the case where the transport has meanwhile
+  reported a non-error status, so the reopen must not happen. Built it: error →
+  automatic attempt fails (`getRecoveryStats().attempt === 2`, gate closed,
+  demand armed) → `setStatus('disconnected')` → `bus.publish(...)`. It does park
+  and it does bump `transport.startCalls` — but the publish path reopens the
+  transport through its own route, so the same increment happens whether or not
+  `621` returns early. The draft could not distinguish its mutant, so it was
+  deleted instead of shipping an assertion that cannot fail; the guard stays
+  unexercised and is recorded here as unsolved rather than dominated.
+- **`centrifuge-session.ts:219` — a missing input check, not a missing test.**
+  Both `postPublication` call sites already exclude an empty topic (`137`
+  explicitly, `169` by capturing the topic it subscribed with), so the drop leg
+  can only be reached by feeding a `SUBSCRIBE` frame with `topic: ''` — which no
+  in-repo producer emits. Making that state impossible at the boundary (rejecting
+  an empty topic when the frame is read) is a behaviour change to the worker
+  protocol, not coverage, so it is left as a deliberate design question.
+- **Risks / rollback:** documentation only; both drafts were reverted
+  (`git checkout -- tests/data-bus.test.ts`), and the two committed pins from
+  Phase 69 were confirmed present afterwards (174 data-bus tests, 858 total).
+- **Next:** PR #143 to green + merge, then the remaining zero-count legs in
+  `cluster.ts` (`355`, `360`, `582`, `1347`) and `port-reaper.ts:119`.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
