@@ -2953,6 +2953,40 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
     runtime.stop();
   });
 
+  it('does not let an unrelated owned pattern capture a batch for a remote topic', async () => {
+    // publishBatch's wildcard probe walks every pattern this worker owns. A's
+    // `chat.*` says nothing about `metrics.cpu`, which B owns outright, so A must
+    // forward the batch. Drop the matcher and the first owned pattern wins: the
+    // batch is captured into a local dispatch and stops reaching its owner.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a = makeRuntime('capture-a', storage, hub);
+    const b = makeRuntime('capture-b', storage, hub);
+    a.runtime.start();
+    b.runtime.start();
+    a.runtime.subscribe('chat.*');
+    b.runtime.subscribe('metrics.cpu');
+    for (let round = 0; round < 6; round += 1) {
+      await Promise.resolve();
+      a.env.runIntervals();
+      b.env.runIntervals();
+    }
+    expect(b.runtime.isAssigned('metrics.cpu')).toBe(true);
+    expect(a.runtime.isAssigned('metrics.cpu')).toBe(false);
+    // A's owned pattern is what the probe below has to walk past.
+    expect(a.runtime.isAssigned('chat.*')).toBe(true);
+
+    expect(a.runtime.publishBatch('metrics.cpu', [{ data: 1 }, { data: 2 }])).toBe(true);
+    await Promise.resolve();
+
+    const toOwner = b.onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'metrics.cpu');
+    expect(toOwner).toHaveLength(2);
+    expect(a.onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'metrics.cpu')).toHaveLength(0);
+
+    a.runtime.stop();
+    b.runtime.stop();
+  });
+
   it('publishBatch treats an empty batch as a no-op and a single item as publish()', async () => {
     const { runtime, onControl } = makeRuntime('single');
     runtime.start();
