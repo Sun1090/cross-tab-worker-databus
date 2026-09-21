@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Docs
+- The `0.20.96` entry below undercounts its own test work. Its release range (`v0.20.95..v0.20.96`, PRs #137-#146) also shipped mutation-verified regressions for the WebSocket opt-out handshake budget, the cluster's private-topic handoff rule, the trace reporter's sink-error containment on a runtime without `console.warn`, and the wildcard probe that keeps an unrelated owned pattern from capturing a batch destined for a remote topic — eleven behaviors, not seven. The published `0.20.96` tarball keeps its original wording (npm versions are immutable); this corrects the record for anyone reading between tags, and the `0.20.96` delivered-scope sections in `docs/roadmap.md` and `docs/zh/roadmap.md` now carry the full list.
+
 ## [0.20.96] - 2026-09-22
 
 ### Deprecated
