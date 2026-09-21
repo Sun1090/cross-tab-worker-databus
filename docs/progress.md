@@ -3946,6 +3946,68 @@ corroborates the 26-spec collection.)
   ceiling before any future TypeScript 7 attempt.
 - **Updated:** 2026-09-22.
 
+## Phase 67 (two coordination-release paths that no test had ever driven)
+
+- **Status:** complete. Branch `test/cluster-dead-route-handoff`.
+- **What was wrong.** Phase 65 listed `cluster.ts:483-484` as "dominated by
+  `releaseSubscription`, kept as a defensive guard". That classification was
+  wrong, and chasing it turned up a second, bigger gap: `branchMap` showed
+  `if (this.releaseHandoffOnUnsubscribe(message)) return;` at `cluster.ts:878`
+  with counts `[1, 0]` — every `CONTROL/UNSUBSCRIBE` any test had ever delivered
+  was a *handoff* release, so the owner's ordinary "the last subscriber left"
+  path had never run at all.
+- **Pin 1 — `deletes an unserved route when the owner leaves with no subscriber
+  to hand to`** (`cluster.ts:482-485`). A owns a route, B is its only other
+  subscriber and dies without releasing, C is healthy but never subscribed. The
+  departing owner must delete the route rather than migrate it onto C.
+
+  | Mutation | Result |
+  |---|---|
+  | guard block deleted | `expected [ { workerId: 'worker-c', … } ] to deeply equal []` — the route is migrated to a peer with no subscriber |
+
+  B is deliberately placed on a second `ChannelHub`: it shares storage (so its
+  records are the residue the handoff must sort out) but cannot hear A's
+  teardown nudge, which models a frozen/killed tab. With a shared hub B
+  re-elects the route in its own reconcile and the final storage state is
+  identical with or without the guard — the first draft of this test passed
+  under the mutation for exactly that reason.
+- **Pin 2 — `releases ownership and the transport subscription when the last
+  remote subscriber leaves`** (`cluster.ts:878-879` fall-through). The owning
+  Worker must drop `assignedTopics` *and* dispatch `UNSUBSCRIBE` to its
+  transport when the last subscriber's control message arrives.
+
+  | Mutation | Result |
+  |---|---|
+  | `releaseHandoffOnUnsubscribe(message); return;` (never fall through) | `expected "vi.fn()" to be called with arguments: [ 'UNSUBSCRIBE', 'topic', undefined ]` |
+  | `assignedTopics.delete()` moved below the handoff check | `expected true to be false` (the owner keeps a topic nobody subscribes to) |
+- **Second decorative draft, caught before it shipped:** the handoff test also
+  initially lacked an `await` after `runtimeC.start()`, so C's worker record was
+  still in the batching writer and `activeWorkers` was empty — without the guard
+  the loop fell into `if (!owner) continue` and the observable difference
+  vanished. Both drafts were verified to fail under mutation before either was
+  kept.
+- **Docs:** `docs/architecture.md` and `docs/zh/architecture.md` gain the
+  **Unserved route drop** and **Last-subscriber release** invariants (the
+  failover section previously described only the migrating side).
+- **Verification:** `pnpm check` (37 files / 854 tests), `pnpm lint`,
+  `pnpm test:coverage` (floors hold; `cluster.ts` branch 92.57% → 93.63%, now
+  one uncovered line: `397`), `tests/documentation.test.ts` 17/17,
+  `git diff --check` clean.
+- **Ledger correction.** `cluster.ts:483-484` and `879` are closed. Remaining
+  in `cluster.ts`: `397` (a runtime with no `globalThis.setTimeout`, which the
+  fake environment cannot produce without stubbing a global the module captured
+  at import), and the now provably-unreachable `if (!owner) continue` at `491`
+  (`subscribers.length > 0` ⇒ `remainingWorkers` non-empty ⇒
+  `selectActiveWorkers` never returns an empty array for non-empty input). It
+  stays because `selectLeastLoadedWorker` is typed `WorkerRecord | undefined`;
+  deleting it would need a cast, and `previous?.generation ?? 0` at `493` is
+  kept for the same legacy-record reason the read paths keep it.
+- **Risks / rollback:** tests and documentation only; rollback = revert the
+  commit.
+- **Next:** keep working the Phase 65 ledger for anything that fails under
+  mutation.
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

@@ -397,6 +397,133 @@ describe('WorkerClusterRuntime', () => {
     runtimeB.stop();
   });
 
+  it('deletes an unserved route when the owner leaves with no subscriber to hand to', async () => {
+    // A owns `topic`; the only other subscriber is a tab that stopped
+    // heartbeating without releasing — a frozen/killed tab. It is modelled on
+    // its own BroadcastChannel hub so it can neither hear A's teardown nor
+    // reclaim the route afterwards; only its storage records remain, which is
+    // the residue the handoff has to sort out. C is a healthy peer with no
+    // interest in the topic: the guard must drop the route instead of handing a
+    // subscription to it. A's `pause()` runs no orphan-route cleanup (that lives
+    // in `reconcile`), so this guard is the only code that can remove the record.
+    const storage = new MemoryStorage();
+    let now = 1_000;
+    const hubAB = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub: hubAB, now: () => now, randomId: 'dead-a' });
+    const envC = createFakeEnvironment({ storage, hub: hubAB, now: () => now, randomId: 'dead-c' });
+    const envB = createFakeEnvironment({ storage, hub: new ChannelHub(), now: () => now, randomId: 'dead-b' });
+    const diagnosticsA: Array<{ operation: string; topic: string }> = [];
+    const controlC = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'dead-subscriber-handoff',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn(), onDiagnostic: event => diagnosticsA.push(event) }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'dead-subscriber-handoff',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    const runtimeC = new WorkerClusterRuntime({
+      clusterKey: 'dead-subscriber-handoff',
+      environment: envC.environment,
+      tabId: 'tab-c',
+      workerId: 'worker-c',
+      handlers: { onControl: controlC, onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeA.subscribe('topic');
+    await Promise.resolve();
+    now += 1;
+    runtimeB.start();
+    runtimeB.subscribe('topic');
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('topic')).toBe(true);
+
+    // A stops subscribing but keeps owning the route for B.
+    runtimeA.unsubscribe('topic');
+    await Promise.resolve();
+    const routeOf = () => storage
+      .entries()
+      .filter(([key]) => key.includes(':route:'))
+      .map(([, value]) => {
+        const route = JSON.parse(value as string) as { workerId?: string; generation?: number };
+        return { workerId: route.workerId, generation: route.generation };
+      });
+    expect(routeOf()).toEqual([{ workerId: 'worker-a', generation: 1 }]);
+
+    // C joins well after B went silent, then A's page closes while B is the
+    // only record older than the worker TTL.
+    now = 11_000;
+    runtimeC.start();
+    await Promise.resolve();
+    now = 20_500;
+    runtimeA.stop();
+    await Promise.resolve();
+
+    expect(routeOf()).toEqual([]);
+    // C is never asked to serve a topic it has no subscriber for.
+    expect(controlC).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic', undefined);
+    expect(runtimeC.isAssigned('topic')).toBe(false);
+    expect(diagnosticsA).not.toContainEqual({ operation: 'route_migration', topic: 'topic' });
+    runtimeB.stop();
+    runtimeC.stop();
+  });
+
+  it('releases ownership and the transport subscription when the last remote subscriber leaves', async () => {
+    // A owns `topic` and the peer that shared it is now the only subscriber. When
+    // even that tab unsubscribes, its CONTROL/UNSUBSCRIBE is A's only signal that
+    // nobody is listening any more: A must drop the assignment *and* dispatch the
+    // release to its transport, or a departed peer leaves a live server
+    // subscription — and its inbound publications keep fanning out — forever.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'last-sub-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'last-sub-b' });
+    const controlA = vi.fn();
+    const runtimeA = new WorkerClusterRuntime({
+      clusterKey: 'last-subscriber-release',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: { onControl: controlA, onEvent: vi.fn() }
+    });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'last-subscriber-release',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    runtimeA.subscribe('topic');
+    await Promise.resolve();
+    runtimeB.subscribe('topic');
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('topic')).toBe(true);
+
+    // A stops listening itself, so B's record is the only thing keeping the route.
+    runtimeA.unsubscribe('topic');
+    await Promise.resolve();
+    expect(runtimeA.isAssigned('topic')).toBe(true);
+    controlA.mockClear();
+
+    runtimeB.unsubscribe('topic');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(controlA).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic', undefined);
+    expect(runtimeA.isAssigned('topic')).toBe(false);
+    expect(storage.entries().filter(([key]) => key.includes(':route:'))).toEqual([]);
+    runtimeA.stop();
+    runtimeB.stop();
+  });
+
   it('completes a four-tab handoff when the pagehide control message is lost', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
