@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { createIndexedDbReplayPersistence } from '../src/core/replay-persistence';
 import type { DataBusMessage } from '../src/core/types';
+import { expectRejectionMessage } from './fakes';
 
 function message(topic: string, value: number, timestamp?: number): DataBusMessage<{ value: number }> {
   return { topic, data: { value }, ...(timestamp === undefined ? {} : { timestamp }) };
@@ -518,7 +519,7 @@ describe('createIndexedDbReplayPersistence', () => {
     (globalThis as { indexedDB?: unknown }).indexedDB = flakyFactory;
     const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
 
-    await expect(persistence.append(message('t', 1))).rejects.toThrow('Failed to open replay database.');
+    await expectRejectionMessage(persistence.append(message('t', 1)), 'Failed to open replay database.');
   });
 
   it('falls back to generic request messages when IndexedDB requests carry no error', async () => {
@@ -526,9 +527,9 @@ describe('createIndexedDbReplayPersistence', () => {
     (globalThis as { indexedDB?: unknown }).indexedDB = broken;
     const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
 
-    await expect(persistence.load()).rejects.toThrow('Failed to load replay history.');
-    await expect(persistence.append(message('t', 1))).rejects.toThrow('Failed to read replay history.');
-    await expect(persistence.clearBefore!(1_000)).rejects.toThrow('Failed to read replay history.');
+    await expectRejectionMessage(persistence.load(), 'Failed to load replay history.');
+    await expectRejectionMessage(persistence.append(message('t', 1)), 'Failed to read replay history.');
+    await expectRejectionMessage(persistence.clearBefore!(1_000), 'Failed to read replay history.');
   });
 
   it('keeps the first grouped-read failure authoritative after a later read succeeds and the transaction errors', async () => {
@@ -565,7 +566,7 @@ describe('createIndexedDbReplayPersistence', () => {
       const broken = makeBrokenFactory('transaction-aborts', null);
       (globalThis as { indexedDB?: unknown }).indexedDB = broken;
       const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
-      await expect(testCase.run(persistence)).rejects.toThrow(testCase.message);
+      await expectRejectionMessage(testCase.run(persistence), testCase.message);
     }
   });
 
@@ -623,7 +624,7 @@ describe('createIndexedDbReplayPersistence', () => {
       const broken = makeBrokenFactory('transaction-errors', null);
       (globalThis as { indexedDB?: unknown }).indexedDB = broken;
       const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
-      await expect(testCase.run(persistence)).rejects.toThrow(testCase.message);
+      await expectRejectionMessage(testCase.run(persistence), testCase.message);
     }
   });
 
@@ -634,7 +635,22 @@ describe('createIndexedDbReplayPersistence', () => {
     const broken = makeBrokenFactory('transaction-aborts', null);
     (globalThis as { indexedDB?: unknown }).indexedDB = broken;
     const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
-    await expect(persistence.append(message('a', 1))).rejects.toThrow('Failed to persist replay history.');
+    await expectRejectionMessage(persistence.append(message('a', 1)), 'Failed to persist replay history.');
+  });
+
+  it('falls back to a generic message when a read-only load transaction aborts without an error', async () => {
+    // The load path builds its own rejection message, so it needs its own
+    // null-error case: without the fallback `load()` rejects with `null`,
+    // which surfaces to `ready()`/hydration callers as a failure with nothing
+    // to report.
+    const broken = makeBrokenFactory('transaction-aborts', null);
+    (globalThis as { indexedDB?: unknown }).indexedDB = broken;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    await expectRejectionMessage(persistence.load(), 'Failed to load replay history.');
+
+    broken.disable();
+    await persistence.append(message('t', 5));
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([5]);
   });
 
   it('rejects and invalidates when a store request fails during load or clearBefore', async () => {
