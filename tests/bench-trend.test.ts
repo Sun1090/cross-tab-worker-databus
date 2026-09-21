@@ -67,6 +67,30 @@ describe('bench-trend generator', () => {
     expect(en).toContain('| first-packet cold dispatch (ms, lower is better) | 1 | 2 | +1.00 | 1 |');
   });
 
+  it('keeps the best column inside the recent window instead of the whole archive', () => {
+    // The in-page matrix measured no-ops in its first runs, so an archived
+    // minimum published an impossible `dedup ×1000 = 0 ms` beside a 25 ms
+    // latest value. The window must exclude reports older than the five most
+    // recent, and the column must say so.
+    const stale = entry('browser-2019-12-26T00-00-00-000Z.json', '2019-12-26T00:00:00.000Z', 9, {
+      wildcardDispatch1000Ms: 4,
+      firstPacketMs: 0
+    });
+    const fillers = [1, 2, 3, 4].map(day => entry(
+      `browser-2019-12-2${6 + day}T00-00-00-000Z.json`,
+      `2019-12-2${6 + day}T00:00:00.000Z`,
+      9,
+      { wildcardDispatch1000Ms: 4.5, firstPacketMs: 2 }
+    ));
+    const { en, zh } = buildDocs([stale, ...fillers, newer]);
+    // `newer` is 3, the window is 4.5; the stale 4 (and its 0 ms first packet)
+    // sits just outside it.
+    expect(en).toContain('| wildcard dispatch ×1000 (ms, lower is better) | 4.5 | 3 | -1.50 | 3 |');
+    expect(en).toContain('Best of last 5 runs (ms)');
+    expect(zh).toContain('近 5 次最优 (ms)');
+    expect(en).not.toMatch(/first-packet cold dispatch \(ms, lower is better\) \| 2 \| 2 \| \+0\.00 \| 0 \|/);
+  });
+
   it('falls back to the filename date when a report has no generatedAt', () => {
     const withoutStamp: BenchTrendReportEntry = { name: 'browser-2019-12-31T00-00-00-000Z.json', report: {} };
     const { en } = buildDocs([withoutStamp, newer]);
