@@ -557,6 +557,7 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 3. **发布去重**：设计并实现可选、有界的 message-ID 窗口，覆盖本地分发、BroadcastChannel、WebSocket 与 replay，默认行为保持不变；
 4. **适配层与协议对齐**：统一 React/Vue 生命周期和类型契约，补充二进制帧与恢复语义文档，并增加自定义 transport 兼容夹具；
 5. **运维验证**：扩展浏览器和打包消费测试，增加去重/恢复/replay 清理回归基准，Push CI 继续作为发版门禁。
+6. **TypeScript 7 工具链迁移**：阻塞在上游而非本仓库——截至 2026-09-22，`typescript-eslint` 最新发布仍为 8.70.1，其 peer 范围是 `typescript >=4.8.4 <6.1.0`，装上 TypeScript 7 会先让 lint 门禁失败。等 typescript-eslint 放宽该上限后再在独立分支迁移（TS 7 仍提供 `tsc` 可执行入口，`pnpm typecheck` 本身无需改动）。
 
 ## 发版检查清单
 
