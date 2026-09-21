@@ -3867,8 +3867,8 @@ corroborates the 26-spec collection.)
   keeps every emission from throwing inside `emitSync` and being swallowed as a
   phantom "sink threw" warning. Kept the constructor default, dropped the test,
   and recorded the reachability here instead of writing a cast to fake coverage.
-- Whole-suite numbers after the phase: statements 98.45%, branches 95.49%,
-  functions 98.54%, lines 99.22%.
+- Whole-suite numbers after the phase: statements 98.42%, branches 95.49%,
+  functions 98.36%, lines 99.22% across 852 tests.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
