@@ -817,7 +817,7 @@ describe('CentrifugeWorkerTransport heartbeatIntervalMs validation', () => {
   });
 });
 
-describe('CentrifugeWorkerTransport backend generation guard', () => {
+describe('CentrifugeWorkerTransport superseded backend containment', () => {
   it('ignores error events from a superseded worker', () => {
     const workers: WorkerDouble[] = [];
     const onError = vi.fn();
@@ -832,7 +832,7 @@ describe('CentrifugeWorkerTransport backend generation guard', () => {
       }
     });
 
-    // Start — worker[0] is created, generation = 1, backendGeneration = 1.
+    // Start — worker[0] is created.
     transport.start(
       { url: 'wss://example.test/connection/websocket', options: {} },
       { onStatus, onMessage: () => {}, onError }
@@ -843,22 +843,61 @@ describe('CentrifugeWorkerTransport backend generation guard', () => {
     workers[0]!.fail();
     expect(onError).toHaveBeenCalledTimes(1);
 
-    // After failure, the transport resets backend. Start again — worker[1] is
-    // created, generation = 2, backendGeneration = 2.
+    // After the failure the transport resets its backend. Starting again
+    // creates worker[1].
     transport.start(
       { url: 'wss://example.test/connection/websocket', options: {} },
       { onStatus, onMessage: () => {}, onError }
     );
     expect(workers).toHaveLength(2);
 
-    // The old worker[0]'s error listeners were removed during onWorkerFailed,
-    // so fail() on it does nothing. But even if it somehow fired, the
-    // generation guard would suppress it.
+    // onWorkerFailed removed worker[0]'s listeners before anything else, so
+    // fail() on the dead backend reaches nothing. That listener removal — not
+    // a generation comparison — is what keeps a crashed superseded Worker from
+    // tearing down the live session.
     workers[0]!.fail();
 
     // onError must not be called a second time.
     expect(onError).toHaveBeenCalledTimes(1);
 
+    transport.stop();
+  });
+
+  it('ignores SharedWorker error and decode events from a superseded backend', () => {
+    const sharedWorkers: SharedWorkerDouble[] = [];
+    const onError = vi.fn();
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'shared',
+      sharedWorkerFactory: () => {
+        const shared = new SharedWorkerDouble();
+        sharedWorkers.push(shared);
+        return shared as unknown as SharedWorker;
+      }
+    });
+
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError }
+    );
+    expect(sharedWorkers).toHaveLength(1);
+    const stalePort = sharedWorkers[0]!.port;
+
+    transport.stop();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError }
+    );
+    expect(sharedWorkers).toHaveLength(2);
+
+    // Both the SharedWorker-level error and the port-level messageerror were
+    // detached by stop(), so neither can report the live session dead.
+    stalePort.failDecode();
+    sharedWorkers[0]!.fail();
+    expect(onError).not.toHaveBeenCalled();
+
+    // The replacement still reports its own failures.
+    sharedWorkers[1]!.port.failDecode();
+    expect(onError).toHaveBeenCalledTimes(1);
     transport.stop();
   });
 });
@@ -1379,6 +1418,53 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
       requestId: 1,
       token: 'fresh-token'
     });
+  });
+
+  it('does not deliver a stale credential failure to a replacement worker', async () => {
+    // The mirror of the stale-reply case: the provider's rejection handler runs
+    // on a later microtask too, and posts TOKEN_ERROR — which would make the
+    // replacement session tear down or re-auth for a request it never made.
+    const workers: WorkerDouble[] = [];
+    let rejectStale!: (error: Error) => void;
+    const getToken = vi.fn()
+      .mockImplementationOnce(() => new Promise<string>((_resolve, reject) => { rejectStale = reject; }))
+      .mockResolvedValueOnce('fresh-token');
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => {
+        const worker = new WorkerDouble();
+        workers.push(worker);
+        return worker as unknown as Worker;
+      },
+      credentialProvider: { getToken }
+    });
+
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    workers[0]!.emit({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' });
+
+    transport.stop();
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+    workers[1]!.emit({ type: 'TOKEN_REQUEST', requestId: 1, kind: 'token' });
+    await Promise.resolve();
+
+    rejectStale(new Error('stale token endpoint is down'));
+    await Promise.resolve();
+
+    expect(workers[1]!.messages).toContainEqual({
+      type: 'TOKEN_RESPONSE',
+      requestId: 1,
+      token: 'fresh-token'
+    });
+    expect(
+      workers[1]!.messages.some(message => message.type === 'TOKEN_ERROR'),
+      'the superseded session\'s failure must not surface as a TOKEN_ERROR'
+    ).toBe(false);
   });
 
   it('surfaces provider rejection and empty tokens as TOKEN_ERROR', async () => {
