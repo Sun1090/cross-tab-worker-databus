@@ -126,6 +126,7 @@ The project uses Vitest with fake environments. Key infrastructure in `tests/fak
 | `ChannelHub` | Simulates BroadcastChannel between runtimes. `dropNextControl()` drops the next CONTROL message to simulate channel loss. `failNextPost()` makes the next `postMessage` throw. |
 | `createFakeEnvironment()` | Creates a `ClusterEnvironment` with controllable time, storage, channels, and lifecycle. Returns `.runIntervals()`, `.pageHide()`, `.pageShow()`, `.setVisibility()` for manual control. |
 | `FakeTransport` | Minimal `DataBusTransport` implementation. Track `subscribeCalls`, `unsubscribeCalls`, `publishCalls`. `startShouldFail` makes `start()` report error. `stopGate` delays stop. `emit(topic, data)` simulates an incoming message; `emitError(error)` simulates an asynchronous runtime failure. |
+| `expectRejectionMessage()` | Assert a promise rejects with a real `Error` whose message contains a string. Use this whenever the *message* is the behaviour under test. |
 
 **Typical test pattern:**
 
@@ -184,6 +185,7 @@ Every heartbeat tick: prune stale workers (TTL), orphaned subscribers (no live t
 - `FakeTransport.startShouldFail` / `FakeTransport.stopGate` simulates transport failure/async stop.
 - Fake environment exposes `runIntervals()`, `pageHide()`, `pageShow()`, `setVisibility()` for lifecycle control.
 - E2E tests use Playwright with Chrome, launching a real demo server.
+- `await expect(promise).rejects.toThrow('message')` **also passes when the rejection reason is `null` or `undefined`** (verified on the pinned Vitest 5). That silently voids the assertion for exactly the bug the `reason ?? new Error(...)` fallbacks prevent, so those fallbacks cannot be pinned with `rejects.toThrow`. Use `expectRejectionMessage()` from `tests/fakes.ts` instead whenever the message itself is the contract; plain `rejects.toThrow` stays fine for rejections whose value the test itself constructed.
 
 ## Common tasks
 

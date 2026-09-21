@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import type {
   ClusterChannel,
   ClusterEnvironment,
@@ -268,4 +269,21 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   emitError(error: unknown): void {
     this.handlers?.onError(error);
   }
+}
+
+/** Assert a promise rejects with an `Error` whose message contains `message`.
+ *
+ * `await expect(promise).rejects.toThrow('text')` is not enough on its own: it
+ * also passes when the rejection reason is `null` or `undefined`, which is
+ * exactly the failure the `reason ?? new Error(...)` fallbacks in this codebase
+ * exist to prevent. Use this where the *message* is the behaviour under test. */
+export async function expectRejectionMessage(promise: Promise<unknown>, message: string): Promise<void> {
+  const reason = await promise.then(
+    value => {
+      throw new Error(`expected a rejection, but it resolved with ${String(value)}`);
+    },
+    error => error as unknown
+  );
+  expect(reason, `rejection reason must be an Error, got ${String(reason)}`).toBeInstanceOf(Error);
+  expect((reason as Error).message).toContain(message);
 }

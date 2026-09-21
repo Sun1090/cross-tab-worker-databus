@@ -3651,6 +3651,49 @@ corroborates the 26-spec collection.)
 - `src/core/storage-batch.ts` is now 100% on all four metrics; whole-suite
   branches 94.69% → 94.89%. Verified with typecheck, lint, and 844 unit tests.
 
+## Phase 60 (a Vitest matcher hole, and the dedup sweep that expired everything)
+
+- **`await expect(promise).rejects.toThrow('message')` passes when the rejection
+  reason is `null` or `undefined`.** Verified directly on the pinned Vitest 5:
+  rejecting with `null`, `undefined`, a string, or a `{ message }` object
+  satisfied `.toThrow('anything at all')`. When the reason *is* an `Error` the
+  message is checked properly, so this is a narrow hole — but it swallows
+  exactly the bug class that the `reason ?? new Error(...)` fallbacks in
+  `src/core/replay-persistence.ts` exist to prevent.
+- Consequence: the six "falls back to a generic message …" cases in
+  `tests/replay-persistence.test.ts` could not fail. Mutation proof — deleting
+  the fallback so the adapter rejects with the raw `null` (`fail(transaction.error
+  as Error)` etc.): the open-failure, load-request, load-abort and clear-abort
+  mutants all exited **0** under `rejects.toThrow`, and **1** under the new
+  helper.
+- Added `expectRejectionMessage()` to `tests/fakes.ts` (asserts the reason is an
+  `Error` instance *and* carries the message) and converted the fallback-message
+  assertions to it, plus the missing load-path case: a read-only transaction that
+  aborts with `transaction.error === null` must reject with
+  `'Failed to load replay history.'`, which also closed the last uncovered
+  fallback leg on that path.
+- Left `rejects.toThrow` where the test itself constructs the rejection value
+  (`new Error('request failed')`, `new DOMException('The connection is closed.')`)
+  — there the message can only come from propagation, so the assertion is real.
+  Note `DOMException` is not an `Error` subclass, which is another reason those
+  sites must not use the helper.
+- Recorded the convention in `AGENTS.md` (test-utility table + testing
+  conventions) so future tests do not reintroduce the decorative assertion.
+- **Dedup sweep gap.** `DedupManager.pruneExpired()`'s "not yet expired" leg had
+  never run: every sweep in the suite saw a map whose entries were all stale, so
+  nothing pinned that a sweep keeps recent IDs. A sweep that expired everything
+  would turn duplicate re-deliveries into second acceptances — the exact failure
+  dedup exists to prevent — and the whole suite stayed green. New case pins the
+  partial expiry (tracked 2 → 1, the quiet ID re-accepted, the recent one still
+  suppressed); mutant `timestamp < cutoff` → unconditional delete: old suite
+  exit 0, new suite exit 1.
+- `DedupManager.isDuplicate()`'s FIFO eviction loop carried
+  `if (oldest === undefined) break;`, unreachable because `size > maxEntries`
+  implies a non-empty map. Rewritten as a `for...of` over the key iterator with
+  the bound checked at the top of the loop: same semantics, no dead branch, no
+  non-null assertion. Off-by-one (`<=` → `<`) and never-evict mutants fail the
+  suite before and after, so the restructure preserved the existing pins.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
