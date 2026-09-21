@@ -3870,6 +3870,57 @@ corroborates the 26-spec collection.)
 - Whole-suite numbers after the phase: statements 98.42%, branches 95.49%,
   functions 98.36%, lines 99.22% across 852 tests.
 
+## Phase 65 (audit follow-ups that did not become tests, and the remaining uncovered set)
+
+- **Shared suspend-stop gate — investigated, not shipped.** `data-bus.ts:1174-1175`
+  (`performStop` awaiting an existing `pendingStop` instead of calling
+  `transport.stop()` again) still reads as uncovered, so a
+  pagehide→explicit-`stop()` case with a gated transport was written. It does
+  detect the mutation (`expected 2 to be 1`), but so do three existing cases —
+  including 'stops once when an explicit stop follows a failed-open cleanup',
+  which is the same contract — and adding the new case left `1175` still reported
+  uncovered, i.e. the remaining line difference is a v8 statement-attribution
+  artifact rather than a real gap. The test was dropped rather than shipped as a
+  fourth pin of a covered contract, and nothing in this paragraph should be read
+  as a claim that the branch is untested: it is tested.
+- **`docs/configuration.md:49` documents `trace.sink` as Required** and the type
+  agrees, so `trace.ts:211`'s `?? (() => undefined)` default is reachable only
+  from untyped callers (see Phase 64). Confirmed there is no documentation
+  promising `trace: { enabled: true }` without a sink anywhere in en/zh, so the
+  docs and the type are consistent and nothing needs changing.
+- **TypeScript 7 re-check (roadmap candidate 6), 2026-09-22:** still blocked
+  upstream — `typescript-eslint` publishes `8.70.1` with peer
+  `typescript >=4.8.4 <6.1.0` while `typescript` is at `7.0.2`. Installing 7
+  breaks the lint gate before it breaks our own types, so the note stands.
+- Repository hygiene verified at this point: no open issues, no open PRs other
+  than the one carrying this entry, no `TODO`/`FIXME`/`XXX`/`HACK` markers
+  anywhere in `src`, `scripts`, `examples`, `e2e`, or `tests`, and no stale local
+  or remote topic branches.
+- **Remaining uncovered set, for the next pass.** Everything below was reached in
+  this audit and classified; the list is the starting point, not a to-do:
+  - `centrifuge.ts:444/450/465/471` — the default Worker/SharedWorker factories'
+    "no implementation" throws and their `new URL` catch arms. Unreachable from a
+    unit run: `start()` only selects a Worker backend when the global exists (or a
+    factory is injected), and `selectWorkerBackend` degrades to the local session
+    instead of calling the default factory.
+  - `data-bus.ts:529/803` — public-looking rejections behind an `if (x !== null)`
+    that the caller already tested; `552/556/665/1140-1141/1525/1541/1560/
+    1576-1577` — queue/gate re-entry arms dominated by an earlier check on the
+    same lifecycle epoch.
+  - `replay-manager.ts:411/419/420/466/483/525` — the `retryGeneration`
+    re-checks after each `await`; 525 in particular is dominated by the catch's
+    own generation test two lines below, so it cannot fire first.
+  - `replay-persistence.ts:49/208/244/268/292` and legs of `43/45/177/188` — the
+    `settled` latches and `invalidate()` re-entry arms. Reachable only if an
+    IndexedDB request errors *and* its transaction then aborts; the scripted fake
+    fires one or the other, never both, so pinning them needs a new fake mode
+    rather than a new assertion.
+  - `cluster.ts:397` (no `globalThis.setTimeout` in the runtime), `879`, `921`,
+    `990`, `1245`; `websocket.ts:147/414`; `port-reaper.ts:119/148/149`;
+    `trace.ts:449`; `version.ts:12`; `validation.ts:65`.
+  - `dedup-manager` and `storage-batch` and `environment` and `hooks` have no
+    remaining uncovered lines.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
