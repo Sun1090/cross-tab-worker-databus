@@ -180,6 +180,24 @@ describe('DataBusTraceReporter', () => {
     );
   });
 
+  it('still contains a throwing sink when the runtime has no console.warn', () => {
+    // The warn call is the only reporting path for a broken sink, and some
+    // webview shells strip console methods. Containment must not depend on the
+    // diagnostic being printable.
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      sink: () => {
+        throw new Error('sink exploded');
+      }
+    });
+    vi.stubGlobal('console', { log: () => {} });
+    try {
+      expect(() => reporter.event({ type: 'lifecycle', action: 'start' })).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('continues emitting after a sink failure and keeps trace data bounded', () => {
     const events: DataBusTraceEvent[] = [];
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
