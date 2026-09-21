@@ -147,6 +147,20 @@ describe('WebSocketTransport', () => {
     expect(socket.sent).toEqual([
       JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 1 }, messageId: 'only' })
     ]);
+
+    // The delegation must keep the wire shape for the other two metadata
+    // combinations too — an absent key must not be serialised as `undefined`.
+    socket.sent.splice(0);
+    transport.publishBatch!('market.tick', [{ data: { price: 2 }, timestamp: 7 }]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 2 }, timestamp: 7 })
+    ]);
+
+    socket.sent.splice(0);
+    transport.publishBatch!('market.tick', [{ data: { price: 3 } }]);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ op: 'publish', topic: 'market.tick', data: { price: 3 } })
+    ]);
   });
 
   it('drops a batch frame with onError when the socket is not open', () => {
@@ -646,6 +660,39 @@ describe('WebSocketTransport', () => {
     await startPromise;
     expect(settled).toBe(true);
     expect(onStatus).toHaveBeenCalledWith('connected');
+    transport.stop();
+  });
+
+  it('shares the handshake gate when start() is called again while connecting', async () => {
+    // The transport owns the socket from the moment it is constructed, so a
+    // duplicate start() during the handshake must reuse the in-flight gate:
+    // opening a second socket would orphan the first (never closed) and let a
+    // caller report readiness from a handshake it does not own.
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    const handlers = { onMessage: () => {}, onStatus: () => {}, onError: () => {} };
+    const first = Promise.resolve(transport.start({ url: 'wss://example.test/ws' }, handlers));
+    const second = Promise.resolve(transport.start({ url: 'wss://example.test/ws' }, handlers));
+
+    expect(sockets).toHaveLength(1);
+    expect(second).toBe(first);
+
+    let settled = 0;
+    void first.then(() => { settled += 1; });
+    void second.then(() => { settled += 1; });
+    await Promise.resolve();
+    expect(settled).toBe(0);
+
+    sockets[0]!.open();
+    await Promise.all([first, second]);
+    expect(settled).toBe(2);
     transport.stop();
   });
 
