@@ -4202,6 +4202,34 @@ corroborates the 26-spec collection.)
 - **Risks / rollback:** test only.
 - **Updated:** 2026-09-22.
 
+## Phase 73 (the Vue adapter's unhandled-rejection path)
+
+- **Status:** complete. Branch `test/vue-ready-rejection`.
+- **Gap.** `vue.ts` was the only adapter with an uncovered *function*: the
+  `catch(() => {})` on `void next.ready().catch(…)` at `vue.ts:24`. The React
+  twin has been pinned since phase 62, so the two adapters had silently different
+  guarantees for the same idiom.
+- **Pin — `contains a rejected ready() on the bus it publishes`.** A thenable
+  records whether a rejection handler was installed, then rejects through it, so
+  the assertion is about the handler existing rather than about a promise nobody
+  observes.
+
+  | Mutation | Result |
+  |---|---|
+  | `.catch(() => {})` deleted from `vue.ts:24` | `expected false to be true` — no rejection handler was installed |
+
+  (`typeof handler === 'function'` in the assertion is there so the recording is
+  about a *usable* handler; only the deletion above was verified by mutation.)
+- **Verification:** `npx vitest run` 37 files / 860 tests, `pnpm typecheck`,
+  `pnpm lint`; `pnpm test:coverage` — `vue.ts` now 100% on statements, branches,
+  functions and lines (was 94.44% functions), matching `hooks.ts`; floors hold.
+- **Note on the branch order:** this work was verified against main after #143
+  merged, so the numbering continues from phase 72.
+- **Risks / rollback:** test only; rollback = revert the commit.
+- **Next:** sync `main`, then continue the ledger (`centrifuge.ts:286`,
+  `port-reaper.ts:119`, `data-bus.ts` remaining legs).
+- **Updated:** 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
