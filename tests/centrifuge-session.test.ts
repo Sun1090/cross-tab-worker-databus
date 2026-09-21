@@ -415,6 +415,29 @@ describe('CentrifugeSession protocol coverage', () => {
     expect(sink).toHaveBeenNthCalledWith(2, { type: 'STATUS', status: 'disconnected' });
   });
 
+  it('drops a subscription publication that self-attributes to an empty topic', () => {
+    const { sink, session } = makeSession();
+    session.handle(init());
+    const client = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'SUBSCRIBE', topic: 'room.1' });
+    const subscription = client.getSubscription('room.1')!;
+    const deliver = (data: unknown) => {
+      for (const listener of subscription.listeners.get('publication') ?? []) {
+        (listener as (context: unknown) => void)({ data });
+      }
+    };
+
+    // A payload carrying its own topic wins over the out-of-band channel, and
+    // an empty one therefore resolves to no channel at all: dropped rather than
+    // delivered under 'room.1'.
+    deliver({ topic: '', data: { n: 1 } });
+    expect(sink).not.toHaveBeenCalled();
+
+    // The normal shape (channel known only out-of-band) still delivers.
+    deliver({ n: 2 });
+    expect(sink).toHaveBeenCalledWith({ type: 'MESSAGE', topic: 'room.1', data: { n: 2 } });
+  });
+
   it('reports a client-level error through the sink without changing status', () => {
     const { sink, session } = makeSession();
     session.handle(init());
@@ -670,6 +693,38 @@ describe('CentrifugeSession lifecycle isolation', () => {
 
     secondClient.emit('connected', {});
     expect(sink).toHaveBeenCalledWith({ type: 'STATUS', status: 'connected' });
+  });
+
+  it('drops status transitions from a stopped client after the session is reinitialized', () => {
+    // `state` and `disconnected` are separate listeners from `connected`, and a
+    // late one would still overwrite the replacement connection's reported
+    // status — including mapping straight onto STATUS error.
+    FakeCentrifuge.instances.length = 0;
+    const sink = vi.fn();
+    const session = new CentrifugeSession<unknown>({ post: message => sink(message) });
+    const init = {
+      type: 'INIT' as const,
+      url: 'wss://example.test/connection/websocket',
+      config: {}
+    };
+    session.handle(init);
+    const firstClient = FakeCentrifuge.instances[0]!;
+    session.handle({ type: 'STOP' });
+    session.handle(init);
+    const secondClient = FakeCentrifuge.instances[1]!;
+    sink.mockClear();
+
+    firstClient.emit('state', { newState: 'connected' });
+    firstClient.emit('state', { newState: 'error' });
+    firstClient.emit('disconnected', {});
+    expect(sink).not.toHaveBeenCalled();
+
+    secondClient.emit('state', { newState: 'connected' });
+    secondClient.emit('disconnected', {});
+    expect(sink.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'STATUS', status: 'connected' },
+      { type: 'STATUS', status: 'disconnected' }
+    ]);
   });
 
   it('isolates subscription callbacks when the owning client is replaced', () => {

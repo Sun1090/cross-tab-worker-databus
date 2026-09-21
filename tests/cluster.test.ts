@@ -870,30 +870,64 @@ describe('WorkerClusterRuntime', () => {
     expect(runtime.isAssigned('fill-topic-599')).toBe(false);
   });
 
-  it('evicts the oldest route owner cache entry once the cap is reached', async () => {
+  it('evicts the least-recently-resolved route owner once the cap is reached', async () => {
+    // Only *remote* owners populate this cache: a locally owned topic takes the
+    // `assignedTopics` fast path in `publish()` and never reaches
+    // `resolvePublishTarget()`. So the cap has to be driven from a peer.
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
-    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-cap' });
-    const runtime = new WorkerClusterRuntime({
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-cap-A' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'lru-cap-B' });
+    const runtimeA = new WorkerClusterRuntime({
       clusterKey: 'lru-cap',
-      environment: env.environment,
-      tabId: 'tab-cap',
-      workerId: 'worker-cap',
-      routeOwnerCacheMax: 3,
+      environment: envA.environment,
+      tabId: 'tab-cap-A',
+      workerId: 'worker-cap-A',
+      routeOwnerCacheMax: 2,
       handlers: { onControl: () => {}, onEvent: () => {} }
     });
-    runtime.start();
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'lru-cap',
+      environment: envB.environment,
+      tabId: 'tab-cap-B',
+      workerId: 'worker-cap-B',
+      handlers: { onControl: () => {}, onEvent: () => {} }
+    });
+    runtimeA.start();
+    runtimeB.start();
+    runtimeB.subscribe('bench.cap.a');
+    runtimeB.subscribe('bench.cap.b');
+    runtimeB.subscribe('bench.cap.c');
     await Promise.resolve();
-    env.runIntervals();
-    for (let i = 0; i < 5; i += 1) {
-      runtime.publish(`bench.cap.${i}`, { value: i });
-      await Promise.resolve();
-      env.runIntervals();
-    }
-    const snap = runtime.getSnapshot().routeOwnerCache;
-    expect(snap?.max).toBe(3);
-    expect(snap?.size).toBeLessThanOrEqual(3);
-    runtime.stop();
+    envB.runIntervals();
+    envA.runIntervals();
+
+    // Fill to the cap, then refresh `a` so `b` becomes the oldest entry.
+    runtimeA.publish('bench.cap.a', { value: 1 });
+    runtimeA.publish('bench.cap.b', { value: 2 });
+    runtimeA.publish('bench.cap.a', { value: 3 });
+    // Inserting `c` overflows the cap and must drop `b`, not `a`.
+    runtimeA.publish('bench.cap.c', { value: 4 });
+
+    const snapshot = runtimeA.getSnapshot().routeOwnerCache;
+    expect(snapshot?.max).toBe(2);
+    expect(snapshot?.size).toBe(2);
+    expect(snapshot?.hits).toBe(1);
+    expect(snapshot?.misses).toBe(3);
+
+    // The refreshed entry survives the overflow, and the evicted one resolves
+    // as a miss again — the distinction between LRU and plain insertion-order
+    // eviction. `a` is probed first because re-resolving `b` overflows the cap
+    // again and would itself drop `a`.
+    runtimeA.publish('bench.cap.a', { value: 5 });
+    runtimeA.publish('bench.cap.b', { value: 6 });
+    const after = runtimeA.getSnapshot().routeOwnerCache;
+    expect(after?.size).toBe(2);
+    expect(after?.hits).toBe(2);
+    expect(after?.misses).toBe(4);
+
+    runtimeA.stop();
+    runtimeB.stop();
   });
 
   it('clears route owner cache diagnostics when stopped', () => {
