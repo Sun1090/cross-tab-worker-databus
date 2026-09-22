@@ -4910,6 +4910,73 @@ corroborates the 26-spec collection.)
   `typescript-eslint` peer-range re-check that gates TypeScript 7.
 - Updated: 2026-09-22.
 
+## Release 0.21.1 completed (2026-09-22)
+
+- Version: `0.21.1` published. PR #156 squash-merged as `c9f7b51`, tag `v0.21.1`
+  pushed at that commit, `Release` workflow run `35687174160` **success**,
+  `npm view … version dist-tags.latest` → `0.21.1` / `0.21.1`.
+- CI proved the point of the change independently: the `browser` job drove
+  `examples/react` with no path to `esm.sh` (36 e2e cases green, job 3m37s against
+  2m13s before the four React cases existed).
+- Branch hygiene: `feat/local-react-example` deleted with the merge;
+  `git ls-remote --heads` lists only `main`.
+- Updated: 2026-09-22.
+
+## Phase 82 (one absorb that no assignment can reach)
+
+- Version: `0.21.2` (patch). Branch `test/data-bus-lifecycle-ledger` off
+  `v0.21.1` (`c9f7b51`).
+- **What and why.** Re-measured the `data-bus.ts` zero-count ledger from the
+  coverage JSON rather than from memory: `performStop()`'s
+  `pendingStop.catch(() => undefined)` was an uncovered function. `pendingStop` is
+  assigned non-null in exactly two places — `openTransport`'s failure path via
+  `createStopPromise()`, and `suspendTransport()`'s stop chained behind the
+  in-flight open — and both chains end in a terminal
+  `.catch(error => this.reportError(error))` that resolves, so the absorb cannot
+  fire and the failure is already recorded where it is produced. Deleted, with the
+  enumeration written into the comment so the claim is checkable rather than
+  asserted.
+- **The neighbour that stays, and the asymmetry that decided it.** One line above,
+  `startPromise?.catch(() => undefined)` is covered and load-bearing: `startPromise`
+  holds the opening whose rejection `ready()` reports to its caller. Deleting the
+  `pendingStop` absorb also fails *safe* — a future third assignment site that
+  rejected would route to the outer `catch` and be reported twice, not surface as
+  an unhandled rejection. Both verdicts plus the method are now an `AGENTS.md`
+  convention next to the existing synchronous-`catch` rule.
+- **Deliberately not churned.** The other 19 zero-count arms in this file were
+  read and left standing this pass, because classifying them needs their callers
+  enumerated and several are "always true" guards whose dominance argument is not
+  yet proven (e.g. `branch@1544` in `reopenTransport`, `branch@1242`'s
+  `originTabId === undefined` leg, the `[N,0]` `pendingStop` identity checks). An
+  unproven deletion is how 0.20.97's PR #150 nearly shipped a page error; the
+  ledger stays open on purpose.
+- Changed files: `src/core/data-bus.ts`, `AGENTS.md`, `CHANGELOG.md`,
+  `package.json`, both `docs/roadmap.md`, this file.
+- Verification: `pnpm check` → 37 files / 860 tests + 5 perf gates; `pnpm lint`
+  clean; `pnpm test:coverage` → 98.71 / 96.16 / 98.72 / 99.45 (functions
+  98.54 → 98.72, statements 98.68 → 98.71, branches and lines unmoved, no test
+  deleted); `pnpm test:e2e` → 36 passed; per-file re-measure confirms
+  `fn@1186` is gone from the uncovered list (115/120 functions, was 114/120).
+- Blockers: none. Risks / rollback: the deleted expression had no reachable input,
+  and the browser suite still exercises `performStop()` through real teardowns.
+  npm is immutable — a defect ships as `0.21.3`, `v0.21.2` is never moved.
+- Next: the remaining `data-bus.ts` arms (start with `branch@1544` and the
+  `pendingStop` identity checks), then the standing dependency/security patrol.
+- Updated: 2026-09-22.
+
+## Release 0.21.2 prepared (2026-09-22)
+
+- Version: `0.21.1` → `0.21.2` (patch: a dominated branch removed, nothing
+  observable moved). Same branch and commits as phase 82.
+- Freeze checklist: the set recorded in phase 82's verification bullet, run on this
+  commit; `verify:compat` green against `v0.21.1` by construction (no export
+  changed), `verify:pack` green, `tests/documentation.test.ts` 17/17 with en/zh
+  list-item parity intact, `npm pack --dry-run --json` listing unchanged (109 files),
+  `git diff --check` clean, public-registry audit clean.
+- Next after publish: continue the `data-bus.ts` ledger, then reassess whether any
+  executable work remains beyond dependency tracking.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

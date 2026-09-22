@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.21.2] - 2026-09-22
+
+### Changed
+- One unreachable defensive branch removed, with no behavior change: `performStop()` awaited its pending transport stop through `.catch(() => undefined)`, but that absorption could never run — `pendingStop` is assigned non-null in exactly two places (`openTransport`'s failure path via `createStopPromise()`, and `suspendTransport()`'s stop chained behind the in-flight open) and both chains already end in a terminal `.catch(error => this.reportError(error))` that resolves, so the failure is recorded where it is produced. The neighbouring `startPromise?.catch(() => undefined)` is kept, because that promise *does* reject: it holds the opening a failing `ready()` reports to its caller. Naming which kind of arm each one is is now written into the source and into `AGENTS.md`, since the difference decides whether deleting it is a cleanup or a regression.
+- No public surface, no observable behavior and no protocol changed; `verify:compat` is green against `v0.21.1` by construction. Whole-suite coverage moves from 98.68 / 96.16 / 98.54 / 99.45 to 98.71 / 96.16 / 98.72 / 99.45 (one fewer uncovered function, no test deleted or weakened).
+
 ## [0.21.1] - 2026-09-22
 
 ### Added
@@ -8,7 +14,7 @@
 ### Changed
 - `e2e/adapters.spec.ts` now drives both example pages with one set of cases (fan-out, reactive rebind, delivery after the owning tab closes, and the cleared-topic-box fallback), because the two pages expose the same surface: `#topicInput`/`#publishButton`/`#messageList` ids, a `?topic=` override, and a `__vueBus`/`__reactBus` diagnostics hook. The React page gained those ids, the query override, a topic badge and the hook — it hand-wires the core API rather than importing `cross-tab-worker-databus/hooks`, so a failure that shows up for one page and not the other localizes to the adapter instead of to the library. All four cases pass against both pages, and the fallback leg was verified by mutation on each.
 - `docs/getting-started.md` (en + zh) records that both adapter pages are browser-covered and need no network.
-- One correction to the `0.21.0` entry above: it named the React adapter `cross-tab-worker-databus/react`, which is not an export this package has (`cross-tab-worker-databus/hooks` is). The published `0.21.0` release notes keep the original wording — npm versions and GitHub releases are not rewritten — so this fixes it for anyone reading between tags.
+- One correction to the `0.21.0` entry below: it named the React adapter `cross-tab-worker-databus/react`, which is not an export this package has (`cross-tab-worker-databus/hooks` is). The published `0.21.0` release notes keep the original wording — npm versions and GitHub releases are not rewritten — so this fixes it for anyone reading between tags.
 
 ## [0.21.0] - 2026-09-22
 

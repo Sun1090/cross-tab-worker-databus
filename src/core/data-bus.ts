@@ -1181,9 +1181,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     try {
       await this.startPromise?.catch(() => undefined);
       // A failed-open or suspend cleanup already stopped the transport;
-      // awaiting it is enough, so stop() is not called a second time.
+      // awaiting it is enough, so stop() is not called a second time. No
+      // `.catch` here, because there is nothing to catch: `pendingStop` is
+      // assigned non-null in exactly two places — openTransport's failure path
+      // via createStopPromise(), and suspendTransport()'s stop chained behind the
+      // in-flight open — and both chains end in a terminal
+      // `.catch(error => this.reportError(error))` that resolves. The failure is
+      // therefore already recorded where it is produced, and a rejection reaching
+      // this await would mean a third assignment site had been added. (Compare the
+      // line above: `startPromise` genuinely can reject, because it holds the
+      // opening that a failing `ready()` reports to its caller.)
       const pendingStop = this.pendingStop;
-      if (pendingStop) await pendingStop.catch(() => undefined);
+      if (pendingStop) await pendingStop;
       else await this.transport.stop();
     } catch (error) {
       // A transport whose stop() rejects must not reject stop() itself: the

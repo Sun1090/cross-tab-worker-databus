@@ -1,6 +1,11 @@
 # Roadmap
 
-0.21.1 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.2 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.2 delivered scope
+
+- A dead absorber deleted rather than left to show up as an uncovered function forever: `performStop()` awaited its pending transport stop through `.catch(() => undefined)`, and the proof that arm cannot run is the enumeration of `pendingStop`'s two non-null assignment sites, each chain ending in a terminal `.catch(error => this.reportError(error))`. The sibling absorb one line above stays, because `startPromise` does reject — it is the opening a failing `ready()` hands to its caller.
+- Both verdicts, and the method that produced them, are now written where the next reader looks: in the source comment and as an `AGENTS.md` convention alongside the existing rule for synchronous-`catch` guards. Whole-suite coverage went 98.68 / 96.16 / 98.54 / 99.45 → 98.71 / 96.16 / 98.72 / 99.45 with no test deleted, no ceiling lowered and no behavior change.
 
 ## 0.21.1 delivered scope
 
