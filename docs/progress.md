@@ -5272,6 +5272,36 @@ corroborates the 26-spec collection.)
   swallows at 1583/1602, and `cluster.ts:397`.
 - Updated: 2026-09-22.
 
+## Phase 90 / `ready()`'s final rejection classified as unreachable-by-construction
+
+- Version: no release — comment-only `src/` change; `pnpm build` and `pnpm typecheck` clean.
+  Branch `docs/ledger-ready-fallthrough`.
+- The last `return` of `ready()` (the generic "Transport is not ready and no start operation is
+  in flight") had never executed. Rather than invent a scenario to score it, it is now classified
+  with the enumeration that shows no state reaches it: it needs `started && !transportReady &&
+  !suspended` with `startPromise` null **and** `lastError` null, and `transportReady = false` is
+  written in exactly four places — `openTransport`'s entry (an opening owns the gate, returned one
+  check earlier), its failure path (`recordError` runs before that gate is cleared, so the
+  preceding line rejects with the real reason), `performStop`'s finally (which clears `started`
+  too, so `ensureStarted` has already installed a fresh opening or thrown for want of an
+  `initialConfig`), and `reopenTransport` (which assigns its opening synchronously first).
+- Why it stays instead of becoming an assertion: it is the final return on a promise every caller
+  awaits. A future path that cleared the ready flag without recording a failure or installing an
+  opening would otherwise fall off the end and have `ready()` **resolve** on a dead transport —
+  the one failure mode here that no caller could detect. Recorded in the source with the
+  classification, per the standing convention that each zero-count leg says which kind it is
+  (dominated / unreachable-by-construction / reachable-through-application-re-entry), because that
+  is what decides whether deleting it is a cleanup or a regression.
+- Ledger: the entry stays a zero count by design and is no longer open work. `data-bus.ts` had 17
+  entries before this phase; the count is unchanged, one is now closed as classified rather than
+  covered.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build` green.
+- Risk / rollback: comment and progress log only; `git revert`, no artifact consequence.
+- Next: `cluster.ts:397`, the never-invoked rejection swallows at `data-bus.ts` 1583/1602, then the
+  remaining module legs (`replay-manager` 411, `replay-persistence` 49, `trace` 449,
+  `centrifuge` 457/477, `centrifuge-session` 219, `websocket` 113/147/379, `version` 12).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
