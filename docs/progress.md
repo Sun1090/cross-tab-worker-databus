@@ -6604,6 +6604,8 @@ corroborates the 26-spec collection.)
   candidate list is therefore a degraded storage layer — `readWorkers()` returning nothing because this
   worker's own record could not be persisted — which is an advertised failure mode (AGENTS.md principle
   6) and the next thing to try for those two arms.
+  -> SUPERSEDED by Phase 120: that route does not reach them either, because `readWorkers()` re-supplies
+  this worker's own record while started. Both arms are dominated by an invariant in the same file.
 - Changed files: `tests/cluster.test.ts` (one new test; the adjacent private-topic test's heading was
   briefly clobbered by the insertion and restored in the same commit), `src/core/cluster.ts` (comment),
   `AGENTS.md` (the mutant-diff rule), `CHANGELOG.md`, `docs/progress.md`.
@@ -6616,6 +6618,42 @@ corroborates the 26-spec collection.)
   start, 1270 `writeRoute` without storage) and the rest are `??`/spread/`typeof` fallbacks. Phase 118's
   lesson applies: check whether a *synchronous handler* can reach them before writing an enumeration
   that claims they are dead — that is what turned this pass from a comment into a test.
+- Updated: 2026-09-23.
+
+## Phase 120 / Two zero-count election fallbacks, closed by the compiler rather than a test
+
+- Version: comments only; no behaviour change. Branch `docs/self-election-fallback-v2`, off `ff56df2`
+  (main after #201) — written on `test/self-election-fallback` off `b2d382c` while #201 was open, and
+  moved to a `-v2` branch after #201 landed first, because force-push is prohibited and both touch the
+  `### Coverage` and `## Next candidates` anchors. PR #202 closed as superseded.
+- `subscribe()`'s and `reconcileSubscriptions()`'s `selectLeastLoadedWorker(…) ?? this.currentRecord`
+  are the two `cluster.ts` arms that most look like a missing test: an ownership election silently
+  falling back to self is exactly the shape that hides a routing bug. They are dominated, and the
+  dominator is inside this file: `subscribe()` returns early unless `started`,
+  `reconcileSubscriptions()` is reached only through `reconcile()` which does the same, and
+  `readWorkers()` appends this worker's own record whenever storage names nobody while started. The
+  candidate list therefore cannot be empty, so the election cannot answer `undefined`.
+- A counterexample was built before writing that down: two runtimes, time advanced so the peer's
+  reconcile prunes this worker's record, then the peer stops cleanly, leaving zero worker records in
+  storage. `subscribe()` then saw `workers: ["worker-a"]` — its own record, re-supplied by
+  `readWorkers()` — and elected itself through the *left* operand, so the probe returned `true` without
+  ever touching the right arm. Coverage on the probe read `[2,0]` and `[1,0]`, unchanged.
+- Measured twice, in the order that matters: deleting both `??` arms leaves 37 files / 883 tests green,
+  because vitest transpiles without type checking; `tsc --noEmit` on the same tree fails with five
+  errors (`Argument of type 'WorkerRecord | undefined' is not assignable to parameter of type
+  'WorkerRecord'` at both `writeRoute` calls, plus `'owner' is possibly 'undefined'`). So the invariant
+  is checked — by the compiler, at the call sites that consume the value — and the honest fix if anyone
+  wants the arm covered by nothing at all is a non-null assertion, which trades a checkable claim for an
+  unchecked one. Recorded rather than pinned; no coverage movement claimed.
+- Changed files: `src/core/cluster.ts` (two comments), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean on the rebased tree (typecheck + build + 37 files / 884 tests + 5
+  perf gates), `pnpm lint` clean, plus the two mutation runs and the probe described above (measured on
+  883 tests, before #201's test landed).
+- Risk / rollback: `git revert`; nothing observes a comment.
+- Next: `cluster.ts` still reports 21 zero-count arms, of which 5 are the `if` legs at `activate()`,
+  `handoffAssignedTopics()`, `removeLifecycleListeners()`, `reconcile()` and `writeRoute()`; the rest are
+  the `??`/conditional-spread family this phase just characterised, so a future pass should test whether
+  each is dominated by an in-file invariant before treating it as a gap.
 - Updated: 2026-09-23.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
