@@ -1849,6 +1849,67 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('settles stop() when the teardown failure cannot be reported either', async () => {
+    // `createStopPromise()` chains the public gate to performStop() with
+    // `.then(onFulfilled, onRejected)`, and *both* handlers resolve the gate.
+    // performStop() was believed never to reject — its catch reports the failure
+    // and its finally completes the teardown — so the rejection arm had never
+    // run in any test. It can reject: the catch calls reportError(), which runs
+    // the error subscribers through invokeHandlers(), and a throwing subscriber
+    // is absorbed only by logging to console.warn. A console.warn that throws
+    // therefore escapes the catch and rejects the teardown.
+    //
+    // The consequence of that arm missing is not a wrong value but a hang:
+    // resolveGate() is the only thing that settles `await bus.stop()` on this
+    // path, and the transport stop is already done, so nothing else can wake
+    // the caller. The race below turns that into an assertion instead of a
+    // test timeout; verified by deleting resolveGate() from the arm, which makes
+    // it read 'hung'.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'unreportable-stop' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'unreportable-stop', environment: environment.environment, transport
+    });
+    await bus.start({});
+    bus.onError(() => {
+      throw new Error('error subscriber exploded');
+    });
+
+    const warn = console.warn;
+    console.warn = () => {
+      throw new Error('the logging shim failed too');
+    };
+    transport.stopShouldFail = true;
+    let outcome = '';
+    try {
+      outcome = await Promise.race([
+        bus.stop().then(() => 'settled'),
+        new Promise<string>(resolve => setTimeout(() => resolve('hung'), 250))
+      ]);
+    } finally {
+      console.warn = warn;
+    }
+    expect(outcome).toBe('settled');
+
+    // The transport failure still reached both ledgers, because recordError()
+    // runs before notifyError() and only the notification blew up. A caller
+    // that survives the hang must still be able to explain it.
+    expect(bus.getRecoveryStats()).toMatchObject({ hasError: true });
+    expect(bus.getRecoveryStats().errorMessage).toBe('transport stop failed');
+    expect(bus.getHealthSummary().lastFailure).toMatchObject({
+      source: 'transport', message: 'transport stop failed'
+    });
+
+    // And the bus is restartable: the rejection arm cleared the gate field and
+    // the finally completed the teardown, so a later open is a fresh operation
+    // rather than a stale lifecycle.
+    transport.stopShouldFail = false;
+    await expect(bus.start({})).resolves.toBeUndefined();
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
+    await bus.stop();
+  });
+
   it('opens the transport on a retry when the failed open stop also failed unrecordably', async () => {
     // `start()` chains the new open behind `pendingStop` with no `.catch`, on the
     // documented premise that every `pendingStop` ends in a terminal
