@@ -29,6 +29,10 @@ export declare class DemoWebSocketConnection {
   constructor(socket: DemoWebSocketSocket, bufferedHead?: Buffer);
 
   readonly id: string;
+  /** When the socket was accepted, as an epoch timestamp; `/debug/connections`
+   * renders it as an age so a test can tell whether a connection predates an
+   * event it caused. */
+  readonly openedAtMs: number;
   socket: DemoWebSocketSocket;
   buffer: Buffer;
   client: string;

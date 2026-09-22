@@ -164,6 +164,10 @@ export class DemoCentrifugeHub {
 export class DemoWebSocketConnection {
   constructor(socket, bufferedHead) {
     this.id = randomUUID();
+    // When this socket was accepted. `/debug/connections` reports it as an age so
+    // a teardown test can say whether the surviving connection predates the tab
+    // close, rather than only counting how many connections are left.
+    this.openedAtMs = Date.now();
     this.socket = socket;
     this.buffer = bufferedHead ?? Buffer.alloc(0);
     this.client = '';
