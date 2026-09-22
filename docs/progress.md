@@ -6095,15 +6095,21 @@ corroborates the 26-spec collection.)
   the scheduler, while the contract ("the cap limits automatic retries, not the application's") survives
   any of those counts.
 - Ledger after this pass, re-derived from `coverage/coverage-final.json` rather than from the doc's line
-  numbers: `data-bus.ts` uncovered branch arms 13 → 12, branches 97.01% → 97.24%, whole-suite
-  98.98 / 96.63 / 99.26 / 99.69 → 98.98 / 96.68 / 99.26 / 99.69, uncovered functions still two
+  numbers: `data-bus.ts` uncovered branch arms 13 → 12, branches 97.01% → 97.24% — both sides measured on
+  this module. Whole-suite coverage on the rebased tree is 98.98 / 96.69 / 99.26 / 99.69 over
+  37 files / 879 tests; the pre-rebase figure this entry first quoted (96.68) was measured before #186
+  moved `cluster.ts`, so it is corrected here rather than carried. Uncovered functions unchanged: two
   (`reopenTransport`'s superseded-lifecycle arms at 1689 and 1714). Remaining arms: 509, 542, 572, 577,
   644, 720, 760, 784, 857, 1235, 1654, 1730.
-- Changed files: `tests/data-bus.test.ts`, `CHANGELOG.md`, `docs/progress.md`.
-- Verification: `pnpm check` clean (37 files / 876 tests + 5 perf gates), `pnpm lint` clean,
+- Changed files: `tests/data-bus.test.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (37 files / 879 tests + 5 perf gates), `pnpm lint` clean,
   `pnpm test:coverage` as above; the mutant run described immediately above.
-- Risk / rollback: tests and docs only, `git revert`. The conflict risk is the known one — this branch
-  appends a phase at the `## Next candidates` anchor, as PR #186 does, so the later merge resolves there.
+- Risk / rollback: tests and docs only, `git revert`. The known anchor collision happened as documented:
+  #186 appended Phases 106–107 at `## Next candidates` and this branch appended 108 at the same place, so
+  the rebase resolved `docs/progress.md` and `CHANGELOG.md` by keeping both sides in order (verified
+  additive against `origin/main`: 0 deletions outside the amended test), and `gh pr update-branch`
+  reported "Cannot update PR branch due to conflicts", so the rebased work ships on `-v2` with the
+  original PR closed as superseded rather than a force-push.
 - Next: the twelve remaining arms, then the patch release the three protocol fixes accumulate to.
 - Updated: 2026-09-22.
 
