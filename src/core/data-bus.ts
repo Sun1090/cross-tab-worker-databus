@@ -550,10 +550,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Queue exactly one fresh start after an in-flight explicit stop settles. */
   private queueStartAfterStop(config: TConfig): Promise<void> {
     if (this.queuedStart) return this.queuedStart;
+    // No `.catch` on this await-then, and none is needed: `stopPromise` is
+    // assigned a non-null value in exactly one place — stop()'s hand-resolved
+    // gate — and both of that gate's settle handlers resolve it, which is what
+    // keeps the public stop() contract non-rejecting.
     const stop = this.stopPromise ?? Promise.resolve();
     const token = ++this.queuedStartToken;
     const queued = stop
-      .catch(() => undefined)
       .then(() => {
         // Clear before invoking start(), which installs its own startPromise.
         if (this.queuedStart === queued) this.queuedStart = null;
@@ -661,8 +664,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // has created the stop gate and cleared startPromise; otherwise an onStatus
     // retry runs while the failed opening still owns the gate.
     let startupInProgress = true;
+    // `before` resolves by construction, so no `.catch` is chained onto it: it is
+    // either `Promise.resolve()` from reopenTransport() or `this.pendingStop` from
+    // start(), and every non-null assignment of that field is a chain ending in a
+    // terminal `.catch(error => this.reportError(error))` (see performStop(), which
+    // awaits the same promise for the same reason).
     return before
-      .catch(() => undefined)
       .then(() => {
         // stop(), suspendTransport(), or a newer reopen may have arrived while
         // this opening was queued behind a pending stop. Abandon the open and
