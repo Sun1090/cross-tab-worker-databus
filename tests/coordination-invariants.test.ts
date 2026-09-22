@@ -43,7 +43,9 @@
  *
  * Concrete topics only: wildcard patterns have their own mutation-verified
  * pins, and folding them in here would replace a checkable expectation with a
- * hand-simulated matcher. Seeds are fixed, so a failure is replayable.
+ * hand-simulated matcher. Seeds are fixed, so a failure is replayable, and the
+ * sweep stops on a wall-clock budget with an asserted floor — see the constants
+ * below.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { CrossTabDataBus } from '../src/core/data-bus';
@@ -148,14 +150,29 @@ function forgeSubscribe(hub: ChannelHub, targetWorkerId: string, topic: string):
 }
 
 describe('cross-tab coordination invariants', () => {
-  // 5,000 seeds × three buses measured 9.0s idle; coverage instrumentation
-  // roughly doubles it and a loaded runner doubles it again, so the budget
-  // below leaves room without the 98%-of-budget squeeze the lifecycle fuzzer
-  // ran into. Cutting seeds would cut the interleavings that found the
-  // residue cases, so the budget moves instead.
+  // Depth is bounded by wall clock, not by seed count. Locally the sweep runs
+  // 18–76 seeds/s depending on machine load, so all 5,000 seeds cost 66–278s;
+  // its first CI run reported 553s and *still* had not finished, because 37
+  // other files shared 4 cores — well past the 120s per-test ceiling, which is
+  // how the gate failed. Seeds still stop at MAX_SEEDS, and MIN_SEEDS stops a
+  // machine from "passing" on a handful of interleavings without anyone
+  // noticing: 100 seeds in 60s needs 1.7 seeds/s, roughly 5x slower than the
+  // worst CI rate above. The floor is not arbitrary — the heaviest mutant this
+  // harness was proved against (an emptied `reconcileAssignedTopics` sweep) is
+  // caught at seed 12, so 100 keeps 8x the depth that detects a regression
+  // while the budget bounds the cost.
+  const MAX_SEEDS = 5_000;
+  const MIN_SEEDS = 100;
+  const SEED_BUDGET_MS = 60_000;
+
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
-    for (let seed = 1; seed <= 5_000 && failures.length < 6; seed += 1) {
+    let completed = 0;
+    // Read at the top of each iteration, which is after the previous one's
+    // `useRealTimers()`, so this is wall time rather than faked cluster time.
+    const startedAt = Date.now();
+    for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
+      if (completed >= MIN_SEEDS && Date.now() - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
@@ -285,8 +302,12 @@ describe('cross-tab coordination invariants', () => {
       } finally {
         for (const tab of tabs) await tab.bus.stop().catch(() => undefined);
         vi.useRealTimers();
+        completed += 1;
       }
     }
+    // A budget that always fires early would let the suite go quiet on a slow
+    // runner without anyone noticing, so depth is floored as well as capped.
+    expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);
     expect(failures).toEqual([]);
   }, 120_000);
 });

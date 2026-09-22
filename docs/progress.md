@@ -4461,6 +4461,62 @@ corroborates the 26-spec collection.)
   (`data-bus.ts:621` stale-demand construction, `centrifuge.ts:286`).
 - Updated: 2026-09-22.
 
+## Phase 77 (a fuzz budget the runner actually fits)
+
+- Main is green, and that hid a landmine. PR #150's `verify` job failed inside
+  `pnpm check` with `Error: Test timed out in 120000ms` on
+  `tests/coordination-invariants.test.ts`, which the runner reported as
+  **553,490ms**. Two runs of the same commit disagree because depth was bought
+  with a seed count: the file's own comment claimed "5,000 seeds × three buses
+  measured 9.0s idle", and re-measuring it says 18–76 seeds/s depending on
+  machine load, so the sweep costs **66–278s** before CI's 38 workers arrive to
+  share 4 cores. `#148` passing on main was luck, not a green test — so the fix
+  had to remove the possibility, not retry the job.
+- Both seeded fuzzers now bound depth by wall clock: a `MAX_SEEDS` cap, a
+  `Date.now()` budget check at the top of each iteration, and
+  `expect(completed).toBeGreaterThanOrEqual(MIN_SEEDS)`. The budget alone would
+  turn a loaded runner into a silent shallow pass, so the floor is what keeps the
+  assertion honest, and it is set from measured **kill depth** rather than taste:
+  the heaviest mutant the harness was proved against (an emptied
+  `reconcileAssignedTopics` sweep) fails at **seed 12**, so `MIN_SEEDS = 100`
+  keeps 8x the depth that detects a regression and needs only 1.7 seeds/s over
+  60s — ~5x slower than the CI run above.
+- **A wall-clock budget has to be read outside the fake clock.** Vitest fakes
+  `Date` by default, and this harness advances it ~45s per seed, so the same
+  check placed one line later measures simulated time and stops after a handful
+  of seeds while still "passing". `Date.now()` is therefore read at the top of
+  the iteration, which is after the previous one's `vi.useRealTimers()`.
+- Both new arms were proved live, not added as decoration: `MAX_SEEDS = 50`
+  fails with `explored only 50 seeds`, and an 8s budget stops the coordination
+  sweep at the floor (150 seeds, 8.3s wall) with the invariant assertions still
+  passing.
+- Collateral finding, unfixed and recorded: one full-suite run also took two of
+  the five `tests/perf-gate.test.ts` ceilings down (2079ms against 1000ms,
+  2955ms against 2500ms) while the file passed on its own — same contention
+  class. Those gates now assert the **fastest of 3 repeats** instead of a single
+  sample, which is the repeat that was not preempted. Verified it did not blunt
+  them: a quadratic `selectLeastLoadedWorker` (`workers.flatMap` over itself)
+  still trips the 1s ceiling at 13,630ms on its best repeat, and the weaker
+  50-object-spread-per-call mutant passing both ways is the honest measurement
+  of how much headroom a 4–20x ceiling leaves.
+- Changed files: `tests/coordination-invariants.test.ts`,
+  `tests/lifecycle-invariants.test.ts`, `tests/perf-gate.test.ts`, `AGENTS.md`
+  (the fuzz-budget convention, including the fake-`Date` trap), `CHANGELOG.md`,
+  `docs/progress.md`. No `src/` change.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` →
+  38 files / **862 tests passed** in 62.55s (both fuzzers stop at the 60s
+  budget, so the suite is now bounded rather than 66–553s), `pnpm test:coverage`
+  → 98.62 / 96.02 / 98.54 / 99.38 against floors 96 / 92 / 96 / 97. Before the
+  `bestOfMs` change the same full-suite run failed 2 of the 5 perf gates; after
+  it the file passes both inside the suite and on its own.
+- Risks / rollback: test-only. The floor can fail loudly if a runner ever drops
+  below ~1.7 coordination seeds/s, which is the intended signal (the gate's
+  environment degraded), not a hidden shallow pass. Rollback = revert the commit.
+- Next: land this, then rebase `refactor/dead-credential-guard` (#150, whose CI
+  failure is this bug) and `test/cjs-default-worker-url` on top; renumber #150's
+  progress entry to Phase 78.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
