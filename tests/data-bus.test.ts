@@ -517,6 +517,67 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('returns a promise from a resume that a re-entered start() has already superseded', async () => {
+    // The sibling of the case above, and it reaches the other half of the same
+    // early return. A re-entered `stop()` leaves `stopPromise` set, so
+    // `return this.stopPromise ?? Promise.resolve()` takes the first operand; a
+    // re-entered `start()` bumps `lifecycleEpoch` with no stop in flight at all,
+    // so nothing had assigned `stopPromise` and only the fallback keeps `start()`
+    // returning the Promise its signature promises. Without it the call returns
+    // `null`, and `bus.start(c).then(...)` — a documented usage in the adapters —
+    // throws `TypeError: Cannot read properties of null`.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-resume-start' });
+    const transport = new FakeTransport<number>();
+    let resumeArmed = false;
+    let resumeSinkHits = 0;
+    let nestedStart: Promise<void> | undefined;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-resume-start',
+      environment: environment.environment,
+      initialConfig: {},
+      trace: {
+        enabled: true,
+        sink: event => {
+          if (
+            resumeArmed &&
+            event.type === TRACE_EVENT_TYPE.LIFECYCLE &&
+            event.action === TRACE_LIFECYCLE_ACTION.RESUME
+          ) {
+            resumeSinkHits += 1;
+            // Once, from the outer resume's own event. The nested start emits a
+            // RESUME of its own; an unguarded sink would recurse forever.
+            if (resumeSinkHits === 1) nestedStart = bus.start({});
+          }
+        }
+      },
+      transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    environment.pageHide();
+    expect(bus.getClusterSnapshot().suspended).toBe(true);
+    const opensBeforeResume = transport.startCalls;
+
+    resumeArmed = true;
+    const outer = bus.start({});
+    expect(outer).toBeInstanceOf(Promise);
+    await outer;
+    await nestedStart!;
+    await Promise.resolve();
+
+    // Outer + inner RESUME events, and exactly one of them opens the transport:
+    // the outer cancelled itself because the nested start owns the lifecycle now.
+    expect(resumeSinkHits).toBe(2);
+    expect(transport.startCalls).toBe(opensBeforeResume + 1);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, started: true, suspended: false });
+    // The subscription intent survives the doubled resume.
+    expect(transport.subscribed.has('topic')).toBe(true);
+
+    await bus.stop();
+  });
+
   it('lets a stop() re-entered from the RESUME trace keep pageshow from reactivating the cluster', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
