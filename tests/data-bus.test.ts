@@ -4274,6 +4274,47 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(persistence.clear).not.toHaveBeenCalled();
   });
 
+  it('leaves the concrete topics a pattern filled when the pattern is unsubscribed', async () => {
+    // The test above is the exact-topic case. A pattern is not a topic: the
+    // rings it fills are keyed by the concrete publication topics, so
+    // `unsubscribe('chat.*')` can only address the pattern key — the durable
+    // cleanup names a row that was never written, and the in-memory rings stay
+    // with whatever still owns them. That is deliberate (any of those topics may
+    // have a live exact subscriber this one must not evict), and it is pinned
+    // here so the documentation cannot drift back to an unqualified "cleared
+    // when the last handler for the topic unsubscribes".
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+      clearTopic: vi.fn(async () => undefined)
+    };
+    const { bus, transport } = makeReplayBus({ persistence, maxPerTopic: 10 });
+    await bus.ready();
+    bus.subscribe('chat.*', () => undefined);
+    await Promise.resolve();
+
+    transport.emit('chat.room.1', 7);
+    transport.emit('chat.room.2', 8);
+    await Promise.resolve();
+    expect(bus.getDiagnostics().replay).toMatchObject({ topics: 2, messages: 2 });
+
+    bus.unsubscribe('chat.*');
+    await Promise.resolve();
+    expect(persistence.clearTopic).toHaveBeenCalledWith('chat.*');
+    expect(bus.getDiagnostics().replay).toMatchObject({ topics: 2, messages: 2 });
+
+    const seen: string[] = [];
+    bus.subscribe(
+      'chat.*',
+      message => seen.push(`${message.topic}:${String(message.data)}`),
+      { replay: true }
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(seen).toEqual(['chat.room.1:7', 'chat.room.2:8']);
+    await bus.stop();
+  });
+
   it('exposes explicit replay retention cleanup', async () => {
     const persistence = { load: vi.fn(async () => []), append: vi.fn(async () => undefined), clear: vi.fn(async () => undefined) };
     const { bus } = makeReplayBus({ persistence });

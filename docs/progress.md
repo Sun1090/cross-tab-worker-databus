@@ -6344,6 +6344,48 @@ corroborates the 26-spec collection.)
   `lastSeenAt` / `sessionTimeoutMs`.
 - Updated: 2026-09-23.
 
+## Phase 114 / The replay teardown promise did not hold for a wildcard, and said so
+
+- Version: documentation plus one test; no behaviour change. Branch `docs/wildcard-replay-teardown`,
+  off `49dc1ff` (#194).
+- #193 and #194 landed first (both merged, both branches deleted), then the pass turned from the
+  coverage ledger to the other kind of drift: what the user docs promise. Two mechanical audits — every
+  camelCase identifier quoted in the docs must exist in `src`, and every property of a public config
+  interface must appear in the user docs — both came back clean; the only misses were test-harness names
+  in maintainer documents and internal wire-record fields in the Chinese architecture doc. The finding
+  this phase ships did not come from the audits. It came from reading the replay paragraph next to the
+  wildcard paragraph.
+- `docs/api.md` states that replay buffers are "cleared when the last handler for the topic
+  unsubscribes", and elsewhere that "wildcard subscriptions replay across every buffered topic matching
+  the pattern". Each is true; together they describe an interaction that does not exist. A pattern is not
+  a topic: `dispatch()` records under the *concrete* publication topic, so `unsubscribe('chat.*')`
+  releases delivery only. Measured with a recording persistence double before touching the text — three
+  publications across two concrete topics under one pattern held `{ topics: 2, messages: 3 }` straight
+  through the unsubscribe, the durable cleanup was asked for `chat.*` (a key no row lives under), and a
+  later `replay: true` subscribe to the same pattern was redelivered all of it.
+- The code is not wrong, and changing it is not this pass's call: pruning every topic that matches a
+  released pattern would evict rings another live subscription still owns, and doing it correctly needs
+  a "no other exact or pattern subscriber holds this topic" test across `topicHandlers` at unsubscribe
+  time — a behaviour change with its own redelivery consequences. So the docs now state which key each
+  cleanup addresses, that `maxPerTopic` bounds ring *depth* and never the number of rings a wide pattern
+  creates (the buffer map is unbounded in key count by design), and what to call instead.
+- The new test is a pin on the *documented* boundary rather than on a guard: it fails if pattern-aware
+  pruning is ever implemented without the documentation being revisited, which is the drift worth
+  catching. Its assertions were taken from the probe's numbers, not written first and fitted.
+- Changed files: `docs/api.md`, `docs/zh/api.md`, `tests/data-bus.test.ts`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- Verification: probe measurements above; `pnpm check` clean (37 files / 882 tests + 5 perf gates) and
+  `pnpm lint` clean; the branch diff against `main` is additive.
+- Risk / rollback: `git revert`. The docs previously over-promised; a reader who acted on the old
+  sentence and relied on unsubscribe to reclaim replay memory now has the accurate contract plus the
+  three calls that do the job.
+- Next: the same doc-promise-vs-behavior question on the other `docs/api.md` bullets that pair a general
+  rule with a wildcard exception — the `clearReplayTopic(topic)` wording ("one exact topic") and the
+  dedup section's silence about pattern topics — and then the three zero-count legs #194 left named in
+  `centrifuge.ts`, `centrifuge-session.ts` and `port-reaper.ts`, two of which already look dominated by
+  a write-pairing enumeration that has to be measured rather than asserted.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
