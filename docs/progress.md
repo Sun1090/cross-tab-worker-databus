@@ -6113,6 +6113,56 @@ corroborates the 26-spec collection.)
 - Next: the twelve remaining arms, then the patch release the three protocol fixes accumulate to.
 - Updated: 2026-09-22.
 
+## Phase 109 / 0.21.6 — the release that finished the sentence 0.21.5 started
+
+- Version: **0.21.6** (patch — two receiver-side behaviour fixes, no public API change). Branch
+  `release/0.21.6`, off `0f13b5b`. Status: gates run locally; PR, tag and publish follow the merge.
+- Trigger: #186 changed runtime behaviour twice over (a batched `PUBLISH` frame's `items` must be a real
+  non-empty array; a `ROUTE_RELEASED` ACK must satisfy the key/topic pairing), which is the condition a
+  patch is owed under the release policy. Everything else in the range is test-only.
+- What this release actually finishes is 0.21.5's own claim. That version fixed a protocol substitution
+  in `handleControlMessage` and documented the rule as a protocol invariant — but a rule implemented in
+  one handler covers one handler, and the second reader of the same field pair (`handleRouteReleasedMessage`,
+  the ACK that *completes* a handoff) stayed open for a whole release. The audit that found it was looking
+  for something else (batched item metadata), which is the argument for doing the enumeration rather than
+  the plausible-looking fix.
+- Milestone contents: the two receiver-side fixes with forged-frame tests and three-mutant evidence each;
+  the batched-`PUBLISH` shape gate (throw-out-of-listener, `undefined`-payload publish, and fall-through
+  publishing); `AGENTS.md`'s protocol section now names every reader of the pairing invariant and says
+  which ones need it and why the rest do not; the recovery-exhaustion pin that turned a suite-green
+  mutant into a failing one.
+- Changed files: `package.json`, `CHANGELOG.md`, `docs/roadmap.md`, `docs/zh/roadmap.md`,
+  `docs/progress.md`, `docs/benchmarks.md`, `docs/zh/benchmarks.md`,
+  `AGENTS.md` (the in-scope queue line still said "13-arm" after #188).
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 879 tests + 5 perf gates);
+  `pnpm lint` clean; `pnpm bench` clean; `pnpm test:coverage` 98.98 / 96.69 / 99.26 / 99.69 over 879
+  tests, above the 96 / 92 / 96 / 97 floors; `pnpm verify:compat` reports "0.21.6 preserves public exports
+  and type metadata from v0.21.5"; `pnpm verify:pack` imports root and every subpath in ESM and CJS from
+  `cross-tab-worker-databus-0.21.6.tgz`; `pnpm audit --registry=https://registry.npmjs.org` → "No known
+  vulnerabilities found"; `npm pack --dry-run --json` lists 109 entries (980,162 B packed / 3,814,554 B
+  unpacked); `RELEASE_TAG=v0.21.6 node scripts/verify-release-version.mjs` → matches `package.json` with
+  exactly one non-empty notes section.
+- Browser gates: `pnpm test:e2e` 36 passed in 50.7s on an idle machine — including
+  `shared-mode session closes server-side when a tab closes`, the case that needed adjudication before
+  the 0.21.5 tag, which passed twice here (27.1s under load alongside a running benchmark chain, then
+  inside the clean 50.7s suite) rather than being waved through. `pnpm bench:browser` run twice and
+  `pnpm bench:compare --fail-above-pct 50` against the median of the preceding five reports per metric
+  improved on every row: `publish/dedicated/perMessageMs` 54.467 → 47.163 (−13.4%),
+  `publish/shared/perMessageMs` 38.845 → 33.814 (−13.0%), `databus/dedup1000Ms` 14.7 → 11.0 (−25.2%),
+  `wildcardDispatch1000Ms` −6.5%, `publishBatch1000Ms` −4.9%, `traceAndPublish1000Ms` −12.7%. Worth
+  stating plainly because it is a negative result about this release's cost: both new guards run on the
+  *receive* path, and the two metrics that would show them are not in this benchmark set, so the numbers
+  above establish "nothing on the measured hot paths regressed", not "the hash costs nothing".
+  `pnpm bench:trend` regenerated both benchmark docs from 52 archived reports.
+- Risks / rollback: both guards narrow what the receiver accepts, and every sender in the repository, in
+  the packed artifacts and in the examples satisfies them by construction. Rollback is reverting the
+  release commit and shipping 0.21.7; no published version is moved or reused, and no storage or
+  wire-format migration is involved.
+- Next: merge, tag the exact merged commit, publish, confirm the Release workflow's blocking
+  published-consumer step, then record the outcome in this entry rather than leaving it in the future
+  tense. After that, the twelve remaining arms, starting with the `startDemandRecovery()` status gate.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
