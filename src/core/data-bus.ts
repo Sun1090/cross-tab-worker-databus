@@ -1589,9 +1589,9 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // beginStop(), which cancels the recovery timer synchronously.
     // `activeConfig === undefined` is the one that is *not* re-checked anywhere: it
     // is the only thing between a future caller and `transport.start(undefined)`.
-    // It is kept because that is a different kind of leg from the swallowed
-    // rejection in performStop() — dropping it would not merely re-route a report,
-    // it would hand a nonsense config to the transport. Do not "cover" it by
+    // It is kept because that is a different kind of leg from the absorb below —
+    // dropping that one would re-route a report, dropping this would hand a nonsense
+    // config to the transport. Do not "cover" it by
     // driving a pageshow after a stop: cluster.stop() removes the visibility
     // listener (and bumps lifecycleGeneration), so the resume path is already gone
     // before this check matters — verified by mutation, which survived a full suite
@@ -1611,6 +1611,25 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // later stop() would be a no-op and leave the reopened transport running.
     const lifecycleEpoch = ++this.lifecycleEpoch;
     const pending = this.startPromise ?? this.pendingStop ?? Promise.resolve();
+    // This absorb has never run — `pending` resolving is provable, not merely
+    // observed: the `startPromise !== this.pendingStop` guard above already returned
+    // for any in-flight opening that is not also the stop gate, so `pending` is
+    // `pendingStop` or a fresh resolved promise, and `pendingStop` has two non-null
+    // assignments (`createStopPromise()` and `suspendTransport()`'s `stopping`), each
+    // chain ending in a terminal `.catch(error => this.reportError(error))` that
+    // resolves because `reportError` is total over any rejection reason
+    // (`describeFailure()`).
+    //
+    // It is kept anyway, which is a different verdict from 0.21.2 and 0.21.3's two
+    // deletions, and the reason is the shape of the failure rather than its
+    // likelihood. Measured: forcing `pending` to reject fails exactly one test
+    // ("reopens after repeated hide/show cycles…") whether this line is present or
+    // deleted, so no assertion protects the premise. But the two outcomes are not
+    // symmetric — with the absorb the reopen still proceeds, without it the
+    // `.then()` below is skipped and the bus silently stays closed after a
+    // pageshow. A guard whose deletion converts "degraded" into "stuck" is worth
+    // its one uncovered function; `performStop()`'s deleted twin sat inside a
+    // `try`, where the rejection was already caught.
     const opening = pending
       .catch(() => undefined)
       .then(() => this.openTransport(config, Promise.resolve(), false, lifecycleEpoch));
@@ -1631,6 +1650,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // opening before transport.start() is reached.
     this.updateStatus(WORKER_STATUS.CONNECTING);
     if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping || this.suspended) {
+      // The only handler this opening ever gets. `resumeTransport()` calls here with
+      // `void`, and the `opening.then(f, g)` below is unreachable from this arm, so
+      // without this line a rejected reopen — a superseded lifecycle whose transport
+      // then failed to start — lands as an unhandled rejection. Unlike the absorb at
+      // the top of this method, this one is not dominated by anything: it is the
+      // handler.
       void opening.catch(() => undefined);
       return opening;
     }
@@ -1659,7 +1684,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         }
       }
     );
-    void opening.catch(() => undefined);
+    // Deliberately no trailing `void opening.catch(() => undefined)` here. The
+    // `then(f, g)` two lines up passes an onRejected handler, which registers
+    // *that* as a handler of `opening` — so `opening` can never surface as an
+    // unhandled rejection on this path, whatever it rejects with, and a second
+    // swallow would only add a permanently uncovered function. That is a property
+    // of Promise semantics rather than of any assignment enumeration, which is why
+    // this one could be deleted and the one at the top of the method could not.
     return opening;
   }
 
