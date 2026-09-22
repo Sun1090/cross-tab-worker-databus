@@ -6460,6 +6460,59 @@ corroborates the 26-spec collection.)
   of `[Unreleased]` is test pins, leg labels, and this gate.
 - Updated: 2026-09-23.
 
+## Phase 117 / 0.21.7 — the release whose headline defect was a sentence
+
+- Version: **0.21.7, published**. Branch `release/0.21.7` → squash-merged as `43c7d3d` (PR #198, all four
+  checks green: verify / analyze / browser / CodeQL), tagged `v0.21.7` on that exact commit after fetching
+  it, tag pushed, `Release` workflow run **35763058247** completed in 6m31s with every named step green —
+  Validate release version and notes, Verify, Lint, Public export compatibility, Packed consumer smoke,
+  Extract changelog, Create GitHub release, **Publish to npm**, **Verify published npm consumers** (the
+  blocking gate), Record release verification context.
+- npm: `dist-tags.latest = 0.21.7`. GitHub release `v0.21.7` exists and is not a draft.
+- What this release actually is: no behaviour, wire format, or storage layout changed. What shipped is the
+  accumulated verification work since 0.21.6 — and the reason it counted as a release rather than as
+  repository cleanup is that `package.json`'s `files` list ships `docs/api.md` and its Chinese counterpart
+  inside the tarball, so #195 correcting a false statement about replay teardown under a wildcard
+  subscription changed a published artifact. Verified against the installed package, not the repository:
+  the corrected sentence is present in both language files of the registry tarball.
+- Also in it: the hydration-epoch failure path pinned (#194, the one real test gap found this cycle), the
+  receiver-side frame-validation rules written for integrators (#193), a dozen zero-count legs settled by
+  delete-mutant experiment and labelled at the site (#194, #196), and the coverage floors raised from
+  96 / 92 / 96 / 97 to 98 / 96 / 98 / 99 (#197) — which this release's own `verify` job cleared.
+- Pre-tag verification, all on the release tree: `RELEASE_TAG=v0.21.7 node scripts/verify-release-version.mjs`
+  (tag equals package version, exactly one non-empty CHANGELOG section); `pnpm check` — 37 files / 882
+  tests + 5 perf gates; `pnpm lint`; `pnpm test:coverage` 99.01 / 96.74 / 99.26 / 99.69; `pnpm bench` — 3
+  files / 28 gates; `pnpm verify:compat` against `v0.21.6`; `pnpm verify:pack` from the 0.21.7 tarball (109
+  entries); `pnpm audit --registry=https://registry.npmjs.org` — no known vulnerabilities; `git diff
+  --check`. Playwright `pnpm test:e2e` — **36/36 in 37.6s**, including the shared-mode teardown spec
+  previously flagged as the loaded-runner flake (passed at 18.2s). `pnpm bench:browser` twice, then
+  `pnpm bench:compare --fail-above-pct 50` → `[bench] OK: no metric regressed more than 50%`
+  (`dedup1000Ms` −43.5%, `publish/dedicated/perMessageMs` −21.7%, `traceAndPublish1000Ms` −28.8%, two
+  metrics +5%, one +1.0%); `pnpm bench:trend` regenerated both benchmark tables from 54 archived reports.
+- Independent consumer smoke, run against `npm pack`ed output from the public registry rather than CI's
+  copy: CJS root and ESM root both expose 19 exports (the dual-format surface property), `CrossTabDataBus`
+  and `createWebSocketDataBus` construct from CJS, and the published `topicMatchesPattern` answers
+  `('*', '') → false`, `('chat.*', 'chat.room.1') → true`, `('chatter.1', 'chat.room.1') → false` — the
+  segment-boundary case the documentation claims, and the measurement this session cited in a source
+  comment, verified now in the shipped bundle. `dist/cjs/hooks.cjs` requires `react` and fails in a bare
+  directory with no React installed; that is the optional-peer contract working, and the hooks surface is
+  covered by `verify:pack` inside the repo where the peer exists.
+- Migration: none. `verify:compat` proves every `exports` subpath and type field present in `v0.21.6` still
+  exists, no storage key or frame shape changed, so a 0.21.7 tab clusters unchanged with 0.21.0–0.21.6
+  peers. Rollback is a version pin back to `0.21.6`, with no cleanup step for the same reason.
+- Changed files: `docs/progress.md` only (this record).
+- Risk / rollback: the release cannot be re-published under the same version and the tag does not move;
+  a defect found later ships as 0.21.8.
+- Next: the project remains feature-complete, so the executable queue is now short and one item on it is
+  the maintainer's. In priority order — (1) the open product question #194 recorded: should releasing a
+  wildcard pattern prune the concrete topics it filled, which is a behaviour change with redelivery
+  consequences and was deliberately not decided here; (2) `cluster.ts` (22 zero-count arms),
+  `replay-persistence.ts` (8, seven of them `if (settled) return` guards in IndexedDB callbacks) and
+  `data-bus.ts` (12, documented as a set) are the remaining ledger, each to be settled by deletion
+  experiment rather than by reading; (3) the standing TypeScript 7 re-check, blocked upstream as of this
+  release (8.70.1 and 8.70.2-alpha.4 both peer on `<6.1.0`).
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
