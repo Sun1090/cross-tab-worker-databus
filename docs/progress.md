@@ -5575,6 +5575,47 @@ corroborates the 26-spec collection.)
   `version.ts:12`.
 - Updated: 2026-09-22.
 
+## Phase 96 / A live arm that only a re-entered `start()` exposes, and the shape it protects
+
+- Version: no release — recorded under `## [Unreleased]`. Branch
+  `test/resume-superseded-return-arm`, based on `7b2c322` (0.21.4) and rebased onto `7ed304a`
+  (#172) after that landed; the rebase was clean in the source and only the two append anchors
+  (`CHANGELOG.md`, here) needed the usual both-sides-kept handling.
+- The first of Phase 95's owed arms. `start()`'s superseded-resume guard returns
+  `this.stopPromise ?? Promise.resolve()`, and the right operand had never executed in a test:
+  reaching that line needs `resumeSuspendedResources()` to return false, and the two ways it can
+  return false assign `stopPromise` differently. A re-entered `stop()` sets it (the sink of the
+  RESUME trace event calls `stop()` — that leg was already covered); a re-entered `start()` bumps
+  the lifecycle epoch with no stop in flight at all, leaving `stopPromise` null. So the fallback
+  was not decoration, it was an untested live arm.
+- Construction: a RESUME sink that calls `bus.start({})` once, nested inside a resume from
+  suspension, then asserts the *outer* `start()` still returns a promise, that the nested open is
+  the only transport open, and that the resume sink is entered twice. Everything but the return
+  shape holds either way, which is the point — the assertion that carries the pin is
+  `expect(outer).toBeInstanceOf(Promise)`.
+- Teeth verified by mutation, not by reasoning: `return this.stopPromise!` fails exactly that
+  assertion with `expected null to be an instance of Promise`. The mutant is interesting because it
+  breaks no state invariant at all — it hands a caller a `null` where `start()` promises
+  `Promise<void>`, so the failure surfaces as `TypeError: Cannot read properties of null (reading
+  'then')` in application code. A guard whose deletion is only visible in the caller's stack.
+- The number is re-measured rather than inherited: `data-bus.ts` goes 17 → 16 uncovered branch
+  arms, whole-suite 98.84 / 96.46 / 99.08 / 99.57 over 37 files / 872 tests against unchanged
+  ceilings of 96 / 92 / 96 / 97. Inheriting Phase 95's "17" would have been wrong in principle even
+  though it happens to be the right baseline, because #172 edited the same file in between; the
+  counter reads `coverage-final.json`'s per-arm counts directly, so it also names the line
+  (457, `[2,1]`) instead of just the total. Note line 564 is the *other*
+  `?? Promise.resolve()` in the same file and is still `[86,0]` — same spelling, different arm,
+  which is why the grep for this pattern returns two hits and only one of them closed.
+- Changed files: `src/core/data-bus.ts` (comment only), `tests/data-bus.test.ts`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- Verification: `pnpm typecheck` clean, `pnpm test:coverage` green as above, mutation checked.
+- Risk / rollback: no behaviour change — a test plus a comment that names the re-entry it pins.
+  `git revert`, no artifact consequence.
+- Next: `data-bus.ts`'s remaining 16 arms. `564`'s right operand (`queuedStart`'s gate) and the
+  `509/535/559` if-arms come next, then `switch` default (324), then the arm tiers of
+  `replay-manager`, `replay-persistence`, `trace`, `websocket`, `centrifuge-session`, `version.ts:12`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
