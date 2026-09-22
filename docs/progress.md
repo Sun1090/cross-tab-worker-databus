@@ -4529,6 +4529,61 @@ corroborates the 26-spec collection.)
   `test/cjs-default-worker-url`.
 - Updated: 2026-09-22.
 
+## Phase 78 (the guard PR called dead was a page error waiting to happen)
+
+- PR #150 proposed deleting `resolveTokenRequest`'s `isCurrentBackend()` check in
+  the synchronous `catch`, on the reasoning that nothing between the backend
+  capture and the `post()` yields, so the check could only ever read true. The
+  reasoning misses that the code between them is **application code**: a
+  `credentialProvider` is free to call `stop()` before it throws. Built that
+  case and it is not dead — `stop()` clears the backend, `post()` then reaches
+  its "start() must be called first" branch, and the throw escapes the Worker
+  `message` listener, which in a page is an uncaught error rather than a
+  contained connection failure.
+- So #150 closes and this branch keeps the guard and pins it:
+  `tests/centrifuge.test.ts` now has
+  *drops a synchronous credential failure when the provider takes the transport
+  down first*, asserting no throw escapes the listener, no `TOKEN_ERROR` reaches
+  the terminated Worker, and — as the premise, so the case cannot pass because
+  the provider never reached `stop()` — that `diagnosticsBackend` is back to
+  `uninitialized` and `STOP` is the last frame the Worker sees. Deleting the
+  guard fails it with `Error: CentrifugeWorkerTransport.start() must be called
+  first.`, verified by mutation, so the assertion is the regression and not
+  decoration.
+- The classification is the part worth keeping: this project has removed several
+  zero-count legs as unreachable, and correctly so (`selectWorkerBackend` cannot
+  return a Worker backend when the corresponding global is absent — the parked
+  `typeof Worker` removals stay that way). The difference is whether anything
+  other than library code runs inside the guarded window. `AGENTS.md` now says
+  that out loud, because the same reasoning will be applied to the next such leg.
+- Coverage is unchanged in statements/lines/functions; **branch coverage rose
+  96.02 → 96.07**, because the test now takes the guard's false branch instead of
+  that branch being deleted. The uplift PR #150 claimed for removing the check is
+  therefore available without removing it — which is the whole argument, in one
+  number.
+- **Correction to Phase 77's account**, from this branch's CI run of the merged
+  fix: the green run logs no truncation at all and times the sweeps at
+  19.1s (coordination) and 1.7s (lifecycle) on the same runner that previously
+  spent 539s on the same 5,000 seeds. So the poisoned clock did not merely
+  mis-time the budget, it made the work itself ~28x slower — consistent with the
+  leftover fake clock feeding `advanceTimersByTimeAsync`, but that mechanism was
+  not proven and is recorded as unproven rather than explained away. What the
+  numbers do establish: the two-layer fix removed both the timeout and the
+  slowdown, and the depth floor is not what CI is near.
+- Changed files: `src/centrifuge.ts` (comment only — the guard is unchanged),
+  `tests/centrifuge.test.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` →
+  37 files / **858 tests passed**, `pnpm test:perf` → 5 passed,
+  `pnpm test:coverage` → 98.62 / 96.07 / 98.54 / 99.38 against floors
+  96 / 92 / 96 / 97. Mutation: with the check deleted, the new case fails with
+  `Error: CentrifugeWorkerTransport.start() must be called first.`
+- Risks / rollback: no behavior change on this branch, so rollback is a revert.
+  The risk being retired is the opposite one: #150 as written would have shipped
+  a real regression, which is why it closes rather than merging with tests added.
+- Next: rebase `test/cjs-default-worker-url` (whose default-Worker guards really
+  are dominated by the tested selector) onto this and land it, then 0.20.97.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

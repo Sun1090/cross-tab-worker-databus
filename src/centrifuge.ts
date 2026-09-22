@@ -283,6 +283,9 @@ export class CentrifugeWorkerTransport<TData = unknown>
         ? provider.getChannelToken(channel ?? '')
         : provider?.getToken?.();
     } catch (error) {
+      // This arm never yields, but the provider is application code and can
+      // stop or replace the transport synchronously before throwing. Without
+      // the check `post()` then addresses a backend that no longer exists.
       if (isCurrentBackend()) {
         this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
       }
