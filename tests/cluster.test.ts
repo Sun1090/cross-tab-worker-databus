@@ -929,6 +929,36 @@ describe('WorkerClusterRuntime', () => {
     }
   });
 
+  it('closes the cluster channel synchronously when the environment has no setTimeout', () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'no-settimeout' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'no-settimeout',
+      environment: env.environment,
+      tabId: 'tab-no-timeout',
+      workerId: 'worker-no-timeout',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    const channel = `${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('no-settimeout')}`;
+    expect(hub.liveChannelCount(channel)).toBe(1);
+
+    // The deferral exists so a handoff's ROUTE_RELEASED can flush before the
+    // channel goes away; the fallback is that same close without the deferral. A
+    // timerless host that skipped the fallback would leave the channel attached
+    // to the hub, which keeps routing frames to it — a behavioural leak, not just
+    // a counter that never reaches zero.
+    const originalSetTimeout = globalThis.setTimeout;
+    (globalThis as { setTimeout: unknown }).setTimeout = undefined;
+    try {
+      runtime.stop();
+      expect(hub.liveChannelCount(channel)).toBe(0);
+    } finally {
+      (globalThis as { setTimeout: unknown }).setTimeout = originalSetTimeout;
+    }
+  });
+
   it('keeps a live topic owner when its tab becomes hidden', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

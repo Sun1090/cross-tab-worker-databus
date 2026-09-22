@@ -5272,6 +5272,42 @@ corroborates the 26-spec collection.)
   swallows at 1583/1602, and `cluster.ts:397`.
 - Updated: 2026-09-22.
 
+## Phase 91 / The timerless channel close, and a hub seam that tells deferred from skipped
+
+- Version: no release — `src/` is unchanged; this is a test plus a test-only seam.
+  Branch `test/cluster-close-fallback`.
+- Pinned the last uncovered line in `cluster.ts`: the `else` arm of the channel close at
+  `stopTeardown()`'s tail. The normal path defers `channel.close()` by one task so a handoff's
+  `ROUTE_RELEASED` can flush first; the fallback closes it immediately on a host with no
+  `setTimeout`. Nothing in the suite ever ran the fallback, so the *only* path that guarantees the
+  channel is released on such a host was untested — and a skipped close there is not a cosmetic
+  leak: the hub keeps the channel in its registry and keeps routing frames to a torn-down session.
+- New seam: `ChannelHub.liveChannelCount(name)` in `tests/fakes.ts`. A closed channel leaves the
+  hub's set, so this is what lets a test distinguish "the close is deferred" from "the close never
+  happens" — before it, the only observable was that frames stopped arriving, which a deferred
+  close also produces one task later.
+- Mutation-checked: replacing the fallback body with a no-op fails the new test with
+  `AssertionError: expected 1 to be 0` (the channel still live after `stop()`); `src/` verified
+  clean afterwards.
+- Ledger, at line granularity: `cluster.ts` showed exactly one uncovered line (`397`) in every
+  coverage run of this session and now shows none — its `Lines` moved 99.79% → **100%** and
+  `Branches` 93.89% → 94.16%. Whole-suite: 98.84 / 96.42 / 99.08 / 99.57 over 37 files / 865
+  tests.
+- Not "closed", and the distinction matters for the next pass: at *arm* granularity `cluster.ts`
+  still carries 19 zero-count branch arms — `?? this.currentRecord` owner-selection fallbacks,
+  `...(x !== undefined ? { x } : {})` spreads, `typeof unknown.type === 'string'` guards. Those are
+  a different tier of the ledger from an uncovered line, and they were never baselined here, so
+  this phase records the line tier only. `data-bus.ts` stands at 17 zero entries on the same
+  arm-level script (16 open plus the one classified in Phase 90).
+- Changed files: `tests/cluster.test.ts`, `tests/fakes.ts`, `docs/progress.md`.
+- Verification: `pnpm typecheck` clean, the new test green in isolation, full gates re-run before
+  the PR.
+- Risk / rollback: test-only; `git revert`, no artifact consequence.
+- Next: the never-invoked rejection swallows at `data-bus.ts` 1583/1602 (classify or construct),
+  then `replay-manager` 411, `replay-persistence` 49, `trace` 449, `centrifuge` 457/477,
+  `centrifuge-session` 219, `websocket` 113/147/379, `version` 12.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
