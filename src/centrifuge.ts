@@ -440,12 +440,16 @@ export function createCentrifugeDataBus<TData = unknown>(
   });
 }
 
-
-/** Create the default dedicated Worker hosting the Centrifuge client. */
+/** Create the default dedicated Worker hosting the Centrifuge client. There is
+ * no `typeof Worker` guard: `start()` asks `selectWorkerBackend` with
+ * `worker: workerFactory !== undefined || typeof Worker !== 'undefined'`, that
+ * function never returns a Worker backend its availability flags deny, and these
+ * factories are only reached for a backend it did return. The degradation is
+ * pinned where it is decided — `tests/worker-mode.test.ts` on the selector, and
+ * "falls back to the local session when the platform lacks both Worker APIs" on
+ * the transport — so a guard here could only ever re-check a fact the caller has
+ * already established, and no runtime can reach it with the global missing. */
 function createDefaultWorker(): Worker {
-  if (typeof Worker === 'undefined') {
-    throw new Error('CentrifugeWorkerTransport requires a browser Worker implementation.');
-  }
   let workerUrl: URL;
   try {
     workerUrl = new URL('./centrifuge.worker.js', import.meta.url);
@@ -462,11 +466,10 @@ function createDefaultWorker(): Worker {
 
 /** Create the default SharedWorker. Each connecting port within the SharedWorker
  * creates its own CentrifugeSession with an independent WebSocket connection,
- * so refreshing or stopping one tab does not affect the others. */
+ * so refreshing or stopping one tab does not affect the others. Like its
+ * dedicated twin it carries no `typeof SharedWorker` guard — the availability
+ * flag in `start()` is what decides this is reachable. */
 function createDefaultSharedWorker(): SharedWorker {
-  if (typeof SharedWorker === 'undefined') {
-    throw new Error('CentrifugeWorkerTransport requires a browser SharedWorker implementation.');
-  }
   let workerUrl: URL;
   try {
     workerUrl = new URL('./centrifuge.shared.worker.js', import.meta.url);
