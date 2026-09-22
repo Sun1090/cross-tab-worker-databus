@@ -447,6 +447,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // RESUME trace events are synchronous extension points. A sink can call
       // stop() while this resume is being prepared; the stop owns the newest
       // lifecycle and the outer start must not restart timers or the cluster.
+      // A sink can equally call start(), which supersedes this resume by bumping
+      // the epoch with no stop in flight at all — that is why the fallback is a
+      // live arm and not decoration: `start()` returns `Promise<void>`, so
+      // returning a bare null `stopPromise` breaks `bus.start(c).then(...)`.
+      // Pinned by "returns a promise from a resume that a re-entered start() has
+      // already superseded".
       if (resumingFromSuspend && !this.resumeSuspendedResources()) {
         return this.stopPromise ?? Promise.resolve();
       }
