@@ -5921,6 +5921,50 @@ corroborates the 26-spec collection.)
   carries its own metadata and the frame-level key check only sees the outer `topic`.
 - Updated: 2026-09-22.
 
+## Phase 105 / 0.21.5 — the release the control-frame fix earned
+
+- Version: **0.21.5** (patch — one behaviour change, no public API change). Branch
+  `release/0.21.5`. Status: gates run locally, PR pending, tag after merge.
+- Trigger: #181 changed runtime behaviour (incoming control frames are now dropped unless
+  `createOpaqueKey(topic) === topicKey`), which is the condition Phase 103 recorded for cutting a patch.
+  Everything else in the range since 0.21.4 is test-only, comment-only, or harness work.
+- Milestone contents: the protocol substitution fix; the `stop()` hang contract that its own comment
+  had ruled impossible; the missing-`console.warn` leg of the error-reporting path; fuzz-fuse,
+  two-direction clock pin, and in-sweep progress heartbeat; three legs classified by enumeration
+  instead of hunted; `AGENTS.md`'s new protocol section stating which frame fields a receiver checks
+  and why `EVENT` is deliberately not held to the `CONTROL` standard.
+- Changed files: `package.json`, `CHANGELOG.md`, `docs/roadmap.md`, `docs/zh/roadmap.md`,
+  `docs/progress.md`.
+- Verification: `pnpm check` (typecheck + build + 37 files / 876 tests + 5 perf gates) clean; `pnpm lint`
+  clean; `git diff --check` clean; `pnpm test:coverage` 98.98 / 96.63 / 99.26 / 99.69 over 876 tests,
+  above the 96 / 92 / 96 / 97 floors; `pnpm verify:compat` reports "0.21.5 preserves public exports and
+  type metadata from v0.21.4"; `pnpm verify:pack` imports root and every subpath in ESM and CJS from the
+  packed tarball; `pnpm audit --registry=https://registry.npmjs.org` reports no known vulnerabilities;
+  `npm pack --dry-run --json` lists 109 entries for 0.21.5.
+- The one gate that needed adjudication: `pnpm test:e2e` failed twice, both on
+  `demo.spec.ts › shared-mode session closes server-side when a tab closes`, the second time after
+  33.9s against an 11.2s pass. Investigated rather than waved through: the CONTROL senders are two
+  sites in `cluster.ts` and both derive `topicKey` from the same topic, so no shipped path can emit the
+  mismatch the guard now drops; the test passes in isolation and then the whole suite passed 36/36 in
+  51.9s on an idle machine, and CI's `browser` job had already gone green on #181 and #182 with the
+  guard in place. Conclusion: loaded-runner contention on a polling assertion, recorded because the
+  alternative reading — that the frame guard broke shared-worker session teardown — is the kind of
+  claim that has to be excluded with evidence, not by preference.
+- Deliberately skipped: `pnpm bench:browser` / `bench:compare` (local-only per the checklist, and its
+  own notes document the fast/slow bimodality that makes a single run uninformative). `pnpm bench`
+  output was not captured locally; CI's verify job runs it, and that is the gate being relied on.
+  The added cost is one 128-bit hash per received control frame, which is not a path these benchmarks
+  measure.
+- Risks / rollback: the guard is stricter than the previous behaviour, so a peer that constructed a
+  mismatched pair would now be ignored — no such sender exists in this repository, in the packed
+  artifacts, or in the E2E examples, and mixed-version peers are covered by the E2E and the
+  legacy-protocol unit tests. Rollback is reverting the release commit and re-tagging; no storage or
+  wire-format migration is involved, and no published version is ever moved or reused.
+- Next: merge the green PR, tag that exact commit as `v0.21.5`, let the `Release` workflow publish, and
+  confirm the blocking `verify:published` step; then resume the 13-arm ledger and the `message.items`
+  question Phase 104 left open.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
