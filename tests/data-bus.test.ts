@@ -1880,16 +1880,14 @@ describe('CrossTabDataBus', () => {
       throw new Error('the logging shim failed too');
     };
     transport.stopShouldFail = true;
-    let outcome = '';
     try {
-      outcome = await Promise.race([
+      expect(await Promise.race([
         bus.stop().then(() => 'settled'),
         new Promise<string>(resolve => setTimeout(() => resolve('hung'), 250))
-      ]);
+      ])).toBe('settled');
     } finally {
       console.warn = warn;
     }
-    expect(outcome).toBe('settled');
 
     // The transport failure still reached both ledgers, because recordError()
     // runs before notifyError() and only the notification blew up. A caller
