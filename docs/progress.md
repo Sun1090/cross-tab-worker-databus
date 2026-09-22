@@ -5923,8 +5923,9 @@ corroborates the 26-spec collection.)
 
 ## Phase 105 / 0.21.5 — the release the control-frame fix earned
 
-- Version: **0.21.5** (patch — one behaviour change, no public API change). Branch
-  `release/0.21.5`. Status: gates run locally, PR pending, tag after merge.
+- Version: **0.21.5** (patch — one behaviour change, no public API change). Branch `release/0.21.5`,
+  squash-merged as `701b531`; tag `v0.21.5` on that exact commit. Status: **published** — GitHub release
+  live, npm `latest` is 0.21.5, and the `Release` workflow's blocking published-consumer step is green.
 - Trigger: #181 changed runtime behaviour (incoming control frames are now dropped unless
   `createOpaqueKey(topic) === topicKey`), which is the condition Phase 103 recorded for cutting a patch.
   Everything else in the range since 0.21.4 is test-only, comment-only, or harness work.
@@ -5960,9 +5961,19 @@ corroborates the 26-spec collection.)
   artifacts, or in the E2E examples, and mixed-version peers are covered by the E2E and the
   legacy-protocol unit tests. Rollback is reverting the release commit and re-tagging; no storage or
   wire-format migration is involved, and no published version is ever moved or reused.
-- Next: merge the green PR, tag that exact commit as `v0.21.5`, let the `Release` workflow publish, and
-  confirm the blocking `verify:published` step; then resume the 13-arm ledger and the `message.items`
-  question Phase 104 left open.
+- Release outcome: PR #183 squash-merged into `main` as `701b531`, `v0.21.5` tagged on that exact commit
+  and pushed alone (no direct `main` push, no force-push, no merge commit), release branch deleted both
+  sides. `Release` run 35736169241 finished `success` with every named step green, including the blocking
+  `Verify published npm consumers` — the published artifact, not just the built tree, imports cleanly.
+  GitHub release live at `/releases/tag/v0.21.5` (published 2026-09-22T13:51:15Z, not a draft);
+  `npm view cross-tab-worker-databus version` → `0.21.5` with `dist-tags.latest` → `0.21.5`. Repeated the
+  consumer check by hand against the registry tarball
+  (`PUBLISHED_VERSION=0.21.5 pnpm verify:published`) → "verified published
+  cross-tab-worker-databus@0.21.5 ESM/CJS consumers", so the smoke test is first-hand and not only a CI
+  green check.
+- Next: resume the 13-arm ledger (task #22) and the batched-`PUBLISH` `message.items` question that
+  Phase 104 left open — each item carries its own metadata while the frame-level key check added in
+  Phase 103 only sees the outer `topic`.
 - Updated: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
