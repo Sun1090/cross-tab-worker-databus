@@ -6116,7 +6116,9 @@ corroborates the 26-spec collection.)
 ## Phase 109 / 0.21.6 — the release that finished the sentence 0.21.5 started
 
 - Version: **0.21.6** (patch — two receiver-side behaviour fixes, no public API change). Branch
-  `release/0.21.6`, off `0f13b5b`. Status: gates run locally; PR, tag and publish follow the merge.
+  `release/0.21.6`, off `0f13b5b`. Status: **published** — PR #189 squash-merged as `607a30c`, tagged
+  `v0.21.6` on that exact commit, GitHub release live, npm `latest` 0.21.6, and the `Release` workflow
+  run 35747468986 finished `success` with its blocking published-consumer step green.
 - Trigger: #186 changed runtime behaviour twice over (a batched `PUBLISH` frame's `items` must be a real
   non-empty array; a `ROUTE_RELEASED` ACK must satisfy the key/topic pairing), which is the condition a
   patch is owed under the release policy. Everything else in the range is test-only.
@@ -6158,9 +6160,18 @@ corroborates the 26-spec collection.)
   the packed artifacts and in the examples satisfies them by construction. Rollback is reverting the
   release commit and shipping 0.21.7; no published version is moved or reused, and no storage or
   wire-format migration is involved.
-- Next: merge, tag the exact merged commit, publish, confirm the Release workflow's blocking
-  published-consumer step, then record the outcome in this entry rather than leaving it in the future
-  tense. After that, the twelve remaining arms, starting with the `startDemandRecovery()` status gate.
+- Release outcome: tagged `v0.21.6` on exactly `607a30c` and only the tag pushed (no direct `main` push,
+  no force-push, no merge commit); release branch deleted both sides. `Release` run 35747468986
+  completed `success` with every named step green through `Publish to npm` and the blocking
+  `Verify published npm consumers`. GitHub release live at `/releases/tag/v0.21.6`, published
+  2026-09-22T15:28:12Z, not a draft; `npm view cross-tab-worker-databus version` → `0.21.6`. The
+  consumer check was also repeated first-hand from this checkout —
+  `PUBLISHED_VERSION=0.21.6 pnpm verify:published` → "verified published
+  cross-tab-worker-databus@0.21.6 ESM/CJS consumers" — so the smoke test does not rest on a CI badge.
+- Next: Phases 110 and 111 took the two huntable recovery legs and both came back as measurements rather
+  than pins; the remaining ten zero-count slots in `data-bus.ts` are documented as a set. Also owed: a
+  look at whether `state: 'stopped'` beside `started: true` during an in-flight teardown is worth
+  reconciling in `getHealthSummary()`, which this pass sampled by accident and did not change.
 - Updated: 2026-09-22.
 
 ## Phase 110 / The demand-recovery status arm resisted two constructions, and now says so
@@ -6195,6 +6206,42 @@ corroborates the 26-spec collection.)
 - Risk / rollback: `git revert`, nothing observes a comment.
 - Next: the remaining arms are the enumerated-dominated set (542, 572, 720, 760, 857) plus the
   recovery-timer and re-subscribe legs; and the smoke test for the just-published 0.21.6.
+- Updated: 2026-09-22.
+
+## Phase 111 / The replay-loop break passed its own test, so the test was deleted
+
+- Version: comment-only; no behaviour change. Branch `docs/subscribe-loop-measurement`, off
+  `2766e72` (#190).
+- Third ledger leg attempted, third different verdict. `start()`'s re-subscribe loop breaks when the
+  lifecycle it belongs to has been superseded — the comment said a `cluster.subscribe()` callback could
+  do that, which is true, and the question was whether the `break` is load-bearing.
+- It is not, in either scenario that reaches it. Construction 1, a re-entrant `stop()` from the
+  transport's own `subscribe()`: the topics that reached the transport were `['first']` with the guard
+  live *and* with it disabled — a stopped cluster's `subscribe()` is inert, so the iteration the `break`
+  prevents would have done nothing anyway. Construction 2, a re-entrant `start()`: `['first', 'second']`
+  both ways, because the newer lifecycle replays the remaining topic itself and
+  `subscribeTransport()`'s already-subscribed gate absorbs the duplicate the superseded loop issues.
+  Mutation was the check both times, and both times the mutant survived.
+- The intermediate artifact was a test that passed and was written into the file first. Deleting it is
+  the deliverable: its assertions hold identically with the guard removed, so shipping it would have
+  read as "this leg is pinned" while teaching the opposite of what was measured.
+- Verdict: **executing and redundant in the reachable scenarios**, recorded at the site — distinct from
+  Phase 110's "measured, not reachable" and from the enumerated-dominated legs. Kept, because the
+  redundancy is a property of today's two neighbours (an inert stopped cluster and a duplicate-absorbing
+  gate), not of the loop.
+- Ledger after this pass: ten branch arms in `data-bus.ts` still carry a zero-count slot — seven
+  recorded as dominated by enumeration, two as measured-not-reachable (this one and Phase 110's), and
+  the remainder as the queued-start/stop-gate legs from earlier passes. Re-derived from
+  `coverage/coverage-final.json`, not from the line numbers quoted in older entries.
+- Changed files: `src/core/data-bus.ts` (comment), `CHANGELOG.md`, `docs/progress.md`. Also flips
+  Phase 109's status line, which was written before the release shipped.
+- Verification: `pnpm check` clean (37 files / 879 tests + 5 perf gates), `pnpm lint` clean; the two
+  mutant runs and the coverage measurements described above are the evidence, and no coverage movement
+  is claimed.
+- Risk / rollback: `git revert`; nothing observes a comment.
+- Next: the remaining ten legs are documented as a set rather than hunted one at a time; the productive
+  direction is a structural probe of what a *stopped-but-live-transport* state can do, which is the
+  premise both measurements turned on.
 - Updated: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
