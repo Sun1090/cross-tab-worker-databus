@@ -5063,6 +5063,35 @@ corroborates the 26-spec collection.)
   standing dependency/security patrol.
 - Updated: 2026-09-22.
 
+## Phase 85 / Release 0.21.3 completed, and a harness claim that was false
+
+- Version: `0.21.3` published — PR #159 squash-merged as `ea526c2`, tag `v0.21.3`
+  at that commit, branch deleted with the merge. Its first `verify` run failed and
+  the identical re-run passed, which is what led to the finding below.
+- **The re-run was not the end of it.** `tests/coordination-invariants.test.ts`
+  spent 525s on that runner (16.0s locally, same code) and blew its 120s test
+  timeout. Retrying hides it; the cause is that the sweep's wall-clock budget is
+  read from `performance.now()`, and the claim in `AGENTS.md` that `performance` is
+  outside Vitest's default fake set is **wrong on the pinned Vitest 5**: with the
+  budget forced to 2.5s the sweep reported "out of budget" after 48 ms of real
+  time, because each seed advances the faked timers ~45 simulated seconds.
+- **Why the obvious fix is not obvious.** Removing the `completed >= MIN_SEEDS`
+  conjunct and checking the budget per operation — the change that looks correct —
+  truncates the sweep at 3 seeds and fails the floor locally, because the clock it
+  compares against is the faked one. So the conjunct is currently the only thing
+  keeping the budget from firing immediately, and the real fix has to bind a
+  monotonic clock at module load (before any `vi.useFakeTimers()`) first.
+- Status: partially done. Shipped — the falsified claim corrected in `AGENTS.md`
+  with the measurement that disproved it. Open — a real-clock budget plus operation
+  granularity in both seeded fuzzers, with the floor re-derived from the depth that
+  actually detects a regression (the heaviest known mutant dies at seed 12).
+- Verification of this entry: `git status` clean after reverting the experimental
+  harness edit (no behavior was shipped from it), the committed suite still green
+  (`pnpm test` 37 files / 860 tests on `ea526c2`).
+- Next: implement the real-clock budget on a branch of its own, then re-derive
+  `MIN_SEEDS`, then return to the `data-bus.ts` handler ledger (1576/1595 arms).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
