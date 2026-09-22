@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-22
+
+### Breaking
+- `subscribe("")`, `publish("")` and `publishBatch("")` now throw a `TypeError` instead of being accepted. This is the removal step of the cycle opened in `0.20.96`, which warned once per instance and changed nothing else; it follows the pre-1.0 policy, and no other behavior of those three calls moved. An empty topic routes as a literal channel that no transport can address, so the subscription it created could never receive anything and a publication to it was dropped without a trace — the call now fails where the mistake is made, the same way an invalid `replay.maxPerTopic` does. The guard runs as the first statement of each method, so a rejected call also starts no transport, registers no handler and writes no route record. `publishBatch("", [])` throws too: the argument is checked ahead of the documented empty-array no-op. **Migration:** pass a real channel name. Where the topic comes from user input or a config field, validate or fall back before calling — `input.trim() || 'demo.flow'`, which is what the bundled example pages do.
+
+### Changed
+- `examples/react` and `examples/vue` now resolve their topic as `topicInput.trim() || <default>`, matching what `examples/demo` already did, because their boxes feed a reactive subscription and would otherwise hand `""` straight to the bus. The failure mode the fallback prevents is measured rather than assumed: with it removed, the Vue page keeps rendering its *previous* topic while a `TypeError` escapes to `pageerror`, and the demo page lands on 错误 with an error-feed row that never mentions the field the user just emptied. Both pages are now driven in real browser tabs (`e2e/adapters.spec.ts`, `e2e/demo.spec.ts`), each arm of the guard killing a different mutant.
+- `docs/getting-started.md` (en + zh) claimed the browser suite covers both adapter pages. It covers the Vue page only — the React page loads React from `esm.sh`, so it cannot run where CI has no network, and it hand-wires the demo page's pattern rather than using the shipped `cross-tab-worker-databus/react` adapter (covered in jsdom by `tests/hooks.test.tsx`). The paragraph now says exactly that.
+
 ## [0.20.97] - 2026-09-22
 
 ### Added

@@ -4675,6 +4675,128 @@ corroborates the 26-spec collection.)
   ceiling for TypeScript 7.
 - Updated: 2026-09-22.
 
+## Release 0.20.97 completed (2026-09-22)
+
+- Version: `0.20.97` published. PR #154 squash-merged into `main` as `4abe7d9`,
+  tag `v0.20.97` pushed at that exact commit, and the `Release` workflow run
+  `35680947257` finished with **every step green** in 6m22s — `pnpm check`,
+  `pnpm lint`, `verify:compat` (baseline `v0.20.96`), `verify:pack`, the npm
+  publish, and the blocking `verify:published` consumer check.
+- Registry state after publish: `npm view cross-tab-worker-databus version
+  dist-tags.latest` → `0.20.97` / `0.20.97`, so `latest` moved with the release
+  rather than lagging behind it.
+- Branch hygiene: `release/0.20.97` remote branch deleted after the merge and
+  tracking refs pruned, per the rule that a topic branch is PR transport and
+  not storage.
+- Risk / rollback: none outstanding. npm versions are immutable, so a defect
+  found later ships as a new version and `v0.20.97` is never moved or reused.
+- Next: close the empty-topic deprecation cycle opened in `0.20.96` (phase 80),
+  which is the removal step the policy calls for and therefore a minor.
+- Updated: 2026-09-22.
+
+## Phase 80 (the empty topic stops being accepted, and what the pages did without a fallback)
+
+- Version: `0.21.0` (minor — this is a removal, not an addition). Branch
+  `feat/reject-empty-topic` off `main@4abe7d9`.
+- **What shipped.** `subscribe("")`, `publish("")` and `publishBatch("")` throw a
+  `TypeError` where `0.20.96` warned once per bus: the cycle the pre-1.0 policy
+  requires is complete, and `warnEmptyTopic` plus its per-instance latch are
+  gone. The new `assertPublicTopic` sits in `src/utils/validation.ts` with the
+  option guards and runs as the first statement of all three methods, so a
+  rejected call starts no transport, registers no handler and writes no route
+  record for a channel nothing can address.
+- **The ordering finding that decided the test split.** `publishBatch` delegates a
+  one-item batch to `publish()`, so *every* empty-topic batch call is still
+  refused even with its own guard deleted — only `publishBatch("", [])`, which
+  would otherwise take the documented empty-array no-op, distinguishes a guard
+  above that return from one below it. It therefore has its own `it()`, and each
+  message names the operation the caller used for the same reason.
+- Mutation evidence, each killing a distinct arm (five mutants, all dead):
+  guard deleted from `subscribe` → `expected function to throw an error, but it
+  didn't`; from `publish` → `expected [Function] to throw an error`; from
+  `publishBatch` → `expected … to throw error including
+  'CrossTabDataBus.publishBatch("")' but got 'CrossTabDataBus.publish("")'`, the
+  delegation showing through; guard moved below the no-op → **both** tests fail,
+  the second with a plain "to throw an error" and nothing else; `assertPublicTopic`
+  made a no-op → the first probe fails.
+- **The example pages were the exposure, not the bus.** Their topic boxes feed a
+  reactive (demo: re-applied) subscription, so with `""` now rejected the page has
+  to resolve the fallback itself; `examples/react` and `examples/vue` gained
+  `input.trim() || <default>`, which `examples/demo` already had.
+- **What "without the fallback" actually looks like, measured rather than
+  assumed.** Driving the Vue page with the guard removed produced
+  `pageerror: TypeError: CrossTabDataBus.subscribe("") addresses a channel no
+  transport can route` while `#topicBadge` kept rendering the *previous* topic —
+  the tab looks healthy and is deaf. On the demo page, `applyConnection()` caught
+  the throw and left the tab on 错误 with an event-feed row that never mentions
+  the field the user emptied. Both are now pinned in real Chromium
+  (`e2e/adapters.spec.ts`, `e2e/demo.spec.ts`), and each arm of the guard kills a
+  different mutant: `computed(() => topicInput)` fails the whitespace arm, `??`
+  instead of `||` fails the raw-empty arm, and dropping `demo.js`'s guard fails at
+  `#configTopic` staying on the previous topic.
+- **Docs defect found on the way.** `docs/getting-started.md` (en + zh) said the
+  browser suite covers "the adapter pages". It covers the Vue page only:
+  `examples/react` loads React from `esm.sh`, so it cannot load on a CI runner
+  without network, and it hand-wires the demo page's pattern rather than using the
+  shipped React adapter. The paragraph now states which page is driven and why the
+  other is not, which also puts the React page's fallback on the record as the one
+  path in this change verified by hand.
+- Changed files: `src/utils/validation.ts`, `src/core/data-bus.ts`,
+  `tests/data-bus.test.ts`, `e2e/adapters.spec.ts`, `e2e/demo.spec.ts`,
+  `examples/react/main.jsx`, `examples/vue/main.js`, `docs/api.md`,
+  `docs/zh/api.md`, `docs/getting-started.md`, `docs/zh/getting-started.md`,
+  `CHANGELOG.md`, `package.json`, both `docs/roadmap.md`, both
+  `docs/benchmarks.md` (regenerated), this file.
+- Verification: `pnpm check` → typecheck + build + 37 files / **860 tests** +
+  `pnpm test:perf` 5 tests; `pnpm lint` clean; `pnpm test:coverage` →
+  98.68 / 96.16 / 98.54 / 99.45 against floors 96 / 92 / 96 / 97;
+  `pnpm test:e2e` → **32 passed** (the two new cases included); `pnpm bench`
+  28/28; `pnpm bench:browser` twice then `bench:compare --fail-above-pct 50` →
+  "no metric regressed more than 50%" (largest move `publish/shared/perMessageMs`
+  +16.3%, inside the documented alternating-mode spread); `pnpm bench:trend`
+  regenerated both trend docs from 46 reports; `pnpm verify:compat` → "0.21.0
+  preserves public exports and type metadata from v0.20.97" (the export surface is
+  unchanged — this is a behavior removal, which the gate cannot see, hence the
+  CHANGELOG call-out); `pnpm verify:pack` green on
+  `cross-tab-worker-databus-0.21.0.tgz`; `tests/documentation.test.ts` 17/17 with
+  the en/zh list-item parity intact; public-registry `pnpm audit --audit-level
+  high` → no known vulnerabilities; `npm pack --dry-run --json` → 109 files,
+  3.6 MB, nothing unintended; `git diff --check` clean.
+- Blockers: none. Risks / rollback: a consumer calling the three methods with a
+  value that is empty at runtime now gets a `TypeError` instead of a warning —
+  that is the intended break, announced one minor earlier and migration-shaped in
+  the upgrading guide (`input.trim() || 'demo.flow'`). npm versions are immutable:
+  a defect ships as `0.21.1`, `v0.21.0` is never moved.
+- Next: publish `0.21.0`, then serve the React example's React locally (esbuild is
+  already a devDependency) so the last hand-wired adapter page gains browser
+  coverage and the example stops depending on a CDN; afterwards the
+  `typescript-eslint` peer ceiling for TypeScript 7 stays the only external block.
+- Updated: 2026-09-22.
+
+## Release 0.21.0 prepared (2026-09-22)
+
+- Version: `0.20.97` → `0.21.0` (minor, as the deprecation policy requires for a
+  removal). Branch `feat/reject-empty-topic` off `main@4abe7d9`.
+- **Why this is worth a minor rather than a patch.** It is the second half of the
+  project's first deprecation cycle: `0.20.96` warned, this refuses. The public
+  export surface is byte-for-byte compatible (`verify:compat` green against
+  `v0.20.97`) — the change is in what three existing methods accept, which no
+  export-shape gate can see. The CHANGELOG leads with a `### Breaking` section
+  that names the call sites, the reason, the migration and the
+  `publishBatch("", [])` edge case.
+- Freeze checklist: the full set is recorded in the phase 80 verification bullet
+  above and was run on this branch at this commit; the release adds only
+  `package.json`, `CHANGELOG.md`, both roadmaps, both generated
+  `docs/benchmarks.md` and these entries.
+- Risks / rollback: the runtime delta is one string comparison per public call on
+  the hot path, plus the pages' fallback. `publish/shared/perMessageMs` moved
+  +16.3% against the median baseline, which is inside the spread two identical
+  runs of unchanged code have shown (49.9 ms then 71.1 ms), and no metric came
+  near the 50% gate. A defect ships as `0.21.1`; `v0.21.0` is never moved.
+- Next after publish: local React for `examples/react` so its adapter page is
+  driven in a browser too, then the standing dependency/security patrol.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
