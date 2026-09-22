@@ -5677,6 +5677,49 @@ corroborates the 26-spec collection.)
   `324`'s switch default. Then the other modules' arm tiers.
 - Updated: 2026-09-22.
 
+## Phase 99 / The isolation leg that has nowhere to log — and the vacuity theory that measurement killed
+
+- Version: no release — recorded under `## [Unreleased]`. Branch `test/reporting-fallback-arms`, off
+  `024879a` (#174). Two parallel branches are now open against `data-bus.ts`; the second
+  (`test/suspend-mid-open-arms`, Phase 98) has three commits and its CHANGELOG bullet collides with
+  this one at the `### Changed` anchor, exactly as the append convention predicts — whichever lands
+  second resolves it by keeping both.
+- Pinned: the second conjunct of `invokeHandlers()`' logging guard. A throwing error subscriber is
+  contained by `console.warn`; with a console that has no `warn`, an unguarded call raises
+  `TypeError: console.warn is not a function` from inside the containment itself — through
+  `reportError()`, out of the dispatch loop, into the transport's message callback. The new test
+  stubs such a console, asserts a publication dispatch does not throw, and asserts the dispatch
+  failure still lands in the ledger with its own message rather than the formatter's. Mutation
+  (dropping the conjunct) fails it as
+  `expected [Function] to not throw an error but 'TypeError: console.warn is not a func…' was thrown`.
+- `data-bus.ts` 15 uncovered branch arms → 14; functions stay at 2; whole-suite branch 96.52 → 96.57
+  with statements/functions/lines unchanged, 37 files / 874 tests.
+- The phase's other target failed, and that is the more instructive half. The hypothesis was that
+  `caps automatic recovery attempts` reaches its "still exactly one `exhausted` event" assertion
+  vacuously, because its environment clock is a constant and so the recovery cooldown must swallow
+  every attempt after the first. Acting on it, I rewrote the test to advance the clock — with a
+  comment asserting the old one had driven a single scheduled attempt. Then measured it, against a
+  scratch copy of the *unmodified* test: frozen clock, `attempt: 3`, `startCalls: 3`, one `exhausted`
+  event. The old test does what it looks like it does; the comment I had written for it was false, and
+  so was the premise for the change. The rewrite went back out (the file was rebuilt from `HEAD` plus
+  the new test, rather than by checking paths out under a dirty tree) and `AGENTS.md` gained the rule:
+  measure a vacuity theory against the unmodified test before rewriting on account of it, because the
+  rewrite carries a comment the next reader will trust.
+- What remains true and recorded: the one-shot `if (!this.recoveryExhausted)` guard's false arm has no
+  construction yet. A fourth `setStatus('error')` does not advance the attempt counter at all, and
+  making the guard unconditional emits no second event, so nothing currently depends on that leg in
+  either direction. Kept as an open item, not relabelled "dominated" to close it.
+- Changed files: `tests/data-bus.test.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`. No source
+  change this time.
+- Verification: `pnpm typecheck` and `pnpm lint` clean, `npx vitest run tests/data-bus.test.ts` 185
+  passed, `pnpm test:coverage` re-measured for the tier numbers, mutation checked both ways.
+- Risk / rollback: test and docs only; `git revert`, no artifact consequence.
+- Next: 14 arms. The remaining constructible candidates from Phase 98's ledger, in the order that
+  ledger lists them (demand-recovery bail-out, re-subscribe loop break, failed-open reuse of an
+  existing `pendingStop`, `reopenTransport()`'s gate clear, the `onControl` switch default), plus the
+  enumerations for `535`/`559`. `test/suspend-mid-open-arms` is waiting on CI and should merge first.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
