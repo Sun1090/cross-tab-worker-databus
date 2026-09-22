@@ -198,4 +198,34 @@ describe('DemoCentrifugeHub protocol', () => {
     const replies = connection.messages.map(text => JSON.parse(text));
     expect(replies.map(reply => reply.id)).toEqual([7]);
   });
+
+  it('carries the per-socket identity the debug endpoint reports', () => {
+    // `/debug/connections` publishes `{ id, ageMs, channels }` for every client so
+    // a teardown test can say *which* connection survived a tab close rather than
+    // only how many are left. `ageMs` is derived from `openedAtMs` at request time,
+    // so that field has to be a real epoch timestamp fixed when the socket was
+    // accepted — a zero or a monotonic counter would render as an absurd age.
+    const hub = new DemoCentrifugeHub();
+    const before = Date.now();
+    const first = new FakeConnection(hub);
+    const second = new FakeConnection(hub);
+
+    expect(first.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second.id).not.toBe(first.id);
+    expect(first.openedAtMs).toBeGreaterThanOrEqual(before);
+    expect(first.openedAtMs).toBeLessThanOrEqual(Date.now());
+
+    hub.attach(first);
+    hub.attach(second);
+    first.sendCommand({ id: 1, connect: {} });
+    first.sendCommand({ id: 2, subscribe: { channel: 'demo.reap' } });
+    expect([...first.channels]).toEqual(['demo.reap']);
+
+    // Detaching is the event the count assertion waits for, and it has to take the
+    // socket's channel membership with it: a stale subscription would keep the
+    // channel alive after the connection it names is gone.
+    hub.detach(first);
+    expect([...hub.clients]).toEqual([second]);
+    expect(hub.channels.size).toBe(0);
+  });
 });

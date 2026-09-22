@@ -6735,6 +6735,57 @@ corroborates the 26-spec collection.)
   target is making a failure there name its cause instead of reporting a bare count.
 - Updated: 2026-09-23.
 
+## Phase 123 / The teardown E2E's "loaded-runner flake" was a global counter, not load
+
+- Version: test and demo-server observability only; nothing shipped changes (`scripts/` and `e2e/` are
+  outside `files`), so no release is triggered. Branch `test/e2e-teardown-identity` off `bbc57d1`
+  (#204).
+- What prompted it: Phase 122 named this spec as the last known load-sensitive failure, and the plan was
+  to make its failure legible. Making it legible turned up the cause instead, and the cause was not load.
+- `shared-mode session closes server-side when a tab closes` polled the demo server's **total** connection
+  count: `2` before the close, `1` after. That number is server-wide while the suite runs in parallel, so
+  any other spec holding a tab is in it. The reproduction was accidental and exact: running this one spec
+  with `--repeat-each=3` failed **3 of 3**, each timing out at the `toBe(2)` precondition with three tests
+  each expecting to see exactly two of six connections. Run alone it passes, which is how this presented
+  as runner load for months.
+- The passing case was also weaker than it looked. In a shared cluster only the owner transport subscribes
+  a channel, so of the two sockets behind a real "2", one held the test's channel and the other was
+  subscribed to nothing at all — measured, printed in the trajectory the new test logs. The count was not
+  a statement about the pair of sessions the test names, and reaching "1" could not distinguish the dead
+  tab's socket closing from the *live* one closing while the dead one lingered.
+- The fix addresses sockets by channel, which `uniqueTopic()` already makes private to the test: the closed
+  tab's socket id must leave `/debug/connections`, and the surviving tab's id must still be there after
+  the close. Both are real assertions about identity rather than about arithmetic, and the second one is
+  the case a count structurally cannot see. Ownership of each topic is waited for as a precondition,
+  because channel-based addressing is only valid while the cluster keeps a topic with the tab that asked
+  for it — if that ever changes, the test fails naming the socket and channel, which is the honest
+  outcome; the alternative was an assertion that quietly stops meaning anything.
+- Supporting changes: `/debug/connections` returns `details: [{ id, ageMs, channels }]` next to the
+  unchanged `centrifugo` count; `DemoWebSocketConnection` records `openedAtMs` at accept (declared in
+  `demo-centrifuge-server.d.mts`, where the type of a `.mjs` class actually comes from — the property is
+  invisible to `tsc` until it is added there); and `tests/demo-centrifuge-server.test.ts` pins the id and
+  accept-time contract plus that `detach()` takes the channel membership with it, which is what the count
+  the test waits on depends on.
+- The trajectory the poll accumulates is printed on both paths. On a pass the line is the baseline:
+  measured **27–32 ms** across one poll, so the 45 s budget carries three orders of magnitude of headroom
+  and a slow reaper is not what a future timeout means. On a failure the run dumps every observation with
+  socket ids, ages and channel counts, so "slow", "wrong survivor" and "both died" are separable from the
+  report instead of from a re-run.
+- Verification: full E2E 36 passed in 41.6 s; the same spec `--repeat-each=3` now 3 passed, the exact
+  invocation that failed 3 of 3 against the old assertions. `pnpm check` clean (typecheck, build, 37 files
+  / 885 tests, 5 perf gates), `pnpm lint` clean, and `pnpm test:coverage` at 99.01 / 96.89 / 99.26 /
+  99.69 — unchanged, since nothing in `src/` moved. Unit gates ran after the browser suite finished, not
+  beside it — see Phase 122 on why those two do not share a machine.
+- Changed files: `e2e/demo.spec.ts`, `scripts/serve-examples.mjs`, `scripts/demo-centrifuge-server.mjs`,
+  `scripts/demo-centrifuge-server.d.mts`, `tests/demo-centrifuge-server.test.ts`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- Risk / rollback: `git revert`. The only runtime-surface change is one added field on a local dev
+  endpoint; `centrifugo` keeps its meaning for anything that still reads it.
+- Next: the other specs in `e2e/` that assert on server state should be re-read for the same global-counter
+  mistake — `serverSubscribers()` in `adapters.spec.ts` is already per-channel, so the exposure is
+  specifically in counts of connections rather than subscriptions.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

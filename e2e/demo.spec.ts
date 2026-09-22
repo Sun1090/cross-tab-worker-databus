@@ -31,6 +31,11 @@ declare global {
 
 const DEMO_URL = 'http://localhost:4173/examples/demo/';
 const LOCAL_WS_URL = 'ws://localhost:4173/centrifuge/demo/connection/websocket';
+
+/** One server-side WebSocket as `/debug/connections` reports it. The id is stable
+ * for the life of the socket and `ageMs` is measured by the server, so the pair
+ * says whether a connection predates something the test just did. */
+type ServerSocket = { id: string; ageMs: number; channels: string[] };
 // Graceful pagehide handoff is fast locally, but heartbeat-TTL fallback alone
 // is heartbeatInterval + workerTtl (~13s), and shared CI runners can delay the
 // standby's reconcile loop far beyond that. Give the takeover a generous
@@ -97,6 +102,31 @@ async function ownerCount(page: Page): Promise<number> {
   const live = await page.evaluate(() => window.__bus?.getClusterSnapshot().assignedTopics.length ?? null);
   if (live !== null) return live;
   return Number(await page.locator('#assignedCount').textContent());
+}
+
+/** Whether this tab's worker currently owns `topic`, i.e. is the one holding its
+ * transport subscription. A test that addresses a *server* socket by the channel it
+ * subscribes is only valid while that holds, so it is waited for as a precondition. */
+function ownsTopic(page: Page, topic: string): Promise<boolean> {
+  return page.evaluate(
+    name => window.__bus?.getClusterSnapshot().assignedTopics.includes(name) ?? false,
+    topic
+  );
+}
+
+/** Every WebSocket the demo server holds right now, with the channels each is
+ * subscribed to. Prefer this over the server's total connection count, which is
+ * global: any other spec with a live tab in a parallel run is in that number. */
+async function serverSockets(): Promise<ServerSocket[]> {
+  const response = await fetch('http://localhost:4173/debug/connections');
+  const body = (await response.json()) as { centrifugo: number; details: ServerSocket[] };
+  return body.details;
+}
+
+/** Compact rendering for a failure log: id prefix, how old the socket is, and how
+ * many channels it holds. */
+function formatSockets(detail: ServerSocket[]): string {
+  return detail.map(socket => `${socket.id.slice(0, 8)}@${socket.ageMs}ms/${socket.channels.length}ch`).join(' ');
 }
 
 /** Wait until the provided tabs have converged to exactly one topic owner and
@@ -408,25 +438,67 @@ test.describe('cross-tab databus demo', () => {
 
   test('shared-mode session closes server-side when a tab closes', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = uniqueTopic('e2e.reap');
+    const topicA = uniqueTopic('e2e.reap.a');
+    const topicB = uniqueTopic('e2e.reap.b');
     const tabA = await openDemoTab(context);
-    await connectDemo(tabA, 'shared', topic);
+    await connectDemo(tabA, 'shared', topicA);
     const tabB = await openDemoTab(context);
-    await connectDemo(tabB, 'shared', topic);
+    await connectDemo(tabB, 'shared', topicB);
 
-    // Each shared-worker port holds its own WebSocket, so two tabs mean two
-    // server connections (see the SharedWorker session reaper docs).
-    const connections = async () => {
-      const response = await fetch('http://localhost:4173/debug/connections');
-      return (await response.json()) as { centrifugo: number };
-    };
-    await expect.poll(async () => (await connections()).centrifugo, { timeout: 30_000 }).toBe(2);
+    // Each shared-worker port holds its own WebSocket (see the SharedWorker session
+    // reaper docs), so the two tabs are two server connections. Each is addressed
+    // below by the channel it subscribes, which is only sound while the cluster
+    // still gives each topic to the tab that asked for it — so that ownership is
+    // waited for as a precondition instead of being assumed.
+    await expect.poll(() => ownsTopic(tabA, topicA), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => ownsTopic(tabB, topicB), { timeout: 30_000 }).toBe(true);
+    const socketHolding = async (topic: string): Promise<ServerSocket[]> =>
+      (await serverSockets()).filter(socket => socket.channels.includes(topic));
+    await expect.poll(async () => (await socketHolding(topicB)).length, { timeout: 30_000 }).toBe(1);
+    const deadSocket = (await socketHolding(topicB))[0]!;
+    const liveSocket = (await socketHolding(topicA))[0]!;
 
-    // Closing the tab stops its transport gracefully; the demo server must
-    // drop the corresponding WebSocket. The silent-death variant of this
-    // lifecycle is covered by the PortReaper unit tests.
+    // Closing the tab stops its transport gracefully; the demo server must drop
+    // that tab's WebSocket. The silent-death variant of this lifecycle is covered
+    // by the PortReaper unit tests.
+    //
+    // Both halves used to be one global count — `centrifugo` 2, then 1 — and that
+    // number never tested what the name claims. It is server-wide, so every other
+    // spec with a live tab in a parallel run contributes to it, and
+    // `--repeat-each=3` reproduces that at the precondition: three copies of this
+    // test, each expecting to see exactly two of six connections. Worse, on a run
+    // that did pass, the two sockets behind the "2" measured as one subscriber of
+    // this test's channel plus one subscribed to nothing at all, so reaching "1"
+    // said nothing about which shared session had gone. Addressing sockets by
+    // channel fixes both, and makes the second half statable: the surviving tab's
+    // connection has to still be there. A server that closed both sockets and let
+    // tabA reconnect satisfied the old count while destroying the session this
+    // spec exists to protect.
+    const closedAt = Date.now();
     await tabB.close();
-    await expect.poll(async () => (await connections()).centrifugo, { timeout: 45_000 }).toBe(1);
+    const trajectory: string[] = [];
+    let reapedAfterMs = -1;
+    try {
+      await expect
+        .poll(async () => {
+          const detail = await serverSockets();
+          const gone = !detail.some(socket => socket.id === deadSocket.id);
+          trajectory.push(`+${Date.now() - closedAt}ms ${gone ? 'gone' : 'open'} ${formatSockets(detail)}`);
+          if (gone && reapedAfterMs < 0) reapedAfterMs = Date.now() - closedAt;
+          return gone;
+        }, { timeout: 45_000 })
+        .toBe(true);
+    } catch (error) {
+      console.log(`[reap] ${deadSocket.id.slice(0, 8)} never closed; trajectory:\n  ${trajectory.join('\n  ')}`);
+      throw error;
+    }
+    await expect
+      .poll(async () => (await serverSockets()).some(socket => socket.id === liveSocket.id), { timeout: 10_000 })
+      .toBe(true);
+    console.log(
+      `[reap] closed tab's socket ${deadSocket.id.slice(0, 8)} gone ${reapedAfterMs}ms after the close call, ` +
+        `across ${trajectory.length} polls; survivor ${formatSockets([liveSocket])} still connected`
+    );
   });
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {

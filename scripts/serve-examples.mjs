@@ -34,11 +34,25 @@ const server = createServer(async (request, response) => {
       response.end('Forbidden');
       return;
     }
-    // Connection-count observability: lets the e2e suite verify that the
-    // SharedWorker session reaper actually closes a dead tab's WebSocket.
+    // Socket observability for the e2e suite: which WebSocket connections the
+    // demo server holds, each with its id and the channels it subscribes.
+    // `centrifugo` is the *global* total and is not a per-test observable — the
+    // suite runs specs in parallel, so every other live tab is inside that number,
+    // and a shared cluster only subscribes the channel on its owner's transport, so
+    // a pair of tabs can show one channel-carrying socket and one with none. Address
+    // a test's own connections through `details[].channels`, whose names come from
+    // `uniqueTopic()`.
     if (pathname === '/debug/connections') {
+      const clients = centrifugoHub ? [...centrifugoHub.clients] : [];
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      response.end(JSON.stringify({ centrifugo: centrifugoHub?.clients.size ?? 0 }));
+      response.end(JSON.stringify({
+        centrifugo: clients.length,
+        details: clients.map(connection => ({
+          id: connection.id,
+          ageMs: Math.max(0, Date.now() - connection.openedAtMs),
+          channels: [...connection.channels].sort()
+        }))
+      }));
       return;
     }
     // Channel subscription counts on the Centrifugo hub: lets the e2e suite gate
