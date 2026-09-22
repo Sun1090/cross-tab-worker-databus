@@ -150,7 +150,7 @@ Open `http://localhost:4173/examples/demo/` and open it in multiple browser Tabs
 - Data flow animations, event stream, distribution latency metrics, and cluster Worker routing status
 - SDK capability, transport configuration, active/standby Worker, and visible/hidden Tab state
 
-Two more pages are served next to the demo. `http://localhost:4173/examples/react/` wires the framework-agnostic core by hand (effect, `subscribe`, status), while `http://localhost:4173/examples/vue/` uses nothing but the shipped `cross-tab-worker-databus/vue` composables. Both point at the same local demo endpoint, so a publication from one is received by a tab on any of the three pages that uses the same Topic — which is also how the adapter pages are covered by the browser suite (`e2e/adapters.spec.ts`).
+Two more pages are served next to the demo. `http://localhost:4173/examples/react/` wires the framework-agnostic core by hand (effect, `subscribe`, status), while `http://localhost:4173/examples/vue/` uses nothing but the shipped `cross-tab-worker-databus/vue` composables. Both point at the same local demo endpoint, so a publication from one is received by a tab on any of the three pages that uses the same Topic. Only the Vue page is driven by the browser suite (`e2e/adapters.spec.ts`): the React page loads React itself from `esm.sh`, so it needs the network access CI does not have, and it hand-rolls the same effect/`subscribe`/status wiring the demo page uses rather than the `cross-tab-worker-databus/react` adapter — the shipped React hooks are covered by `tests/hooks.test.tsx` in jsdom instead.
 
 When consuming the repository directly through a Git dependency, use a pinned commit. The repository ships `dist` so consumers do not need to build the SDK during installation.
 
@@ -199,7 +199,7 @@ The fallback is opt-in because coordination payloads (plaintext topic names) the
 
 Before `1.0.0` the SDK is allowed to grow additively and, behind an explicit deprecation cycle, remove APIs. The root export surface is pinned by the regression suite and a tag-to-tag compatibility gate, so an unintended removal fails CI rather than silently breaking consumers.
 
-Currently deprecated: an empty topic string in `subscribe()`, `publish()` and `publishBatch()`. Calls with `""` still work and the bus warns once per instance, but no transport can address an empty channel, so nothing is ever delivered through it — the warning is about a subscription that cannot function, and a future minor will reject it outright.
+Nothing is currently deprecated. The one cycle the project has run is closed: an empty topic string in `subscribe()`, `publish()` and `publishBatch()` warned once per instance from 0.20.96 and is **rejected with a `TypeError` from 0.21.0**. Nothing else about those calls changed — the rejection happens before any other effect, so an empty topic no longer starts a transport, registers a handler, or writes a route for a channel no transport can address. To migrate, give the call a real channel name; if a topic comes from user input or a config field, validate or fall back before calling, the way the bundled example pages do (`input.trim() || 'demo.flow'`).
 
 When you upgrade:
 

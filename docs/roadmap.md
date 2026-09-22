@@ -1,6 +1,14 @@
 # Roadmap
 
-0.20.97 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.0 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.0 delivered scope
+
+- The project's first deprecation cycle is closed: `subscribe("")`, `publish("")` and `publishBatch("")` throw a `TypeError` where `0.20.96` warned once per instance. The guard sits beside the option-validation asserts and runs before every other effect, so a rejected call starts no transport, registers no handler and writes no route record — and `publishBatch("", [])` is rejected ahead of the documented empty-array no-op.
+- That boundary is carried by two tests rather than one. The empty-array case exists because every other empty-topic batch is still refused *by `publish()`* through the single-item delegation, so a guard sitting below the no-op returns silently and nothing else notices; each message naming the operation the caller used is pinned for the same reason.
+- The React and Vue example pages gained the topic fallback the demo page already had, and the two new browser tests first recorded what its absence actually does — `TypeError: CrossTabDataBus.subscribe("")` surfacing as a `pageerror` while the Vue tab keeps rendering its previous topic, and an 错误 event-feed row on the demo page. `||` versus `??` and trim versus no-trim each die at a different arm, verified by mutation.
+- `docs/getting-started.md` (en + zh) no longer overstates the browser suite's reach: only the Vue adapter page is driven in a browser, because the React page loads React itself from `esm.sh` and cannot load where CI has no network. That page's topic fallback is consequently the one path in this change checked by hand rather than by a gate.
+- Coverage ceilings untouched and still met (98.68 / 96.16 / 98.54 / 99.45 against 96 / 92 / 96 / 97); the release adds one unit test to `pnpm check` and two cases to the browser job.
 
 ## 0.20.97 delivered scope
 
@@ -14,7 +22,7 @@
 
 ## 0.20.96 delivered scope
 
-- Opened the project's first deprecation cycle: an empty topic (`""`) now warns once per bus in `subscribe()`, `publish()` and `publishBatch()` instead of silently registering a channel no transport can address. Behaviour is unchanged; a future minor rejects it at that boundary, following the pre-1.0 policy. The contract is documented in the API reference and in the upgrading guide, in both languages.
+- Opened the project's first deprecation cycle: an empty topic (`""`) now warns once per bus in `subscribe()`, `publish()` and `publishBatch()` instead of silently registering a channel no transport can address. Behaviour is unchanged; a future minor rejects it at that boundary, following the pre-1.0 policy — which `0.21.0` did. The contract is documented in the API reference and in the upgrading guide, in both languages.
 - Closed the coverage-leg ledger with proof instead of assumption: eleven behaviors that could not fail their tests are now mutation-verified — the departing-owner handoff that deletes an unserved route rather than migrating it onto a live peer, the owner releasing its transport subscription when the last remote subscriber leaves, a cancelled durable-retention sweep staying silent, a superseded hydration snapshot being dropped instead of merged, the default platform `WebSocket` construction including subprotocols, `ready()` surfacing the recorded transport error after the recovery budget is spent, the Vue adapter containing a rejected `ready()`, a `connectTimeoutMs` of `0` or `Infinity` genuinely waiting forever, a private topic leaving no route record when its only holder hides, the trace reporter containing a throwing sink on a runtime with no `console.warn`, and an unrelated owned wildcard pattern failing to capture a batch bound for a remote topic.
 - Every remaining zero-count branch in `src` is now classified as dominated, unreachable by construction, or a missing boundary check (which is what produced the deprecation above). `vue.ts` and `hooks.ts` reach 100% on all four metrics and `cluster.ts` is down to a single uncovered line.
 - `AGENTS.md` records the traps that made early drafts decorative: a `ChannelHub`-sharing peer heals the state under observation, a peer started without a microtask flush is invisible, and textually duplicated guards let a non-global mutation edit the wrong copy.

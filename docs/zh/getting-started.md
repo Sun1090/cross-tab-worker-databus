@@ -150,7 +150,7 @@ pnpm examples
 - 数据流动画、事件流、分发延迟指标和集群 Worker 路由状态
 - SDK 能力、transport 配置、活跃/等待 Worker 与可见/隐藏 Tab 状态
 
-演示页之外还有两个页面：`http://localhost:4173/examples/react/` 手写接入与框架无关的核心 API（effect、`subscribe`、状态），`http://localhost:4173/examples/vue/` 则只使用已发布的 `cross-tab-worker-databus/vue` 组合式 API。二者都连到同一个本地 demo 端点，因此其中一个页面发布的数据会被三个页面里任何使用同一 Topic 的标签页收到——适配器页面也正是这样被浏览器测试覆盖的（`e2e/adapters.spec.ts`）。
+演示页之外还有两个页面：`http://localhost:4173/examples/react/` 手写接入与框架无关的核心 API（effect、`subscribe`、状态），`http://localhost:4173/examples/vue/` 则只使用已发布的 `cross-tab-worker-databus/vue` 组合式 API。二者都连到同一个本地 demo 端点，因此其中一个页面发布的数据会被三个页面里任何使用同一 Topic 的标签页收到。浏览器测试（`e2e/adapters.spec.ts`）只驱动 Vue 页：React 页的 React 本身来自 `esm.sh`，需要 CI 不具备的网络访问；而且它手写的是 demo 页那套 effect/`subscribe`/状态接入，并未使用 `cross-tab-worker-databus/react` 适配器——已发布的 React hooks 由 `tests/hooks.test.tsx` 在 jsdom 中覆盖。
 
 通过 Git 依赖直接接入仓库时，应固定到具体 commit。仓库随代码提供 `dist`，消费方安装时无需构建 SDK。
 
@@ -199,7 +199,7 @@ const bus = new CrossTabDataBus({
 
 在 `1.0.0` 之前，SDK 允许增量新增，并在明确的弃用周期后才移除 API。根导出面由回归套件与 tag 间兼容性门禁钉住，意外删除会令 CI 失败，而不是静默破坏既有消费者。
 
-当前处于弃用中：`subscribe()`、`publish()`、`publishBatch()` 的空 topic 字符串。传入 `""` 的调用仍然可用，实例首次遇到时会输出一条 `console.warn`，但没有任何 transport 能寻址空 channel，因此经由它的订阅永远不会收到消息——警告针对的是一个无法工作的订阅，后续小版本会直接拒绝它。
+当前没有处于弃用中的 API。项目唯一一次弃用周期已经结束：`subscribe()`、`publish()`、`publishBatch()` 的空 topic 字符串自 0.20.96 起每个实例告警一次，**自 0.21.0 起改为抛出 `TypeError`**。这些调用的其他语义都没有变化——拒绝发生在任何副作用之前，因此空 topic 不再请求 start、登记 handler，或为没有任何 transport 能寻址的 channel 写入路由。迁移方式是给出真实的 channel 名称；若 topic 来自用户输入或配置字段，请在调用前校验或回退，随仓库附带的示例页就是这样做的（`input.trim() || 'demo.flow'`）。
 
 升级时请注意：
 

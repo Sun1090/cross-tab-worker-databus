@@ -42,7 +42,7 @@ import {
   WORKER_STATUS
 } from '../utils/constants';
 import { publicationMetadata } from '../utils/metadata';
-import { assertDedupOptions, assertReplayOptions, assertRecoveryOptions } from '../utils/validation';
+import { assertDedupOptions, assertPublicTopic, assertReplayOptions, assertRecoveryOptions } from '../utils/validation';
 
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;
@@ -256,10 +256,6 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   // themselves demand: the failure path starts an on-demand reopen instead of
   // stranding them until some unrelated future operation arrives.
   private recoveryWaiters = 0;
-  // Latch for the empty-topic deprecation warning so a hot publish path cannot
-  // fill the console. It is per-bus and never reset: the warning is about the
-  // caller's code, not about a transient runtime condition.
-  private emptyTopicWarned = false;
   /** Monotonic generation incremented on every successful transport open.
    * Stays in lockstep with `lastSuccessAt` so callers can detect that the
    * transport has been reopened even if the timestamp window is short. */
@@ -815,12 +811,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * unsubscribe function for convenience. During an explicit stop() the
    * registration is rejected through onError and a no-op cleanup is returned,
    * so a late subscriber cannot leak into a future restart.
+   * @throws {TypeError} when `topic` is `''` — no transport can address such a
+   *   channel, so the subscription could never receive anything.
    */
   subscribe(
     topic: string,
     handler: DataBusMessageHandler<TData>,
     options?: { replay?: boolean | number }
   ): () => void {
+    // Argument validation precedes lifecycle state: a caller that passes `''`
+    // has a bug whether or not the bus is stopping, and the TypeError names it.
+    assertPublicTopic('subscribe', topic);
     // A subscription requested during teardown would either be erased by
     // topicHandlers.clear() or leak into the next start while its handler was
     // already dropped. Reject it explicitly, consistent with publish(), and
@@ -833,7 +834,6 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       return () => {};
     }
     this.ensureStarted();
-    if (topic === '') this.warnEmptyTopic('subscribe');
     const handlers = this.topicHandlers.get(topic) ?? new Set<DataBusMessageHandler<TData>>();
     const wasUnused = handlers.size === 0;
     handlers.add(handler);
@@ -892,22 +892,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     this.dedupManager.reset();
   }
 
-  /** Warn (once per bus) that an empty topic is deprecated, without changing
-   * behavior yet. `''` flows through routing as a literal channel, so the
-   * subscription it creates can never be addressed by a transport: the message
-   * silently goes nowhere. A future minor rejects it at this boundary. */
-  private warnEmptyTopic(operation: string): void {
-    if (this.emptyTopicWarned) return;
-    this.emptyTopicWarned = true;
-    console.warn(
-      `cross-tab-worker-databus: ${operation}("") addresses a channel no transport can route. ` +
-      'Use a non-empty topic; passing "" is planned to throw in a future minor.'
-    );
-  }
-
-  /** Publish a message to `topic`. The owning Worker delivers it to the transport. */
+  /** Publish a message to `topic`. The owning Worker delivers it to the transport.
+   * @throws {TypeError} when `topic` is `''`; see `subscribe()`. */
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): void {
-    if (topic === '') this.warnEmptyTopic('publish');
+    assertPublicTopic('publish', topic);
     this.ensureStarted();
     if (this.rejectPublishDuringStop('publish')) return;
     if (!this.cluster.publish(topic, data, options)) {
@@ -923,14 +911,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * in one tick. Per-item dedup / replay / ordering is preserved; each item
    * may carry its own `messageId` / `timestamp` via `options`. Empty array is
    * a no-op; single-item array delegates to `publish()`.
+   * @throws {TypeError} when `topic` is `''`; see `subscribe()`. Checked before
+   *   the empty-array no-op, so `publishBatch('', [])` throws too — the topic is
+   *   the caller's bug regardless of whether anything is carried.
    */
   publishBatch(
     topic: string,
     items: ReadonlyArray<{ data: unknown; options?: DataBusPublishOptions }>
   ): void {
+    assertPublicTopic('publishBatch', topic);
     this.ensureStarted();
     if (items.length === 0) return;
-    if (topic === '') this.warnEmptyTopic('publishBatch');
     if (this.rejectPublishDuringStop('publishBatch')) return;
     if (items.length === 1) {
       const first = items[0]!;
