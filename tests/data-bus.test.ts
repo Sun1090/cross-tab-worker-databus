@@ -1498,6 +1498,68 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('keeps message payloads and error bodies out of trace events, and names the event that carries a topic', async () => {
+    // Two shipped documents make opposite promises about this surface: `docs/api.md`
+    // says no public event contains a raw topic, a payload, or an error body, while
+    // `docs/configuration.md` says subscription events carry their topic so an
+    // integrator can correlate ownership changes — and tells the integrator to
+    // redact topic names before shipping a sink to telemetry. The code is with
+    // `configuration.md`, so this test pins both halves: the strings that must never
+    // appear, and the one event type allowed to name a topic.
+    const topic = 'trace.redaction.channel';
+    const payloadMarker = 'payload-must-not-reach-the-sink';
+    const errorMarker = 'error-body-must-not-reach-the-sink';
+    const events: DataBusTraceEvent[] = [];
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      hub: new ChannelHub(),
+      now: () => Date.now(),
+      randomId: 'trace-redaction'
+    });
+    const transport = new FakeTransport<string>();
+    const bus = new CrossTabDataBus<object, string>({
+      clusterKey: 'trace-redaction',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      trace: { enabled: true, mode: 'all', metricsIntervalMs: 1_000, sink: event => events.push(event) }
+    });
+    const delivered: string[] = [];
+    bus.subscribe(topic, message => {
+      delivered.push(message.data);
+    });
+    bus.onError(() => {});
+    await bus.ready();
+
+    transport.emit(topic, payloadMarker);
+    transport.emitError(new Error(errorMarker));
+    await Promise.resolve();
+    await Promise.resolve();
+    // The payload really did travel through the instrumented path, so the absence
+    // assertion below is about the events and not about a message that never arrived.
+    expect(delivered).toEqual([payloadMarker]);
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(payloadMarker);
+    expect(serialized).not.toContain(errorMarker);
+    const namingTheTopic = [
+      ...new Set(events.filter(event => JSON.stringify(event).includes(topic)).map(event => event.type))
+    ].sort();
+    // Measured, and the reason this assertion exists rather than a sentence in a doc:
+    // exactly two event types name a topic. `subscription` reports the transition,
+    // and `reliability` names the route it is about (`route_ack` here; the
+    // `route_migration` and recovery variants are pinned in the test above). Every
+    // other event the sink sees is topic-free, and `coordination` describes routes
+    // under the opaque key instead.
+    expect(namingTheTopic).toEqual(['reliability', 'subscription']);
+    // Ownership is reported under the opaque key: this is the event that would carry
+    // a route, and it carries the hash instead of the name.
+    const coordination = events.find(event => event.type === 'coordination') as { routes: string[] } | undefined;
+    expect(coordination).toBeTruthy();
+    expect(coordination!.routes.join(',')).toContain(createOpaqueKey(topic));
+    await bus.stop();
+  });
+
   it('numbers consecutive failed recovery attempts and resets after success', async () => {
     vi.useFakeTimers();
     const events: unknown[] = [];

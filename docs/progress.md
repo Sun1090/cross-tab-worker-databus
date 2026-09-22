@@ -6786,6 +6786,51 @@ corroborates the 26-spec collection.)
   specifically in counts of connections rather than subscriptions.
 - Updated: 2026-09-23.
 
+## Phase 124 / A shipped document claimed a privacy property the code never had
+
+- Version: one corrected sentence in two languages, plus the test that holds it. Branch
+  `fix/trace-content-claim` off `7b40175` (#205). No behaviour change, but `docs/api.md` ships inside
+  the package, so this is a patch release on its own (`0.21.8`) per the rule that a false statement in a
+  shipped document is an artifact defect, not repository prose.
+- Found while looking for something to pin rather than classify: `docs/api.md:299` asserts "All public
+  events use a fixed structure and do not contain raw topics, message payloads, connection addresses, or
+  error bodies", and `docs/zh/api.md:299` says the same in Chinese. `docs/configuration.md:51` says the
+  opposite in both languages — "Subscription events include their Topic so an integrator can correlate
+  ownership changes", followed by advice to redact topic conventions before sending a sink to telemetry.
+  Two shipped pages, one contradiction, and the code is with `configuration.md`: `traceSubscription()`
+  emits `{ type: 'subscription', action, topic, … }`, and the route-scoped `reliability` operations carry
+  `topic` too.
+- Measured before writing anything, with a throwaway bus whose sink recorded every event while a payload
+  sentinel and an error-message sentinel passed through it. Topic plaintext appeared in exactly
+  `reliability` (`operation: 'route_ack'`) and `subscription`; neither sentinel appeared anywhere in the
+  serialized event stream; `coordination` named the route as `topicKey@workerId|confirmed=…`, i.e. the
+  opaque key. That is the sentence the docs now carry.
+- Pinned by `keeps message payloads and error bodies out of trace events, and names the event that carries
+  a topic` in `tests/data-bus.test.ts`, structured so the failure modes stay separable: the handler must be
+  observed receiving the payload before any absence is asserted. That ordering earned its keep immediately —
+  the first draft captured the handler's argument as the payload, when `dispatch()` hands the handler the
+  whole message, and the delivery assertion failed on an object where the sentinel was expected. Had the
+  absence check run first, the test would have passed on a message that never travelled at all.
+- Mutant evidence, both halves run and diffed rather than assumed. Adding `message: this.lastFailure.message`
+  to the `error` trace event fails the new test **and nothing else** in the file — 1 failed, 187 passed —
+  so the no-error-body claim had no witness before this commit. Adding plaintext topic to
+  `coordination.routes` instead of the key fails the new test **and** the existing
+  `emits a coordination trace event with formatted workers and routes`, so that half of the new case is a
+  duplicate pin and is recorded as one, not counted as new coverage.
+- Audit of the rest of the claim: `grep` over the shipped docs for the same assertion found one other
+  instance, `docs/configuration.md:51`'s "Trace events do not include URLs, credentials, payloads, or
+  error bodies" — which is true as written, does not mention topics, and is the sentence `api.md`
+  contradicted. Left alone. So the defect was a single sentence in two files, not a systemic drift.
+- Changed files: `docs/api.md`, `docs/zh/api.md`, `tests/data-bus.test.ts`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- Verification: `tests/data-bus.test.ts` 188 passed; the two mutation runs above; gates and the PR check
+  recorded on the branch.
+- Risk / rollback: `git revert`. Documentation and one test; no runtime path changes, so no migration or
+  consumer impact beyond the corrected statement.
+- Next: cut `0.21.8` once this merges — the Unreleased section now holds the harness depth records, the
+  teardown E2E fix, and this correction, and the last of those is what forces the version.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
