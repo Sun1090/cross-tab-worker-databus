@@ -851,6 +851,14 @@ export class WorkerClusterRuntime {
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.CONTROL }>
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
+    // Every frame this library sends derives `topicKey` from `topic` with the
+    // same hash, so a pair that disagrees cannot come from a conforming peer: it
+    // is either forged or corrupt. The channel is a `BroadcastChannel`, which
+    // any same-origin script can post into, and the fields below are used to
+    // authorize ownership and to name the transport subscription — so without
+    // this check one frame could keep a topicKey the route already names for us
+    // while substituting a different plaintext, renaming our owned channel.
+    if (message.topicKey !== undefined && createOpaqueKey(message.topic) !== message.topicKey) return;
     this.rememberTopic(message.topic);
     switch (message.action) {
       case CONTROL_ACTION.SUBSCRIBE: {

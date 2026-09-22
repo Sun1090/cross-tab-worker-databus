@@ -35,6 +35,48 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('drops a control frame whose topicKey disagrees with its topic', async () => {
+    // `topicKey` is a pure function of `topic`, so every frame the library sends
+    // has the two agreeing. A cluster channel is a BroadcastChannel, which any
+    // same-origin script can post into, so a frame is the only place an attacker
+    // can name the channel this worker subscribes and owns — and the durable
+    // route is keyed by `topicKey`, which authorizes the substitution while
+    // `topic` supplies the plaintext it would be replaced with.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControl = vi.fn();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'key-mismatch' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'key-mismatch',
+      environment: env.environment,
+      tabId: 'tab-key-mismatch',
+      workerId: 'worker-key-mismatch',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    runtime.start();
+    runtime.subscribe('chat.a');
+    await Promise.resolve();
+    onControl.mockClear();
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('key-mismatch')}`);
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'forged-peer',
+      targetWorkerId: 'worker-key-mismatch',
+      action: 'SUBSCRIBE' as WorkerControlAction,
+      topic: 'substituted-channel',
+      topicKey: createOpaqueKey('chat.a')
+    } as WorkerClusterMessage);
+    channel.close();
+    await Promise.resolve();
+
+    expect(onControl).not.toHaveBeenCalled();
+    expect(runtime.isAssigned('chat.a')).toBe(true);
+    expect(runtime.getSnapshot().assignedTopics).toContain('chat.a');
+    expect(runtime.getSnapshot().assignedTopics).not.toContain('substituted-channel');
+    runtime.stop();
+  });
+
   it('keeps one topic owner and migrates it when the owner stops', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
