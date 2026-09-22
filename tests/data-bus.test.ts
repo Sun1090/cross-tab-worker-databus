@@ -1728,6 +1728,33 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('renders a non-Error transport failure as a message in both ledgers', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'non-error-ledger' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'non-error-ledger', environment: environment.environment, initialConfig: {}, transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // A Worker or a hand-written transport is allowed to report a bare string,
+    // and both ledgers render it through `String(error)` rather than reading
+    // `.message` off it. Rendering through `.message` does not throw — it yields
+    // `undefined`, which then survives into `lastFailure.message` as the absence
+    // of any explanation, so the diagnostics are the assertion here.
+    transport.emitError('backend said no');
+    expect(bus.getRecoveryStats()).toMatchObject({
+      hasError: true,
+      errorMessage: 'backend said no',
+      errorAt: expect.any(Number)
+    });
+    expect(bus.getHealthSummary()).toMatchObject({
+      lastFailure: { source: 'transport', message: 'backend said no', at: expect.any(Number) },
+      recovery: { hasError: true, errorMessage: 'backend said no', errorAt: expect.any(Number) }
+    });
+    await bus.stop();
+  });
+
   it('keeps non-transport failures out of the transport recovery ledger', async () => {
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'dispatch-error-ledger' });
     const transport = new FakeTransport<number>();
@@ -2607,6 +2634,53 @@ describe('CrossTabDataBus', () => {
     await bus.start({});
     await bus.ready();
     expect(transport.startCalls).toBe(2);
+    await bus.stop();
+  });
+
+  it('drops the failure report of a reopen that a reentrant start has already replaced', async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => Date.now(), randomId: 'superseded-reopen-failure' });
+    const transport = new FakeTransport<number>();
+    let errorHits = 0;
+    const bus = new CrossTabDataBus({
+      clusterKey: 'superseded-reopen-failure',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      trace: { enabled: true, mode: 'events', sink: event => events.push(event) }
+    });
+    // A failed reopen publishes ERROR from its own teardown, and that
+    // notification runs before its rejection settles — so an application that
+    // retries from the callback owns a newer lifecycle by the time
+    // reopenTransport()'s rejection handler runs. The handler must then stay
+    // silent: reporting `failed` for the attempt it replaced would put a
+    // recovery failure *after* the start that superseded it, which is the one
+    // ordering a reader of the trace cannot recover from. Hit #1 is the runtime
+    // failure that arms recovery; hit #2 is the failing reopen's own teardown.
+    bus.onStatus(status => {
+      if (status !== WORKER_STATUS.ERROR) return;
+      errorHits += 1;
+      if (errorHits !== 2) return;
+      transport.startShouldFail = false;
+      void bus.start({}).catch(() => undefined);
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+    expect(transport.startCalls).toBe(1);
+
+    transport.startShouldFail = true;
+    transport.setStatus(WORKER_STATUS.ERROR);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await Promise.resolve();
+
+    expect(errorHits).toBeGreaterThanOrEqual(2);
+    // 1 = the initial open, 2 = the reopen that failed, 3 = the reentrant start.
+    expect(transport.startCalls).toBe(3);
+    const reliability = events.filter((event): event is { outcome: string } =>
+      typeof event === 'object' && event !== null && 'outcome' in event);
+    expect(reliability.filter(event => event.outcome === 'failed')).toEqual([]);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
     await bus.stop();
   });
 
