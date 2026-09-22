@@ -21,8 +21,11 @@ import {
   DEFAULT_SESSION_TIMEOUT_MULTIPLIER
 } from '../centrifuge-protocol';
 
-/** A reaped port: close it (stop message delivery) and stop its session. */
+/** A reaped port: announce the loss, close it (stop message delivery), then stop
+ * its session. `notify` runs first and on its own because a port that is about to
+ * be closed is the only chance its owner gets to learn why. */
 export interface ReapTarget {
+  notify(): void;
   close(): void;
   stop(): void;
 }
@@ -160,11 +163,28 @@ export class PortReaper {
       this.targets.delete(port);
       this.lastSeenAt.delete(port);
       this.sessionTimeoutMs.delete(port);
-      // Close the port before stopping the session: the STOP handler posts a
-      // `disconnected` status back to the port, which must not reach a live
-      // but slow main thread, and a closed port can never deliver a later
-      // message that would resurrect the session outside the reaper's tracking.
+      // Announce before withdrawing, then close the port and stop the session.
+      // The order matters in both directions:
+      // - `notify` is the last thing this port ever delivers, and it has to
+      //   precede `close()`, because a closed port discards everything posted to
+      //   it — including the session's own `disconnected` status post. A tab whose
+      //   heartbeat was merely starved (a long task, the throttling a backgrounded
+      //   tab gets) rather than gone is alive and can rebuild its backend, but only
+      //   if it learns the session left. Measured in a real browser before this
+      //   existed: a 34 s stall got a shared-mode tab's port reaped while the bus
+      //   kept `state: healthy` / `status: connected` and its routes, and every
+      //   publication it posted went into the closed port and vanished.
+      // - `close` still precedes `stop`: the STOP handler posts that
+      //   `disconnected` status back to the port, which must not reach the main
+      //   thread after it has been told outright, and a closed port can never
+      //   deliver a later message that would resurrect the session outside the
+      //   reaper's tracking.
+      // All three share the existing try/catch, which isolates a failing target
+      // from the *other* ports in the pass. That is the same guarantee `close`
+      // already had: a step that throws also skips the steps after it for this one
+      // target, which is accepted here rather than newly introduced.
       try {
+        target.notify();
         target.close();
         target.stop();
       } catch {

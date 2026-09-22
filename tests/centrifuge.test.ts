@@ -6,7 +6,7 @@ import type {
   CentrifugeWorkerOutput
 } from '../src/centrifuge-protocol';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
-import { EVENT_TYPE } from '../src/utils/constants';
+import { CENTRIFUGE_OUTPUT_TYPE, EVENT_TYPE } from '../src/utils/constants';
 
 const { FakeCentrifuge } = vi.hoisted(() => {
   type AnyListener = (context: unknown) => void;
@@ -1288,6 +1288,80 @@ describe('CentrifugeWorkerTransport edge paths', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0]![0]).toBeInstanceOf(Error);
     transport.stop();
+  });
+
+  it('treats a reap announcement as a lost backend so the port can be rebuilt', () => {
+    // The SharedWorker's reaper closes the port it is reclaiming, and a closed
+    // port discards everything posted to it — so this message is the last thing
+    // the main thread will ever hear from that backend, and the only way it can
+    // learn the session is gone. Measured in a real browser before this existed: a
+    // 34 s stall on a shared-mode tab got its port reaped while the bus kept
+    // reporting `state: healthy`, `status: connected`, `transportReady: true` and
+    // `lastFailure: null`, owning routes whose publications went nowhere.
+    vi.stubGlobal('SharedWorker', class {});
+    const shared = new SharedWorkerDouble();
+    const replacement = new SharedWorkerDouble();
+    const factories = [shared, replacement];
+    const statuses: string[] = [];
+    const errors: unknown[] = [];
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'shared',
+      sharedWorkerFactory: () => factories.shift() as unknown as SharedWorker
+    });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: status => statuses.push(status), onMessage: () => {}, onError: error => errors.push(error) }
+    );
+
+    shared.port.emit({ type: CENTRIFUGE_OUTPUT_TYPE.SESSION_REAPED });
+    expect(statuses[statuses.length - 1]).toBe('error');
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toContain('heartbeat went silent');
+    // The dead port is fully detached: a later message from it must not be routed
+    // into whatever session replaces it.
+    expect(shared.port.activeListeners).toEqual(new Set());
+
+    // And the backend is discardable, which is what makes recovery possible at
+    // all — `start()` returns early while a backend exists, so without the reset
+    // the transport could never be reopened.
+    transport.start({ url: 'wss://example.test/connection/websocket', options: {} }, {
+      onStatus: () => {}, onMessage: () => {}, onError: () => {}
+    });
+    expect(replacement.port.messages[0]).toMatchObject({ type: 'INIT' });
+    transport.stop();
+  });
+
+  it('reports a reaped shared session as unhealthy through the bus', async () => {
+    // The consumer-visible half: `getHealthSummary()` must stop claiming a healthy
+    // connection, because that claim is what hides the failure from integrators
+    // (and from the demo's own status badge).
+    vi.stubGlobal('SharedWorker', class {});
+    const shared = new SharedWorkerDouble();
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      now: () => 1_000,
+      randomId: 'reaped-health'
+    });
+    const bus = createCentrifugeDataBus<string>({
+      clusterKey: 'reaped-health',
+      environment: environment.environment,
+      connection: { url: 'wss://example.test/connection/websocket' },
+      sharedWorkerFactory: () => shared as unknown as SharedWorker,
+      workerMode: 'shared'
+    });
+    bus.subscribe('quote.usd', () => undefined);
+    await bus.ready();
+    shared.port.emit({ type: 'STATUS', status: 'connected' });
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, status: 'connected' });
+
+    shared.port.emit({ type: CENTRIFUGE_OUTPUT_TYPE.SESSION_REAPED });
+    await Promise.resolve();
+    const summary = bus.getHealthSummary();
+    expect(summary.healthy).toBe(false);
+    expect(summary.status).not.toBe('connected');
+    expect(summary.recovery.hasError).toBe(true);
+    expect(summary.lastFailure?.message).toContain('heartbeat went silent');
+    await bus.stop();
   });
 });
 

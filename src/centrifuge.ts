@@ -256,6 +256,18 @@ export class CentrifugeWorkerTransport<TData = unknown>
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE_BIN) this.handlers?.onMessage({ topic: message.topic, data: message.data as TData, ...publicationMetadata(message.messageId, message.timestamp) });
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.ERROR) this.handlers?.onError(deserializeWorkerError(message.error));
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST) this.resolveTokenRequest(message.requestId, message.kind, message.channel);
+    // The SharedWorker is closing this port because our PING heartbeat went silent
+    // for longer than its session timeout — a long synchronous task, or the
+    // throttling a backgrounded tab gets. Nothing else can tell us: a MessagePort
+    // has no close event, and posting into the closed end succeeds and is
+    // discarded. Treating it as any other backend loss is what makes the bus report
+    // it and lets the existing cooldown recovery rebuild the port; measured in a
+    // real browser before this existed, a 34 s stall left a shared-mode tab owning
+    // its topic with zero server-side subscribers while reporting
+    // `state: healthy` / `status: connected` / `transportReady: true`.
+    if (message.type === CENTRIFUGE_OUTPUT_TYPE.SESSION_REAPED) {
+      this.onWorkerFailed("The SharedWorker ended this tab's session after its port heartbeat went silent.");
+    }
   }
 
   /** Resolve a Worker credential request from the main thread: call the

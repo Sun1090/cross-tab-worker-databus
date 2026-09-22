@@ -9,10 +9,14 @@ class PortDouble {
   }
 }
 
-/** Minimal session stand-in recording STOP deliveries. */
+/** Minimal session stand-in recording STOP deliveries and reap announcements. */
 class SessionDouble implements ReapTarget {
   closed = false;
   stopped = 0;
+  notified = 0;
+  notify(): void {
+    this.notified++;
+  }
   close(): void {
     this.closed = true;
   }
@@ -31,6 +35,7 @@ function makeReaper() {
     ports.set(id, port);
     sessions.set(id, session);
     reaper.register(port as unknown as MessagePort, {
+      notify: () => session.notify(),
       close: () => port.close(),
       stop: () => session.stop()
     });
@@ -55,15 +60,56 @@ describe('PortReaper', () => {
     vi.advanceTimersByTime(31_000);
     expect(port.closed).toBe(true);
     expect(session.stopped).toBe(1);
+    expect(session.notified).toBe(1);
 
     // Already reaped — a later probe must not stop it again.
     vi.advanceTimersByTime(10_000);
     expect(session.stopped).toBe(1);
+    expect(session.notified).toBe(1);
     vi.useRealTimers();
   });
 
-  it('isolates a throwing reap target so the remaining ports are still reaped', () => {
+  it('announces the reap while the port can still deliver it', () => {
+    // The order is the whole content of this test. `notify` must precede `close`,
+    // because a closed port discards everything posted to it — including the
+    // `disconnected` status the STOP handler produces — and `close` must still
+    // precede `stop`, so the status that STOP posts cannot reach a main thread
+    // that has already been told, and no later message from that tab can
+    // resurrect a session the reaper has stopped tracking.
+    //
+    // Without the announcement a tab whose heartbeat was merely starved (a long
+    // task, background timer throttling) keeps its cluster role and its routes,
+    // posts into a dead port, and reports `status: connected` forever: measured in
+    // a real browser before this existed, a 34 s stall left the tab owning its
+    // topic with zero server-side subscribers and `state: healthy`.
     vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      const reaper = new PortReaper();
+      const port = new PortDouble();
+      reaper.register(port as unknown as MessagePort, {
+        notify: () => order.push('notify'),
+        close: () => {
+          order.push('close');
+          port.close();
+        },
+        stop: () => order.push('stop')
+      });
+
+      vi.advanceTimersByTime(41_000);
+      expect(order).toEqual(['notify', 'close', 'stop']);
+      expect(port.closed).toBe(true);
+
+      // One announcement per port: a second reap pass over a removed port would
+      // tell the main thread twice about a session it has already rebuilt.
+      vi.advanceTimersByTime(41_000);
+      expect(order).toEqual(['notify', 'close', 'stop']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('isolates a throwing reap target so the remaining ports are still reaped', () => {    vi.useFakeTimers();
     try {
       const reaper = new PortReaper();
       const badPort = new PortDouble();
@@ -71,6 +117,7 @@ describe('PortReaper', () => {
       const goodSession = new SessionDouble();
       let badStops = 0;
       reaper.register(badPort as unknown as MessagePort, {
+        notify: () => undefined,
         close: () => {
           throw new Error('port already neutered');
         },
@@ -79,6 +126,7 @@ describe('PortReaper', () => {
         }
       });
       reaper.register(goodPort as unknown as MessagePort, {
+        notify: () => goodSession.notify(),
         close: () => goodPort.close(),
         stop: () => goodSession.stop()
       });
@@ -99,6 +147,7 @@ describe('PortReaper', () => {
       const late = new PortDouble();
       const lateSession = new SessionDouble();
       reaper.register(late as unknown as MessagePort, {
+        notify: () => lateSession.notify(),
         close: () => late.close(),
         stop: () => lateSession.stop()
       });
@@ -163,6 +212,7 @@ describe('PortReaper', () => {
       }
     );
     const reapTarget = (port: PortDouble, session: SessionDouble): ReapTarget => ({
+      notify: () => session.notify(),
       close: () => port.close(),
       stop: () => session.stop()
     });
@@ -259,6 +309,7 @@ describe('PortReaper', () => {
     const port = new PortDouble();
     const session = new SessionDouble();
     reaper.register(port as unknown as MessagePort, {
+      notify: () => session.notify(),
       close: () => port.close(),
       stop: () => session.stop()
     });
@@ -292,7 +343,7 @@ describe('PortReaper', () => {
     const makeTarget = () => {
       const p = new PortDouble();
       const s = new SessionDouble();
-      return { port: p, target: { close: () => p.close(), stop: () => s.stop() } as const, session: s };
+      return { port: p, target: { notify: () => s.notify(), close: () => p.close(), stop: () => s.stop() } as const, session: s };
     };
 
     const a = makeTarget();
@@ -320,6 +371,7 @@ describe('PortReaper fault tolerance', () => {
     const { port } = register('tab-a', 5_000);
     // Simulate a broken port/session pair whose cleanup throws.
     reaper.register({} as MessagePort, {
+      notify: () => undefined,
       close: () => {
         throw new Error('close failed');
       },
@@ -404,10 +456,11 @@ describe('PortReaper untracked-port and shutdown guards', () => {
       const badPort = new PortDouble() as unknown as MessagePort;
       const goodPort = new PortDouble() as unknown as MessagePort;
       reaper.register(badPort, {
+        notify: () => undefined,
         close: () => { throw new Error('port already detached'); },
         stop: () => undefined
       });
-      reaper.register(goodPort, { close: () => good.close(), stop: () => good.stop() });
+      reaper.register(goodPort, { notify: () => good.notify(), close: () => good.close(), stop: () => good.stop() });
 
       // One failing target must not strand the rest — otherwise a detached
       // port would leak every remaining WebSocket on shutdown.

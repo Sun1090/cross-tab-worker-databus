@@ -112,4 +112,9 @@ export type CentrifugeWorkerOutput<TData = unknown> =
   | { type: typeof CENTRIFUGE_OUTPUT_TYPE.ERROR; error: SerializedWorkerError }
   /** The Worker needs a fresh credential. The main thread resolves it via a
    * matching TOKEN_RESPONSE / TOKEN_ERROR carrying the same `requestId`. */
-  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST; requestId: number; kind: 'token' | 'channelToken'; channel?: string };
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.TOKEN_REQUEST; requestId: number; kind: 'token' | 'channelToken'; channel?: string }
+  /** The SharedWorker's reaper is about to close this port, so its session and
+   * WebSocket are going away with it. Sent as the last message on the port: a tab
+   * whose heartbeat was merely starved (a long task, background throttling) is
+   * alive and can rebuild, but only if it learns that its backend is gone. */
+  | { type: typeof CENTRIFUGE_OUTPUT_TYPE.SESSION_REAPED };
