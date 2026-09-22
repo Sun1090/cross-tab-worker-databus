@@ -1290,6 +1290,33 @@ describe('CentrifugeWorkerTransport edge paths', () => {
     transport.stop();
   });
 
+  it('ignores a Worker output type it does not handle', () => {
+    // `handleOutput` tests each type it knows and has no else-branch, which is
+    // what makes the reap announcement safe to add: a SharedWorker is cached by
+    // URL, so a page running this bundle can attach to a worker script from an
+    // older deployment and vice versa, and the only compatible move is to ignore
+    // what you do not understand. Deleting a known branch here is a behaviour
+    // change; adding one must be nothing at all to the other side.
+    vi.stubGlobal('SharedWorker', class {});
+    const shared = new SharedWorkerDouble();
+    const statuses: string[] = [];
+    const errors: unknown[] = [];
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'shared',
+      sharedWorkerFactory: () => shared as unknown as SharedWorker
+    });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket', options: {} },
+      { onStatus: status => statuses.push(status), onMessage: () => {}, onError: error => errors.push(error) }
+    );
+    const seen = [...statuses];
+
+    shared.port.emit({ type: 'A_TYPE_FROM_A_FUTURE_RELEASE' } as unknown as CentrifugeWorkerOutput);
+    expect(statuses).toEqual(seen);
+    expect(errors).toEqual([]);
+    transport.stop();
+  });
+
   it('treats a reap announcement as a lost backend so the port can be rebuilt', () => {
     // The SharedWorker's reaper closes the port it is reclaiming, and a closed
     // port discards everything posted to it — so this message is the last thing
