@@ -48,15 +48,21 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.worker.ts', 'src/workers/centrifuge*.ts'],
       thresholds: {
-        // Measured at HEAD: 98.13 / 94.59 / 98.17 / 99.19. The previous
-        // 85/80/90/85 floors were advisory only — a change could lose 10 points
-        // of branch coverage and still pass the release gate. These sit a few
-        // points under the measured values so real regressions fail CI while
-        // ordinary feature work still fits.
-        statements: 96,
-        branches: 92,
-        functions: 96,
-        lines: 97
+        // Re-measured 2026-09-23: three consecutive local runs agreed exactly
+        // (99.01 / 96.74 / 99.26 / 99.69), and CI's own "Coverage thresholds"
+        // step reported the same four numbers for the same tree, so the spread
+        // this has to tolerate is not measurement noise. The margin below is for
+        // the one genuinely runner-dependent input — the seeded fuzzers bound
+        // depth by wall clock, so a loaded box explores fewer interleavings —
+        // and the floors still catch a real regression: the previous ones were
+        // set against 98.13 / 94.59 / 98.17 / 99.19 and had drifted to 3.0 / 4.7
+        // / 3.3 / 2.7 points under measurement, which is a whole module's worth
+        // of lost branches passing the release gate. Teeth verified by raising
+        // `branches` above the measured value and watching the run fail.
+        statements: 98,
+        branches: 96,
+        functions: 98,
+        lines: 99
       }
     }
   }
