@@ -4873,6 +4873,43 @@ corroborates the 26-spec collection.)
   external blocker.
 - Updated: 2026-09-22.
 
+## Release 0.21.1 prepared (2026-09-22)
+
+- Version: `0.21.0` → `0.21.1` (patch). Branch `feat/local-react-example` off
+  `v0.21.0` (`49e77a7`); commits `ef79b73` (example + browser suite + docs),
+  `c9b4b89` (progress log), this one.
+- **Why cut a release for work that touches no library code.** `scripts/build.mjs`
+  injects `__SDK_VERSION__` from `package.json`, so the version `getDiagnostics()`
+  reports is part of the artifact: leaving this work unreleased would keep
+  shipping `0.21.0` while the repository moved on. It also retires the one
+  hand-verified path phase 80 left behind.
+- Freeze checklist, run on this branch: `pnpm check` → typecheck + build + 37
+  files / 860 tests + 5 perf gates; `pnpm lint` clean; `pnpm test:coverage` →
+  98.68 / 96.16 / 98.54 / 99.45, **identical to 0.21.0** because `src/` did not
+  move; `pnpm test:e2e` → **36 passed** (up from 32: the four React cases);
+  `pnpm bench` 28/28; `pnpm verify:compat` green against `v0.20.97`;
+  `pnpm verify:pack` green; public-registry `pnpm audit --audit-level high` clean;
+  `git diff --check` clean; `tests/documentation.test.ts` 17/17 with en/zh
+  list-item parity intact.
+- **The browser-bench gate failed once and the second run explained it.**
+  `bench:compare --fail-above-pct 50` reported
+  `publish/shared/perMessageMs 37.1 → 66.7 (+79.8%)` with every other metric flat
+  or improved (−2.9%, 0.0%, −0.7%, −3.6%) — the single-metric-up-everything-else-
+  down shape the release checklist already documents as this metric's noise mode.
+  The next run of the same tree came in at 38.8 ms and every metric improved or held
+  (gate OK). No library file changed on this branch, so no regression was available
+  to find; `pnpm bench:trend` regenerated both trend docs from 49 reports.
+- Prepare commit contents: `package.json` version, `CHANGELOG.md` (`Unreleased` →
+  `## [0.21.1]`), `docs/roadmap.md` + `docs/zh/roadmap.md` delivered scope, both
+  `docs/benchmarks.md`, this entry.
+- Risks / rollback: dev-only surface plus the injected version string. If the vendor
+  bundle were defective, only `examples/react` and its four browser cases would
+  break; `dist/` is untouched. npm is immutable — a defect ships as `0.21.2` and
+  `v0.21.1` is never moved.
+- Next after publish: the standing dependency/security patrol, and the
+  `typescript-eslint` peer-range re-check that gates TypeScript 7.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
