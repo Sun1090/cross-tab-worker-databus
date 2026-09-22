@@ -1,3 +1,4 @@
+import { performance as nodePerformance } from 'node:perf_hooks';
 import { expect } from 'vitest';
 import type {
   ClusterChannel,
@@ -269,6 +270,24 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   emitError(error: unknown): void {
     this.handlers?.onError(error);
   }
+}
+
+/** Real elapsed milliseconds, immune to `vi.useFakeTimers()`.
+ *
+ * Measured on the pinned Vitest 5, reading each source *inside* a fake-timer
+ * window that had been advanced 60 simulated seconds: global
+ * `performance.now()` returned 60000 and `process.hrtime.bigint()` moved by
+ * 60000 too, while `node:perf_hooks`' `performance` — a different object, which
+ * is why replacing the global binding leaves it alone — returned 216, i.e. real
+ * time since the process started. `tests/setup.ts` restores real timers after
+ * every test, so a read taken *between* fake windows (the top of a seed loop)
+ * already sees the real clock, and the fuzz budgets worked for that reason
+ * alone. This helper exists so the immunity comes from the source rather than
+ * from where the call happens: a budget that also covered the seed body, or a
+ * gate in a file that ever fakes time, would otherwise read simulated
+ * milliseconds and a busy loop would measure ~0. */
+export function realNowMs(): number {
+  return nodePerformance.now();
 }
 
 /** Deterministic PRNG (mulberry32). Seeded fuzzers here must stay

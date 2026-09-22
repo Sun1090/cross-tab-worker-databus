@@ -5092,6 +5092,61 @@ corroborates the 26-spec collection.)
   `MIN_SEEDS`, then return to the `data-bus.ts` handler ledger (1576/1595 arms).
 - Updated: 2026-09-22.
 
+## Phase 86 / The fuzz budget's clock, made immune instead of accidentally right
+
+- Version: no release — `src/` is untouched, so `dist/` and npm are unaffected. Branch
+  `fix/fuzz-budget-clock`, test-infrastructure and documentation only.
+- **The claim in Phase 85 was only half right, and the half matters.** It recorded that
+  `performance.now()` moves under fake timers and that the budget therefore could not be
+  trusted. Both clocks were then measured separately, inside and outside a fake window:
+  - *inside* a window advanced 60 simulated seconds: global `performance.now()` returned
+    60000, `process.hrtime.bigint()` moved 60000, `Date.now()` moved — and
+    `node:perf_hooks`' `performance` read **216ms of real time**. It reported
+    `performance !== nodePerformance`, which explains why: Vitest shadows the *global
+    binding*, so the module's own object is never touched.
+  - *between* windows (the top of a seed loop, right after that seed's `useRealTimers()`):
+    20 iterations of 45 simulated seconds each produced live reads of 0, 2, 2, 4 … 10ms
+    against 11ms real.
+  So the committed per-seed budget was never broken — it reads a restored clock. What broke
+  in Phase 85's experiment was the *per-operation* variant, which reads inside the window.
+  A correct-by-placement invariant is one refactor away from being wrong, so the immunity now
+  comes from the source.
+- Completed: `realNowMs()` in `tests/fakes.ts` (backed by `node:perf_hooks`), used by both
+  seeded fuzzers' budgets and their truncation log lines, and by `bestOfMs` in
+  `tests/perf-gate.test.ts` — a gate on absolute milliseconds must not be able to read
+  simulated time, because a faked `performance.now()` would make a 200k-iteration loop
+  measure ~0 and pass every ceiling without running anything.
+- Pinned: `budgets on a clock that fake timers cannot move` asserts `realNowMs()` stays under
+  5s across a 60-second fake advance. Mutation-checked: pointing the helper at the global
+  `performance.now()` fails it with `expected 60000 to be less than 5000`, so the pin has
+  teeth rather than merely documenting intent.
+- Documentation corrected to match the measurements: the `AGENTS.md` testing bullet now names
+  `realNowMs()` as the budget clock and states why a live `performance.now()` is unsafe *in a
+  window* but not unsafe *between* them; `tests/setup.ts`'s header no longer claims the
+  fuzzers use a clock no test fakes (that sentence was the error Phase 85 half-fixed).
+- Also measured while sizing this: the sweep is nowhere near its budget on healthy hardware —
+  5,000 seeds cost 58.7s locally without instrumentation, 19s in CI's `test` step and 27.6s in
+  its coverage step, with no `stopped at` line in any of those logs. The 164ms-per-seed figure
+  that motivated the floor came from a loaded local coverage run, i.e. the budget is a fuse for
+  a degraded runner, not a routine cost cap. The `coordination-invariants` constant comment now
+  states those numbers instead of the single 66s estimate it carried.
+- Changed files: `tests/fakes.ts`, `tests/coordination-invariants.test.ts`,
+  `tests/lifecycle-invariants.test.ts`, `tests/perf-gate.test.ts`, `tests/setup.ts`,
+  `AGENTS.md`, `docs/progress.md`.
+- Verification: `pnpm lint` clean; `pnpm typecheck` clean; `pnpm check` green (37 files /
+  861 tests in 55.3s; coordination 53.3s over 2 tests, lifecycle 29.9s; `pnpm test:perf`
+  5 gates in 1.5s on the new clock). The scratch probe file used for the measurements (run
+  three times, once per question) was deleted and never committed.
+- Risk / rollback: no shipped code changes, so a revert is a `git revert` of one commit with no
+  migration and no version consequence. The only behavioural risk is a fuzzer that stops
+  earlier or later than before — it does not: both budgets keep the same 60s ceiling, the same
+  `MAX_SEEDS` caps and the same floors, and neither sweep changed which arm stops it (seed
+  count, not the fuse, on hardware this size).
+- Next: `typescript` 6.0.3 → 7.0.2 is the only package behind (`pnpm outdated`); try the
+  compiler major on its own branch, then back to the `data-bus.ts` handler ledger (`1576`
+  trace-attempt arms, `1601` superseded-opening guard).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
