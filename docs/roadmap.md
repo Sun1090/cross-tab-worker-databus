@@ -1,6 +1,11 @@
 # Roadmap
 
-0.21.2 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.3 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.3 delivered scope
+
+- Two more dead rejection-absorbers deleted from `CrossTabDataBus`, each proven by enumerating the assignment sites of the promise it swallowed: `stopPromise` has exactly one non-null assignment (`stop()`'s hand-resolved gate, resolved from both settle arms), and every non-null `pendingStop` chain already ends in a terminal `.catch(error => this.reportError(error))`. `data-bus.ts` function coverage went 115/120 → 115/118 with no test removed.
+- The module is now down to three uncovered handlers, each carrying its own written reason — one kept deliberately as the last-resort guard against an unhandled rejection in `performStop()`, the others still owing a call-site enumeration before they can be called dominated or pinned.
 
 ## 0.21.2 delivered scope
 

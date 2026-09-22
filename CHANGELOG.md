@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.21.3] - 2026-09-22
+
+### Changed
+- Two more unreachable rejection-absorbers removed from `CrossTabDataBus`, with no behavior change: `queueStartAfterStop()` swallowed a rejection of `stopPromise` (whose only non-null assignment is `stop()`'s hand-resolved gate, resolved from both settle arms — that is what keeps the public `stop()` non-rejecting), and `openTransport()` swallowed one for its `before` argument (either `Promise.resolve()` or `pendingStop`, and every non-null `pendingStop` chain ends in a terminal `.catch(error => this.reportError(error))`). Each arm had been permanently uncovered; the premises are enumerations of assignment sites and are written into the source next to the code.
+- Whole-repository coverage ceilings unchanged (96 / 92 / 96 / 97) and met; `src/core/data-bus.ts` function coverage goes 115/120 → 115/118 by deleting the two dead handlers, with no test removed or weakened. The module's remaining uncovered handlers are now three, each documented with the reason it is kept (`performStop()`'s last-resort rejection arm) or the enumeration that still owes a proof.
+- No export, protocol or observable behavior changed; `verify:compat` is green against `v0.21.2` by construction.
+
 ## [0.21.2] - 2026-09-22
 
 ### Changed
