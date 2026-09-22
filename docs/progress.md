@@ -5482,6 +5482,15 @@ corroborates the 26-spec collection.)
   a single-seed local run of seed 1046 finished in 153ms. The change makes the fuse able
   to fire and the depth reached legible; the root cause stays open, and CI on this branch
   is the experiment that decides whether the bounded behaviour is what was needed.
+- Result of that experiment, recorded honestly as **inconclusive**: this branch's `verify`
+  passed, but the sweep completed all 5,000 seeds and printed no truncation line — the
+  runner was fast, so the repaired fuse was never exercised. The pass shows no regression,
+  not a fix in action. What the fix *is* proven by is the local control: at budget 0 the
+  gated form passes on 100 seeds and the unconditional form stops immediately, and a
+  constant-returning clock fails only the new freeze assertion. Under the original starved
+  conditions the repaired clock+pair should now break at ~60s having explored ~130 seeds
+  — above the 100 floor, so bounded *and* green — but that combination has not been
+  observed yet, and a future starved run is the real test of it.
 - Two process notes, both self-inflicted and worth keeping: the first draft of the clock
   pin busy-waited on `Date.now()`, which is frozen inside the window, so it never
   terminated and hung the run — hence `blockRealTimeMs()`; and a `git checkout
