@@ -4584,6 +4584,56 @@ corroborates the 26-spec collection.)
   are dominated by the tested selector) onto this and land it, then 0.20.97.
 - Updated: 2026-09-22.
 
+## Phase 79 (the CJS bundle cannot resolve a Worker URL, and two guards that could never fire)
+
+- `tests/dual-format.test.ts` now pins a failure mode only the shipped artifacts
+  have: esbuild shims `import.meta` to `{}` in the CommonJS bundle, so
+  `new URL('./centrifuge.worker.js', import.meta.url)` throws there and the
+  default Worker can never be constructed from `require()`. The case asserts the
+  *actionable* message ("provide workerFactory explicitly") on the CJS artifact
+  and, in the same test, drives the ESM artifact with a stubbed `Worker` /
+  `SharedWorker` and asserts both default Workers are resolved and constructed —
+  the pairing is what ties the failure to the module format rather than to a
+  wrong filename. Both arms are mutation-verified: deleting either `catch` fails
+  the case with the raw `TypeError: Invalid URL` the message exists to replace.
+  This closes the `centrifuge.ts` ledger item the coverage phases kept deferring
+  as "CJS-format path, unreachable from an ESM test process".
+- Two unreachable defensive branches removed with it: the `typeof Worker` /
+  `typeof SharedWorker` throws in `createDefaultWorker` and
+  `createDefaultSharedWorker`. `start()` asks `selectWorkerBackend` with
+  `worker: workerFactory !== undefined || typeof Worker !== 'undefined'`, the
+  selector never returns a backend its availability flags deny, and the factories
+  are only reached for a backend it returned — so the throw's condition is
+  already established false by the caller. The degradation is pinned *where it is
+  decided*: `tests/worker-mode.test.ts` on the selector, and the transport-level
+  "falls back to the local session when the platform lacks both Worker APIs" case
+  on the outcome.
+- **The contrast with the credential guard (next phase) is the part worth
+  keeping.** Both looked like dead legs, and the difference was not style: a
+  provider `catch` can be reached with a stale backend because application code
+  runs inside the guarded window, whereas here nothing runs between the
+  availability check and the call — not a callback, not an await — so no
+  re-entry can invalidate the fact. Delete one, pin the other; say which in the
+  code so the next reader does not infer the rule from the wrong example.
+- Residual `centrifuge.ts` uncovered lines after this change: 457 and 477, both
+  inside the `catch` that builds the CJS-format message — unreachable from an
+  ESM test process and reachable from the CJS one, which is exactly the case
+  added above; they read as uncovered because the CJS artifact is loaded from
+  `dist/`, outside the `src/**` coverage include.
+- Changed files: `src/centrifuge.ts`, `tests/dual-format.test.ts`,
+  `CHANGELOG.md`, `docs/progress.md`.
+- Verification (after rebasing onto the CI-budget fix and the credential pin, so
+  the fuzzers are bounded): `pnpm typecheck`, `pnpm lint`, `pnpm build`,
+  `pnpm test` → 37 files / **859 tests passed**, `pnpm test:perf` → 5 passed,
+  `pnpm test:coverage` → 98.68 / 96.17 / 98.54 / 99.46 against floors
+  96 / 92 / 96 / 97 — up from `main`'s 98.62 / 96.02 / 98.54 / 99.38 on every
+  metric the removal touches.
+- Risks / rollback: no behavior change for any reachable runtime; rollback =
+  revert the two commits (the test and the removal are separate).
+- Next: land this after #152, then 0.20.97 with the CI fix, the Vue example, the
+  coordination fuzzer, the credential pin and this removal in its range.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
