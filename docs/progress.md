@@ -4977,6 +4977,63 @@ corroborates the 26-spec collection.)
   executable work remains beyond dependency tracking.
 - Updated: 2026-09-22.
 
+## Phase 83 (jsdom refresh, and the one arm that must not be decorated)
+
+- Version: unreleased work on `chore/jsdom-30.1.1`, rebased onto `v0.21.2`
+  (`a10d2ae`). Rides into the next release; a devDependency patch alone is not a
+  release reason.
+- `jsdom` `30.1.0` → `30.1.1` (`1293bfd`), the only actionable line in
+  `pnpm outdated` — TypeScript `7.0.2` stays fenced by the `typescript-eslint`
+  peer range, as recorded since 0.20.96. Verified by the two jsdom suites
+  (`tests/hooks.test.tsx`, `tests/vue.test.ts`, 26 tests) and the full
+  `pnpm check` (860 tests), `pnpm lint` clean, public-registry audit clean.
+- **The `reopenTransport` guard, classified instead of "covered".** Phase 82 left
+  `if (this.stopping || this.activeConfig === undefined) return` at 0 of 5041. The
+  first disjunct is redundant by construction — every caller re-checks `stopping`
+  or cancels the path (`resumeSuspendedResources()` both arms,
+  `startDemandRecovery()`'s gate, `runTransport()`'s demand reopen, and
+  `beginStop()` cancelling the recovery timer synchronously). The second is not
+  re-checked anywhere and is the only thing between a future caller and
+  `transport.start(undefined)`, so it stays and now says so in the source.
+- **A decorative test was written, caught and deleted.** The obvious probe —
+  pageHide, `stop()`, then pageShow — passes with the disjunct deleted outright,
+  because `cluster.stop()` removes the visibility listener and bumps
+  `lifecycleGeneration`, so the resume path is gone before the check matters. That
+  experiment is the evidence for the classification and the reason no test is
+  claimed here: a probe that survives its own deletion is not coverage, and it is
+  what the next agent would otherwise mistake for one.
+- Changed files: `package.json`, `pnpm-lock.yaml`, `src/core/data-bus.ts`
+  (comment only), this file.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` → 37 files / 860 tests,
+  `pnpm test:coverage` → 98.71 / 96.16 / 98.72 / 99.45, unchanged (no runtime
+  statement moved).
+- Blockers: none. Risks / rollback: dependency + comment; revert is
+  `git revert` of the two commits with no consumer impact.
+- Next: the `data-bus.ts` ledger is *not* closed — 1545, 1186 and 1150 are now
+  classified, and roughly nineteen zero-count arms remain, each needing the same
+  call-site enumeration before it is called dominated or written off. Then the
+  standing dependency/security patrol.
+- Updated: 2026-09-22.
+
+## Release 0.21.2 completed (2026-09-22)
+
+- Version: `0.21.2` published. PR #157 squash-merged as `a10d2ae`, tag `v0.21.2`
+  pushed at that exact commit, `Release` run `35688512897` green through the
+  publish and the blocking `verify:published` consumer gate;
+  `npm view … version dist-tags.latest` → `0.21.2` / `0.21.2`.
+- Branch hygiene: `test/data-bus-lifecycle-ledger` deleted with the merge;
+  `git ls-remote --heads` lists only `main`.
+- What shipped: one dominated `.catch` removed from `performStop()`, its neighbour
+  kept with the reason, and the method for telling them apart recorded in
+  `AGENTS.md`. No export, protocol or observable behavior changed; whole-suite
+  function coverage 98.54% → 98.72%.
+- Risk / rollback: npm is immutable, so a defect ships as `0.21.3` and `v0.21.2`
+  is never moved or reused; the previous release (`0.21.1`) remains installable for
+  anyone who needs to pin back.
+- Next in flight: PR #158 (`chore/jsdom-30.1.1`) — the jsdom 30.1.1 refresh and the
+  `reopenTransport` guard classification, which rides into the next release.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

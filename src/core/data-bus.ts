@@ -1542,6 +1542,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * callers can queue operations behind it.
    */
   private reopenTransport(recoveryAttempt?: number): Promise<void> {
+    // The two disjuncts have different standings, and neither has ever fired
+    // (0 of 5041 calls in the coverage run), so they are recorded rather than
+    // assumed. `stopping` is redundant by construction: every caller re-checks it
+    // or cancels the path first — resumeSuspendedResources() on both arms,
+    // startDemandRecovery()'s status gate, runTransport()'s demand reopen, and
+    // beginStop(), which cancels the recovery timer synchronously.
+    // `activeConfig === undefined` is the one that is *not* re-checked anywhere: it
+    // is the only thing between a future caller and `transport.start(undefined)`.
+    // It is kept because that is a different kind of leg from the swallowed
+    // rejection in performStop() — dropping it would not merely re-route a report,
+    // it would hand a nonsense config to the transport. Do not "cover" it by
+    // driving a pageshow after a stop: cluster.stop() removes the visibility
+    // listener (and bumps lifecycleGeneration), so the resume path is already gone
+    // before this check matters — verified by mutation, which survived a full suite
+    // that way.
     if (this.stopping || this.activeConfig === undefined) return Promise.resolve();
     // A resume/recovery already has an opening in flight. Reuse it so a stale
     // recovery timer or a second caller cannot open a second transport. A
