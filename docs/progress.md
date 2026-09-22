@@ -6163,6 +6163,40 @@ corroborates the 26-spec collection.)
   tense. After that, the twelve remaining arms, starting with the `startDemandRecovery()` status gate.
 - Updated: 2026-09-22.
 
+## Phase 110 / The demand-recovery status arm resisted two constructions, and now says so
+
+- Version: comment-only; no behaviour change. Branch `test/demand-recovery-status-gate`, off
+  `607a30c` (the 0.21.6 release commit).
+- Task #35 was the last plausibly-constructible arm on the twelve-item `data-bus.ts` ledger:
+  `if (this.status !== WORKER_STATUS.ERROR || this.suspended || this.stopping) return;` in
+  `startDemandRecovery()`.
+- The enumeration first, because it narrows the search to one term. `allowDemandRecovery()` calls it from
+  inside a block that already requires `!stopping && !suspended && status === ERROR`; `runTransport()`
+  returns on `suspended` and enters the gate branch only when `!stopping`. So `suspended` and `stopping`
+  are unreachable at that guard from both callers, and only the status term can fire — which in turn
+  needs an `updateStatus()` away from error that neither releases the gate nor consumes the token, since
+  `releaseRecoveryGate()` clears both together and the CONNECTED arm releases whenever `transportReady`
+  is set.
+- Two sequences were built to that description and both measured false. A transport-level reconnect after
+  a failed automatic attempt: the token had already been consumed by the time the operation arrived, so
+  the guard one line above returned and the write went out immediately. The same with a `disconnected`
+  status: a later automatic attempt reopened the transport, so the "no demand reopen" assertion failed
+  with `expected 4 to be 2`.
+- The intermediate artifact is the part worth keeping. The first construction produced a test that
+  **passed** — and coverage on it showed the target arm at `[0,0]`, i.e. never executed, because the call
+  had been absorbed by the earlier guard. A green test that exercises a different leg than its name
+  claims is worse than no test, so it was dropped rather than shipped, and the measurement replaced it.
+- Verdict: open zero-count arm, not dominated. Recorded at the site with the two failed constructions, so
+  the next pass starts from the measurements instead of re-running them. Kept rather than deleted because
+  its deletion converts a future that reaches it into a reopen of a connection reported up.
+- Changed files: `src/core/data-bus.ts` (comment), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 879 tests + 5 perf gates), `pnpm lint`
+  clean; comment-only, so no coverage movement is claimed or expected.
+- Risk / rollback: `git revert`, nothing observes a comment.
+- Next: the remaining arms are the enumerated-dominated set (542, 572, 720, 760, 857) plus the
+  recovery-timer and re-subscribe legs; and the smoke test for the just-published 0.21.6.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

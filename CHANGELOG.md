@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Changed
+- The `startDemandRecovery()` status guard now carries its measurement instead of silence. It is the one arm of the recovery ledger that resisted construction, and the reason matters for anyone tempted to delete it: `suspended` and `stopping` are excluded at both call sites by their own precondition checks, so only `status !== error` can take it, and that needs an `updateStatus()` away from error which neither releases the gate nor consumes the demand token. Two sequences were built against that description and both measured false — a transport-level reconnect after a failed automatic attempt (the token had already been consumed, so the earlier guard returned and the write went straight out), and the same with a `disconnected` status (a later automatic attempt reopened, so the reopen-count assertion failed). The first attempt also produced a test that passed while proving nothing, which is why the entry records the measurements rather than the arm being relabelled "dominated". It stays an open zero-count leg, kept because deleting it would let any of those futures reopen a connection that is reported up. No behaviour change, no coverage movement.
+
 ## [0.21.6] - 2026-09-22
 
 ### Fixed
