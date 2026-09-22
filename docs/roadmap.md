@@ -1,6 +1,23 @@
 # Roadmap
 
-0.21.8 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.9 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.9 delivered scope
+
+- A SharedWorker tab whose main thread was starved — a long synchronous task, or the timer
+  throttling a backgrounded tab gets — used to lose its transport and never come back. The
+  SharedWorker's reaper reclaimed the silent port, and because a `MessagePort` has no close
+  event and a closed port accepts every post while delivering nothing, the tab went on owning
+  its routes and reporting `healthy` / `connected` while its publications vanished. The reaper
+  now announces the reclaim on the port before closing it, which the transport turns into an
+  ordinary backend loss so the existing recovery rebuilds the session. Verified in a real
+  browser both ways: rebuilt automatically in 36.7 s with the announcement, and never within
+  90 s without it.
+- Shared-mode owner migration had no browser coverage at all. Three shared tabs now pin that
+  closing the owner moves the single server-side subscription onto a connection that was
+  already open, and that the handover keeps delivering in both directions.
+- No wire-format, storage-layout or cluster-protocol change: the added message travels between
+  a page and its own Worker, and a main thread that does not know the type ignores it.
 
 ## 0.21.8 delivered scope
 
