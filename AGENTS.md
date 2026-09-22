@@ -244,3 +244,29 @@ Every heartbeat tick: prune stale workers (TTL), orphaned subscribers (no live t
 **Adjust heartbeat/worker TTL**: Pass `heartbeatIntervalMs` / `workerTtlMs` in `WorkerClusterOptions`. Defaults: 3s heartbeat, 10s TTL. Worst-case dead-owner detection = heartbeatIntervalMs + workerTtlMs ≈ 13s.
 
 **Trace/diagnostics**: Pass `trace: { enabled: true, sink: (event) => ... }` to `CrossTabDataBus`. Events include lifecycle, status, subscription, coordination snapshot, and periodic metrics (throughput, dispatch latency percentiles).
+
+## Product Boundaries (thesis → queue, not checklist)
+
+The project is feature-complete: follow-up work is verification and deepening of the existing library surface — never new library capabilities. Queues derive from this boundary; parked ideas are not backlog items unless their entry conditions are met.
+
+### In Scope (library thesis-internal queue)
+
+- 13-arm ledger receiver-trust verification (e.g. batched PUBLISH message.items: per-item metadata while frame-level key checks only see the outer topic)
+- Bench baselines and trend-document corrections
+- Transport protocol compatibility fixes (Centrifuge / native WebSocket)
+- Patch releases
+
+### Out of Scope (parking; every item carries entry conditions)
+
+- Server-side coordination component: entry = repositioning the library as a full-stack solution
+- New framework adapters beyond React/Vue 3: entry = community demand + maintenance commitment
+- Durable storage backends beyond replay ring buffers: entry = extending the library thesis
+
+### Upstream Blocked
+
+- Centrifuge major-version upgrade: unblocks = peer transport protocol change, with regression verification
+
+### Boundary Review Signals
+
+- Centrifuge breaking protocol changes
+- An ability gap inside the library thesis that verification/deepening cannot cover
