@@ -206,11 +206,12 @@ storage 事件只在其他 document 中派发。因此同一 document 内共享�
 - **心跳间隔**：`heartbeatIntervalMs`（默认 `10000` ms）。主线程按此间隔发送 `PING`。传 `Infinity` 完全禁用心跳——仅在确保 SharedWorker 会随 Tab 一起销毁时使用。
 - **会话超时**：`3 × heartbeatIntervalMs`（默认 `30000` ms）。超过超时未收到消息的端口会被回收：其会话停止，WebSocket 关闭。这与 Core 集群心跳（默认 `3000` ms，通过 localStorage 跟踪 worker 存活）相互独立——见下方说明。
 - **自适应频率**：回收器以所有活动端口中最小的心跳间隔运行，使短心跳端口的会话能被及时回收。当最后一个端口断开时，回收器定时器清除，避免长时间存在的 SharedWorker 在连接爆发间隙运行永久的空循环。
+- **关闭端口前先通知 Tab**：被回收的端口会先收到最后一条 `SESSION_REAPED` 消息，然后才被关闭、其会话才被停止。顺序正是关键所在——`MessagePort` 没有 close 事件，而向一个对端已关闭的端口发送消息会“成功”却什么都不送达，这是被饿死的 Tab 唯一能得知真相的途径。此前，一个只是被长时间阻塞、并没有消失的 Tab（一个很长的同步任务，或后台 Tab 受到的定时器节流）会保留自己的集群角色与 topic 路由，而它发出的每条发布都消失在已关闭的端口里，`getHealthSummary()` 仍在报告 `healthy` / `connected`。收到该消息后，transport 会丢弃这个 backend，并通过 `onError` 与 `error` 状态报告失败，正常恢复路径随后在新端口上重建会话。真实浏览器实测：34 秒阻塞之后，Tab 自行重建了订阅——无需用户操作、无需生命周期事件——测试观察时这条替代连接建立尚不到一秒。
 - **先关闭端口再停止会话**：回收端口时，先关闭端口，再停止会话。关闭端口会丢弃会话的 `disconnected` 状态通知（使其不会到达可能仍在运行但缓慢的主线程），并保证已关闭的端口永远无法传递后续消息，从而在回收器追踪之外复活僵尸会话。
 - **失败隔离**：回收与 `dispose()` 都用 try-catch 包裹 `target.close()`/`target.stop()`，单个异常端口不会中断本轮回收，也不会让后续死 Tab 无人回收。
 - **关闭清理**：SharedWorker 关闭时，`PortReaper.dispose()` 停止定时器并关闭/停止**所有**仍被追踪的会话，确保没有任何 `CentrifugeSession` 或 WebSocket 比 reaper 活得更久。这补充了按端口回收——后者只覆盖 reaper 运行期间静默的端口。
 
-这是从崩溃（未发送 `STOP`）的 Tab 中恢复会话的机制。降低 `heartbeatIntervalMs` 可更快回收死会话，代价是端口上更频繁的 PING 消息。
+这是从崩溃（未发送 `STOP`）的 Tab 中恢复会话的机制；而它发出的那条通知，正是没有崩溃、只是被饿死的 Tab 能够察觉并重连的原因。降低 `heartbeatIntervalMs` 可更快回收死会话，代价是端口上更频繁的 PING 消息——另外请注意：如果它的值低于页面最长任务耗时的约三分之一，活着的 Tab 也会被开始回收，而每一次回收都要靠重建会话来恢复。
 
 `heartbeatIntervalMs` 必须为正数或 `Infinity`；`0`、负数或 `NaN` 会导致 transport 构造函数立即抛出 `TypeError`（否则 `setInterval` 会降级为 0ms 忙循环）。
 

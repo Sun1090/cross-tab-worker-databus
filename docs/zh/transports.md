@@ -85,7 +85,10 @@ transport 选择后端（SharedWorker / Dedicated Worker / 本地），向它发
 - **generation 守卫**：创建后端时递增单调计数器；错误处理检查它，使被取代的
   Worker 的迟到错误不会污染新 session。
 - **SharedWorker 心跳**：若用 SharedWorker，定期发 PING，让 `PortReaper` 能
-  回收死 tab 的 session。
+  回收死 tab 的 session，并处理回收器在关闭端口前发出的 `SESSION_REAPED`
+  消息。对被饿死但仍存活的 tab 来说，那是唯一能收到的信号（`MessagePort` 没有
+  close 事件，向已关闭的端口发送消息什么都不会送达），本 transport 会把它转成
+  一次上报的 backend 失败，让恢复流程得以重建 session。
 
 ### 4. 作为 subpath 暴露
 

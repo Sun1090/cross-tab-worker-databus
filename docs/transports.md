@@ -96,7 +96,12 @@ reference shape, including:
   error handlers check it so late errors from a superseded Worker cannot
   corrupt the fresh session.
 - **SharedWorker heartbeat**: if you use a SharedWorker, send periodic PINGs
-  so a `PortReaper` can reclaim dead-tab sessions.
+  so a `PortReaper` can reclaim dead-tab sessions, and handle the
+  `SESSION_REAPED` message the reaper posts before it closes a port. That
+  message is the only signal a starved-but-still-alive tab can receive (a
+  `MessagePort` has no close event, and posting into a closed one delivers
+  nothing), and this transport turns it into a reported backend failure so the
+  recovery path rebuilds the session.
 
 ### 4. Expose as a subpath
 

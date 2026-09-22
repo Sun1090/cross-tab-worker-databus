@@ -41,7 +41,7 @@ graph TB
 
 By default, when `workerMode: 'dedicated'`, each Tab has its own dedicated transport Worker. When configured as `shared` or `auto` and the browser supports SharedWorker, same-origin tabs share the same SharedWorker; each connection port within the SharedWorker creates its own independent `CentrifugeSession`, so one Tab refreshing or stopping does not affect other Tabs. The `auto` mode degrades in order of **SharedWorker → Dedicated Worker → Local mode**, while the `dedicated` mode degrades in order of **Dedicated Worker → SharedWorker → Local mode**. `BroadcastChannel` is only responsible for control messages and real-time publication forwarding; localStorage is only responsible for eventually-consistent coordination metadata.
 
-Because `MessagePort` has no `close` event, a tab that crashes before sending `STOP` would otherwise leak its session and WebSocket. The main thread therefore sends a `PING` every 10 seconds, and the SharedWorker reaps any port that stays silent for more than 30 seconds, releasing the session and its subscriptions.
+Because `MessagePort` has no `close` event, a tab that crashes before sending `STOP` would otherwise leak its session and WebSocket. The main thread therefore sends a `PING` every 10 seconds, and the SharedWorker reaps any port that stays silent for more than 30 seconds, releasing the session and its subscriptions. Silence is not the same as absence, though, so a reclaimed port is announced before it is closed: a tab whose heartbeat was merely starved (a long synchronous task, the throttling a backgrounded tab gets) learns its backend is gone, reports the failure, and rebuilds the session on a fresh port.
 
 ## Layers
 
