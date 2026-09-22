@@ -4594,8 +4594,10 @@ corroborates the 26-spec collection.)
   and, in the same test, drives the ESM artifact with a stubbed `Worker` /
   `SharedWorker` and asserts both default Workers are resolved and constructed —
   the pairing is what ties the failure to the module format rather than to a
-  wrong filename, and deleting either `catch` fails the test (mutation-verified).
-  This is the ledger item recorded as `centrifuge.ts:286` in earlier phases.
+  wrong filename. Both arms are mutation-verified: deleting either `catch` fails
+  the case with the raw `TypeError: Invalid URL` the message exists to replace.
+  This closes the `centrifuge.ts` ledger item the coverage phases kept deferring
+  as "CJS-format path, unreachable from an ESM test process".
 - Two unreachable defensive branches removed with it: the `typeof Worker` /
   `typeof SharedWorker` throws in `createDefaultWorker` and
   `createDefaultSharedWorker`. `start()` asks `selectWorkerBackend` with
