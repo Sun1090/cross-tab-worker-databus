@@ -1908,6 +1908,43 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('keeps a throwing error subscriber from escaping when there is nowhere to log', async () => {
+    // The leg above survives a throwing subscriber only because
+    // `invokeHandlers()` absorbs it by writing to `console.warn`, and that write
+    // is guarded by `typeof console.warn === 'function'`. With no console method
+    // to fall back on, an unguarded call would raise a `TypeError` from inside
+    // the handler that was meant to contain the failure — out through
+    // `reportError()`, out of the dispatch loop, and into the transport's
+    // message callback as a second, unrelated error.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'no-console-warn' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'no-console-warn', environment: environment.environment, initialConfig: {}, transport
+    });
+    bus.subscribe('topic', () => {
+      throw new Error('handler exploded');
+    });
+    bus.onError(() => {
+      throw new Error('error subscriber exploded');
+    });
+    await bus.ready();
+    // A console object with no `warn` at all: the first conjunct of the guard
+    // still passes, so this is the arm that decides whether the failure stays
+    // contained.
+    vi.stubGlobal('console', { log: () => {}, error: () => {} });
+    try {
+      expect(() => transport.emit('topic', 1)).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // Contained, and still recorded: the dispatch failure reaches the unified
+    // ledger with its own message rather than the formatter's.
+    expect(bus.getHealthSummary().lastFailure).toMatchObject({
+      source: 'dispatch', message: 'handler exploded'
+    });
+    await bus.stop();
+  });
+
   it('opens the transport on a retry when the failed open stop also failed unrecordably', async () => {
     // `start()` chains the new open behind `pendingStop` with no `.catch`, on the
     // documented premise that every `pendingStop` ends in a terminal
