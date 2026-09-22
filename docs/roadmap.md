@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.7 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.8 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.8 delivered scope
+
+- A second sentence that ships inside the package was wrong, in the same class as 0.21.7's. `docs/api.md` promised that no public trace event contains a raw topic, in English and in Chinese, while `docs/configuration.md` documented the opposite in both languages and went on to tell integrators to redact topic names before forwarding a sink to telemetry. Subscription events do carry the topic they report, and so do the route-scoped `reliability` operations. The corrected text states what was measured: no event carries a message payload, a connection address, or an error body; topic plaintext appears in exactly those two event types; `coordination` names routes by their opaque key. A test now drives a payload sentinel and an error-body sentinel through a real bus and asserts the sink sees neither — the first witness either half of that claim ever had.
+- The suite's long-standing "loaded-runner" E2E failure was not load. The shared-mode teardown spec asserted on the demo server's *global* connection count while specs run in parallel, so every other live tab contributed to the number; and it passed vacuously when it passed, because only a topic's owner transport subscribes its channel, so a "2" could be one channel-carrying socket plus one subscribed to nothing. Sockets are now addressed by the channel each holds, and the test asserts both halves: the closed tab's socket leaves the server's list, and the surviving tab's stays in it. Repeating that one spec three times, which failed 3 of 3 against the old assertions, now passes.
+- Both seeded invariant harnesses were run 80x and 133x past the depth they ship with — 400,000 and 200,000 seeds, 753.7 s and 262.6 s — and surfaced no violation, so the zero-count legs that remain are classification work rather than a hidden coordination bug. Their headers now record the available depth and the three separate limits that can end a deep run.
+- One coverage zero that had been read backwards is now labelled with what it actually counts: where a `??` fallback is an arrow function, the branch region spans that closure's body, so the arm counts invocations rather than the callers that omitted the argument. Repo-wide this is the only leg of that shape, and the rule now lives in `AGENTS.md`.
+- No behaviour, wire format, or storage layout changed in this release.
 
 ## 0.21.7 delivered scope
 
