@@ -1516,6 +1516,43 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(failure!.error.message).toContain('synchronous token failure');
     transport.stop();
   });
+
+  it('drops a synchronous credential failure when the provider takes the transport down first', () => {
+    // The provider is application code, so nothing stops it from tearing the
+    // transport down before it throws — a token helper that stops the bus on a
+    // 401 is that shape. `post()` then has no backend left to address and throws
+    // "start() must be called first" out of the Worker message listener, which
+    // in a page surfaces as an uncaught error instead of a closed connection.
+    // The backend check in the synchronous catch is what keeps that teardown
+    // quiet; deleting it makes this case throw, verified by mutation.
+    const worker = new WorkerDouble();
+    // The provider closes over `transport` and runs long after the binding is
+    // initialized, so a const is enough to let it take the bus down.
+    const transport: CentrifugeWorkerTransport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: {
+        getToken: () => {
+          transport.stop();
+          throw new Error('token rejected; the bus stopped itself');
+        }
+      }
+    });
+    transport.start(
+      { url: 'wss://example.test/connection/websocket' },
+      { onStatus: () => {}, onMessage: () => {}, onError: () => {} }
+    );
+
+    expect(() => worker.emit({ type: 'TOKEN_REQUEST', requestId: 9, kind: 'token' })).not.toThrow();
+    // The premise, so this cannot pass because the provider never reached
+    // `stop()`: the backend really is gone by the time the catch looks for it,
+    // and `STOP` is the last frame the terminated Worker ever sees.
+    expect(transport.diagnosticsBackend).toBe('uninitialized');
+    expect(worker.messages).not.toContainEqual(
+      expect.objectContaining({ type: 'TOKEN_ERROR', requestId: 9 })
+    );
+    expect(worker.messages[worker.messages.length - 1]).toMatchObject({ type: 'STOP' });
+  });
 });
 
 describe('CentrifugeWorkerTransport start guard and shared-worker failure variants', () => {
