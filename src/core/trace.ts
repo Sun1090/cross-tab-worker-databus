@@ -208,6 +208,19 @@ export class DataBusTraceReporter {
     this.enabled = options?.enabled ?? false;
     this.mode = options?.mode ?? 'all';
     this.metricsIntervalMs = normalizeInterval(options?.metricsIntervalMs);
+    // The zero on this arm counts the closure's *invocations*, not the `??`
+    // selection: `tests/property.test.ts` builds a no-arg reporter 300 times per
+    // run, which selects this default every time, and the arm still reads 0 —
+    // because a reporter with no options has `enabled` false, and every emit path
+    // is gated on it. Selection *with* emission needs `enabled: true` and no
+    // `sink`, which the types forbid: `sink` is a required member of
+    // `DataBusTraceOptions` (documented Required in en and zh) and this class is
+    // not exported by the package, so only untyped JavaScript gets there. What
+    // deleting the default costs that caller: each emission throws inside
+    // `emitSync` and surfaces as a `[cross-tab-worker-databus] trace sink threw:`
+    // warning — measured 2 events → 2 `TypeError`s where the default gives none,
+    // and the 884-test suite is green either way. Recorded rather than pinned,
+    // because pinning it needs a cast that fakes a call the declared types forbid.
     this.sink = options?.sink ?? (() => undefined);
     this.asyncSink = options?.asyncSink ?? false;
     this.now = now;

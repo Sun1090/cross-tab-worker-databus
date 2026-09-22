@@ -6656,6 +6656,85 @@ corroborates the 26-spec collection.)
   each is dominated by an in-file invariant before treating it as a gap.
 - Updated: 2026-09-23.
 
+## Phase 121 / A coverage zero that was being read backwards, in the one place it can happen
+
+- Version: comments and one measurement rule; no behaviour change. Branch
+  `docs/trace-default-sink-classification` off `ad18b3e` (#203, whose merge moved main forward before
+  this branch started).
+- Why it was reopened: this session began holding that "`sink` is optional in `DataBusTraceOptions`, so
+  `trace: { enabled: true }` is a documented configuration with an untested default sink". Both halves
+  are false — `sink` is a required member, and `docs/configuration.md` lists it as Required in en and
+  zh — which is what Phases 64 and 65 already recorded, and the test that premise justified was correctly
+  never written. Re-measuring the premise is what produced the actual finding.
+- The zero on `this.sink = options?.sink ?? (() => undefined)` had been read as "every construction
+  passes a sink". It is not that. Where a `??`'s right operand is an arrow function, the branch region
+  spans the **body** of that function, so the counter moves when the closure runs, not when the fallback
+  is selected. Measured both directions: `tests/property.test.ts` alone constructs a no-arg reporter 300
+  times, which selects this default every single time, and the arm still reads `[300, 0]`; one
+  `enabled: true` construction with the sink omitted, emitting a lifecycle event and one metrics flush,
+  moves it to `[2, 2]`. The distinction decides the work — "nobody omits the argument" argues for a
+  constructor test, while "the closure never runs" argues for none, because a no-arg reporter has
+  `enabled` false and every emit path is gated on it.
+- What keeping the leg costs, which is the question an unpinned leg has to answer anyway: with the
+  fallback deleted (cast in place so the field type still checks), a sink-less *enabled* reporter throws
+  on each emission, `emitSync` catches it, and the outcome is one `[cross-tab-worker-databus] trace sink
+  threw:` `console.warn` carrying a `TypeError` per event — measured 2 events → 2 warnings where the
+  default gives 0, and a no-arg reporter gives 0 either way. All 37 files / 884 tests pass with it
+  deleted, so nothing pins it and the honest record is "kept, unpinned, here is what breaking it costs".
+  Pinning it would need a cast that fakes a call the declared types forbid.
+- Swept for the same shape repo-wide: this is the **only** zero-count arm in `src/` whose region opens on
+  an arrow function, so no other ledger entry was read under the wrong assumption. `AGENTS.md` carries the
+  rule so the next pass does not re-derive it.
+- Changed files: `src/core/trace.ts` (one comment), `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck` clean; the two coverage measurements and the deletion probe above; no
+  coverage movement claimed — the leg stays at 0 by design, and a change that lit it up would be a false
+  signal rather than a win.
+- Risk / rollback: `git revert`; nothing observes a comment.
+- Next: the seeded coordination and lifecycle harnesses were run far past their shipped depth to look for
+  a real invariant break rather than another classification; the result is recorded in Phase 122.
+- Updated: 2026-09-23.
+
+## Phase 122 / Both seeded harnesses, run 80x and 133x past the depth they ship with
+
+- Version: verification sweep only; no code, no test, no behaviour change. Same branch as Phase 121.
+- Question worth asking after this many classification passes: is what is left a defect the harnesses
+  would find if they looked harder, or only more classification? So the two seeded invariant fuzzers were
+  run far past their shipped depth, on scratch copies with `MAX_SEEDS` raised 5,000 → 400,000
+  (`coordination-invariants`) and 1,500 → 200,000 (`lifecycle-invariants`) and
+  `SEED_BUDGET_MS` 60,000 → 1,200,000.
+- The first attempt produced two failures and they meant nothing: the deep run died at *exactly* 120s
+  with `Error: Test timed out in 120000ms`, because each of those `it()` calls passes its own ceiling as
+  a third argument (`120_000`) — a constant the scratch copies inherited. At that point the sweeps had
+  already reached depth 65k and 105k with no violation. Raising that ceiling to 1,300,000 is what let the
+  budget do the stopping it exists to do. Worth remembering: a wall-clock fuse, a per-test ceiling, and a
+  seed cap are three different limits, and only the one you did not think about will end the run.
+- Result: `coordination` completed **400,000 of 400,000** seeds in 753.7 s and `lifecycle` **200,000 of
+  200,000** in 262.6 s, both files green — no owner-uniqueness break, no topic with two transport holders
+  or none, no duplicate or lost fan-out to a live subscriber, no departed topic leaving a route or owner
+  behind, no lifecycle-flag inconsistency. Neither sweep hit its budget or collected a single entry in its
+  failure list, which is why no truncation line was printed.
+- Observed rates on this machine: ~530 seeds/s for the three-tab coordination sweep, ~760 for the
+  lifecycle one. Read against the shipped caps, that means the CI sweep explores roughly 1% of what a
+  20-minute budget would cover, so the shipped depths are a scheduling compromise and not a claim that
+  5,000 interleavings is enough — and the 60 s fuse exists because a loaded runner is an order of
+  magnitude slower, not because 400,000 seeds was judged sufficient.
+- What this does **not** rule out, so the next pass does not over-read it: both harnesses assert
+  end-state quiescence and per-publication delivery, so a defect that only shifts *timing* (a reconcile
+  that converges late but correctly), or that needs a tab count or TTL ratio outside the fixed fixture, is
+  invisible to them by construction. What it does rule out is the cheap hope that the remaining
+  zero-count legs are hiding a live coordination bug — at this depth nothing surfaced, so the ledger work
+  is classification and the defect hunt needs a different instrument.
+- Changed files: `docs/progress.md` (this entry); the scratch copies were deleted, not committed.
+- Verification: the runs above; the shipped suites unchanged and green on this branch. One caution earned
+  the hard way: a `vitest run` started *while* the 400k sweep still held its cores had not finished after
+  19 minutes and was killed — the same starvation the wall-clock fuses exist to survive, not a wedge (the
+  identical command on an idle machine reports 37 files / 884 tests in 12.2 s). Run one heavy sweep at a
+  time, and never quote a duration measured against another.
+- Risk / rollback: none — nothing in the repository changed except this record.
+- Next: the shared-mode E2E teardown spec is the one known load-sensitive failure left; the follow-up
+  target is making a failure there name its cause instead of reporting a bare count.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
