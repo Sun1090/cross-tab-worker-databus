@@ -1368,6 +1368,20 @@ export class WorkerClusterRuntime {
     const load = this.assignedTopics.size;
     if (load === this.currentRecord.load) return;
     this.currentRecord = { ...this.currentRecord, load };
+    // `sendControl()` runs a self-addressed SUBSCRIBE's handler synchronously
+    // before returning, and that handler is application code — at the bus layer
+    // it goes through `subscribeTransport()` into the host's
+    // `transport.subscribe()`. A host that calls `stop()` from there therefore
+    // arrives here with the assignment set already changed and `started` already
+    // false, and writing now would republish the record `pause()` just removed.
+    // Peers read liveness out of that record, so the stale version keeps topics
+    // and publications pointed at a channel that is closed until the TTL
+    // expires. It is the only write in that window: `confirmRoute()` runs before
+    // the handler, and `notifyRegistry()` goes through `send()`, which returns
+    // early once `channel` is null. Pinned by
+    // tests/cluster.test.ts's 'publishes no worker record when a control handler
+    // stops the cluster mid-subscribe', which is the only test that fails when
+    // this guard is deleted.
     if (this.started) this.writeRecord(true);
   }
 
