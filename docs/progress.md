@@ -6557,6 +6557,67 @@ corroborates the 26-spec collection.)
   Product question #194 and the TypeScript 7 re-check are unchanged.
 - Updated: 2026-09-23.
 
+## Phase 119 / The cluster's stopped-write guard was reachable, and nothing tested it
+
+- Version: test + comment; no behaviour change. Branch `test/teardown-reentrancy`, off `b2d382c`
+  (main after #200).
+- Phase 118 predicted the `cluster.ts` block would resist a scheduled-signal harness. It did — and the
+  block yielded a pin anyway, from the direction AGENTS.md keeps warning about: a synchronous extension
+  point that application code can re-enter. `sendControl()`'s **self-addressed** branch runs
+  `handlers.onControl` inline before returning, and at the bus layer that handler is
+  `subscribeTransport()` → `transport.subscribe()`, a method the host implements. A host that calls
+  `stop()` from there unwinds back into `updateLoad()` with the assignment set already changed — so
+  `if (this.started) this.writeRecord(true);` is not defensive filler, it is the line between a clean
+  teardown and republishing the record `pause()` just removed. Peers read liveness from that record, so
+  the stale version keeps topics and publications pointed at a closed channel until the TTL expires.
+- Method, in the order that produced evidence rather than narrative: probe the sequence under coverage
+  and read the arm counts (`[1,1]`, both legs executing after `[0,0]` on main), then delete the guard and
+  re-run the probe — the stopped worker's record reappears in storage — then delete it again against the
+  whole suite. Exactly one test fails (`expected [ 'worker-a' ] to deeply equal []`), so the pin is
+  unique rather than redundant, and the other 883 staying green is the statement that nothing else
+  covered this.
+- That last number was nearly reported backwards, and the reason is worth keeping. Two earlier mutation
+  runs of this same pass removed the whole `this.writeRecord(true)` call instead of only its `if`, which
+  made four *unrelated* routing/TTL tests fail (nothing ever published a record) while the new test
+  passed — the exact inverted signature of "the leg is already pinned, and your test proves nothing". The
+  measurement was only trustworthy once `diff` of the mutant was checked line by line: the same
+  statement, in the same method, answers two different questions depending on which half of it goes.
+  `AGENTS.md` now carries that rule next to the existing "check that the mutant hit the code you meant to
+  break", which is its mirror image.
+- Enumerated the rest of the post-handler write surface instead of leaving it implied: `confirmRoute()`
+  runs *before* the handler in the same branch, and `notifyRegistry()` goes through `send()`, which
+  returns false once `channel` is null (set in `pause()`). `updateLoad()` is therefore the whole window,
+  and one guard closes it.
+- Two runtime assertions rather than one: no `:worker:` key survives the teardown, and a runtime that
+  joins *afterwards* lists only itself among live workers — the second is how a peer actually consumes
+  the first, and it is the one that would catch a fix that moved the stale write instead of removing it.
+- Ledger after this pass: `cluster.ts` 22 → **21** branch arms with a zero-count slot (94.28% → 94.54%
+  branch coverage), `replay-persistence.ts` 6 + 1 uncovered function (Phase 118), `data-bus.ts` 12 + 2
+  functions, `replay-manager.ts` 7. Whole tree 99.01 / 96.89 / 99.26 / 99.69, above the 98 / 96 / 98 / 99
+  floors.
+- One hypothesis killed before it became a change: the two `selectLeastLoadedWorker(…) ??
+  this.currentRecord` fallbacks (both zero-count) looked like a validation gap, because a
+  `maxActiveWorkers` of `0` would empty the candidate list and reach them. It does not:
+  `WorkerClusterRuntime`'s constructor calls `assertClusterOptions(options)` (`src/core/cluster.ts:216`)
+  *before* reading the option, and that already runs `assertPositiveSafeInteger` on
+  `maxActiveWorkers`/`routeOwnerCacheMax` plus the heartbeat and TTL. The documented route to an empty
+  candidate list is therefore a degraded storage layer — `readWorkers()` returning nothing because this
+  worker's own record could not be persisted — which is an advertised failure mode (AGENTS.md principle
+  6) and the next thing to try for those two arms.
+- Changed files: `tests/cluster.test.ts` (one new test; the adjacent private-topic test's heading was
+  briefly clobbered by the insertion and restored in the same commit), `src/core/cluster.ts` (comment),
+  `AGENTS.md` (the mutant-diff rule), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 884 tests + 5 perf gates), `pnpm lint`
+  clean, `pnpm test:coverage` thresholds met with the numbers above; the two mutation runs (guard
+  deleted: 1 failure; nothing deleted: 884 green) are the evidence.
+- Risk / rollback: `git revert`; no shipped behaviour changes.
+- Next: the remaining `cluster.ts` arms — 5 of them are whole-statement-less `if` legs (297 `activate()`
+  re-entry, 491 the handoff `!owner` skip, 817 `removeLifecycleListeners`, 1015 `reconcile` before
+  start, 1270 `writeRoute` without storage) and the rest are `??`/spread/`typeof` fallbacks. Phase 118's
+  lesson applies: check whether a *synchronous handler* can reach them before writing an enumeration
+  that claims they are dead — that is what turned this pass from a comment into a test.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

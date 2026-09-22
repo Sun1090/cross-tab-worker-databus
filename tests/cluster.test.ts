@@ -477,6 +477,73 @@ describe('WorkerClusterRuntime', () => {
     expect(control).toHaveBeenCalledWith('UNSUBSCRIBE', 'topic', undefined);
   });
 
+  it('publishes no worker record when a control handler stops the cluster mid-subscribe', async () => {
+    // `sendControl()` dispatches a self-addressed SUBSCRIBE synchronously, and
+    // that handler is application code: at the bus layer it runs through
+    // `subscribeTransport()` into `transport.subscribe()`, which a host
+    // implements. So `stop()` can be called between recording an assignment and
+    // `updateLoad()` noticing the load changed. The guard that writes the record
+    // only while started is what stops that later write from resurrecting the
+    // worker the teardown had just removed — and peers read liveness out of that
+    // record, so a stale one keeps routes and publications pointed at a closed
+    // channel until the TTL expires. Measured by deleting the guard: the record
+    // is back in storage after `stop()`, and the second runtime below lists this
+    // worker as live.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-stop' });
+    let selfSubscribes = 0;
+    // The handler references the instance its own initializer builds; it only
+    // ever runs after that assignment, from `start()`/`subscribe()`.
+    const runtimeA: WorkerClusterRuntime = new WorkerClusterRuntime({
+      clusterKey: 'reentrant-stop',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      handlers: {
+        onControl: (action: string) => {
+          // Stopping on the second self-addressed assignment is what leaves
+          // `currentRecord.load` ahead of the assignment set: the first one
+          // records load 1, and the teardown clears the set right after, so the
+          // mismatch is what `updateLoad()` still has to handle.
+          if (action !== 'SUBSCRIBE') return;
+          selfSubscribes += 1;
+          if (selfSubscribes === 2) runtimeA.stop();
+        },
+        onEvent: vi.fn()
+      }
+    });
+    runtimeA.start();
+    await Promise.resolve();
+    expect(runtimeA.subscribe('topic-a')).toBe(true);
+    await Promise.resolve();
+    runtimeA.subscribe('topic-b');
+    await Promise.resolve();
+
+    const workerRecords = () => storage.entries()
+      .filter(([key]) => key.includes(':worker:'))
+      .map(([, value]) => (JSON.parse(value) as { workerId: string }).workerId);
+    expect(workerRecords()).toEqual([]);
+    expect(runtimeA.getSnapshot().assignedTopics).toEqual([]);
+
+    // A peer that joins afterwards is the consumer of that record, so the
+    // assertion above is stated in its terms too: nothing may still name the
+    // stopped worker as a live cluster member.
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-observer' });
+    const runtimeB = new WorkerClusterRuntime({
+      clusterKey: 'reentrant-stop',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtimeB.start();
+    await Promise.resolve();
+    expect(runtimeB.getSnapshot().workers.map(worker => worker.workerId)).toEqual(['worker-b']);
+
+    runtimeB.stop();
+  });
+
   it('keeps a tab\'s private topic from migrating to a peer on pagehide', async () => {
     // A's solo topic must not reach a peer: migrating it would open a server
     // subscription nothing serves, and the route would outlive every subscriber.
