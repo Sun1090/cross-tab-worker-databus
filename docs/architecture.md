@@ -148,6 +148,42 @@ interface WorkerRoute {
 
 Routes do not store the original topic string or payload. When the actual owner receives `CONTROL/SUBSCRIBE`, the original topic string is only passed through the BroadcastChannel in-memory message. The receiver accepts that control frame only when the durable route currently names it; a delayed frame from an earlier assignment round is dropped, and a route awaiting `ROUTE_RELEASED` can be confirmed only by the matching handoff ACK. `confirmedAt` is written after the owner processes the control message; before the route is confirmed, the subscriber Runtime holding the original topic string will resend `SUBSCRIBE` to recover from BroadcastChannel message loss that results in "a route without a real subscription".
 
+### Receiver-side frame validation
+
+The control channel is a `BroadcastChannel`: same-origin, unauthenticated, and writable by any script in
+the origin, so a receiving Runtime treats frame fields as attacker-controlled except where it checks
+them. Three checks are part of the wire contract, and a frame that fails one is dropped silently rather
+than reported — there is no peer to send an error to.
+
+| Check | Where | Consequence of failing it |
+|---|---|---|
+| `targetWorkerId` names this worker | every point-to-point handler | frame ignored |
+| `topicKey === createOpaqueKey(topic)` | `CONTROL` (any action) and `ROUTE_RELEASED` | frame ignored |
+| a `CONTROL/PUBLISH` frame that carries `items` carries a non-empty **array** of them | `CONTROL/PUBLISH` | frame ignored |
+
+The second row is what makes ownership authorization meaningful. `topicKey` is a pure function of
+`topic`, so every frame this library builds has the two agreeing; a pair that disagrees is therefore a
+substitution, not a variant — and because ownership is authorized by the route stored under `topicKey`
+while the transport subscription is named by `topic`, an unchecked mismatch lets a frame borrow one
+channel's authorization to name another. The durable route record stores only `topicKey`, never the
+plaintext, so the key → name mapping exists only in memory and cannot be injected through localStorage.
+
+The third row exists because the batch path iterates its payload: a value with a `length` but no
+iterator threw out of the message listener, and an iterable non-array (a string) walked the batch as
+one-character items whose `data` is `undefined` — which the owner then published under its own session.
+
+Two things are deliberately **not** checked. `EVENT` frames are validated by shape only
+(`eventType` plus a payload with a string `topic`) and the rest is forwarded, because delivery still
+requires a local subscriber on that topic and the shape-only tolerance is what lets an older or newer
+SDK version publish into the same cluster. And item *content* inside a batch is not validated: a
+well-formed `{ data: anything }` is what a legitimate item looks like, and `messageId` / `timestamp` are
+only forwarded into `transport.publish()`, where the receiving side discards a non-string id and a
+non-finite timestamp when it parses the publication.
+
+**For a non-JS peer or a custom environment:** derive `topicKey` from the topic with
+`createOpaqueKey`, never send a batch with zero items, and expect a frame to be ignored without any
+response if the pair disagrees.
+
 ### How `topic`, `topicKey`, `tabId`, `workerId`, and BroadcastChannel relate
 
 These identifiers represent different layers:

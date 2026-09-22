@@ -6197,6 +6197,38 @@ corroborates the 26-spec collection.)
   recovery-timer and re-subscribe legs; and the smoke test for the just-published 0.21.6.
 - Updated: 2026-09-22.
 
+## Phase 112 / The receive-path rules existed only for maintainers
+
+- Version: documentation only; no behaviour change. Branch `docs/protocol-validation`, off
+  `origin/main` while PR #191 is still open.
+- Three arm hunts in a row came back as negative results, which is the signal to work the part of the
+  same subject that had no test or comment failure behind it: what an integrator is told. The
+  receiver-side rules added across 0.21.5 and 0.21.6 were written into code comments and `AGENTS.md`, and
+  `AGENTS.md` is the contributor contract — `docs/architecture.md`, the document that actually explains
+  the protocol to users, still described only the `CONTROL/SUBSCRIBE` route check and said nothing about
+  the other two.
+- Added to both language versions: the three checks as a table (target, key/topic pairing on **both**
+  point-to-point frame types, batch shape), the reason each exists stated as a consequence rather than a
+  rule, the two deliberate non-checks with their justification, and a short paragraph addressed to a
+  non-JS peer or a custom `ClusterEnvironment`: derive the key from the topic, never send an empty batch,
+  and expect a bad frame to vanish without a response.
+- The silently-dropped part is the substantive addition. Every one of these guards fails closed with no
+  reply, so an integrator whose custom sender computes `topicKey` differently sees "subscriptions never
+  confirmed", not an error — the failure mode is documented behaviour only if the document says so.
+- Changed files: `docs/architecture.md`, `docs/zh/architecture.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `git diff --check` clean; `pnpm check` clean (37 files / 879 tests + 5 perf gates),
+  `pnpm lint` clean and `pnpm verify:compat` clean, run because the change is prose-only and their
+  passing is the evidence that no code path moved.
+- Risk / rollback: documentation drift is the risk, so each claim here is traceable to a guard in
+  `src/core/cluster.ts` and to the tests that name them (`drops a control frame whose topicKey disagrees
+  with its topic`, `drops a ROUTE_RELEASED whose topicKey disagrees with its topic`,
+  `drops a batched PUBLISH whose items are not a usable batch`,
+  `never hands a non-array batch to the transport publish path`). `git revert` is the rollback.
+- Next: fold the TypeScript 7 re-verification (TS 7.0.2 published; `typescript-eslint` pins
+  `>=4.8.4 <6.1.0` on every channel including the canary, so it remains upstream-blocked) into the next
+  dependency-inspection entry rather than a phase of its own.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
