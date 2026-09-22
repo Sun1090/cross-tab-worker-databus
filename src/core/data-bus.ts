@@ -1172,10 +1172,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // STOP event emitted here already observes the shared gate.
     this.beginStop();
     const stopPromise = this.performStop();
-    // performStop() renders transport failures through reportError() and never
-    // rejects, so the gate resolves in both branches and the swallow keeps an
-    // unexpected teardown rejection from surfacing as an unhandled rejection
-    // for fire-and-forget callers. The public stop() contract stays
+    // Both settle arms clear the gate and resolve it, and the rejection arm is
+    // not decoration: performStop() reports transport failures through
+    // reportError(), which runs the error subscribers through invokeHandlers(),
+    // which absorbs a throwing subscriber only by writing to console.warn. A
+    // subscriber that throws *and* a console.warn that throws therefore escape
+    // performStop()'s catch and reject it. On that path nothing else can wake a
+    // caller of `await bus.stop()` — the transport shutdown is already done — so
+    // resolveGate() here is the only thing that settles the public contract.
+    // Pinned by "settles stop() when the teardown failure cannot be reported
+    // either"; deleting resolveGate() from this arm makes that test report
+    // 'hung' on its watchdog. The clearing beside it is defensive by the
+    // reasoning at stop()'s `stopPromise && this.stopping` gate, which treats
+    // `stopping` as authoritative and a settled gate as stale: deleting that
+    // line changes no assertion in the file, measured. The swallow keeps an
+    // unexpected teardown rejection from surfacing as an unhandled rejection for
+    // fire-and-forget callers, and the public stop() contract stays
     // non-rejecting.
     void stopPromise.then(
       () => {

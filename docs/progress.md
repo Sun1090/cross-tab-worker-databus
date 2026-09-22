@@ -5616,6 +5616,67 @@ corroborates the 26-spec collection.)
   `replay-manager`, `replay-persistence`, `trace`, `websocket`, `centrifuge-session`, `version.ts:12`.
 - Updated: 2026-09-22.
 
+## Phase 97 / A comment said "never rejects"; the arm it dismissed is the only thing that settles `stop()`
+
+- Version: no release — recorded under `## [Unreleased]`. Branch
+  `test/teardown-gate-rejection-arm`, based directly on `f88de7c` (#173) after that merged, so no
+  rebase was needed this time; the previous phase's two commits dropped out of the rebase as
+  "patch contents already upstream", which is the squash-merge workflow behaving.
+- Phase 96's next item was `data-bus.ts`'s remaining 16 arms. The one that turned out to matter was
+  not an arm at all but the *prose* that had made it look harmless: `createStopPromise()` chained
+  `performStop()` to the public gate with `.then(f, g)` and commented that `performStop()` "never
+  rejects, so the gate resolves in both branches". Both branches resolving is exactly why the
+  rejection arm looked like filler, and the arm had never executed — its two branches were among the
+  17 uncovered legs this ledger started from.
+- The claim is false, and the chain that breaks it is four links long: `performStop()`'s `catch` calls
+  `reportError()` → `notifyError()` → `invokeHandlers(errorHandlers, …, ERROR_HANDLER)`, which absorbs
+  a throwing error subscriber *only* by writing to `console.warn`. A subscriber that throws and a
+  `console.warn` that throws therefore escape the `catch`, and the async function rejects after its
+  `finally` has already completed the teardown. Nothing else can then wake a caller of
+  `await bus.stop()` — the transport shutdown is finished, `stopping` is already false — so
+  `resolveGate()` in that arm is the only thing that settles the public contract. The construction is
+  the test; the assertion is that the stop settles at all.
+- Failure mode chosen deliberately: a never-settling promise has no end-state assertion. The test
+  races the stop against a 250ms real-timer watchdog and asserts the verdict string, so deleting
+  `resolveGate()` from the arm fails as `expected 'hung' to be 'settled'` in a quarter of a second
+  instead of as a Vitest timeout that names nothing. Checked by mutation (`// MUTANT-a`), and the
+  mutant diff was read back before running to confirm the intended arm was the one edited — the two
+  arms are textually identical, which is the duplicated-guard trap `AGENTS.md` already warns about.
+- The same mutation run split the arm's two statements, which is the part worth keeping: deleting the
+  co-located `if (this.stopPromise === stopGate) this.stopPromise = null;` leaves all 184 tests in
+  `tests/data-bus.test.ts` passing. So one statement is a contract and its neighbour is defensive —
+  for the reason `stop()`'s own comment gives (`stopping` is authoritative, a settled gate is stale and
+  must fall through to a fresh teardown). The source comment now says which is which, and says it was
+  measured.
+- Numbers, re-measured rather than inherited: `data-bus.ts` 16 → 15 uncovered branch arms and — the
+  first movement at that tier in this ledger — 3 → 2 uncovered functions, because what closed is a
+  handler function that had never been entered. Module 97.9 / 96.32 / 97.43 / 98.86 → 98.38 / 96.55 /
+  98.29 / 99.24; whole-suite 98.94 / 96.52 / 99.26 / 99.65 over 37 files / 873 tests against
+  unchanged ceilings. The leftover at line 1198 is now the *fall-through* arm: a teardown whose gate
+  had already been replaced by a newer stop.
+- Also done while waiting on CI: the branch audit `AGENTS.md` requires before starting new work. No
+  open PRs and no remote topic branches existed; nine local branches (`docs/coverage-dist-blindspot`,
+  `…-v2`, `docs/ledger-ready-fallthrough`, `fix/e2e-handoff-race`, `fix/failure-record-totality`,
+  `fix/fuzz-budget-clock`, `scratch/rebase-preview`, `test/data-bus-reopen-arms`,
+  `test/ledger-origin-stamp`) were each matched to the landed squash commit carrying their subject and
+  PR number, so all nine were removed. Their tip SHAs are in `/tmp/stale-branch-tips.txt` and in the
+  reflog; `git branch` is now `main` plus the branch in flight.
+- Changed files: `src/core/data-bus.ts` (comment), `tests/data-bus.test.ts`, `AGENTS.md`,
+  `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck` clean, `pnpm lint` clean, targeted run green, mutation checks as
+  above, `pnpm test:coverage` re-measured for the tier claims.
+- Risk / rollback: no behaviour change; one test and one comment. `git revert`, no artifact
+  consequence. If a future change makes `performStop()` genuinely total again, this arm goes back to
+  being defensive — the comment names the chain to re-check rather than asserting impossibility.
+- Next: 15 arms left in `data-bus.ts`. Four are already classified in prose and should not be hunted
+  (820's fall-through, 1617's guard, and the dominated-by-call-site pair 535/559); `564`'s right
+  operand needs `stopping` true with `stopPromise` null, which the assignment enumeration says is
+  reachable only through a re-entrant `start()` inside `cluster.stop()`. Constructible and worth a
+  test: `509`'s loop break, `631`'s demand-recovery bail-out, the suspend-mid-open family
+  (`694`, `723`, `747`), `1368`'s second exhaustion, `1513`'s missing-console leg, `1693`, and
+  `324`'s switch default. Then the other modules' arm tiers.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
