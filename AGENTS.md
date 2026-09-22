@@ -178,7 +178,9 @@ handlers that carry the pair enforce it — `handleControlMessage` and
 durable route under `topicKey`, and then writes `topic` into `assignedTopics` and hands it to the
 transport. `EVENT` and `REGISTRY` need no such check because they carry no key/plaintext pair, and the
 sender of an ACK can itself only be poisoned through those two handlers, which is why checking the
-receiver is enough. When adding a field the receiver acts on, ask which of those two
+receiver is enough: a durable route record stores `topicKey` and never the plaintext, so the key → name
+mapping exists only in `knownTopics`/`assignedTopics` in memory and cannot be injected through
+localStorage. When adding a field the receiver acts on, ask which of those two
 it belongs to, and pin the forged-frame case — `tests/cluster.test.ts`'s
 "drops a control frame whose topicKey disagrees with its topic" is the shape, and it must fail when the
 guard comes out.
