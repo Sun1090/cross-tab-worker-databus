@@ -1517,7 +1517,7 @@ describe('CrossTabDataBus', () => {
       randomId: 'trace-redaction'
     });
     const transport = new FakeTransport<string>();
-    const bus = new CrossTabDataBus<string>({
+    const bus = new CrossTabDataBus<object, string>({
       clusterKey: 'trace-redaction',
       environment: environment.environment,
       initialConfig: {},
