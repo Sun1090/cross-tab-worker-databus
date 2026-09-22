@@ -6,12 +6,14 @@ import type { DataBusTransport, DataBusTransportHandlers, WorkerClusterMessage }
 import { SDK_VERSION } from '../src/core/version';
 import {
   CLUSTER_MESSAGE_TYPE,
+  DEFAULT_STORAGE_PREFIX,
   PUBLICATION_EVENT,
   TRACE_EVENT_TYPE,
   TRACE_LIFECYCLE_ACTION,
   WORKER_STATUS
 } from '../src/utils/constants';
-import { ChannelHub, createFakeEnvironment, expectRejectionMessage, FakeTransport, MemoryStorage } from './fakes';
+import { createOpaqueKey } from '../src/core/hash';
+import { ChannelHub, createFakeEnvironment, expectRejectionMessage, flushMicrotasks, FakeTransport, MemoryStorage } from './fakes';
 
 describe('CrossTabDataBus', () => {
   afterEach(() => vi.useRealTimers());
@@ -1942,6 +1944,54 @@ describe('CrossTabDataBus', () => {
     expect(bus.getHealthSummary().lastFailure).toMatchObject({
       source: 'dispatch', message: 'handler exploded'
     });
+    await bus.stop();
+  });
+
+  it('ignores a control frame whose action the cluster does not recognise', async () => {
+    // The cluster channel is unauthenticated: any same-origin script or tab can
+    // post into it, and `handleControlMessage` forwards `message.action` to the
+    // DataBus switch without validating it against the union — its own `default`
+    // arm falls through to the same `onControl` call, then runs load accounting
+    // because the action is not PUBLISH. So the switch's `default: break` is the
+    // only thing between a newer or hostile peer and an unknown verb being acted
+    // upon as if it were one of the three known ones.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'unknown-action' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'unknown-action', environment: environment.environment, initialConfig: {}, transport
+    });
+    const handler = vi.fn();
+    bus.subscribe('topic', handler);
+    await bus.ready();
+
+    const workers = bus.getClusterSnapshot().workers;
+    expect(workers).toHaveLength(1);
+    const self = workers[0]?.workerId;
+    expect(typeof self).toBe('string');
+
+    const subscribeCalls = [...transport.subscribeCalls];
+    const unsubscribeCalls = [...transport.unsubscribeCalls];
+    const publishCalls = [...transport.publishCalls];
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('unknown-action')}`);
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'hostile-peer',
+      targetWorkerId: self,
+      action: 'DESTROY' as never,
+      topic: 'topic',
+      topicKey: createOpaqueKey('topic')
+    } as unknown as WorkerClusterMessage);
+    channel.close();
+    await flushMicrotasks();
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(transport.subscribeCalls).toEqual(subscribeCalls);
+    expect(transport.unsubscribeCalls).toEqual(unsubscribeCalls);
+    expect(transport.publishCalls).toEqual(publishCalls);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
     await bus.stop();
   });
 

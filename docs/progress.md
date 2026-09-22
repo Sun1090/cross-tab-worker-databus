@@ -5824,6 +5824,38 @@ corroborates the 26-spec collection.)
   `onControl` switch default. Then the other modules' arm tiers.
 - Updated: 2026-09-22.
 
+## Phase 102 / The cluster's unknown-verb arm was not defensive — it was load-bearing
+
+- Version: no release — `## [Unreleased]`. Branch `test/unknown-control-action`, off `cc4d46e` (#179).
+- Phase 101's ledger listed the `onControl` switch's `default:` as "constructible, maybe". Reading the
+  receiving side first turned it from a defensive leg into a real one: the cluster's channel is an
+  unauthenticated `BroadcastChannel`, and `handleControlMessage` validates the *target*
+  (`message.targetWorkerId !== this.workerId` returns) but not the *action* — its own `switch` ends in
+  a `default: break` that falls through to `this.handlers.onControl(message.action, …)`, and then runs
+  `updateLoad()` because the verb is not `PUBLISH`. So the DataBus handler's `default: break` is the
+  only place a frame saying `DESTROY` can be refused.
+- Test: one bus on a shared `ChannelHub`, forge a `CONTROL` frame for its own `workerId` (read back from
+  `getClusterSnapshot().workers`, not guessed) with an action outside the union, flush, and assert the
+  publication handler never ran, the transport's subscribe/unsubscribe/publish call logs are unchanged,
+  and the bus still reports `healthy: true`.
+- Teeth by mutation, because an assertion of *inaction* is easy to write vacuously: replacing the
+  handler's `default: break` with `default: this.unsubscribeTransport(topic)` fails the new test as
+  `expected [ 'topic' ] to deeply equal []`. The source was restored from a copy rather than by
+  checking out a dirty path.
+- Ledger: `data-bus.ts` 14 → 13 uncovered branch arms, suite 37 files / 875 tests, `pnpm typecheck`
+  clean after one `noUncheckedIndexedAccess` fix on `workers[0]` (the first version of the test did not
+  compile — caught by the gate, not by the run).
+- Changed files: `tests/data-bus.test.ts`, `CHANGELOG.md`, `docs/progress.md`. No source change.
+- Verification: `pnpm typecheck`, `pnpm lint`, `npx vitest run --coverage` all clean; mutation checked.
+- Risk / rollback: test and docs only; `git revert`.
+- Next: 13 arms. Remaining constructible: `startDemandRecovery()`'s bail-out under suspension, the
+  re-subscribe loop's break, the failed-open reuse of an existing `pendingStop`, the recovery timer's
+  productive path (worth re-deriving which arm that is before hunting it), and
+  `reopenTransport()`'s rejection-arm gate clear. Also worth a look: whether *other* fields of a
+  received frame are trusted the way `action` is — this pass found the target checked and the verb not,
+  and the same question applies to `topicKey` versus `topic`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
