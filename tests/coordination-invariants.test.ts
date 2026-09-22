@@ -174,6 +174,11 @@ describe('cross-tab coordination invariants', () => {
   // fails with "explored only 0 seeds".
   const MAX_SEEDS = 5_000;
   const MIN_SEEDS = 100;
+  // How much depth is actually available: run with MAX_SEEDS 400_000 and a 1,200,000 ms budget on an
+  // idle desktop this sweep completed all 400,000 seeds in 753.7 s (~530 seeds/s) with no violation, so
+  // the 5,000 shipped here is a CI-time compromise, not a claim that 5,000 interleavings is enough. Note
+  // the three separate limits when raising one — the seed cap, this fuse, and the 120 s ceiling passed to
+  // it() below, which is what ended the first deep attempt at depth 65k with a bare test timeout.
   const SEED_BUDGET_MS = 60_000;
 
   it('budgets on a clock that fake timers can neither advance nor stop', () => {

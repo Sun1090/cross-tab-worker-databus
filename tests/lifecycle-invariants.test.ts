@@ -102,6 +102,10 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   // tests/coordination-invariants.test.ts.
   const MAX_SEEDS = 1_500;
   const MIN_SEEDS = 100;
+  // Depth available, measured 2026-09-23: with MAX_SEEDS raised to 200_000 and the budget to
+  // 1,200,000 ms, this sweep completed all 200,000 seeds in 262.6 s (~760 seeds/s) with no violation, so
+  // the 1,500 shipped here is a scheduling compromise rather than a sufficiency claim. See the same note
+  // in tests/coordination-invariants.test.ts on the three limits that can end a deep run.
   const SEED_BUDGET_MS = 60_000;
 
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
