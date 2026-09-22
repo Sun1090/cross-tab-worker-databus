@@ -6063,6 +6063,54 @@ corroborates the 26-spec collection.)
   three senders; `git revert` of this commit, no storage or wire-format change.
 - Next: re-walk `handleMessage`'s four branches for anything else that trusts a field by shape alone,
   then the 13-arm `data-bus.ts` ledger (task #22), then cut the patch release these three fixes earn.
+## Phase 108 / The recovery-exhaustion one-shot had an assertion that never reached the branch
+
+- Version: test-only; no behaviour change. Branch `test/recovery-exhaustion-once`, off `e337be4`
+  (`origin/main` while PR #186 is still open).
+- The `data-bus.ts` ledger's one genuinely open item was this arm: `if (!this.recoveryExhausted)` in the
+  exhaustion branch, previously recorded as "a mutant that makes it unconditional passes the whole suite
+  — nothing asserts it", and therefore neither dominated nor closable by argument.
+- It looked asserted. `caps automatic recovery attempts…` emits a second `setStatus('error')` after the
+  cap and re-counts the `exhausted` diagnostics. Measured with a spy on `updateStatus`, that second call
+  reached it **zero times**: once the last reopen has failed, the handlers installed on the transport
+  capture a superseded `lifecycleEpoch`, and `openTransport`'s `onStatus` gate drops the status before
+  the attempt counter. The assertion was passing on a code path that had not run — the same
+  vacuity-by-shape trap Phase 99 measured from the other direction (there, a frozen clock; here, a dead
+  closure).
+- Two dead ends worth recording so they are not retried. Moving the fake environment clock did nothing:
+  the recovery cooldown is not the cluster clock, it is `this.now = dedup?.now ?? Date.now`, i.e. the
+  Vitest-faked `Date`, which `advanceTimersByTimeAsync` already moves. And calling `setStatus` again
+  cannot work for any test, because no status from that transport is deliverable after a failed reopen.
+- What does reach it is the sequence an application actually performs after exhaustion: an explicit retry
+  (`bus.publish(...)`) takes the demand path, reopens, installs a live closure — and if that reopen fails,
+  `recoveryExhausted` is still set, because the only reset on this path sits in `reopenTransport`'s
+  success arm. One further failure then lands in the exhaustion branch with the flag true, which is the
+  fall-through arm.
+- Mutation-checked in the direction that matters: with the guard made unconditional the test fails as
+  `expected [ { type: 'reliability', …(4) }, …(1) ] to have a length of 1 but got 2`. Before this change
+  the same mutant was suite-green.
+- Two assertions were re-typed while doing this. The post-retry `startCalls` count is relative to a
+  captured baseline rather than an absolute `toBe(4)`, because a failing reopen with operations parked on
+  the gate legitimately runs one more on demand (measured: 5, not 4) — pinning the number would encode
+  the scheduler, while the contract ("the cap limits automatic retries, not the application's") survives
+  any of those counts.
+- Ledger after this pass, re-derived from `coverage/coverage-final.json` rather than from the doc's line
+  numbers: `data-bus.ts` uncovered branch arms 13 → 12, branches 97.01% → 97.24% — both sides measured on
+  this module. Whole-suite coverage on the rebased tree is 98.98 / 96.69 / 99.26 / 99.69 over
+  37 files / 879 tests; the pre-rebase figure this entry first quoted (96.68) was measured before #186
+  moved `cluster.ts`, so it is corrected here rather than carried. Uncovered functions unchanged: two
+  (`reopenTransport`'s superseded-lifecycle arms at 1689 and 1714). Remaining arms: 509, 542, 572, 577,
+  644, 720, 760, 784, 857, 1235, 1654, 1730.
+- Changed files: `tests/data-bus.test.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (37 files / 879 tests + 5 perf gates), `pnpm lint` clean,
+  `pnpm test:coverage` as above; the mutant run described immediately above.
+- Risk / rollback: tests and docs only, `git revert`. The known anchor collision happened as documented:
+  #186 appended Phases 106–107 at `## Next candidates` and this branch appended 108 at the same place, so
+  the rebase resolved `docs/progress.md` and `CHANGELOG.md` by keeping both sides in order (verified
+  additive against `origin/main`: 0 deletions outside the amended test), and `gh pr update-branch`
+  reported "Cannot update PR branch due to conflicts", so the rebased work ships on `-v2` with the
+  original PR closed as superseded rather than a force-push.
+- Next: the twelve remaining arms, then the patch release the three protocol fixes accumulate to.
 - Updated: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
