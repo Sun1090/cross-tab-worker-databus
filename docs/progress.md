@@ -6831,6 +6831,48 @@ corroborates the 26-spec collection.)
   teardown E2E fix, and this correction, and the last of those is what forces the version.
 - Updated: 2026-09-23.
 
+## Phase 125 / 0.21.8 shipped — the second false sentence inside the package
+
+- Version: `0.21.8`, published. Tag `v0.21.8` at `b29592c` (the squash of PR #207, whose `verify`,
+  `lint`, `analyze`, `coverage` and `browser` jobs were all green before merge). Release workflow run
+  `35786155157` (branch/tag `v0.21.8`, triggered by the tag push).
+- What the release carries: the `docs/api.md` redaction correction and its test (#206), the shared-mode
+  teardown E2E that was never a load problem (#205), and the harness-depth and coverage-arm records
+  (#204). No behaviour, wire format, or storage layout changed, and coverage stayed at
+  99.01 / 96.89 / 99.26 / 99.69 across 886 tests — the same four numbers as the release before it.
+- Freeze evidence, all measured on the release commit: `pnpm check` (typecheck, build, 37 files / 886
+  tests, 5 perf gates), `pnpm lint`, `pnpm test:coverage`, `pnpm bench` (6 tasks), `pnpm test:e2e`
+  (36 passed, 56.5 s, reap measured at 28 ms in one poll with the survivor identified by channel),
+  `pnpm bench:browser` twice plus `bench:compare --fail-above-pct 50` (worst metric +13.8%),
+  `pnpm verify:compat` (`0.21.8 preserves public exports and type metadata from v0.21.7`),
+  `pnpm verify:pack` (ESM + CJS, root and every subpath, from the 0.21.8 tarball),
+  `npm pack --dry-run --json` (109 files, 985.1 kB), `pnpm audit` against `registry.npmjs.org` (no known
+  vulnerabilities), `git diff --check`, and `RELEASE_TAG=v0.21.8 node scripts/verify-release-version.mjs`.
+- Corrected on the way: the release checklist opened with "the repository does not publish from the
+  assistant; run the final npm command manually". It has published from the workflow since 0.21.5 — three
+  successful `Release` runs precede this one — and both language files ship inside the package, so the
+  stale instruction was reaching consumers. The manual path is now scoped to a repository state without
+  `NPM_TOKEN`.
+- Also learned the cheap way: `package.json`'s `files` ships **the whole `docs/` tree** (README, api,
+  architecture, benchmarks, capabilities, configuration, getting-started, release-checklist, roadmap,
+  transports, and every `docs/zh/` counterpart) plus `CHANGELOG.md` — not just the three files earlier
+  notes named. Only `docs/progress.md` is excluded. So any false sentence anywhere in `docs/` is a shipped
+  artifact defect and a patch release on its own, which is the rule this release exists for.
+- Post-publish verification: the run's blocking `Verify published npm consumers` step propagated on
+  attempt 39 of 48 — `[npm] cross-tab-worker-databus@0.21.8 not available yet (attempt 39/48)` then
+  `[npm] verified published cross-tab-worker-databus@0.21.8 ESM/CJS consumers` — and recorded
+  `published-consumer-check: success`; the run completed green in 6m45s. `npm view` against
+  `registry.npmjs.org` reports `version = 0.21.8`, `dist-tags = { latest: '0.21.8' }`. The earlier
+  `ETARGET` / `No matching version found` lines in that step's log are registry-propagation retries, not
+  failures — the step is built to absorb them, and this is what a passing run looks like in the log.
+- Risk / rollback: `0.21.8` is additive documentation plus tests; a regression would be reverted by
+  shipping `0.21.9`, since a published version cannot be re-published and its tag must not move.
+- Next: `docs/` and the coverage ledger are both in a state where the remaining work needs a new question
+  to ask, not another pass over the same legs. The open product decision is unchanged — whether releasing
+  a wildcard pattern should prune the concrete topics it filled (question #194) — and TypeScript 7 is
+  still blocked upstream on `typescript-eslint`'s peer range.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
