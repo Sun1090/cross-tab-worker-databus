@@ -89,8 +89,9 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:examples": "node scripts/build-example-vendor.mjs",
     "check": "pnpm typecheck && pnpm build && pnpm test && pnpm test:perf",
-    "examples": "node scripts/serve-examples.mjs",
+    "examples": "pnpm build:examples && node scripts/serve-examples.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "test:perf": "DATABUS_PERF_GATES=1 vitest run tests/perf-gate.test.ts",
@@ -103,7 +104,7 @@
     "verify:pack": "node scripts/verify-packed-consumer.mjs",
     "verify:compat": "node scripts/verify-version-compat.mjs",
     "verify:published": "node scripts/verify-published-consumer.mjs",
-    "test:e2e": "pnpm build && playwright test",
+    "test:e2e": "pnpm build && pnpm build:examples && playwright test",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm check"
   },

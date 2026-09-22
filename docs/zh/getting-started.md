@@ -150,7 +150,7 @@ pnpm examples
 - 数据流动画、事件流、分发延迟指标和集群 Worker 路由状态
 - SDK 能力、transport 配置、活跃/等待 Worker 与可见/隐藏 Tab 状态
 
-演示页之外还有两个页面：`http://localhost:4173/examples/react/` 手写接入与框架无关的核心 API（effect、`subscribe`、状态），`http://localhost:4173/examples/vue/` 则只使用已发布的 `cross-tab-worker-databus/vue` 组合式 API。二者都连到同一个本地 demo 端点，因此其中一个页面发布的数据会被三个页面里任何使用同一 Topic 的标签页收到。浏览器测试（`e2e/adapters.spec.ts`）只驱动 Vue 页：React 页的 React 本身来自 `esm.sh`，需要 CI 不具备的网络访问；而且它手写的是 demo 页那套 effect/`subscribe`/状态接入，并未使用 `cross-tab-worker-databus/react` 适配器——已发布的 React hooks 由 `tests/hooks.test.tsx` 在 jsdom 中覆盖。
+演示页之外还有两个页面：`http://localhost:4173/examples/react/` 手写接入与框架无关的核心 API（effect、`subscribe`、状态），`http://localhost:4173/examples/vue/` 则只使用已发布的 `cross-tab-worker-databus/vue` 组合式 API。二者都连到同一个本地 demo 端点，因此其中一个页面发布的数据会被三个页面里任何使用同一 Topic 的标签页收到；两个页面也都被浏览器测试覆盖（`e2e/adapters.spec.ts`），因为它们都不需要外网：Vue 直接由本地安装提供，React 则由 `pnpm build:examples` 从本地安装打包，而 `pnpm examples` 与 `pnpm test:e2e` 都会先跑这一步。React 页手写接入的是核心 API，并没有使用已发布的 `cross-tab-worker-databus/hooks` 适配器；那些 hooks 由 `tests/hooks.test.tsx` 在 jsdom 中覆盖。
 
 通过 Git 依赖直接接入仓库时，应固定到具体 commit。仓库随代码提供 `dist`，消费方安装时无需构建 SDK。
 

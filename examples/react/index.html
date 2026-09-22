@@ -4,11 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>React 跨 Tab 数据总线示例</title>
+    <!-- React is bundled from the local install by scripts/build-example-vendor.mjs
+         (run via `pnpm build:examples`, which `pnpm examples` and `pnpm test:e2e`
+         both call), so this page needs no network access and can be driven from CI.
+         Both specifiers point at the one bundle on purpose: react-dom's reconciler
+         and the hooks the page imports must come from the same React instance. -->
     <script type="importmap">
       {
         "imports": {
-          "react": "https://esm.sh/react@18.3.1",
-          "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+          "react": "./vendor/react.esm.js",
+          "react-dom/client": "./vendor/react.esm.js",
           "centrifuge": "/node_modules/centrifuge/build/index.mjs"
         }
       }
