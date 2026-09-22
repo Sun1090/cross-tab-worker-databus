@@ -283,9 +283,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
         ? provider.getChannelToken(channel ?? '')
         : provider?.getToken?.();
     } catch (error) {
-      if (isCurrentBackend()) {
-        this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
-      }
+      // A synchronous throw cannot straddle a backend swap: nothing between the
+      // capture above and this line yields, so `post()` is already addressing
+      // the captured backend and the generation check below is dead here.
+      this.post({ type: CENTRIFUGE_INPUT_TYPE.TOKEN_ERROR, requestId, error: serializeError(error) });
       return;
     }
     Promise.resolve(value).then(

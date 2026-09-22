@@ -4461,6 +4461,33 @@ corroborates the 26-spec collection.)
   (`data-bus.ts:621` stale-demand construction, `centrifuge.ts:286`).
 - Updated: 2026-09-22.
 
+## Phase 77 (a guard that could only ever read true)
+
+- `centrifuge.ts:286` was the last uncovered leg that the ledger had never
+  classified: `resolveTokenRequest`'s synchronous `catch` wrapped its
+  `TOKEN_ERROR` post in `if (isCurrentBackend())`. The capture it compares
+  against (`generation`, `worker`, `port`, `localSession`) happens a few
+  statements earlier, and between it and the `catch` there is no `await`, no
+  callback and no re-entry point — a synchronous throw cannot straddle a
+  backend swap, so the false arm is unreachable by construction rather than
+  untested. Removed, with the reason written where the guard was; the two
+  asynchronous arms (resolve/reject of the provider's promise) keep the check,
+  and those legs are covered by the existing late-credential pins.
+- Same practice as 0.20.95's unreachable-branch removals: the alternative is a
+  line that inflates the coverage floor and implies a protection that does not
+  exist.
+- Changed files: `src/centrifuge.ts`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` → 38 files / 862 tests; `pnpm lint` clean;
+  `pnpm test:coverage` → whole-project branches 96.02 → **96.07**, `centrifuge.ts`
+  now 96.98 / 96.11 / 100 / 97.38 with its uncovered set reduced to
+  `445, 451, 466, 472` (the default-Worker construction and URL-fallback
+  throws, which are the next item, not this one); `git diff --check` clean.
+- Risks / rollback: no behavior change; rollback = restore the guard.
+- Next: classify `centrifuge.ts:445/466` (reachable in a Worker-less runtime
+  that still selects a Worker backend — needs a construction) and
+  `451/472` (the CJS-format `new URL` fallback), then `data-bus.ts:621`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
