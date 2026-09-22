@@ -273,7 +273,7 @@ The project is feature-complete: follow-up work is verification and deepening of
 
 ### In Scope (library thesis-internal queue)
 
-- 13-arm ledger receiver-trust verification (e.g. batched PUBLISH message.items: per-item metadata while frame-level key checks only see the outer topic)
+- 12-arm ledger receiver-trust verification (the batched PUBLISH `message.items` and `ROUTE_RELEASED` key/topic questions are closed as of 0.21.6; what remains is arms whose consequence is a behavior no test names yet)
 - Bench baselines and trend-document corrections
 - Transport protocol compatibility fixes (Centrifuge / native WebSocket)
 - Patch releases

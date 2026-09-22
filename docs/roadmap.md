@@ -1,6 +1,13 @@
 # Roadmap
 
-0.21.5 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.6 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.6 delivered scope
+
+- The 0.21.5 protocol fix turned out to cover one of the two handlers that read the fields in question. A `ROUTE_RELEASED` ACK authorizes itself the same way — against the durable route stored under `topicKey` — and then writes the frame's `topic` into `assignedTopics` and subscribes the transport to it, so a same-origin script that reads the real key, the recorded previous owner and the generation off localStorage can answer a live handoff with a channel name of its own. Both point-to-point handlers now enforce `createOpaqueKey(topic) === topicKey`; `EVENT` and `REGISTRY` need no such check because neither carries a key/plaintext pair.
+- The batched `PUBLISH` frame's `items` was gated on truthiness plus a length, and `publishBatch()`'s `Array.prototype.map` is the only producer. A hand-built `{ length: 2 }` threw `message.items is not iterable` out of the cluster's own `BroadcastChannel` listener; an iterable `"ab"` reached the transport as two publications whose `data` was `undefined`, sent under the receiving worker's session; and an empty batch fell through to the single-publication tail and published `undefined` once instead of nothing. A frame that carries `items` must now carry a non-empty array.
+- One coverage-ledger item closed by proving the assertion behind it was inert: the recovery-exhaustion one-shot had a second "exactly one `exhausted` diagnostic" count that never reached its branch, because after a failed reopen the handlers installed on the transport belong to a superseded lifecycle. Driving the post-cap failure through the demand path an application actually takes makes the pin real — deleting the guard now fails the suite. `data-bus.ts` uncovered branch arms 13 → 12.
+- `AGENTS.md` records the process lesson next to the invariants: a guard that protects a *protocol* invariant belongs to the protocol, so pinning one means enumerating every reader of the fields it constrains — which is exactly what a release of "the fix" missed.
 
 ## 0.21.5 delivered scope
 
