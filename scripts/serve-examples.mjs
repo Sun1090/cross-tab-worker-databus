@@ -41,6 +41,21 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ centrifugo: centrifugoHub?.clients.size ?? 0 }));
       return;
     }
+    // Channel subscription counts on the Centrifugo hub: lets the e2e suite gate
+    // on the transport's server-side state. A cluster snapshot reports the
+    // client's intent, which updates before the subscribe frame has landed, so a
+    // test that publishes on that promise races the publication past a channel
+    // with no subscriber yet and loses it (at-most-once, as documented).
+    if (pathname === '/debug/channels') {
+      const channels = centrifugoHub
+        ? Object.fromEntries(
+            [...centrifugoHub.channels].map(([channel, state]) => [channel, state.subscriptions.size])
+          )
+        : {};
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ channels }));
+      return;
+    }
     // Frame-count observability for the WebSocket-bus hub: lets the e2e suite
     // assert that `publishBatch` travelled as one wire frame and did not
     // decompose into per-item `publish` frames. The per-topic breakdown lets a

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vue 跨 Tab 数据总线示例</title>
+    <!-- Vue is served from the local node_modules install (same as the demo
+         page does for `centrifuge`), so this example needs no network access
+         and can run in the browser test suite. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "vue": "/node_modules/vue/dist/vue.esm-browser.js",
+          "centrifuge": "/node_modules/centrifuge/build/index.mjs"
+        }
+      }
+    </script>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #e5e7eb; }
+      .badge.connected { background: #d1fae5; }
+      .badge.connecting, .badge.disconnected { background: #fef3c7; }
+      .badge.error { background: #fee2e2; }
+      ul { max-height: 300px; overflow: auto; }
+      button { margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
