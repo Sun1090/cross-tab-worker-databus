@@ -14,6 +14,7 @@
  */
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
+import { uniqueTopic } from './topics';
 
 declare global {
   interface Window {
@@ -134,7 +135,7 @@ async function transportBackend(page: Page): Promise<string> {
 
 test.describe('cross-tab databus demo', () => {
   test('single-owner routing: one tab owns the topic and all tabs receive', async ({ context }) => {
-    const topic = `e2e.owner.${Date.now()}`;
+    const topic = uniqueTopic('e2e.owner');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -161,7 +162,7 @@ test.describe('cross-tab databus demo', () => {
   });
 
   test('diagnostic trace events surface in the event feed', async ({ context }) => {
-    const topic = `e2e.reliability.${Date.now()}`;
+    const topic = uniqueTopic('e2e.reliability');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
 
@@ -178,7 +179,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('adaptive-weighting toggle samples throughput and keeps routing stable', async ({ context }) => {
     test.setTimeout(90_000);
-    const topic = `e2e.weighting.${Date.now()}`;
+    const topic = uniqueTopic('e2e.weighting');
     const openWeightedTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
       // Opt into adaptive weighting BEFORE the re-apply that creates the bus,
@@ -206,7 +207,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('owner migration: closing the owning tab hands the topic to a survivor', async ({ context }) => {
     test.setTimeout(90_000);
-    const topic = `e2e.migrate.${Date.now()}`;
+    const topic = uniqueTopic('e2e.migrate');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -240,7 +241,7 @@ test.describe('cross-tab databus demo', () => {
     // renderer crash via CDP cannot isolate one tab: same-origin tabs share
     // the renderer, so siblings die too.)
     test.setTimeout(180_000);
-    const topic = `e2e.crash.${Date.now()}`;
+    const topic = uniqueTopic('e2e.crash');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -271,7 +272,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('concurrent multi-publisher burst stays duplicate-free across all tabs', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.burst.${Date.now()}`;
+    const topic = uniqueTopic('e2e.burst');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -305,7 +306,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('re-applying the connection rebuilds the bus and rejoins the cluster', async ({ context }) => {
     test.setTimeout(90_000);
-    const topic = `e2e.reapply.${Date.now()}`;
+    const topic = uniqueTopic('e2e.reapply');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -338,7 +339,7 @@ test.describe('cross-tab databus demo', () => {
     // other page in the suite auto-connects to on the shared demo server, so a
     // delivery or server-subscriber assertion here would race unrelated tabs.
     const tab = await openDemoTab(context);
-    await connectDemo(tab, 'dedicated', `e2e.cleared.${Date.now()}`);
+    await connectDemo(tab, 'dedicated', uniqueTopic('e2e.cleared'));
     const errorRows = () => tab.locator('#eventBody tr', { hasText: '错误' }).count();
     expect(await errorRows()).toBe(0);
 
@@ -359,7 +360,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('reload: a refreshed tab re-subscribes and keeps receiving', async ({ context }) => {
     test.setTimeout(90_000);
-    const topic = `e2e.reload.${Date.now()}`;
+    const topic = uniqueTopic('e2e.reload');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -388,7 +389,7 @@ test.describe('cross-tab databus demo', () => {
   });
 
   test('SharedWorker mode: one shared process, independent sessions, cross-tab delivery', async ({ context }) => {
-    const topic = `e2e.shared.${Date.now()}`;
+    const topic = uniqueTopic('e2e.shared');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'shared', topic);
     await expect(tabA.locator('#backendBadge')).toHaveText('SharedWorker');
@@ -407,7 +408,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('shared-mode session closes server-side when a tab closes', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.reap.${Date.now()}`;
+    const topic = uniqueTopic('e2e.reap');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'shared', topic);
     const tabB = await openDemoTab(context);
@@ -430,7 +431,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.soak.${Date.now()}`;
+    const topic = uniqueTopic('e2e.soak');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -485,7 +486,7 @@ test.describe('cross-tab databus demo', () => {
 
   test('repeated BFCache round trips and reload keep delivery exactly-once', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.longsoak.${Date.now()}`;
+    const topic = uniqueTopic('e2e.longsoak');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -522,7 +523,7 @@ test.describe('cross-tab databus demo', () => {
 test.describe('cross-tab databus demo — BFCache round trip', () => {
   test('pagehide hands ownership off and pageshow restores a standby receiver', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.bfcache.${Date.now()}`;
+    const topic = uniqueTopic('e2e.bfcache');
     const tabA = await openDemoTab(context);
     await connectDemo(tabA, 'dedicated', topic);
     const tabB = await openDemoTab(context);
@@ -574,7 +575,7 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
     // through the TTL-gated re-election (no ACK will ever arrive). The
     // survivor converges and its event feed records the recovery operation.
     test.setTimeout(180_000);
-    const topic = `e2e.chaos.${Date.now()}`;
+    const topic = uniqueTopic('e2e.chaos');
     const openChaosTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
       await page.check('#dropHandoffAck');
@@ -612,7 +613,7 @@ test.describe('cross-tab databus demo — BFCache round trip', () => {
 
 test.describe('cross-tab databus demo — WebSocket backend', () => {
   test('native WebSocket transport: cross-tab publish/receive through the cluster', async ({ context }) => {
-    const topic = `e2e.wsbrowser.${Date.now()}`;
+    const topic = uniqueTopic('e2e.wsbrowser');
 
     const setupWsTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
@@ -643,7 +644,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
 
   test('publication metadata round-trips through the real demo WebSocket server', async ({ page }) => {
     await page.goto(DEMO_URL);
-    const topic = `e2e.metadata.${Date.now()}`;
+    const topic = uniqueTopic('e2e.metadata');
     const result = await page.evaluate(async replayTopic => {
       const moduleUrl = '/dist/index.js';
       const { WebSocketTransport } = await import(/* @vite-ignore */ moduleUrl);
@@ -674,7 +675,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
   });
 
   test('publishBatch button sends ten items in a single wire frame', async ({ context, request }) => {
-    const topic = `e2e.batch.${Date.now()}`;
+    const topic = uniqueTopic('e2e.batch');
 
     const page = await openDemoTab(context);
     await page.click('#modeSwitch [data-mode="websocket"]');
@@ -709,7 +710,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
   });
 
   test('batch burst fanned out across tabs stays exactly-once per tab', async ({ context }) => {
-    const topic = `e2e.batch2tab.${Date.now()}`;
+    const topic = uniqueTopic('e2e.batch2tab');
     const setupWsTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
       await page.click('#modeSwitch [data-mode="websocket"]');
@@ -734,7 +735,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
 
   test('large publishBatch (100 items × 3 tabs) fans out exactly-once per tab', async ({ context }) => {
     test.setTimeout(150_000);
-    const topic = `e2e.batch3tab.${Date.now()}`;
+    const topic = uniqueTopic('e2e.batch3tab');
     const setupWsTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
       await page.click('#modeSwitch [data-mode="websocket"]');
@@ -769,7 +770,7 @@ test.describe('cross-tab databus demo — WebSocket backend', () => {
 
 test.describe('cross-tab databus demo — binary publish', () => {
   test('binary publish button round-trips across tabs over the WebSocket backend', async ({ context }) => {
-    const topic = `e2e.bin.${Date.now()}`;
+    const topic = uniqueTopic('e2e.bin');
     const setupWsTab = async (): Promise<Page> => {
       const page = await openDemoTab(context);
       await page.click('#modeSwitch [data-mode="websocket"]');
@@ -796,7 +797,7 @@ test.describe('cross-tab databus demo — binary publish', () => {
 test.describe('cross-tab databus demo — storage-event coordination fallback', () => {
   test('two BroadcastChannel-less tabs coordinate over localStorage storage events', async ({ context }) => {
     test.setTimeout(120_000);
-    const topic = `e2e.storage.${Date.now()}`;
+    const topic = uniqueTopic('e2e.storage');
     const tabA = await openStorageEventTab(context, topic);
     const tabB = await openStorageEventTab(context, topic);
 
@@ -824,7 +825,7 @@ test.describe('cross-tab databus demo — storage-event coordination fallback', 
     // handoff shares this test's budget: without the raised ceiling, a healthy
     // but slow HANDOFF_TIMEOUT_MS poll dies on the default 60s test timeout.
     test.setTimeout(120_000);
-    const topic = `e2e.storage.migrate.${Date.now()}`;
+    const topic = uniqueTopic('e2e.storage.migrate');
     const tabA = await openStorageEventTab(context, topic);
     const tabB = await openStorageEventTab(context, topic);
 
@@ -858,8 +859,8 @@ test.describe('cross-tab databus replay persistence', () => {
   test('hydrates IndexedDB replay history after a reload', async ({ context }) => {
     const page = await context.newPage();
     await page.goto(DEMO_URL);
-    const dbName = `e2e.replay.${Date.now()}`;
-    const topic = `e2e.replay.topic.${Date.now()}`;
+    const dbName = uniqueTopic('e2e.replay');
+    const topic = uniqueTopic('e2e.replay.topic');
 
     await page.evaluate(async ({ dbName: name, topic: replayTopic }) => {
       const moduleUrl = '/dist/index.js';

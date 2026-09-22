@@ -5195,6 +5195,53 @@ corroborates the 26-spec collection.)
   good and no wait can recover it. Then back to the `data-bus.ts` ledger (18 entries left).
 - Updated: 2026-09-22.
 
+## Phase 88 / The adapter handoff E2E: one race made a precondition, and a name collision found while proving it
+
+- Version: no release — `src/`, `dist/` and the published surface are untouched. Branch
+  `fix/e2e-handoff-race`.
+- **What the CI failure actually was.** `e2e/adapters.spec.ts` "keeps delivering after the tab
+  that owned the topic closes" failed 3/3 attempts on two consecutive runs (main's push
+  `35691812563`, PR #161's `35692895267`) with one signature: after `owner.close()`, the
+  survivor's list stayed at `["{\"tag\":\"before-close\"}"]` for the entire 60s poll, while the
+  React twin of the same test passed in ~1.2s *in the same job* and every `demo.spec` handoff
+  case passed. #161's re-run passed unchanged. That bimodality — pass in a second, or never —
+  is what at-most-once delivery predicts: the test closed the owner and published **once** from
+  a third tab, so if that tab still addressed the departed worker the CONTROL frame had no
+  receiver and no waiting could bring that publication back. The 60s ceiling was never the
+  problem; the publish was unrescuable before the poll started.
+- Fix: the sender's own cluster view becomes a precondition the test waits for instead of a race
+  it must win. Both example pages already expose the bus (`examples/vue/main.js:56`,
+  `examples/react/main.jsx:44`), so the test reads the worker ids *that tab* would relay to
+  before the close, asserts it names exactly one, closes the owner, waits until none of them
+  survives, checks the channel is held again, and only then publishes. A sender whose route never
+  recovers still fails — that is the property under test — but it now fails on the precondition,
+  naming the tab and the worker id, rather than on a delivery that was never going to arrive.
+- **A second defect, found by trying to reproduce the first.** Running the spec with
+  `--repeat-each=3 --workers=4` failed 2/6 — not on the handoff, but inside `openTab`, with
+  `serverSubscribers(topic)` pinned at 2 for the full 30s. Topic names came from `Date.now()`
+  alone, and `playwright.config.ts` runs `fullyParallel: true` off CI, so two concurrent
+  instances of the same case derived the same name, shared one channel, and made a
+  server-wide count of one impossible for two *correct* clusters. The "exactly one tab holds
+  this topic" assertion was measuring two topics' worth of tabs.
+- Fixed for both specs: `uniqueTopic()` in `e2e/topics.ts` mixes worker index, retry count, a
+  per-process sequence counter and the timestamp, replacing all 29 name sites (4 adapter, 25
+  demo). A/B on the exact command that failed: 6/6 then 16/16 passing at `--workers=4`.
+- Not reproduced, and recorded as such: the original CI symptom did not appear locally under an
+  injected load (`pnpm test:coverage` alongside `--workers=1`), where old and new code both
+  passed 12/12. The mechanism argument and the failure signature carry the diagnosis; the
+  precondition carries the fix, and it is the shape that is correct regardless of what the
+  runner was doing.
+- Changed files: `e2e/topics.ts` (new), `e2e/adapters.spec.ts`, `e2e/demo.spec.ts`,
+  `docs/progress.md`. Three scratch probe specs used to characterize the states were run and
+  deleted; none was committed.
+- Verification: `pnpm typecheck` and `pnpm lint` clean; `pnpm test` 37 files / 861 tests;
+  `pnpm test:e2e` 36 passed in 40.5s; `pnpm playwright test e2e/adapters.spec.ts
+  --repeat-each=4 --workers=4` 16 passed.
+- Risk / rollback: revert of one commit; test-only, no shipped-code or artifact change.
+- Next: the `data-bus.ts` ledger (18 entries after Phase 87), then the standing dependency and
+  security patrol.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
