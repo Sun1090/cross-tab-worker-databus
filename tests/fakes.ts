@@ -291,20 +291,40 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
 
 /** Real elapsed milliseconds, immune to `vi.useFakeTimers()`.
  *
- * Measured on the pinned Vitest 5, reading each source *inside* a fake-timer
- * window that had been advanced 60 simulated seconds: global
- * `performance.now()` returned 60000 and `process.hrtime.bigint()` moved by
- * 60000 too, while `node:perf_hooks`' `performance` — a different object, which
- * is why replacing the global binding leaves it alone — returned 216, i.e. real
- * time since the process started. `tests/setup.ts` restores real timers after
- * every test, so a read taken *between* fake windows (the top of a seed loop)
- * already sees the real clock, and the fuzz budgets worked for that reason
- * alone. This helper exists so the immunity comes from the source rather than
- * from where the call happens: a budget that also covered the seed body, or a
- * gate in a file that ever fakes time, would otherwise read simulated
- * milliseconds and a busy loop would measure ~0. */
+ * Two sources, taking the larger, because neither is immune everywhere and the
+ * failure mode that matters is a clock that *stops*:
+ *
+ * - `node:perf_hooks`' `performance`. Measured on the pinned Vitest 5 inside a
+ *   window advanced 60 simulated seconds it returned real time (216) while the
+ *   global `performance.now()` returned 60000 and `process.hrtime.bigint()` moved
+ *   by 60000. But that immunity is an artifact of the global and the `perf_hooks`
+ *   export being *different objects* in this context — in a worker thread Node
+ *   makes them the same one, so a `toFake` list that includes `performance`
+ *   patches both, and a budget clock that then freezes reads 0 elapsed however
+ *   slow the host is. Observed in that shape: a sweep ran 485s against its own 60s
+ *   fuse, twice on CI, while every local run finished in ~9s.
+ * - `process.uptime()`, which is in no fake-timer toolbox's list of things to
+ *   replace — it measured a real 260ms across a 250ms `Atomics.wait` inside a
+ *   fake window where `Date`, global `performance` and `hrtime` all read 0.
+ *
+ * Max means neither source being frozen, advanced or stubbed can stall a budget;
+ * both track real time otherwise, so ordinary differences are unaffected. Do not
+ * "simplify" this to one source — whichever single source is picked is the one
+ * some runner configuration will freeze, and a fuse that cannot fire is worse than
+ * no fuse, because the sweep then reads as a hang instead of as bounded depth. */
 export function realNowMs(): number {
-  return nodePerformance.now();
+  return Math.max(nodePerformance.now(), process.uptime() * 1000);
+}
+
+/** Block the thread for `ms` of genuinely real time, to prove a budget clock is
+ * counting while fake timers are installed.
+ *
+ * Do not write this as a `while (Date.now() < stop)` busy loop: `Date` is itself
+ * frozen inside a fake window, so the loop never terminates — an early version of
+ * the clock pin did exactly that and hung the run. `Atomics.wait` is not a timer,
+ * so nothing in `vi.useFakeTimers()`' reach can make it return early. */
+export function blockRealTimeMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** Deterministic PRNG (mulberry32). Seeded fuzzers here must stay

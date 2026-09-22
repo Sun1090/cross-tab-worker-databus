@@ -56,6 +56,7 @@ import {
   ChannelHub,
   FakeTransport,
   MemoryStorage,
+  blockRealTimeMs,
   createFakeEnvironment,
   flushMicrotasks,
   mulberry32,
@@ -175,19 +176,31 @@ describe('cross-tab coordination invariants', () => {
   const MIN_SEEDS = 100;
   const SEED_BUDGET_MS = 60_000;
 
-  it('budgets on a clock that fake timers cannot move', async () => {
-    // Every seed opens its own fake-timer window and advances ~45 simulated
-    // seconds through it, so a budget reading the faked clock stops the sweep
-    // for reasons that have nothing to do with how long anything took — which is
-    // what a per-operation check did when it was tried (three seeds, 48ms of
-    // real time). The immunity has to come from the source, not from where the
-    // read happens, so this pins the source itself: 60 simulated seconds must
-    // not cost 60 measured ones. 5s is deliberately loose next to 60 — it still
-    // fails on the mutant that reads the fake clock, and never on load.
+  it('budgets on a clock that fake timers can neither advance nor stop', () => {
+    // Both directions have to be pinned, and only one of them was. Advancing 60
+    // simulated seconds must not cost 60 measured ones (the clock must not run
+    // fast); 120ms of *real* blocked time inside a fake window must still measure
+    // as ~120ms (the clock must not freeze). The first assertion passes trivially
+    // on a frozen clock — 0 is well under 5,000 — which is exactly how the
+    // per-source immunity looked proven while a CI worker was freezing it, and a
+    // frozen budget is the dangerous direction: the sweep then never stops for
+    // being slow and dies on the test's own timeout instead.
     vi.useFakeTimers();
-    const before = realNowMs();
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(realNowMs() - before).toBeLessThan(5_000);
+    try {
+      const beforeAdvance = realNowMs();
+      vi.advanceTimersByTime(60_000);
+      expect(realNowMs() - beforeAdvance).toBeLessThan(5_000);
+
+      const beforeBlock = realNowMs();
+      blockRealTimeMs(120);
+      const blocked = realNowMs() - beforeBlock;
+      // 80 of 120 is loose enough to survive scheduler granularity and the cost
+      // of the fake-timer machinery, and tight enough to fail on any clock that
+      // stops counting inside a window.
+      expect(blocked, 'budget clock froze inside the fake-timer window').toBeGreaterThanOrEqual(80);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
