@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Coverage
+- The `recoveryExhausted` one-shot is now pinned, which closes the last arm on the `data-bus.ts` ledger that a mutation had been shown to survive. `caps automatic recovery attempts…` already asserted "exactly one `exhausted` diagnostic" a second time after the cap was spent, and that second assertion had never re-entered the branch: once the last reopen has failed, the handlers installed on the transport belong to a superseded lifecycle, so `isCurrentLifecycle()` drops a subsequent `setStatus('error')` before the attempt counter is reached — measured with a spy, `updateStatus` ran zero times for such a call. Deleting the guard therefore passed the whole suite. The test now drives a second failure through the path an application actually takes after exhaustion — an explicit retry, which reopens and installs a live closure — and while that reopen fails, `recoveryExhausted` is still set because the only reset on the path sits in the success arm. With the guard made unconditional the test now fails as `expected […] to have a length of 1 but got 2`. `data-bus.ts` uncovered branch arms 13 → 12, its branch coverage 97.01% → 97.24%, whole-suite branches 96.63% → 96.68%; no source change.
+
 ## [0.21.5] - 2026-09-22
 
 ### Changed

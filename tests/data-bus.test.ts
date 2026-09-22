@@ -1566,13 +1566,29 @@ describe('CrossTabDataBus', () => {
     expect(transport.startCalls).toBe(3);
     expect(events).toContainEqual(expect.objectContaining({ type: 'reliability', operation: 'transport_recovery', outcome: 'exhausted' }));
     expect(events.filter(event => typeof event === 'object' && event !== null && 'outcome' in event && (event as { outcome?: string }).outcome === 'exhausted')).toHaveLength(1);
-    transport.setStatus('error');
+    // A second report must not follow. Feeding it another `setStatus('error')`
+    // looks like it re-enters and does not: once the last reopen has failed, the
+    // handlers installed on the transport belong to a superseded lifecycle, so
+    // `isCurrentLifecycle()` drops the status before the attempt counter is
+    // reached — measured, `updateStatus` ran 0 times for such a call. The one
+    // caller that can put a live closure back on a spent sequence is an
+    // application retry, which takes the demand path and reopens. Keep that
+    // reopen failing and `recoveryExhausted` is still set when the new status
+    // arrives, because the only reset on this path sits in the success arm.
+    bus.publish('topic', 99);
     await vi.advanceTimersByTimeAsync(250);
+    // 4 rather than an exact count: the retry reopens once, and a reopen that
+    // fails while operations are parked on the gate runs one more on demand.
+    expect(transport.startCalls).toBeGreaterThanOrEqual(4);
     expect(events.filter(event => typeof event === 'object' && event !== null && 'outcome' in event && (event as { outcome?: string }).outcome === 'exhausted')).toHaveLength(1);
     transport.startShouldFail = false;
+    const startsBeforeExplicitRetry = transport.startCalls;
     bus.subscribe('topic-2', vi.fn());
     await bus.ready();
-    expect(transport.startCalls).toBe(4);
+    // The point of the cap is that it caps the *automatic* retries, not the
+    // application's. Relative rather than absolute because the demand retry
+    // above may itself reopen more than once.
+    expect(transport.startCalls).toBe(startsBeforeExplicitRetry + 1);
     await bus.stop();
   });
 
