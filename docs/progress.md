@@ -5765,6 +5765,38 @@ corroborates the 26-spec collection.)
   enumerations for `535`/`559`. Phase 98's epoch-invariant classification is already on `main` (#175).
 - Updated: 2026-09-22.
 
+## Phase 100 / A fuse that cannot report the failure it was built for
+
+- Version: no release — recorded under `## [Unreleased]`. Branch `test/fuzz-progress-logging`, off
+  `7456c78` (#175).
+- Trigger: `verify` on #177 (the no-console pin, Phase 99's work rebased onto #175) failed with
+  `Error: Test timed out in 120000ms` in `tests/coordination-invariants.test.ts`, with the job's suite
+  duration at 331s against ~52s locally. The branch contains no source change and no harness change;
+  the identical content passed `verify` 13 minutes earlier as #176, so the failure is runner load, not
+  diff. It is still a hole worth closing, because of what the log *could not* say.
+- The hole: Phase 94's truncation diagnostics (`stopped at N/5000 seeds after Xms (slowest seed Yms)`)
+  sit after the loop. A test killed by the ceiling never reaches them, so the one event they were
+  written to explain is precisely the event where they are absent, and the log distinguishes nothing —
+  "a runner this slow needs a smaller budget" and "one seed wedged on an `await` that needs a timer the
+  fake clock never advances" both print as a bare timeout, and they want opposite fixes.
+- Change: both seeded fuzzers now print `starting seed N at <elapsed>ms (depth D)` for the first five
+  seeds and every fiftieth thereafter. Sampled from a full local run: the sequence advances, so the
+  heartbeat is proof of progress and its absence is proof of a wedge. Cost is one string every 50
+  iterations; `AGENTS.md` gains the rule.
+- Deferred deliberately: lowering `SEED_BUDGET_MS` or raising the per-test ceiling. Neither is
+  justified yet, because the two candidate causes need different responses and the current data cannot
+  tell them apart — which is the thing this change settles for the *next* occurrence rather than
+  guessing at this one.
+- Changed files: `tests/coordination-invariants.test.ts`, `tests/lifecycle-invariants.test.ts`,
+  `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck` and `pnpm lint` clean, full suite 37 files / 873 tests green, both
+  harnesses observed emitting the new lines.
+- Risk / rollback: diagnostics only; `git revert`.
+- Next: #177 needs a re-run of its failed `verify` job — the rerun request itself died on the same
+  degraded GitHub API path (`unexpected EOF`) three times, so retry when connectivity recovers, then
+  squash-merge it before this branch lands (both touch `AGENTS.md`/`CHANGELOG.md`/`docs/progress.md`).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
