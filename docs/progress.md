@@ -4409,6 +4409,58 @@ corroborates the 26-spec collection.)
   stale-demand construction and `centrifuge.ts:286` synchronous arm.
 - Updated: 2026-09-22.
 
+## Phase 76 (the Vue adapter finally runs in a browser, and the test that found no bug)
+
+- `examples/vue/` is a runnable page for `cross-tab-worker-databus/vue`. It
+  mounts the real adapter (`useCrossTabDataBus` / `useCrossTabStatus` /
+  `useCrossTabSubscription`) against the bundled demo Centrifugo endpoint, and
+  the Vue runtime comes from the local `node_modules` install, so the page needs
+  no network access and can be driven from CI. `examples/react` hand-rolls its
+  own effect/subscribe/status wiring to show the core API, so before this the
+  shipped adapters had no page that used them, and the Vue entry had never run
+  outside jsdom.
+- `e2e/adapters.spec.ts` drives it in real Chromium tabs: two tabs publish and
+  receive through the composables; a reactive topic change re-attaches the
+  subscription, and once every tab has left the old channel the demo server
+  reports zero subscribers on it (the last-subscriber release, seen from the
+  server side); and a publication still crosses tabs after the owning tab
+  closes. `openVueTab` gates on "exactly one server-side subscriber", which is
+  the same invariant the coordination fuzzer asserts against `FakeTransport`.
+- `scripts/serve-examples.mjs` gained `/debug/channels` for that gate: it
+  reports the Centrifugo hub's per-channel subscriber counts. A cluster
+  snapshot shows the *client's intent* a round trip before the subscribe frame
+  lands, and delivery is at-most-once, so a test that publishes on the snapshot
+  can lose the message for a reason that has nothing to do with what it claims.
+- **The three failing tests were my fault, and the reason is worth
+  documenting.** The probe payloads were shaped `{"topic":"moved"}`, and
+  `parseDataBusPublication` lets a payload's own string `topic` override the
+  channel it arrived on — by design, because that is how a server delivers
+  through a wildcard channel and still names the concrete topic. The
+  publication was therefore re-addressed to `moved`, which no tab owned, and
+  dropped: the owner's main thread logged `assigned=false local=false` and both
+  tabs sat empty. Confirmed by instrumenting `handleTransportMessage`, running
+  the real page, and reading the worker-side Centrifuge debug log (the
+  subscription was `subscribed` and the server did push to it). No product bug,
+  so no src change; the payload shapes were fixed instead.
+- Docs: `docs/transports.md` (en + zh) now states the re-addressing rule and its
+  consequence for application data that happens to carry a top-level `topic`;
+  `AGENTS.md` lists the new spec and points the quick reference at both adapter
+  example pages.
+- Changed files: `examples/vue/index.html`, `examples/vue/main.js` (new),
+  `e2e/adapters.spec.ts` (new), `scripts/serve-examples.mjs`, `AGENTS.md`,
+  `docs/transports.md`, `docs/zh/transports.md`, `CHANGELOG.md`,
+  `docs/progress.md`. No `src/` change.
+- Verification: `pnpm check` → 38 files / 862 tests; `pnpm lint` clean;
+  `pnpm test:e2e` → **30 passed** (was 27) in real Chromium, including the three
+  new adapter cases; `git diff --check` clean.
+- Risks / rollback: example and tests only. The new e2e cases depend on
+  `/debug/channels`, which is additive to the dev-only examples server and
+  excluded from the published package. Rollback = delete `examples/vue/`,
+  `e2e/adapters.spec.ts`, and revert the server/doc diffs.
+- Next: commit, PR, then the remaining coverage ledger items
+  (`data-bus.ts:621` stale-demand construction, `centrifuge.ts:286`).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
