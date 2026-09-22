@@ -112,6 +112,16 @@ describe('CrossTabDataBus lifecycle invariants', () => {
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 5; seed += 1) {
       const seedStartedAt = realNowMs();
       if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
+      // Progress reported *during* the sweep, not only after it: when the host
+      // kills this test on its own ceiling the truncation log below never runs,
+      // and the run leaves no trace of whether the sweep was slow or wedged
+      // inside one seed. A fuse sampled between iterations cannot bound an
+      // iteration, so this line is what distinguishes those two failures.
+      if (seed <= 5 || seed % 50 === 0) {
+        console.log(
+          `[lifecycle-invariants] starting seed ${seed} at ${Math.round(seedStartedAt - startedAt)}ms (depth ${completed})`
+        );
+      }
       const random = mulberry32(seed);
       vi.useFakeTimers();
       try {
