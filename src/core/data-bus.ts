@@ -1616,6 +1616,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       },
       () => {
         if (this.startPromise === opening) this.startPromise = null;
+        // Load-bearing, and pinned: a failing reopen publishes ERROR from its own
+        // teardown before this rejection settles, so an application that retries
+        // from that callback already owns a newer lifecycle here. Reporting
+        // `failed` past that point puts a recovery failure *after* the start that
+        // replaced it, which no reader of the trace can reinterpret.
         if (lifecycleEpoch !== this.lifecycleEpoch) return;
         if (traceAttempt !== undefined) {
           this.trace.event({ type: TRACE_EVENT_TYPE.RELIABILITY, operation: RELIABILITY_OPERATION.TRANSPORT_RECOVERY, attempt: traceAttempt, outcome: RECOVERY_OUTCOME.FAILED });

@@ -5147,6 +5147,54 @@ corroborates the 26-spec collection.)
   trace-attempt arms, `1601` superseded-opening guard).
 - Updated: 2026-09-22.
 
+## Phase 87 / Two recovery-ledger legs in `data-bus.ts`, and a test that was deleted for being decoration
+
+- Version: no release — the only `src/` change is a comment. The shipped JS is
+  unaffected by it (the comment text appears only in `dist/*.js.map`, never in a
+  chunk), so this phase changes what is *proved* about the code, not the code.
+- Branch `test/data-bus-reopen-arms`, rebased on `ca44401` (Phase 86's merge).
+- Closed two ledger legs, both in the diagnostics the roadmap bills as a shipped
+  capability ("structured recovery/retry events"):
+  1. `getRecoveryStats().errorMessage` and `getHealthSummary().lastFailure.message`
+     render a non-`Error` failure through `String(error)`. A Worker or a hand-written
+     transport may report a bare string, and reading `.message` off one does not throw
+     — it yields `undefined`, so the ledger kept the failure and lost the explanation.
+     Two separate render expressions, so both are asserted in one test.
+  2. `reopenTransport()`'s rejection handler drops its `failed` reliability event once
+     a newer lifecycle owns the bus. The path is real and re-entrant: a failing reopen
+     publishes `ERROR` from its own teardown *before* its rejection settles, so an
+     application that retries from that callback has already bumped the lifecycle epoch
+     when the handler runs. Reporting anyway would place a recovery failure *after* the
+     start that replaced it — the one ordering a trace reader cannot reinterpret.
+- Coverage-verified, not assumed: those three lines (990, 1378, 1619) read zero counts
+  before and non-zero after, and the whole-`data-bus.ts` ledger went 21 → 18 entries.
+  Suite coverage moved 98.78 / 96.16 → 98.81 / 96.31 (statements / branches).
+- Mutation-checked, one mutant at a time, `src/` verified clean afterwards:
+  `String(error)` → `''` fails the `lastFailure` assertion; `String(this.lastError)` →
+  `null` fails the recovery-stats assertion; deleting the epoch `return` produces an
+  unexpected `outcome: "failed"` event. Each kill was confirmed to hit the intended leg —
+  the third mutant is textually identical in the sibling success handler, so the patch was
+  checked to remove exactly one line (`@@ -1619 +1618,0 @@`).
+- **A test written, measured, and dropped.** A first draft pinned
+  `reopenTransport`'s superseded-opening guard (1601-1603) from the *automatic recovery*
+  caller. Measurement says the existing `reconnect CONNECTING` test already executes that
+  body (statement counts 1/1/1 with only that test selected), so the new test would have
+  been decoration over an already-covered leg; it was deleted rather than shipped, and the
+  effort went to the rejection-handler leg instead, which no test reached.
+- Verification: `pnpm check` green (37 files / 862 tests on the pre-rebase tree, 863 after
+  rebase, `pnpm test:perf` 5 gates), `pnpm lint` clean, `pnpm test:coverage` green with the
+  thresholds in `vitest.config.ts` (96/92/96/97) unmodified.
+- Changed files: `src/core/data-bus.ts` (comment), `tests/data-bus.test.ts`,
+  `docs/progress.md`.
+- Risk / rollback: revert of one commit; no shipped-code change, no migration.
+- Next: the adapter handoff E2E (task from the Phase 86 note) — `e2e/adapters.spec.ts:171`
+  failed 3/3 attempts on two consecutive runners (main's push `35691812563` and PR #161's
+  `35692895267`) and passed 8/8 locally under 4 workers and on #161's re-run. The test
+  closes the owner and publishes *once* from a third tab, then waits 60s: publications are
+  at-most-once, so one issued while the sender still routes to the dead worker is lost for
+  good and no wait can recover it. Then back to the `data-bus.ts` ledger (18 entries left).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
