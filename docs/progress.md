@@ -6292,6 +6292,58 @@ corroborates the 26-spec collection.)
   outdated` on this tree reports that one package and nothing else.
 - Updated: 2026-09-22.
 
+## Phase 113 / The other modules' zero-count legs: one pinned, one proven redundant, the rest labelled
+
+- Version: tests and comments; no behaviour change. Branch `test/zero-arm-ledger`, off `ebd1f89`
+  (#191), rebased onto `131e08b` (#193).
+- Three ledger legs in a row came back negative inside `data-bus.ts`, so this pass stopped mining that
+  file and re-derived the zero-count branch arms for the whole repository from
+  `coverage/coverage-final.json`. The per-module notes had drifted — `cluster.ts` is at 22 arms where an
+  older entry recorded 19 — which is the reason to recount before choosing, not after.
+- One arm was genuinely unverified and is now pinned: `if (epoch !== this.hydrationEpoch) return;` in
+  `ReplayManager.hydrate()`'s `catch`. `resetBuffers()` raises the epoch without raising the retry
+  generation, so a load rejection that lands after a buffer reset is still "current" by generation, and
+  that line is the only thing between it and `onPersistenceError()`. Two consequences, not one: the
+  application gets a phantom persistence error, *and* the arm owns the `hydrationComplete` /
+  `hydrationFailed` latch that `requestHydration()` short-circuits on, so the replacement session's load
+  is skipped and durable history stays missing for the rest of the instance's life. The new test fails
+  against the deleted guard as `expected [ Error: stale load failed ] to deeply equal []` and also stops
+  at `expected 1 to be 2` on the replacement load, so it catches both halves.
+- The WebSocket connect-timer's `handshakeCompleted` term looked like the same kind of gap and is not:
+  the timer is cancelled twice on a successful handshake (`onopen` directly, `settleConnect()` again), so
+  a completed attempt has no live timer for the callback to argue with. Deletion ladder, measured: term
+  only → whole suite green; `onopen`'s cancel only → green; both cancels → green, and the term is what
+  holds; term *and* both cancels → the new test fails as `expected "vi.fn()" to not be called with
+  arguments: [ 'error' ]`, i.e. `onStatus('error')` + `onError` + `abortSocket()` on a socket that had
+  connected. Kept on the asymmetric-cost rule, with the ladder recorded at the site. **Zero coverage
+  movement** from that half of the pass — the term is a covered-function, zero-arm leg either way.
+- Five `replay-manager.ts` legs are now labelled at the site with the condition that covers them rather
+  than left as an open question, and none is counted closed: `hydrate()`'s own buffers/persistence check,
+  the post-`load()` generation check, the `new PersistenceRetryCancelledError()` wrap in the cancellation
+  catch, `scheduleRetentionCleanup()`'s capability check, and `withPersistenceRetry()`'s loop-top
+  generation check (dominated on every pass by construction: no await separates it from the identical
+  check at the end of the catch). Each states what deleting it would change, which is the part a reader
+  needs in order to act.
+- Ledger after this pass, recounted the same way: `cluster.ts` 22, `data-bus.ts` 12 (already documented
+  as a set), `replay-manager.ts` 8 → 7, `replay-persistence.ts` 8, `websocket.ts` 3, `trace.ts` 3,
+  `port-reaper.ts` 3, `centrifuge.ts` 2, `centrifuge-session.ts` 1, `version.ts` 1, `validation.ts` 1.
+  `version.ts`'s is the `SDK_VERSION` fallback and is statically dead in everything that ships: both
+  bundles inject the `define`, so only the `'string'` arm exists in-tree, and the `''` arm is for a
+  consumer bundling `src/` without it.
+- Changed files: `tests/replay-manager.test.ts`, `tests/websocket.test.ts`, `src/core/replay-manager.ts`
+  (comments), `src/websocket.ts` (comment), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (37 files / 881 tests + 5 perf gates), `pnpm lint` clean, and
+  `pnpm test:coverage` twice — 98.98 / 96.69 / 99.26 / 99.69 before, 99.01 / 96.74 / 99.26 / 99.69 after.
+  The two mutant runs described above are the evidence for the legs themselves.
+- Risk / rollback: `git revert`; nothing but a test and prose changes behaviour.
+- Next: the four zero-count legs that still look *reachable* rather than dominated, in the order worth
+  trying — `centrifuge.ts`'s `if (this.heartbeatHandle !== null) return` (a second `startHeartbeat()`
+  without a clear would double the ping traffic), `centrifuge-session.ts`'s `if (!topic) return` in
+  `postPublication` (needs first to establish whether the protocol gate already rejects an empty topic,
+  which would make it dominated), and `port-reaper.ts`'s two `??` fallbacks for a port absent from
+  `lastSeenAt` / `sessionTimeoutMs`.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
