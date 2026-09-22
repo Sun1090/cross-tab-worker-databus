@@ -5015,6 +5015,25 @@ corroborates the 26-spec collection.)
   standing dependency/security patrol.
 - Updated: 2026-09-22.
 
+## Release 0.21.2 completed (2026-09-22)
+
+- Version: `0.21.2` published. PR #157 squash-merged as `a10d2ae`, tag `v0.21.2`
+  pushed at that exact commit, `Release` run `35688512897` green through the
+  publish and the blocking `verify:published` consumer gate;
+  `npm view … version dist-tags.latest` → `0.21.2` / `0.21.2`.
+- Branch hygiene: `test/data-bus-lifecycle-ledger` deleted with the merge;
+  `git ls-remote --heads` lists only `main`.
+- What shipped: one dominated `.catch` removed from `performStop()`, its neighbour
+  kept with the reason, and the method for telling them apart recorded in
+  `AGENTS.md`. No export, protocol or observable behavior changed; whole-suite
+  function coverage 98.54% → 98.72%.
+- Risk / rollback: npm is immutable, so a defect ships as `0.21.3` and `v0.21.2`
+  is never moved or reused; the previous release (`0.21.1`) remains installable for
+  anyone who needs to pin back.
+- Next in flight: PR #158 (`chore/jsdom-30.1.1`) — the jsdom 30.1.1 refresh and the
+  `reopenTransport` guard classification, which rides into the next release.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
