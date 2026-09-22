@@ -5677,6 +5677,51 @@ corroborates the 26-spec collection.)
   `324`'s switch default. Then the other modules' arm tiers.
 - Updated: 2026-09-22.
 
+## Phase 98 / Two conditions in `openTransport()` that the lifecycle epoch already decided
+
+- Version: no release — recorded under `## [Unreleased]`. Branch `test/suspend-mid-open-arms`, off
+  `024879a` (#174); the rebase collided with Phase 97 at the `### Changed` append anchor of
+  `CHANGELOG.md` — the collision this file's append-at-`## Next candidates` convention predicts — and
+  both bullets were kept, this one first.
+- Phase 97's "next" list split the remaining 15 arms into classified, constructible, and
+  enumeration-needed. This pass took the two that a *comment* claimed were reachable: `openTransport()`'s
+  `if (this.pendingStop === chainedPendingStop) this.pendingStop = null;`, whose comment said "a stop
+  created concurrently (e.g. by `suspendTransport()`) is a different promise and must stay visible",
+  and the `if (!this.suspended && !this.stopping) { … }` ready-flag guard below it, which had no
+  explanation at all. Both claims describe states that this continuation cannot observe.
+- The proof is one enumeration plus one invariant. `pendingStop` is written in four places (this line,
+  the failed-open cleanup, `performStop()`'s finally, `suspendTransport()`'s chained stop); of those,
+  the three that could change it mid-flight each run behind a `lifecycleEpoch` increment —
+  `beginStop()` bumps before `stopping = true`, `suspendTransport()` bumps before `suspended = true`,
+  and the failed-open write belongs to this same promise chain, strictly after the continuation being
+  guarded. Epochs only increase, so an opening that is *still current* at that point has seen none of
+  them. Same reasoning kills the second guard's false arm.
+- So neither check is a coverage gap, and neither was deleted: the failure modes are asymmetric, which
+  is the test Phase 95 established for keeping a dominated leg. Making the clear unconditional depends
+  on the invariant holding forever, and the first future transition that suspends without superseding
+  would then drop a live `pendingStop` and let `stop()` issue a second `transport.stop()`; dropping the
+  ready-guard would mark a hidden transport ready. Each comment now carries the enumeration, so the
+  next reader can check the premise instead of re-deriving it — and can see that the guards are there
+  for the day the premise breaks.
+- Zero coverage movement, measured rather than assumed: `data-bus.ts` stays at 15 uncovered branch arms
+  and 2 uncovered functions, 37 files / 873 tests green, `pnpm typecheck` and `pnpm lint` clean. This
+  is the third consecutive pass whose justification is a proof rather than a number, which is worth
+  stating precisely because a comment-only change is the easiest kind to sell as progress.
+- Changed files: `src/core/data-bus.ts` (comments), `CHANGELOG.md`, `docs/progress.md`.
+- Risk / rollback: no behaviour change; `git revert`, no artifact consequence.
+- Next: the constructible list. Line numbers in this file's *earlier* entries drift with every comment
+  edit — this pass moved two of them by 13 lines each — so the ledger below is written against a fresh
+  read of `coverage/coverage-final.json`, which is the only authoritative source for the current
+  positions. Cheapest real gaps first: the missing-`console.warn` leg (now 1537, the error-handler
+  isolation path with nowhere to log) and the second exhaustion (now 1392, the exhausted-trace event
+  firing twice), then `startDemandRecovery()`'s bail-out (631), the re-subscribe loop's break (509),
+  the failed-open reuse of an existing `pendingStop` (771), `reopenTransport()`'s gate clear (1717),
+  and the `onControl` switch default (324). `564`'s right operand needs `stopping` true with
+  `stopPromise` null, which the same epoch argument says arrives only through a re-entrant `start()`
+  inside `cluster.stop()`; `535`/`559` are dominated by their single guarded call sites and want the
+  enumeration, not a test.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
