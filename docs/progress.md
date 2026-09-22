@@ -5034,6 +5034,35 @@ corroborates the 26-spec collection.)
   `reopenTransport` guard classification, which rides into the next release.
 - Updated: 2026-09-22.
 
+## Phase 84 / Release 0.21.3 prepared (2026-09-22)
+
+- Version: `0.21.2` → `0.21.3` (patch). Branch `refactor/dead-absorbers` off
+  `main@b0354e4`; the code commit is `ebbb61b`.
+- **Done.** Two more absorbed rejections deleted, both dominated by an
+  enumeration of assignment sites rather than by a guess: `queueStartAfterStop()`
+  swallowed `stopPromise` (single non-null assignment — `stop()`'s gate, resolved
+  from both settle arms, which is exactly why `stop()` never rejects), and
+  `openTransport()` swallowed its `before` argument (`Promise.resolve()` from
+  `reopenTransport()`, or `pendingStop`, whose every non-null chain ends in a
+  terminal `.catch(reportError)`). The premises are in the comments at the two
+  call sites.
+- Files: `src/core/data-bus.ts`, `package.json`, `CHANGELOG.md`,
+  `docs/roadmap.md`, `docs/zh/roadmap.md`, this file.
+- Verification: `pnpm typecheck` and `pnpm lint` clean; `pnpm test` → 37 files /
+  860 tests; `pnpm test:e2e` → 36 passed; per-file function coverage
+  115/120 → 115/118, three uncovered handlers left in the module (one kept on
+  purpose as `performStop()`'s unhandled-rejection backstop, two still owed a
+  call-site enumeration).
+- Risks / rollback: like 0.21.2 the runtime delta is dead-code removal, so the
+  only defect class it can introduce is a branch that was reachable after all —
+  and here the reachability argument is a two-site enumeration written next to the
+  code, not a prose claim. npm is immutable: a defect ships as `0.21.4`;
+  `v0.21.3` is never moved, and `0.21.2`/`0.21.1` stay installable to pin back.
+- Next: the remaining `data-bus.ts` handlers (`1576`, `1595` superseded-open and
+  reopen-failure arms) plus the zero-count branches in the other modules; then the
+  standing dependency/security patrol.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
