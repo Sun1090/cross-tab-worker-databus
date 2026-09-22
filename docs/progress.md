@@ -4461,6 +4461,74 @@ corroborates the 26-spec collection.)
   (`data-bus.ts:621` stale-demand construction, `centrifuge.ts:286`).
 - Updated: 2026-09-22.
 
+## Phase 77 (the fuzz budget that was reading a fake clock)
+
+- Main is green, and that hid a landmine. PR #150's `verify` job failed inside
+  `pnpm check` with `Error: Test timed out in 120000ms` on
+  `tests/coordination-invariants.test.ts`, which the runner reported as
+  **553,490ms**: the sweep bought depth with a seed count, so `#148` passing on
+  main was luck rather than a green test. The first diagnosis — runner load — was
+  only half right, and the phase records both halves because the wrong one was
+  committed first.
+- **The mechanism.** The budget compared `Date.now()` against a baseline taken
+  at test start, while this suite fakes `Date` in nearly every file and the two
+  fuzzers advance it ~45 simulated seconds per seed. A faked clock that outlives
+  the file that installed it (vitest reuses a worker across files) poisons that
+  arithmetic in either direction, which is exactly what the three measurements
+  said: the same file stopped at its floor after **16.4s** in one full coverage
+  run, ran to its 60s budget in **60.2s** alone, and burned **539s** on CI never
+  breaking at all. Reproduced locally with `--coverage`, so the fix was decided
+  on evidence rather than on a retry.
+- **The fix is in two layers**, because either alone leaves the other live:
+  `tests/setup.ts` restores real timers after *every* test in every file (the
+  per-file `afterEach` hooks only covered the describes that declared them), and
+  both fuzzers budget on `performance.now()` — not in vitest's default fake set,
+  and no test here passes a custom `toFake` — so a future leak cannot move their
+  depth again. `Date` stays fake inside the sweep on purpose: that is the
+  cluster's clock, and 60 real seconds is now the only thing that bounds it.
+- Depth is bounded explicitly: `MAX_SEEDS` cap, per-seed budget check, an
+  asserted `MIN_SEEDS` floor so a slow runner cannot "pass" on a handful of
+  interleavings, and a log line whenever the sweep truncates — that line is what
+  turns "CI explored 12 seeds" from a mystery into a log entry. The floor comes
+  from measured mutant **kill depth**: the heaviest mutant this harness was
+  proved against (an emptied `reconcileAssignedTopics` sweep) fails at **seed
+  12**, so 100 keeps 8x the depth that detects a regression.
+- Both new arms were proved live, not added as decoration: `MAX_SEEDS = 50`
+  fails with `explored only 50 seeds`, and an 8s budget truncates the sweep at
+  the floor with the invariant assertions still passing. After the leak fix the
+  same full coverage run reports no truncation at all — the sweep completes.
+- **Perf gates: same class, different fix.** One full-suite run also took two of
+  the five `tests/perf-gate.test.ts` ceilings down (2079ms against 1000ms,
+  2955ms against 2500ms) while the file passed on its own. Fastest-of-3 repeats
+  helped but did not save it — a contended coverage run still failed one gate
+  with the *best* repeat at 7.4s of a 1s ceiling — so absolute-millisecond gates
+  now run as their own sequential step (`pnpm test:perf`, wired into
+  `pnpm check`, excluded from `pnpm test` and `pnpm test:coverage` via a config
+  flag). Verified the ceiling kept its teeth: a quadratic
+  `selectLeastLoadedWorker` trips it at 13,630ms on its best repeat, while a
+  50-object-spread-per-call mutant passes both ways — the honest measure of how
+  much headroom a 4–20x ceiling actually leaves.
+- Changed files: `tests/setup.ts` (new), `vitest.config.ts`, `package.json`
+  (`test:perf`, `check`), `tests/coordination-invariants.test.ts`,
+  `tests/lifecycle-invariants.test.ts`, `tests/perf-gate.test.ts`, `AGENTS.md`
+  (quick reference + the budget/clock/gate conventions), `CHANGELOG.md`,
+  `docs/progress.md`. No `src/` change.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` →
+  37 files / **857 tests passed**, `pnpm test:perf` → 5 passed, `pnpm
+  test:coverage` → 98.62 / 96.02 / 98.54 / 99.38 against floors
+  96 / 92 / 96 / 97 — byte-identical to the run that included the perf file, so
+  moving it cost no `src/` coverage.
+- Risks / rollback: test and config only. The floor can fail loudly if a runner
+  cannot reach 100 seeds in 60s, which is the intended signal (the gate's
+  environment degraded), and the truncation line says so. A global
+  `afterEach(useRealTimers)` could in principle break a test that expects fake
+  timers to survive a hook; none does (`pnpm test` is green). Rollback = revert
+  the commits.
+- Next: #150 is closed (its premise was wrong — see Phase 78 on
+  `test/credential-sync-guard-pin`), then rebase and land
+  `test/cjs-default-worker-url`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

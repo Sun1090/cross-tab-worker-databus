@@ -89,10 +89,11 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "pnpm typecheck && pnpm build && pnpm test",
+    "check": "pnpm typecheck && pnpm build && pnpm test && pnpm test:perf",
     "examples": "node scripts/serve-examples.mjs",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:perf": "DATABUS_PERF_GATES=1 vitest run tests/perf-gate.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run",

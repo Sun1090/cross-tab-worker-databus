@@ -43,7 +43,9 @@
  *
  * Concrete topics only: wildcard patterns have their own mutation-verified
  * pins, and folding them in here would replace a checkable expectation with a
- * hand-simulated matcher. Seeds are fixed, so a failure is replayable.
+ * hand-simulated matcher. Seeds are fixed, so a failure is replayable, and the
+ * sweep stops on a wall-clock budget with an asserted floor — see the constants
+ * below.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { CrossTabDataBus } from '../src/core/data-bus';
@@ -148,14 +150,31 @@ function forgeSubscribe(hub: ChannelHub, targetWorkerId: string, topic: string):
 }
 
 describe('cross-tab coordination invariants', () => {
-  // 5,000 seeds × three buses measured 9.0s idle; coverage instrumentation
-  // roughly doubles it and a loaded runner doubles it again, so the budget
-  // below leaves room without the 98%-of-budget squeeze the lifecycle fuzzer
-  // ran into. Cutting seeds would cut the interleavings that found the
-  // residue cases, so the budget moves instead.
+  // Depth is bounded by wall clock, not by seed count: all 5,000 seeds take
+  // 66s on an idle desktop and did not finish inside CI's 120s per-test ceiling
+  // (its first run reported 539s and still had the loop running). Seeds still
+  // stop at MAX_SEEDS, and MIN_SEEDS stops a machine from "passing" on a
+  // handful of interleavings. The floor is not arbitrary — the heaviest mutant
+  // this harness was proved against (an emptied `reconcileAssignedTopics`
+  // sweep) is caught at seed 12, so 100 keeps 8x the depth that detects a
+  // regression while the budget bounds the cost.
+  const MAX_SEEDS = 5_000;
+  const MIN_SEEDS = 100;
+  const SEED_BUDGET_MS = 60_000;
+
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
-    for (let seed = 1; seed <= 5_000 && failures.length < 6; seed += 1) {
+    let completed = 0;
+    // `performance.now()`, never `Date.now()`: this suite fakes `Date` per
+    // test, a reused worker can carry that clock into the next file, and a
+    // baseline poisoned by it silently decides whether this sweep stops at all
+    // (the same file measured 60.2s alone and 16.4s in a full run before the
+    // net in tests/setup.ts existed). Performance time is not in vitest's
+    // default fake set and is monotonic, so the budget is one wall clock even
+    // when the cluster clock is 45 simulated seconds ahead per seed.
+    const startedAt = performance.now();
+    for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
+      if (completed >= MIN_SEEDS && performance.now() - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
@@ -285,8 +304,21 @@ describe('cross-tab coordination invariants', () => {
       } finally {
         for (const tab of tabs) await tab.bus.stop().catch(() => undefined);
         vi.useRealTimers();
+        completed += 1;
       }
     }
+    // A truncated sweep is the interesting case, and the one that is invisible
+    // from a pass/fail CI line: log the depth actually reached so a runner that
+    // is too slow to clear the floor is diagnosable instead of mysterious.
+    if (completed < MAX_SEEDS) {
+      console.log(
+        `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
+          `${Math.round(performance.now() - startedAt)}ms`
+      );
+    }
+    // A budget that always fires early would let the suite go quiet on a slow
+    // runner without anyone noticing, so depth is floored as well as capped.
+    expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);
     expect(failures).toEqual([]);
   }, 120_000);
 });

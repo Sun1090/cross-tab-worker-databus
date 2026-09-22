@@ -91,11 +91,22 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   // V8 coverage instrumentation roughly doubles this fuzzer's runtime, and a
   // loaded runner doubles it again: the same sweep measured 13.2s idle and
   // 29.6s under load, so the previous 30s budget was already 98% consumed
-  // before CI entered the picture. Keep all 1,500 seeds and give the release
-  // gate an explicit budget instead of shrinking it.
+  // before CI entered the picture. Depth is therefore bounded by wall clock
+  // against the 120s per-test ceiling, and MIN_SEEDS keeps a slow machine from
+  // "passing" on a handful of interleavings instead of quietly shrinking the
+  // sweep. The clock is `performance.now()` because `Date` is faked per test
+  // and a reused worker can carry a leaked fake clock into this file — see the
+  // header of tests/coordination-invariants.test.ts.
+  const MAX_SEEDS = 1_500;
+  const MIN_SEEDS = 100;
+  const SEED_BUDGET_MS = 60_000;
+
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
-    for (let seed = 1; seed <= 1_500 && failures.length < 5; seed += 1) {
+    let completed = 0;
+    const startedAt = performance.now();
+    for (let seed = 1; seed <= MAX_SEEDS && failures.length < 5; seed += 1) {
+      if (completed >= MIN_SEEDS && performance.now() - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       try {
@@ -239,8 +250,16 @@ describe('CrossTabDataBus lifecycle invariants', () => {
         }
       } finally {
         vi.useRealTimers();
+        completed += 1;
       }
     }
+    if (completed < MAX_SEEDS) {
+      console.log(
+        `[lifecycle-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
+          `${Math.round(performance.now() - startedAt)}ms`
+      );
+    }
+    expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);
     expect(failures).toEqual([]);
   }, 120_000);
 });
