@@ -5338,6 +5338,36 @@ corroborates the 26-spec collection.)
   `centrifuge-session` 219, `websocket` 113/147/379, `version` 12.
 - Updated: 2026-09-22.
 
+## Phase 92 / Two `centrifuge.ts` arms are pinned through dist, which the src-only report cannot see
+
+- Version: no release — comments and documentation only; `dist/` behaviour is untouched.
+  Branch `docs/coverage-dist-blindspot-v2` — the first roll of this branch (`docs/coverage-dist-blindspot`)
+  was left un-PR'd and went into conflict with `main` while it waited, exactly the append-only
+  collision Phase 91's successor recorded: a phase entry inserted before `## Next candidates` meets
+  another phase entry at the same spot. `gh pr update-branch --rebase` cannot help a branch with no
+  PR, and resolving it in place would need a force-push, so the commit was cherry-picked onto current
+  `main` and the two entries kept side by side.
+- `src/centrifuge.ts`'s two `catch` arms (the `new URL('./centrifuge.worker.js', import.meta.url)`
+  / SharedWorker twins) read zero in `pnpm test:coverage`, and both are **false positives of the
+  report, not gaps in the suite**: `coverage.include` is `src/**`, while the only environment where
+  that specifier genuinely fails is the CommonJS bundle, which the tests reach as
+  `dist/cjs/centrifuge.cjs`. `tests/dual-format.test.ts:103` drives both halves — the actionable
+  "default Centrifuge Worker URL is unavailable" message under CJS, a constructed `Worker` under
+  ESM — so the leg is exercised and simply unattributable.
+- Recorded where it will be found: at each site, with the test name, as "pinned through dist", and
+  in `AGENTS.md`'s testing conventions so the next ledger pass checks for a dist-level driver before
+  hunting a zero count — plus the second finding of this session's sweep, that an uncovered **line**
+  and a line carrying zero-count **branch arms** are different claims (`cluster.ts` reached 100%
+  lines and still holds 19 zero arms), so "module closed" has to name its tier.
+- Changed files: `src/centrifuge.ts` (comments), `AGENTS.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build` green; `tests/dual-format.test.ts`
+  re-read to confirm it asserts the message rather than merely an error being thrown.
+- Risk / rollback: comment/doc only; `git revert`.
+- Next: the never-invoked rejection swallows at `data-bus.ts` 1583/1602, then the arm tiers of
+  `replay-manager`, `replay-persistence`, `trace`, `websocket`, `centrifuge-session`, and
+  `version.ts:12` (whose `typeof __SDK_VERSION__ === 'string'` guard is injected by every build).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

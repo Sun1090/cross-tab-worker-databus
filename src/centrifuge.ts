@@ -448,7 +448,15 @@ export function createCentrifugeDataBus<TData = unknown>(
  * pinned where it is decided — `tests/worker-mode.test.ts` on the selector, and
  * "falls back to the local session when the platform lacks both Worker APIs" on
  * the transport — so a guard here could only ever re-check a fact the caller has
- * already established, and no runtime can reach it with the global missing. */
+ * already established, and no runtime can reach it with the global missing.
+ *
+ * The `catch` below reads as uncovered in `pnpm test:coverage` and is not: it is
+ * the CommonJS half of the module-format pair, and the report's `include` is
+ * `src/**`, while the artifact that actually has no usable `import.meta.url` is
+ * `dist/cjs/centrifuge.cjs`. `tests/dual-format.test.ts` asserts both sides —
+ * this message under CJS and a constructed Worker under ESM — so the leg is
+ * pinned through the built output rather than missing. Treat that test as its
+ * coverage. */
 function createDefaultWorker(): Worker {
   let workerUrl: URL;
   try {
@@ -468,7 +476,9 @@ function createDefaultWorker(): Worker {
  * creates its own CentrifugeSession with an independent WebSocket connection,
  * so refreshing or stopping one tab does not affect the others. Like its
  * dedicated twin it carries no `typeof SharedWorker` guard — the availability
- * flag in `start()` is what decides this is reachable. */
+ * flag in `start()` is what decides this is reachable — and like its twin the
+ * `catch` below is pinned through the built artifacts (the CJS half of
+ * `tests/dual-format.test.ts`) rather than being uncovered. */
 function createDefaultSharedWorker(): SharedWorker {
   let workerUrl: URL;
   try {
