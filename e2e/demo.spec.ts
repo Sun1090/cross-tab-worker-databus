@@ -501,6 +501,104 @@ test.describe('cross-tab databus demo', () => {
     );
   });
 
+  test('shared-mode owner migration moves the server subscription onto a surviving connection', async ({ context }) => {
+    test.setTimeout(120_000);
+    const topic = uniqueTopic('e2e.shared.migrate');
+    const tabA = await openDemoTab(context);
+    await connectDemo(tabA, 'shared', topic);
+    const tabB = await openDemoTab(context);
+    await connectDemo(tabB, 'shared', topic);
+    const tabC = await openDemoTab(context);
+    await connectDemo(tabC, 'shared', topic);
+    const tabs = [tabA, tabB, tabC];
+
+    // A migration in shared mode is a different operation from the dedicated one
+    // above: every tab has its own cluster identity and its own WebSocket, but all
+    // of those sockets live in one shared worker process, so handing the topic over
+    // means moving the single server-side subscription between connections that must
+    // survive it. Measured before writing this: 3 shared tabs on one topic produce 3
+    // sockets of which exactly 1 holds the channel, and the 2 standby tabs each still
+    // report the topic as subscribed while only the owner reports it as assigned.
+    for (const tab of tabs) {
+      await expect.poll(() => transportBackend(tab), { timeout: 30_000 }).toBe('shared');
+    }
+
+    const holders = async (): Promise<ServerSocket[]> =>
+      (await serverSockets()).filter(socket => socket.channels.includes(topic));
+
+    const ownerIndex = await waitForSingleOwner(tabs, { timeout: 30_000 });
+    await expect.poll(async () => (await holders()).length, { timeout: 30_000 }).toBe(1);
+
+    // Steady-state fan-out before any lifecycle transition, so a failure after the
+    // close cannot be read as "this never worked in shared mode".
+    const sender = tabs[(ownerIndex + 1) % tabs.length]!;
+    const receivers = tabs.filter(tab => tab !== sender);
+    const beforeFirstPublish = await Promise.all(receivers.map(receivedCount));
+    await publishJson(sender);
+    await Promise.all(
+      receivers.map((tab, tabIndex) =>
+        expect.poll(() => receivedCount(tab), { timeout: 30_000 }).toBe(beforeFirstPublish[tabIndex]! + 1)
+      )
+    );
+
+    // A poll for "exactly one holder" passes on the first read that happens to
+    // show one — which is also what a duplicate-holder bug looks like before it
+    // settles. Measured: with `handleControlMessage`'s targetWorkerId guard
+    // deleted, all three tabs acted on the owner's SUBSCRIBE, the convergence poll
+    // above still passed, and the failure surfaced only as a doubled delivery. This
+    // re-read runs after that round trip, so the steady state is what gets
+    // asserted, and its message names the holders instead of their symptom.
+    const holdersBeforeClose = await holders();
+    expect(holdersBeforeClose, `holders before the close: ${formatSockets(holdersBeforeClose)}`).toHaveLength(1);
+    const ownerSocket = holdersBeforeClose[0]!;
+    const openBeforeClose = (await serverSockets()).map(socket => socket.id);
+
+    const owner = tabs[ownerIndex]!;
+    await owner.close();
+
+    const survivors = tabs.filter(tab => tab !== owner);
+    const newOwnerIndex = await waitForSingleOwner(survivors, { timeout: HANDOFF_TIMEOUT_MS });
+    await expect.poll(async () => (await holders()).length, { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
+
+    // Both directions still deliver after the takeover: owner→standby through the
+    // EVENT fan-out, and standby→owner because the new owner's transport
+    // subscription is what the server is now answering.
+    const newOwner = survivors[newOwnerIndex]!;
+    const standby = survivors.find(tab => tab !== newOwner)!;
+    const beforeOwnerPublish = await receivedCount(standby);
+    await publishJson(newOwner);
+    await expect.poll(() => receivedCount(standby), { timeout: 30_000 }).toBe(beforeOwnerPublish + 1);
+    const beforeStandbyPublish = await receivedCount(newOwner);
+    await publishJson(standby);
+    await expect.poll(() => receivedCount(newOwner), { timeout: 30_000 }).toBe(beforeStandbyPublish + 1);
+
+    // Steady state again, for the same reason as before the close.
+    const holdersAfterMigration = await holders();
+    expect(holdersAfterMigration, `holders after migration: ${formatSockets(holdersAfterMigration)}`).toHaveLength(1);
+    const migrated = holdersAfterMigration[0]!;
+
+    // The exactly-one-holder check has no teeth on its own for what this test is
+    // about: a survivor that tore its own session down and reconnected to get the
+    // channel also ends with one holder. Requiring the new holder to be a socket
+    // that was already open before the close is what pins "the subscription moved",
+    // and requiring it not to be the dead one is what stops the closed tab's
+    // connection from keeping the channel while a survivor believes it owns it.
+    expect(migrated.id, `holder after migration: ${formatSockets([migrated])}`).not.toBe(ownerSocket.id);
+    expect(openBeforeClose, `sockets open before the close: ${openBeforeClose.join(' ')}`).toContain(migrated.id);
+    // Membership in a pre-close snapshot is a real constraint even though the
+    // snapshot is not only this test's sockets — measured 3 in isolation and up to 9
+    // under `--repeat-each=3`, since other specs' connections are in it too. That
+    // costs nothing: `migrated` is by construction a connection carrying this
+    // topic's channel, and a `uniqueTopic` name is only ever subscribed by this
+    // test's tabs, so a foreign id can pad the set but can never satisfy it. The
+    // assertion fails exactly when the takeover rides a connection that was opened
+    // after the close.
+    console.log(
+      `[shared-migrate] owner ${ownerSocket.id.slice(0, 8)} → holder ${migrated.id.slice(0, 8)} on one of ` +
+        `${openBeforeClose.length} sockets open before the close`
+    );
+  });
+
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
     test.setTimeout(120_000);
     const topic = uniqueTopic('e2e.soak');
