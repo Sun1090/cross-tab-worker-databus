@@ -83,6 +83,12 @@ export class ChannelHub {
   close(channel: FakeChannel): void {
     this.channels.get(channel.name)?.delete(channel);
   }
+
+  /** How many channels are still open under `name`. A closed channel leaves the
+   * hub, so this is how a test tells a deferred close from a skipped one. */
+  liveChannelCount(name: string): number {
+    return this.channels.get(name)?.size ?? 0;
+  }
 }
 
 class FakeChannel implements ClusterChannel {
