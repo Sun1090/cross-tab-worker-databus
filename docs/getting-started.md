@@ -150,6 +150,8 @@ Open `http://localhost:4173/examples/demo/` and open it in multiple browser Tabs
 - Data flow animations, event stream, distribution latency metrics, and cluster Worker routing status
 - SDK capability, transport configuration, active/standby Worker, and visible/hidden Tab state
 
+Two more pages are served next to the demo. `http://localhost:4173/examples/react/` wires the framework-agnostic core by hand (effect, `subscribe`, status), while `http://localhost:4173/examples/vue/` uses nothing but the shipped `cross-tab-worker-databus/vue` composables. Both point at the same local demo endpoint, so a publication from one is received by a tab on any of the three pages that uses the same Topic — which is also how the adapter pages are covered by the browser suite (`e2e/adapters.spec.ts`).
+
 When consuming the repository directly through a Git dependency, use a pinned commit. The repository ships `dist` so consumers do not need to build the SDK during installation.
 
 ## 9. Explicit Start

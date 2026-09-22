@@ -1,6 +1,16 @@
 # Roadmap
 
-0.20.96 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.20.97 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.20.97 delivered scope
+
+- No public surface and no observable runtime behavior changed. The shipped `src/` delta is `centrifuge.ts` only: two unreachable `typeof Worker` / `typeof SharedWorker` throws removed, and comments recording why one guard survives while another does not. Everything else is example, test, CI and documentation work.
+- The Vue adapter finally runs where it ships: `examples/vue/` mounts the real `cross-tab-worker-databus/vue` composables against the local demo endpoint from the installed `vue` package (no CDN), and `e2e/adapters.spec.ts` drives it in real Chromium tabs — publish/receive across two tabs, a reactive topic change releasing the old channel server-side, and delivery surviving the owning tab's close. Before this the Vue entry had never executed outside jsdom.
+- The cluster's promise *between* tabs is now fuzzed rather than hand-ordered: three buses over one storage registry and BroadcastChannel through randomized subscribe/unsubscribe/publish/hide/show/stop/start/heartbeat/dropped-frame/forged-`SUBSCRIBE` interleavings, asserting at quiescence one owner and one transport holder per live topic, no residue for a departed topic, and exactly-once fan-out. Five mutations kill those arms; three guards survive because `reconcileAssignedTopics()` repairs them, which is recorded as the reason those belong to frame-level regressions.
+- Two release-gate timing failures were traced to their causes instead of retried. The coordination fuzzer's `Date.now()` budget was reading a clock the suite fakes — a leaked fake `Date` in a reused worker made the same file stop at its floor after 16.4s and burn 539s on CI — so `tests/setup.ts` now restores real timers after every test and the fuzzers budget on `performance.now()`. The hot-path performance gates moved to their own sequential step, because an absolute-millisecond ceiling only measures code on an unscheduled core.
+- The credential-guard investigation ended with the guard kept: a PR proposing its deletion as unreachable was shown to be reachable through application code (`getToken()` may `stop()` the transport before throwing), so it gained a mutation-proved regression test, and the rule distinguishing that from a genuinely dominated branch is now written into `AGENTS.md` and the source.
+- The CommonJS-only default-Worker failure is pinned from the built artifacts: `dist/cjs` cannot resolve a Worker URL through esbuild's `import.meta` shim, so `start()` must report the actionable "provide workerFactory explicitly" rather than `TypeError: Invalid URL` — asserted on both factories, with the ESM artifact checked in the same case to tie the failure to the module format.
+- Whole-suite coverage moved from 98.62 / 96.02 / 98.54 / 99.38 to 98.68 / 96.17 / 98.54 / 99.46 without lowering any ceiling; `docs/transports.md` (en + zh) documents that a publication carrying its own string `topic` is re-addressed to it, which is how wildcard delivery names a concrete topic and why `{ "topic": … }` payloads can go nowhere.
 
 ## 0.20.96 delivered scope
 
