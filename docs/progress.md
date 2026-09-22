@@ -6873,6 +6873,64 @@ corroborates the 26-spec collection.)
   still blocked upstream on `typescript-eslint`'s peer range.
 - Updated: 2026-09-23.
 
+## Phase 126 / Shared-mode handover, tested where it is actually different
+
+- Version: one E2E spec plus its mutation evidence. `e2e/` is outside `package.json`'s `files`, nothing in
+  `src/` moved, so no release is triggered and `v0.21.8` stays current. Branch
+  `test/shared-mode-migration` off `a2aadf9` (#208).
+- What prompted it: Phase 122 ended on "the ledger work is classification and the defect hunt needs a
+  different instrument". The instrument chosen was the coverage gap in `e2e/`: shared mode has no browser
+  test that *transitions* anything. `SharedWorker mode: one shared process, independent sessions,
+  cross-tab delivery` is steady state, `shared-mode session closes server-side when a tab closes` is one
+  socket leaving, and every migration, reload, handoff-ACK and BFCache spec passes `'dedicated'`.
+- Why the gap is worth filling rather than shrugging at: in shared mode a handover is a different
+  operation, not the same one three times over. Each tab has its own cluster worker identity *and* its own
+  WebSocket, and all of those connections live inside one shared worker process — so moving a topic means
+  moving the single server-side subscription between connections that must survive it, with a port reaper
+  running beside them. A dedicated-mode migration cannot observe that, because there each tab owns its
+  worker and its socket to begin with.
+- Process model measured with a throwaway spec before writing anything (created, run at 36.7 s, deleted):
+  three shared tabs on one topic produce three sockets of which exactly **one** carries the channel, and
+  each tab reports its own `currentWorker`; the two standby tabs report the topic as *subscribed* while
+  only the owner reports it *assigned*. That is the state the new spec pins at both ends of a close.
+- The new spec `shared-mode owner migration moves the server subscription onto a surviving connection`:
+  three shared tabs on one `uniqueTopic`, all three verified to be on the `shared` backend; exactly one
+  connection holds the channel; a publication reaches every other tab exactly once; the owner closes; a
+  survivor takes over and the single holder is then a socket that **was already open before the close**
+  and is **not** the closed tab's; delivery is re-checked in both directions. The containment check is
+  what makes it a migration test rather than a liveness test — a survivor that dropped its own session and
+  reconnected to get the channel ends with exactly one holder too, and fails here.
+- Mutation 1, and it changed the test: deleting `handleControlMessage`'s `targetWorkerId` guard made every
+  tab act on the owner's SUBSCRIBE. The convergence poll for "exactly one holder" **still passed** — a
+  poll stops at the first read that satisfies it, and one is what a duplicate-holder bug looks like before
+  it settles — and the failure surfaced 30 s later as a doubled delivery, `expected 1, received 2`. The
+  holder count is therefore re-read in steady state after each round trip on both sides of the close, so
+  the invariant is asserted against a settled state and its message names the sockets.
+- Mutation 2: skipping `handleRouteReleasedMessage`'s `onControl(SUBSCRIBE)` — the line that completes a
+  graceful handoff — left the survivors' cluster view converged on exactly one owner while **no**
+  connection held the channel, and the reconcile loop did not repair it inside the 60 s handoff budget.
+  The new post-close poll failed at zero holders. That is the justification for the whole spec: a
+  coordination-side "who owns it" assertion cannot see a transport subscription that never moved.
+- Tooling trap found on the way: `scripts/build.mjs` calls `rmSync(dist)` *before* `tsc`, so a mutant that
+  fails to compile (`TS7027: Unreachable code detected` from an `if (false && …)` guard) leaves `dist/`
+  holding only declarations. The next E2E run then fails at `openDemoTab` waiting for the connected badge —
+  a build artifact, not a measurement, and easy to misfile as "the mutation was caught". Both surviving
+  mutants are written in a `tsc`-clean form, and `pnpm build`'s exit status is chained ahead of the test
+  run from then on. `AGENTS.md` gained the rule.
+- Verification: `pnpm typecheck` and `pnpm lint` clean; full E2E **37 passed** in 35.7 s (36 before this
+  spec existed); the new spec alone 2.3–2.4 s and 3 passed under `--repeat-each=3`, where the pre-close
+  snapshot measures 5–9 sockets instead of 3 — sound, because a `uniqueTopic` channel is only ever
+  subscribed by this test's own tabs. `pnpm check` green (typecheck, build, 37 files / **886** tests, 5
+  perf gates) and `pnpm test:coverage` at 99.01 / 96.89 / 99.26 / 99.69 — unchanged from 0.21.8, since
+  nothing in `src/` moved. Unit gates ran after the browser suite, never beside it (Phase 122).
+- Changed files: `e2e/demo.spec.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Risk / rollback: `git revert`. No shipped-code change; the only new runtime surface is a `console.log`
+  line in a test.
+- Next: the shared-mode specs still assert delivery and socket lifecycle but not *reap latency under
+  migration* — if a takeover races the reaper, the survivor's session can be closed while it is acquiring
+  a route. Worth one probe before deciding whether it is testable at browser level or is unit-only.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
