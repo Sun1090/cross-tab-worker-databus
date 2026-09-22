@@ -5976,6 +5976,95 @@ corroborates the 26-spec collection.)
   Phase 103 only sees the outer `topic`.
 - Updated: 2026-09-22.
 
+## Phase 106 / A batched PUBLISH frame could carry a batch that is not an array
+
+- Version: behaviour change inside the `CONTROL` receive path, so another patch is owed. Branch
+  `fix/control-frame-batch-shape`, off `origin/main` (`701b531`, the 0.21.5 release commit).
+- The question Phase 104 deferred — "each item carries its own metadata and the frame-level key check
+  only sees the outer `topic`" — had a different answer than expected, because the item *metadata* is
+  already harmless and the item *container* was not checked at all. `handleControlMessage` gated the
+  batch on `message.items && message.items.length > 0` and then either iterated it or passed it to
+  `onPublishBatch`. `publishBatch()`'s `Array.prototype.map` is the only producer, so anything else
+  reaching that branch is a hand-built frame on the unauthenticated cluster channel.
+- Two shapes, two different failures, both measured rather than argued. `{ length: 2, 0: {...} }` threw
+  `TypeError: message.items is not iterable` out of the runtime's own `BroadcastChannel` listener —
+  exactly the failure mode the `EVENT` path is deliberately lax about on purpose. `"ab"` did not throw:
+  it is iterable with a length, so it reached the batch handler as two one-character items whose `data`
+  is `undefined`, and the owning worker published them to the backend under its own session. A third,
+  quieter one: `items: []` satisfied neither half of the old test, fell out of the switch into the
+  single-publication tail, and published the frame's absent `data` — `undefined` — instead of nothing.
+- Guard: presence and shape are decided together — a frame that carries `items` at all must carry a
+  non-empty array, or it is dropped. Deciding them together is what makes the empty case safe; checking
+  only `Array.isArray` would still let `[]` reach a batch-capable transport, and checking only emptiness
+  keeps the throw. A cross-worker `publish(topic, undefined)` is untouched, because its frame has no
+  `items` key at all.
+- Three mutants, each killed by a different leg, which is the part worth recording: restoring the old
+  gate fails both new tests (the throw and the `"ab"` batch); keeping only `Array.isArray` fails just the
+  batch-handler test; keeping only the emptiness check fails just the array-like test. The emptiness
+  check is genuinely dominated on the no-handler leg — the loop runs zero times and returns either way —
+  so the test that falsifies it is the one with an `onPublishBatch` handler, and that asymmetry is now
+  written into the test's comment instead of being rediscovered.
+- Deliberately not done: validating item *content*. `{ data: anything }` is what a legitimate item looks
+  like, so a per-item shape check stops nothing a well-formed frame cannot already do, and it would buy
+  a false sense of the boundary. `messageId`/`timestamp` are forwarded only into `transport.publish()`,
+  and the receiving side already discards a non-string id and a non-finite timestamp in
+  `parseDataBusPublication`, so nothing downstream does arithmetic on them.
+- Changed files: `src/core/cluster.ts`, `tests/cluster.test.ts`, `AGENTS.md` (the protocol section gains
+  the third receiver-checked invariant and the reason item content is left alone), `CHANGELOG.md`,
+  `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 878 tests + 5 perf gates); `pnpm lint`
+  clean; `pnpm test:coverage` whole-suite 98.98 / 96.63 / 99.26 / 99.69 (unchanged at that precision),
+  `cluster.ts` branches 94.22 → 94.25; the two new tests fail against the pre-fix gate in three distinct
+  ways as described above.
+- Risk / rollback: strictly a narrowing of what the receiver accepts, and no sender in this repository,
+  in the packed ESM/CJS artifacts, or in the examples produces a non-array `items`. Rollback is
+  `git revert`; no storage or wire-format change, and no version has to be moved.
+- Next: the 13-arm `data-bus.ts` ledger (task #22), and a look at whether the same "presence implies a
+  contract" reading applies to the remaining optional frame fields (`data` on a `SUBSCRIBE`,
+  `protocolVersion` on the legacy path) before the next patch cut.
+- Updated: 2026-09-22.
+
+## Phase 107 / The 0.21.5 guard covered one handler, and a second one read the same pair
+
+- Version: behaviour change in the handoff receive path — a third protocol fix in this range, so the
+  owed patch release now carries three. Branch `fix/control-frame-batch-shape`, second commit, off
+  Phase 106.
+- Phase 106's next step was to read the remaining frame fields the same way ("does presence imply a
+  contract?"). Enumerating the four `handleMessage` branches for that answer found a real second hole
+  instead: `handleRouteReleasedMessage` is the only other place a receiver reads both `topicKey` and
+  `topic` and acts on both, and 0.21.5's pairing check went into `handleControlMessage`, which never
+  covers it.
+- The shape is identical to the one that was fixed, and the handoff makes it sharper. A
+  `ROUTE_RELEASED` is authorized by the durable route — it must still name this worker, must come from
+  the recorded `handoffFromWorkerId`, and must carry the exact generation. All three are readable:
+  route records are plain localStorage under a key the attacker already needs for the channel name. So
+  a correctly-formed ACK for a live handoff, with the frame's `topic` swapped, passed every staleness
+  check and then wrote the attacker's plaintext into `assignedTopics` under the real key *and*
+  subscribed this worker's transport to that channel. Measured before the fix: the recipient's
+  `onControl` fired twice for a topic no tab had subscribed.
+- Consequence worth naming, because it explains why fixing the receiver is enough: `assignedTopics` is
+  what `reconcileAssignedTopics()` later reads back to build an outgoing ACK, so a poisoned entry turns
+  into a *legitimately sent* mismatched frame — the receiver check closes the sender side too, and no
+  ACK sender needs its own guard.
+- Fix: the same one-line invariant, in the one handler that was missing it, with the reasoning at the
+  site rather than a "see cluster.ts:NNN" pointer. `EVENT` and `REGISTRY` need no such check and now say
+  so in `AGENTS.md`: an `EVENT` carries a payload and no key/plaintext pair, a `REGISTRY` nudges
+  reconciliation and acts on no field at all.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 879 tests + 5 perf gates);
+  `pnpm lint` clean; `pnpm test:coverage` whole-suite 98.98 / 96.63 / 99.26 / 99.69 unchanged,
+  `cluster.ts` branches 94.22 → 94.25 → 94.28 across the two guards. The new test fails without the
+  guard as `expected "vi.fn()" to not be called at all, but actually been called 2 times`.
+- The lesson for the ledger, recorded in `AGENTS.md`: a guard that protects an *invariant* belongs to the
+  protocol, not to the handler where the first violation happened to be found. After 0.21.5 the pairing
+  was stated as a protocol rule and implemented as one `if` in one method, and that is exactly how a
+  second reader of the same pair stays open for a release. When pinning an invariant, enumerate every
+  reader of the fields it constrains and say which of them need it.
+- Risk / rollback: no conforming peer can produce a mismatched ACK, since the pair is derived at all
+  three senders; `git revert` of this commit, no storage or wire-format change.
+- Next: re-walk `handleMessage`'s four branches for anything else that trusts a field by shape alone,
+  then the 13-arm `data-bus.ts` ledger (task #22), then cut the patch release these three fixes earn.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

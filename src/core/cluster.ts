@@ -886,7 +886,15 @@ export class WorkerClusterRuntime {
         if (this.releaseHandoffOnUnsubscribe(message)) return;
         break;
       case CONTROL_ACTION.PUBLISH:
-        if (message.items && message.items.length > 0) {
+        if (message.items !== undefined) {
+          // `publishBatch()` is the only sender of `items` and it builds them with
+          // `Array.prototype.map`, so a present batch that is not a non-empty array
+          // — an iterable string, an array-like with a `length` — comes from a
+          // hand-built frame. Rejecting it here is the only place that decision can
+          // be taken: the loop below would throw out of this listener on a
+          // non-iterable value, and falling through instead would publish
+          // `message.data`, which a batch frame does not carry.
+          if (!Array.isArray(message.items) || message.items.length === 0) return;
           // A batched CONTROL: hand the whole batch to the transport at once
           // when the owner supports it, preserving per-item metadata.
           if (this.handlers.onPublishBatch) {
@@ -961,6 +969,14 @@ export class WorkerClusterRuntime {
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
+    // The same pairing invariant `handleControlMessage` applies, and for the same
+    // reason: this frame is the one that *completes* a handoff, and its
+    // authorization is the durable route stored under `topicKey` while the
+    // plaintext handed to `assignedTopics` and the transport is `topic`. Route
+    // records are plain localStorage, so a same-origin script can read the real
+    // key, the previous owner's id and the generation to pass every staleness
+    // check below, and still name the channel this worker subscribes.
+    if (createOpaqueKey(message.topic) !== message.topicKey) return;
     const route = this.readRoute(message.topicKey);
     if (!route || this.isStaleRouteRelease(route, message)) return;
     this.assignedTopics.set(message.topicKey, message.topic);
