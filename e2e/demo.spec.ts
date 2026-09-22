@@ -326,6 +326,37 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(tabB)).toBe(beforeB + 1);
   });
 
+  test('falls back to the default topic when the topic box is cleared', async ({ context }) => {
+    test.setTimeout(90_000);
+    // demo.js resolves the effective topic as `topicInput.value.trim() ||
+    // 'demo.flow'`, and from 0.21.0 that guard is the only thing standing between
+    // a cleared box and a rejected subscribe(): the bus throws on '',
+    // applyConnection() reports it through its own catch, and the tab sits on
+    // 错误 with nothing pointing at the field the user just emptied. Both arms get
+    // probed — whitespace through `trim()`, the raw empty string through `||`.
+    // Everything asserted is this tab's own state: `demo.flow` is the channel every
+    // other page in the suite auto-connects to on the shared demo server, so a
+    // delivery or server-subscriber assertion here would race unrelated tabs.
+    const tab = await openDemoTab(context);
+    await connectDemo(tab, 'dedicated', `e2e.cleared.${Date.now()}`);
+    const errorRows = () => tab.locator('#eventBody tr', { hasText: '错误' }).count();
+    expect(await errorRows()).toBe(0);
+
+    for (const cleared of ['   ', '']) {
+      // applyConnection() ignores a click while a switch is in flight, so wait for
+      // the button rather than have the arm under test silently do nothing.
+      await expect(tab.locator('#applyConnection')).toBeEnabled();
+      await tab.fill('#topicInput', cleared);
+      await tab.click('#applyConnection');
+      // Only rendered once the re-apply has finished, so a swallowed click or a
+      // rejected subscribe leaves the previous topic on screen.
+      await expect(tab.locator('#configTopic')).toHaveText('demo.flow');
+      await expect(tab.locator('#statusBadge')).toHaveText('已连接');
+      expect(await errorRows()).toBe(0);
+      expect(await tab.evaluate(() => window.__bus?.getClusterSnapshot().assignedTopics ?? [])).toContain('demo.flow');
+    }
+  });
+
   test('reload: a refreshed tab re-subscribes and keeps receiving', async ({ context }) => {
     test.setTimeout(90_000);
     const topic = `e2e.reload.${Date.now()}`;

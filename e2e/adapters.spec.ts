@@ -150,4 +150,42 @@ test.describe('vue adapter', () => {
 
     await context.close();
   });
+
+  test('rebinds to the default topic when the topic box is cleared', async ({ browser }) => {
+    // The bus rejects `''` at its own boundary, so the page owns the fallback
+    // (`topicInput.trim() || 'vue.example'`). This has to run in a browser
+    // because the alternative is not a wrong rendering but a TypeError escaping
+    // the composable's watcher: the tab keeps its old subscription, stops
+    // reacting to the box, and says nothing about it on screen. Both arms are
+    // probed — whitespace-only falls back through `trim()`, the raw empty string
+    // through `||` — and the recovery is then shown to be a live subscription,
+    // not just a badge that changed.
+    const topic = `vue.fallback.${Date.now()}`;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const thrown: string[] = [];
+    page.on('pageerror', error => thrown.push(String(error)));
+    await page.goto(`${VUE_URL}?topic=${encodeURIComponent(topic)}`);
+    await expect(page.locator('#statusBadge')).toHaveText('状态: connected', { timeout: 30_000 });
+    await expect.poll(() => tabSubscribed(page, topic), { timeout: 30_000 }).toBe(true);
+
+    await page.fill('#topicInput', '   ');
+    await expect(page.locator('#topicBadge')).toHaveText('Topic: vue.example', { timeout: 30_000 });
+    await expect.poll(() => tabSubscribed(page, 'vue.example'), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => serverSubscribers(topic), { timeout: 30_000 }).toBe(0);
+
+    // Back to a topic of its own, so the second arm cannot pass by doing nothing.
+    await moveTo(page, topic);
+    await page.fill('#topicInput', '');
+    await expect(page.locator('#topicBadge')).toHaveText('Topic: vue.example', { timeout: 30_000 });
+    await expect.poll(() => tabSubscribed(page, 'vue.example'), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => serverSubscribers(topic), { timeout: 30_000 }).toBe(0);
+
+    const peer = await openVueTab(context, 'vue.example');
+    await publish(page, '{"what":"after-fallback"}');
+    await expect(peer.locator('#messageList')).toContainText('{"what":"after-fallback"}', { timeout: 30_000 });
+    expect(thrown).toEqual([]);
+
+    await context.close();
+  });
 });
