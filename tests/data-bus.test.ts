@@ -4938,6 +4938,50 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
     await Promise.all([busA.stop(), busB.stop()]);
   });
 
+  it('keeps a producer stamp that arrives on the transport rather than re-stamping it as this tab', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+    const envA = createFakeEnvironment({ storage, hub, now, randomId: 'stamped-frame-a' });
+    const envB = createFakeEnvironment({ storage, hub, now, randomId: 'stamped-frame-b' });
+    const transportA = new FakeTransport<number>();
+    const transportB = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'stamped-frame',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'stamped-frame',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: transportB
+    });
+    await busA.start({});
+    await busB.start({});
+    const receivedA: Array<{ data: unknown; originTabId?: string }> = [];
+    const receivedB: Array<{ data: unknown; originTabId?: string }> = [];
+    busA.subscribe('topic', message => receivedA.push(message));
+    busB.subscribe('topic', message => receivedB.push(message));
+    await Promise.all([busA.ready(), busB.ready()]);
+
+    // A transport is a public extension point, and a proxying or replaying one
+    // hands back a frame that already names its producer. `handleTransportMessage`
+    // stamps only when the field is absent: overwriting here attributes someone
+    // else's publication to the receiving tab, and every consumer downstream —
+    // the neighbor's EVENT fan-out and the replay history both — inherits the lie.
+    transportA.emit('topic', 1, undefined, undefined, 'tab-remote');
+    await Promise.resolve();
+    expect(receivedA).toHaveLength(1);
+    expect(receivedA[0]!.originTabId).toBe('tab-remote');
+    expect(receivedB).toHaveLength(1);
+    expect(receivedB[0]!.originTabId).toBe('tab-remote');
+    await Promise.all([busA.stop(), busB.stop()]);
+  });
+
   it('producing tab\'s local handler sees the same originTabId it broadcasts', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

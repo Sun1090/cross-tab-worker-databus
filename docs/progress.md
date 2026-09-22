@@ -5242,6 +5242,36 @@ corroborates the 26-spec collection.)
   security patrol.
 - Updated: 2026-09-22.
 
+## Phase 89 / A transport frame that already names its producer keeps that producer
+
+- Version: no release — the `src/` change is a comment, so `dist/` is unaffected.
+  Branch `test/ledger-origin-stamp`.
+- Closed the `handleTransportMessage` ternary leg at `src/core/data-bus.ts:1250`: a frame
+  arriving from the transport with `originTabId` already set is passed through unchanged, and
+  only an unstamped one is stamped with this tab's id. `DataBusTransport` is a public extension
+  point, so a proxying or replaying transport legitimately delivers someone else's publication;
+  re-stamping it attributes that publication to the receiving tab, and both downstream consumers
+  — the neighbour's `EVENT` fan-out and the replay history — inherit the misattribution. Nothing
+  in the suite had ever produced that shape: `FakeTransport.emit()` built frames without the
+  field, so the arm read zero across 863 tests.
+- `FakeTransport.emit` gained an optional trailing `originTabId`, and the new test asserts it
+  survives on *both* tabs, which is what makes the pin about the guarantee rather than about the
+  branch: the local handler and the neighbour must agree on who produced it.
+- Mutation-checked: collapsing the ternary to always-stamp fails with
+  `AssertionError: expected 'tab-a' to be 'tab-remote'`, and `src/` was verified clean after.
+- Ledger movement for `data-bus.ts`: **18 → 17** zero entries; suite branches
+  96.31 → 96.36, statements 98.81, functions 99.08, lines 99.53.
+- Changed files: `src/core/data-bus.ts` (comment), `tests/data-bus.test.ts`, `tests/fakes.ts`,
+  `docs/progress.md`.
+- Verification: `pnpm check` green (37 files, `pnpm test:perf` included), `pnpm lint` clean,
+  `pnpm test:coverage` green against the unmodified floors; `tests/data-bus.test.ts` alone is
+  179 tests.
+- Risk / rollback: one commit; test-and-comment only, no shipped-code change.
+- Next on this ledger: the ready-during-teardown leg (`ready()` with no operation in flight and
+  no recorded error falls through to the generic rejection at 810), the never-invoked rejection
+  swallows at 1583/1602, and `cluster.ts:397`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
