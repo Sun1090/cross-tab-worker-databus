@@ -4797,6 +4797,119 @@ corroborates the 26-spec collection.)
   driven in a browser too, then the standing dependency/security patrol.
 - Updated: 2026-09-22.
 
+## Release 0.21.0 completed (2026-09-22)
+
+- Version: `0.21.0` published. PR #155 squash-merged into `main` as `49e77a7`,
+  tag `v0.21.0` pushed at that exact commit, `Release` workflow run
+  `35685211626` **success** (its `release` job green end to end, including the
+  blocking `verify:published` consumer gate), GitHub release `v0.21.0` published
+  from the CHANGELOG section.
+- Registry state: `npm view cross-tab-worker-databus version dist-tags.latest` →
+  `0.21.0` / `0.21.0`, and the registry time list ends
+  `"0.20.96", "0.20.97", "0.21.0"` — the first **minor** of this release series
+  and the first removal the project has shipped.
+- Branch hygiene: `feat/reject-empty-topic` deleted with the merge
+  (`--delete-branch`), `git ls-remote --heads` shows only `main`.
+- What the release actually changed for a consumer: three public methods now
+  reject `""`. No export moved, no other behavior moved, and the pre-1.0 policy's
+  own paper trail (warn in `0.20.96`, remove in `0.21.0`, call it out in that
+  CHANGELOG) is what the breaking section documents.
+- Follow-up found after publish: the `0.21.0` CHANGELOG text named the React
+  adapter `cross-tab-worker-databus/react`, which is not an export this package
+  has — it is `cross-tab-worker-databus/hooks`. Published release notes are not
+  rewritten, so the correction is recorded in the current `Unreleased` section
+  (phase 81 found it while the same sentence was being updated for real).
+- Risk / rollback: none outstanding. npm versions are immutable; a defect ships
+  as `0.21.1` and `v0.21.0` is never moved or reused.
+- Updated: 2026-09-22.
+
+## Phase 81 (the React example stops needing a network, and so its page gets tests)
+
+- Version: unreleased work on `feat/local-react-example`, off the tagged
+  `v0.21.0` commit `49e77a7`. Target: a patch release (`0.21.1`) — no public
+  surface and no library behavior changes; everything is example, test and docs.
+- **Why it was worth doing.** Phase 80 left one edited code path verified by hand
+  instead of by a gate: `examples/react` resolves its topic fallback in a React
+  effect, and nothing in CI could load that page at all, because React itself came
+  from `esm.sh`. That also pinned the page to React 18 while `tests/hooks.test.tsx`
+  exercises React 19 — the example was demonstrating an older framework version
+  than the one under test.
+- **What it took.** React ships no browser ESM build (`react/index.js` is
+  `module.exports = require('./cjs/react.development.js')`), so `pnpm build:examples`
+  bundles `react` + `react-dom/client` with esbuild into one vendor module that the
+  import map points at twice. Twice on purpose: two vendor files would give the page
+  two Reacts, and react-dom's reconciler differing from the imported `react` fails
+  every hook with "Invalid hook call". The first attempt used `export * from 'react'`
+  and exported **nothing but** `createRoot` — an export-star over a CJS module whose
+  shape is a runtime reassignment has no static names to forward. Caught by importing
+  the bundle in node and checking each name, not by a browser test failing.
+- **Page changes to make it drivable.** `examples/react` gained the ids the Vue page
+  already had (`#statusBadge`, `#topicBadge`, `#topicInput`, `#draftInput`,
+  `#publishButton`, `#messageList`, `#receivedCount`), a `?topic=` override, a topic
+  badge, and the `window.__reactBus` diagnostics hook. `e2e/adapters.spec.ts` then
+  runs one set of four cases against both pages, parameterized by the page's url,
+  hook name and fallback topic: fan-out, reactive rebind that leaves the old channel
+  with zero server subscribers, delivery after the owning tab closes, and the
+  cleared-topic-box fallback with both arms of the guard probed.
+- Verification: all four React cases pass (`pnpm exec playwright test --grep "react
+  example page"`, 29.3s for 4 tests in parallel), and the fallback case was
+  mutation-checked the same way the Vue one was — `topic = topicInput` (no
+  `trim()`, no fallback) fails with `unexpected value "  Topic:    "` and passes
+  again in 1.0s once restored. `pnpm typecheck` and `pnpm lint` clean;
+  `node scripts/build-example-vendor.mjs` output verified in node for all 9 names
+  the page imports, with `version` reporting the installed `19.3.0`.
+- Changed files: `scripts/build-example-vendor.mjs` (new), `package.json`
+  (`build:examples`, wired into `examples` and `test:e2e`), `.gitignore`
+  (`examples/react/vendor/`), `examples/react/index.html`, `examples/react/main.jsx`,
+  `e2e/adapters.spec.ts`, `docs/getting-started.md`, `docs/zh/getting-started.md`,
+  `AGENTS.md` (quick-reference row), `CHANGELOG.md`, this file.
+- Blockers: none. Risks / rollback: dev-only surface — the packed `dist/` is
+  untouched, so the shipped artifact is byte-identical to `0.21.0` apart from
+  version metadata. A defect in the vendor bundle breaks only the example page and
+  its four browser tests.
+- Next: full gate set on this branch (`pnpm check`, `pnpm test:coverage`,
+  `pnpm test:e2e`, `verify:compat`, `verify:pack`), then the `0.21.1` prepare and
+  publish; the `typescript-eslint` peer ceiling for TypeScript 7 stays the only
+  external blocker.
+- Updated: 2026-09-22.
+
+## Release 0.21.1 prepared (2026-09-22)
+
+- Version: `0.21.0` → `0.21.1` (patch). Branch `feat/local-react-example` off
+  `v0.21.0` (`49e77a7`); commits `ef79b73` (example + browser suite + docs),
+  `c9b4b89` (progress log), this one.
+- **Why cut a release for work that touches no library code.** `scripts/build.mjs`
+  injects `__SDK_VERSION__` from `package.json`, so the version `getDiagnostics()`
+  reports is part of the artifact: leaving this work unreleased would keep
+  shipping `0.21.0` while the repository moved on. It also retires the one
+  hand-verified path phase 80 left behind.
+- Freeze checklist, run on this branch: `pnpm check` → typecheck + build + 37
+  files / 860 tests + 5 perf gates; `pnpm lint` clean; `pnpm test:coverage` →
+  98.68 / 96.16 / 98.54 / 99.45, **identical to 0.21.0** because `src/` did not
+  move; `pnpm test:e2e` → **36 passed** (up from 32: the four React cases);
+  `pnpm bench` 28/28; `pnpm verify:compat` green against `v0.20.97`;
+  `pnpm verify:pack` green; public-registry `pnpm audit --audit-level high` clean;
+  `git diff --check` clean; `tests/documentation.test.ts` 17/17 with en/zh
+  list-item parity intact.
+- **The browser-bench gate failed once and the second run explained it.**
+  `bench:compare --fail-above-pct 50` reported
+  `publish/shared/perMessageMs 37.1 → 66.7 (+79.8%)` with every other metric flat
+  or improved (−2.9%, 0.0%, −0.7%, −3.6%) — the single-metric-up-everything-else-
+  down shape the release checklist already documents as this metric's noise mode.
+  The next run of the same tree came in at 38.8 ms and every metric improved or held
+  (gate OK). No library file changed on this branch, so no regression was available
+  to find; `pnpm bench:trend` regenerated both trend docs from 49 reports.
+- Prepare commit contents: `package.json` version, `CHANGELOG.md` (`Unreleased` →
+  `## [0.21.1]`), `docs/roadmap.md` + `docs/zh/roadmap.md` delivered scope, both
+  `docs/benchmarks.md`, this entry.
+- Risks / rollback: dev-only surface plus the injected version string. If the vendor
+  bundle were defective, only `examples/react` and its four browser cases would
+  break; `dist/` is untouched. npm is immutable — a defect ships as `0.21.2` and
+  `v0.21.1` is never moved.
+- Next after publish: the standing dependency/security patrol, and the
+  `typescript-eslint` peer-range re-check that gates TypeScript 7.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

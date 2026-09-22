@@ -24,6 +24,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Perf gates | `pnpm test:perf` (own step — absolute-ms ceilings need an unscheduled core) |
 | Watch tests | `pnpm test:watch` |
 | E2E test | `pnpm test:e2e` (Playwright, requires `pnpm build` first) |
+| Bundle example vendor deps | `pnpm build:examples` (React for `examples/react`; run by `pnpm examples` and `pnpm test:e2e`) |
 | Run demo | `pnpm examples` → http://localhost:4173/examples/demo/ (adapter pages: `/examples/react/`, `/examples/vue/`) |
 
 ## Directory layout

@@ -2,20 +2,20 @@
 
 # Browser Benchmark Trend
 
-> Data through 2026-09-22, from the 46 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
+> Data through 2026-09-22, from the 49 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
 
 The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50`, which compares the newest report against the median of the same metric in the preceding reports (50% ceiling absorbs shared-runner noise; a single previous report was a fragile baseline because the in-page hot-path metrics alternate between a fast and a slow mode on identical code). This doc records the long-run picture: values are per-metric latencies where lower is better, and the last column is the best run inside the most recent 5 reports — not an all-time record, because the in-page matrix changed measurement semantics in early September 2026 and older reports are not comparable.
 
 <!-- BENCH-TREND:BEGIN (machine-generated table) -->
 | Metric | Previous (ms) | Latest (ms) | Δ | Best of last 5 runs (ms) |
 |---|---|---|---|---|
-| publish per-message (ms, lower is better) — dedicated | 55.7209 | 55.1633 | -0.56 | 46.6942 |
-| publish per-message (ms, lower is better) — shared | 37.1139 | 39.5561 | +2.44 | 33.7528 |
-| wildcard dispatch ×1000 (ms, lower is better) | 6.5 | 7 | +0.50 | 6.5 |
-| publishBatch ×1000 (ms, lower is better) | 4.5 | 5.1 | +0.60 | 4.5 |
-| dedup ×1000 (ms, lower is better) | 16.6 | 12.1 | -4.50 | 12.1 |
-| trace + publish ×1000 (ms, lower is better) | 5.3 | 4.8 | -0.50 | 4.8 |
-| first-packet cold dispatch (ms, lower is better) | 0.1 | 0 | -0.10 | 0 |
+| publish per-message (ms, lower is better) — dedicated | 63.4052 | 51.1936 | -12.21 | 51.1936 |
+| publish per-message (ms, lower is better) — shared | 66.7386 | 38.8451 | -27.89 | 37.1139 |
+| wildcard dispatch ×1000 (ms, lower is better) | 6.8 | 6.7 | -0.10 | 6.2 |
+| publishBatch ×1000 (ms, lower is better) | 4.7 | 4.6 | -0.10 | 4.1 |
+| dedup ×1000 (ms, lower is better) | 14.7 | 12.8 | -1.90 | 12.1 |
+| trace + publish ×1000 (ms, lower is better) | 5.3 | 4.9 | -0.40 | 4.8 |
+| first-packet cold dispatch (ms, lower is better) | 0 | 0 | +0.00 | 0 |
 <!-- BENCH-TREND:END -->
 
 Notes:

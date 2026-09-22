@@ -1,6 +1,12 @@
 # Roadmap
 
-0.21.0 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.1 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.1 delivered scope
+
+- No library behavior changed; the shipped delta is the example, test and documentation surface. `pnpm build:examples` bundles `react` + `react-dom/client` out of the local install into a gitignored vendor module, replacing the `esm.sh` imports that had kept `examples/react` unloadable on a network-less CI runner — and had it running React 18 while the adapter tests run 19.
+- One set of four browser cases now drives both example pages (fan-out, reactive rebind that leaves the old channel with no server subscriber, delivery after the owning tab closes, and the cleared-topic-box fallback), because the React page gained the ids, the `?topic=` override and the `__reactBus` diagnostics hook the Vue page already exposed. A failure that hits one page and not the other now localizes to the adapter rather than to the library, and the fallback leg is mutation-checked on each page.
+- `docs/getting-started.md` (en + zh) states which pages the browser suite covers, and the `0.21.0` release notes' reference to a `cross-tab-worker-databus/react` export — one this package never had, the real subpath being `cross-tab-worker-databus/hooks` — is corrected in `Unreleased`, since published notes are not rewritten.
 
 ## 0.21.0 delivered scope
 
