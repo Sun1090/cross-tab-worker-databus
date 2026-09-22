@@ -6557,6 +6557,39 @@ corroborates the 26-spec collection.)
   Product question #194 and the TypeScript 7 re-check are unchanged.
 - Updated: 2026-09-23.
 
+## Phase 120 / Two zero-count election fallbacks, closed by the compiler rather than a test
+
+- Version: comments only; no behaviour change. Branch `test/self-election-fallback`, off `b2d382c`
+  (main after #200), while PR #201 is still open.
+- `subscribe()`'s and `reconcileSubscriptions()`'s `selectLeastLoadedWorker(…) ?? this.currentRecord`
+  are the two `cluster.ts` arms that most look like a missing test: an ownership election silently
+  falling back to self is exactly the shape that hides a routing bug. They are dominated, and the
+  dominator is inside this file: `subscribe()` returns early unless `started`,
+  `reconcileSubscriptions()` is reached only through `reconcile()` which does the same, and
+  `readWorkers()` appends this worker's own record whenever storage names nobody while started. The
+  candidate list therefore cannot be empty, so the election cannot answer `undefined`.
+- A counterexample was built before writing that down: two runtimes, time advanced so the peer's
+  reconcile prunes this worker's record, then the peer stops cleanly, leaving zero worker records in
+  storage. `subscribe()` then saw `workers: ["worker-a"]` — its own record, re-supplied by
+  `readWorkers()` — and elected itself through the *left* operand, so the probe returned `true` without
+  ever touching the right arm. Coverage on the probe read `[2,0]` and `[1,0]`, unchanged.
+- Measured twice, in the order that matters: deleting both `??` arms leaves 37 files / 883 tests green,
+  because vitest transpiles without type checking; `tsc --noEmit` on the same tree fails with five
+  errors (`Argument of type 'WorkerRecord | undefined' is not assignable to parameter of type
+  'WorkerRecord'` at both `writeRoute` calls, plus `'owner' is possibly 'undefined'`). So the invariant
+  is checked — by the compiler, at the call sites that consume the value — and the honest fix if anyone
+  wants the arm covered by nothing at all is a non-null assertion, which trades a checkable claim for an
+  unchecked one. Recorded rather than pinned; no coverage movement claimed.
+- Changed files: `src/core/cluster.ts` (two comments), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 883 tests + 5 perf gates), `pnpm lint`
+  clean, plus the two mutation runs and the probe described above.
+- Risk / rollback: `git revert`; nothing observes a comment.
+- Next: `cluster.ts` still reports 21 zero-count arms, of which 5 are the `if` legs at `activate()`,
+  `handoffAssignedTopics()`, `removeLifecycleListeners()`, `reconcile()` and `writeRoute()`; the rest are
+  the `??`/conditional-spread family this phase just characterised, so a future pass should test whether
+  each is dominated by an in-file invariant before treating it as a gap.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

@@ -431,6 +431,16 @@ export class WorkerClusterRuntime {
     // A missing live owner cannot participate in a strict handoff. Assign and
     // subscribe immediately; pagehide uses handoffAssignedTopics() while the
     // old owner is still present when release ordering is required.
+    //
+    // The `?? this.currentRecord` right arm has never executed, and the reason is
+    // the `readWorkers()` call above: while `started` — which the top of this
+    // method asserts — it appends this worker's own record when storage names
+    // nobody, so `activeWorkers` cannot be empty and the election cannot return
+    // undefined. `reconcileSubscriptions()` holds the identical pair for the same
+    // reason. Deleting both fallbacks leaves the suite green (vitest does not type
+    // check), but `tsc --noEmit` then rejects `writeRoute(…, owner, …)` and
+    // `owner.workerId` as `WorkerRecord | undefined`: the fallback is what the
+    // call sites' types rest on, which is why it is recorded rather than pinned.
     this.writeRoute(topicKey, owner, undefined, (existingRoute?.generation ?? 0) + 1);
     this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
     this.notifyRegistry();
@@ -1061,6 +1071,10 @@ export class WorkerClusterRuntime {
         // A route invalidated by owner departure or heartbeat expiry is
         // recovered immediately. Graceful pagehide uses the strict ACK path in
         // handoffAssignedTopics(), where the departing owner is still known.
+        // The `?? this.currentRecord` above is never taken, for the reason
+        // recorded at `subscribe()`'s identical pair: `reconcile()` runs only
+        // while started, and `readWorkers()` supplies this record when storage
+        // names nobody.
         this.writeRoute(topicKey, owner, undefined, (route?.generation ?? 0) + 1);
         this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
         this.notifyRegistry();
