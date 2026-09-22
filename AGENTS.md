@@ -168,6 +168,16 @@ Four message types on one channel per cluster:
 | REGISTRY | broadcast | Trigger immediate reconciliation |
 | ROUTE_RELEASED | point-to-point (old owner → new owner) | Handoff ACK |
 
+The channel is unauthenticated — any same-origin script can post into it — so a receiving runtime
+treats frame fields as attacker-controlled except where it checks them. Two invariants carry that
+weight: `topicKey` must equal `createOpaqueKey(topic)`, because ownership is authorized by the route
+stored under `topicKey` while the transport is named by `topic`, and a mismatch is therefore a
+substitution rather than a variant; and `targetWorkerId` must name this worker. `handleControlMessage`
+drops anything violating the first. When adding a field the receiver acts on, ask which of those two
+it belongs to, and pin the forged-frame case — `tests/cluster.test.ts`'s
+"drops a control frame whose topicKey disagrees with its topic" is the shape, and it must fail when the
+guard comes out.
+
 ## Reconcile loop (3s default)
 
 Every heartbeat tick: prune stale workers (TTL), orphaned subscribers (no live tab), orphaned routes (no subscribers + expired TTL); refresh role; re-send unconfirmed CONTROL/SUBSCRIBE; recompute load. Write to worker/route/subscriber storage also broadcasts a REGISTRY nudge so peers reconcile immediately instead of waiting for the next heartbeat.

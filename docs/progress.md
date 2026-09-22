@@ -5856,6 +5856,39 @@ corroborates the 26-spec collection.)
   and the same question applies to `topicKey` versus `topic`.
 - Updated: 2026-09-22.
 
+## Phase 103 / A forged control frame could rename the channel an owner subscribes
+
+- Version: behaviour change, so the next patch release is now owed (see
+  `project-release-held-at-0-21-4`). Branch `fix/control-frame-key-consistency`, off `5650274` (#180).
+- Phase 102's follow-up question — which fields of a received frame are trusted — had a real answer.
+  `handleControlMessage` validated `targetWorkerId` and, for `SUBSCRIBE`, the durable route named by
+  `message.topicKey`; everything else it acted on came from the frame, including `message.topic`, which
+  is what `rememberTopic()`, `assignedTopics`, and the transport subscription are named by. Since
+  `topicKey` is `createOpaqueKey(topic)`, a `BroadcastChannel` post carrying a *real* key next to an
+  *arbitrary* topic passed the authorization that was keyed by the key and then substituted the
+  plaintext. Same-origin, no credentials, one frame.
+- Fix is the invariant, not a denylist: a control frame is dropped unless
+  `createOpaqueKey(message.topic) === message.topicKey`. Senders already satisfy it by construction —
+  `cluster.ts` computes the key from the topic in both places a frame is built — which is what makes
+  the check safe to apply to every action rather than to `SUBSCRIBE` alone.
+- Verified in both directions. With the guard the new test passes; with the source restored to `HEAD`
+  it fails as `expected "vi.fn()" to not be called at all, but actually been called 1 times`, so the
+  hole is demonstrated rather than argued. Whole suite green with it in place — 37 files / 876 tests,
+  `pnpm typecheck` and `pnpm lint` clean — including the coordination fuzzer, which forges frames
+  deliberately, and the legacy-protocol tests, which omit `protocolVersion` but never the key/topic
+  pairing. Coverage moved up rather than down: whole-suite 98.94 / 96.57 / 99.26 / 99.65 →
+  98.98 / 96.63 / 99.26 / 99.69, `cluster.ts` branches 94.16 → 94.22.
+- Changed files: `src/core/cluster.ts`, `tests/cluster.test.ts`, `AGENTS.md` (the protocol section now
+  states the two invariants a receiver checks and asks the next field-adder which one it belongs to),
+  `CHANGELOG.md`, `docs/progress.md`.
+- Risk / rollback: a conforming peer cannot be broken by the check unless it builds keys some other
+  way, and nothing in this repository or the packed ESM/CJS artifacts does; `git revert` is the
+  rollback and there is no storage or wire-format migration.
+- Next: cut the patch release this earns (version → CHANGELOG → notes → full freeze → tag → publish →
+  `verify:published`), then resume the 13-arm ledger with the same "what does the receiver trust"
+  question applied to the `EVENT` fan-out path and to `message.items` in batched `PUBLISH`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
