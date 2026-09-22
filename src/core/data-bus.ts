@@ -506,6 +506,20 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     for (const topic of this.topicHandlers.keys()) {
       // cluster.subscribe() can synchronously invoke onControl for a
       // self-owned topic, so a callback may supersede this lifecycle.
+      //
+      // Two superseding callbacks were built and measured, and neither one makes
+      // this `break` observable: a re-entrant `stop()` (the transport received
+      // ['first'] with the guard live *and* with it disabled, because a stopped
+      // cluster's `subscribe()` is inert, so the iteration it prevents would have
+      // done nothing), and a re-entrant `start()` (['first', 'second'] both ways,
+      // because the newer lifecycle replays `second` itself and
+      // `subscribeTransport()` absorbs the duplicate the old loop would have
+      // issued). That is "executing and redundant in the reachable scenarios",
+      // not "dominated": it is the only thing standing between a superseded
+      // opening and issuing subscriptions at whichever transport is currently
+      // installed, which the duplicate gate happens to cover today. Kept for that
+      // reason, and the three start()/stop()/cluster.start() guards above it are
+      // separately pinned, so a regression in this loop's job shows up there.
       if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping) break;
       this.cluster.subscribe(topic);
     }
