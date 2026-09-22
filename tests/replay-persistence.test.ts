@@ -15,6 +15,19 @@ function message(topic: string, value: number, timestamp?: number): DataBusMessa
   return { topic, data: { value }, ...(timestamp === undefined ? {} : { timestamp }) };
 }
 
+/** Assert a promise rejects with `expected`, raced against a real-timer
+ * watchdog. Used where a leg's failure mode is an operation that never settles:
+ * deleting the leg throws out of an IndexedDB handler, so the plain assertion
+ * would report a bare test timeout that names nothing instead. */
+async function expectRejectedSettling(promise: Promise<unknown>, expected: string) {
+  const outcome = await Promise.race([
+    promise.then(() => 'resolved', () => 'rejected'),
+    new Promise<string>(resolve => setTimeout(() => resolve('hung'), 500))
+  ]);
+  expect(outcome).toBe('rejected');
+  await expectRejectionMessage(promise, expected);
+}
+
 describe('createIndexedDbReplayPersistence', () => {
   let factory: IDBFactory;
 
@@ -360,6 +373,96 @@ describe('createIndexedDbReplayPersistence', () => {
     return Object.assign(wrapped, { disable: () => { control.disabled = true; } });
   }
 
+  /** Wrap the real factory so the first transactions the adapter starts report
+   * their abort on a schedule instead of on the next microtask. A real
+   * implementation queues each event of an aborted transaction as its own task,
+   * so a handler can run long after the adapter invalidated that connection and
+   * opened another; `makeBrokenFactory` dispatches inside one microtask batch
+   * and cannot express that gap. `delaysMs` is consumed per transaction in
+   * creation order and a transaction past the end of the list is left healthy.
+   * Signalled transactions are never forwarded to the real transaction, because
+   * its own completion would settle the operation before the scheduled abort. */
+  function makeScheduledFailureFactory(delaysMs: number[]) {
+    // The adapter captures the factory at creation time, so a healthy reopen
+    // still has to go through this object.
+    const control = { disabled: false };
+    let openCalls = 0;
+    let transactions = 0;
+    const wrapped = {
+      open(name: string, version?: number) {
+        openCalls += 1;
+        if (control.disabled) return factory.open(name, version);
+        const request = factory.open(name, version);
+        const stub: {
+          onupgradeneeded: unknown;
+          onsuccess: ((event: unknown) => void) | null;
+          onerror: ((event: unknown) => void) | null;
+          result: IDBDatabase | null;
+          error: unknown;
+        } = { onupgradeneeded: null, onsuccess: null, onerror: null, result: null, error: null };
+        request.onupgradeneeded = () => {
+          stub.result = request.result;
+          (stub.onupgradeneeded as ((event: unknown) => void) | null)?.({ target: stub });
+        };
+        request.onsuccess = () => {
+          const realDb = request.result;
+          stub.result = new Proxy(realDb, {
+            get(target, prop) {
+              if (prop === 'transaction') {
+                return (storeNames: string, txMode: IDBTransactionMode) => {
+                  const delay = transactions < delaysMs.length ? delaysMs[transactions] : null;
+                  transactions += 1;
+                  if (delay === null) return target.transaction(storeNames, txMode);
+                  const abortError = new Error('transaction aborted');
+                  const succeed = () => {
+                    const requestStub: {
+                      onsuccess: ((event: unknown) => void) | null;
+                      onerror: ((event: unknown) => void) | null;
+                      result: unknown[];
+                    } = { onsuccess: null, onerror: null, result: [] };
+                    queueMicrotask(() => requestStub.onsuccess?.({ target: requestStub }));
+                    return requestStub;
+                  };
+                  const dispatch = (handler: ((event: unknown) => void) | null) => {
+                    if (handler === null) return;
+                    if (delay === 0) queueMicrotask(() => handler({ target: { error: abortError } }));
+                    else setTimeout(() => handler({ target: { error: abortError } }), delay);
+                  };
+                  return {
+                    objectStore: () => ({
+                      get: succeed,
+                      getAll: succeed,
+                      put: () => undefined,
+                      delete: () => undefined,
+                      clear: () => undefined
+                    }),
+                    oncomplete: null as IDBTransaction['oncomplete'],
+                    set onerror(value: IDBTransaction['onerror']) {
+                      dispatch(value as unknown as ((event: unknown) => void) | null);
+                    },
+                    set onabort(value: IDBTransaction['onabort']) {
+                      dispatch(value as unknown as ((event: unknown) => void) | null);
+                    },
+                    get error() { return abortError; }
+                  };
+                };
+              }
+              const value = Reflect.get(target, prop);
+              return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+            }
+          });
+          stub.onsuccess?.({ target: stub });
+        };
+        request.onerror = () => stub.onerror?.({ target: request });
+        return stub;
+      },
+      get openCalls() { return openCalls; }
+    };
+    return Object.assign(wrapped, {
+      disable: () => { control.disabled = true; }
+    });
+  }
+
   it('invalidates the connection when transaction construction fails', async () => {
     const broken = makeBrokenFactory('transaction-throws');
     // The adapter captures the factory at creation time, so the broken
@@ -506,6 +609,41 @@ describe('createIndexedDbReplayPersistence', () => {
     broken.disable();
     await persistence.append(message('t', 7));
     expect((await persistence.load()).map(item => item.data.value)).toEqual([7]);
+  });
+
+  it('keeps the connection a later operation reopened when an older signal lands late', async () => {
+    // Three loads share the first connection and its transactions report their
+    // abort at 0ms, 15ms and 40ms. The first invalidation runs while the cache
+    // still names that connection. The second finds the cache already empty —
+    // `invalidate` has no pointer to drop, and reading it unguarded would throw
+    // out of the abort handler. Only then does a healthy append reopen and
+    // repopulate the cache, so the third finds a *different*, live connection
+    // cached: the identity check is what keeps that stale signal from closing it
+    // and evicting it, and the open count below is the observable of either
+    // happening. Deleting the check makes this test report a third open.
+    const scheduled = makeScheduledFailureFactory([0, 15, 40]);
+    (globalThis as { indexedDB?: unknown }).indexedDB = scheduled;
+    const persistence = createIndexedDbReplayPersistence<{ value: number }>({
+      dbName: 'late-signal-db',
+      maxPerTopic: 4
+    });
+
+    const first = persistence.load();
+    const second = persistence.load();
+    const third = persistence.load();
+
+    await expectRejectedSettling(first, 'transaction aborted');
+    await expectRejectedSettling(second, 'transaction aborted');
+
+    scheduled.disable();
+    await persistence.append(message('a', 9));
+    expect(scheduled.openCalls).toBe(2);
+
+    await expectRejectedSettling(third, 'transaction aborted');
+
+    expect(scheduled.openCalls).toBe(2);
+    expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
+    expect(scheduled.openCalls).toBe(2);
   });
 
   it('falls back to a generic message when opening fails without an error object', async () => {
