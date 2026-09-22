@@ -407,6 +407,10 @@ export class ReplayManager<TData = unknown> {
    * entries past the retention window first. Failures are reported but do not
    * block startup — the bus runs with whatever survived. */
   private async hydrate(epoch: number, generation: number): Promise<void> {
+    // Uncovered, and dominated: the only caller is `requestHydration()`, which
+    // tests the same pair immediately before invoking this, and `hydrate` is
+    // private. The checks stay because the body reads both through `!`
+    // assertions, so the guard is what makes them sound for a future caller.
     if (!this.buffers || !this.persistence) {
       return;
     }
@@ -416,6 +420,12 @@ export class ReplayManager<TData = unknown> {
           await this.withPersistenceRetry(PERSISTENCE_OPERATION.CLEAR_BEFORE, () => this.persistence!.clearBefore!(this.now() - this.retentionMs!));
         }
         const loaded = await this.withPersistenceRetry(PERSISTENCE_OPERATION.LOAD, () => this.persistence!.load());
+        // Uncovered. `withPersistenceRetry` re-checks this same generation after
+        // the operation resolves and converts any failure into this same error, so
+        // the only window left is a bump landing in the microtask gap between that
+        // check and this line. `suspend()` is the sole bump site and it also bumps
+        // the epoch, so the next line would catch it — the difference is a
+        // reported cancellation vs. a silent drop, which is why this stays.
         if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
         if (epoch !== this.hydrationEpoch) return;
         const loadedByTopic = new Map<string, DataBusMessage<TData>[]>();
@@ -456,13 +466,23 @@ export class ReplayManager<TData = unknown> {
         this.hydrationFailed = false;
       } catch (error) {
         if (generation !== this.retryGeneration) {
+          // The `: new PersistenceRetryCancelledError()` arm is uncovered and
+          // dominated: `withPersistenceRetry`'s own catch converts any failure
+          // that arrived after a generation bump into that error before it can
+          // reach here, so `error` is already one. The wrap stays because this
+          // branch's contract is "report a cancellation", not "report whatever
+          // the backend happened to throw".
           this.onPersistenceError(
             error instanceof PersistenceRetryCancelledError ? error : new PersistenceRetryCancelledError()
           );
           return;
         }
         // A clear/unsubscribe invalidated this snapshot and owns the observable
-        // error. Do not report it as a second, stale hydration failure.
+        // error. Do not report it as a second, stale hydration failure, and do
+        // not let it set the completion state the replacement session owns —
+        // that latch is what would suppress the newer load. Pinned by
+        // tests/replay-manager.test.ts's 'does not let a superseded hydration
+        // failure speak for the replacement session'.
         if (epoch !== this.hydrationEpoch) return;
         this.onPersistenceError(error);
         this.hydrationComplete = true;
@@ -480,6 +500,11 @@ export class ReplayManager<TData = unknown> {
   /** Coalesce retention cleanup: the newest cutoff wins while one pass runs,
    * so a burst of publications issues at most one clearBefore transaction. */
   private scheduleRetentionCleanup(cutoff: number): void {
+    // Uncovered, and dominated by both callers: `record()` checks
+    // `this.persistence.clearBefore` before calling, and `start()` checks it
+    // (plus `persistence`) before arming the sweep that is the third caller.
+    // It stays because the loop below reads both through `!` assertions, so this
+    // is the statement that they hold for the whole pass.
     if (!this.persistence?.clearBefore) return;
     if (this.retentionCutoff === null || cutoff > this.retentionCutoff) {
       this.retentionCutoff = cutoff;
@@ -522,6 +547,12 @@ export class ReplayManager<TData = unknown> {
     while (true) {
       attempt += 1;
       try {
+        // Uncovered, and dominated on every pass: the first iteration captures
+        // `generation` two statements above with no await between, and a later
+        // iteration is only reached through the identical check at the end of the
+        // catch, which has no await between it and this line. It is the loop's
+        // "never issue an operation for a dead lifecycle" statement, so it stays
+        // where a future await at the top of the body would make it real.
         if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
         const result = await operation();
         // A lifecycle transition may complete while an async backend operation

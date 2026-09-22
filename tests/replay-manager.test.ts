@@ -674,6 +674,49 @@ describe('ReplayManager — hydration', () => {
     expect(received).toEqual([1]);
     expect(manager.getStats()).toMatchObject({ messages: 1 });
   });
+
+  it('does not let a superseded hydration failure speak for the replacement session', async () => {
+    // The failure-path mirror of the test above. resetBuffers() bumps the
+    // hydration epoch but not the retry generation, so a rejection arriving
+    // after the reset belongs to a dead snapshot. Reporting it would also set
+    // hydrationComplete/hydrationFailed — state the replacement session owns —
+    // and requestHydration() then short-circuits, so the newer load never runs
+    // and durable history stays missing for the rest of the instance's life.
+    let releaseLoad!: (error: unknown) => void;
+    let loadCalls = 0;
+    const persistence = {
+      load: (): Promise<ReadonlyArray<DataBusMessage<Payload>>> =>
+        new Promise((_resolve, reject) => {
+          loadCalls += 1;
+          releaseLoad = reject;
+        }),
+      append: async (_item: DataBusMessage<Payload>) => undefined
+    };
+    const { manager, persistenceErrors } = createManager({
+      persistence,
+      persistenceRetryMaxAttempts: 1
+    });
+    manager.start();
+    await settle(4);
+    expect(loadCalls).toBe(1);
+
+    manager.resetBuffers();
+    releaseLoad(new Error('stale load failed'));
+    await settle(10);
+
+    // Neither the report nor the completion state belongs to the live session.
+    expect(persistenceErrors).toEqual([]);
+
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle(4);
+    expect(loadCalls).toBe(2);
+    releaseLoad(new Error('live load failed'));
+    await settle(10);
+
+    expect((persistenceErrors as Error[]).map(error => error.message)).toEqual(['live load failed']);
+    expect(received).toEqual([]);
+  });
 });
 
 describe('ReplayManager — persistence appends', () => {
