@@ -100,6 +100,71 @@ describe('dual-format build artifacts', () => {
     expect(indexTypes).toContain('DataBusPersistenceHealth');
   });
 
+  it('reports the CJS-only default Worker failure with the actionable message', async () => {
+    // The bundled default Workers are located relative to the module:
+    // `new URL('./centrifuge.worker.js', import.meta.url)`. esbuild shims
+    // `import.meta` to `{}` in the CommonJS bundle, so that specifier cannot
+    // resolve and the transport has to surface its "pass workerFactory
+    // explicitly" error rather than a bare TypeError. The ESM build resolves the
+    // same URL and constructs the Worker — asserting both halves is what ties
+    // the failure to the module format instead of to a typo in the filename.
+    type Transport = {
+      start: (config: unknown, handlers: unknown) => void;
+      stop: () => void;
+    };
+    const constructed: string[] = [];
+    class StubWorkerGlobal {
+      readonly port = {
+        postMessage(): void {},
+        addEventListener(): void {},
+        removeEventListener(): void {},
+        start(): void {},
+        close(): void {}
+      };
+      constructor(url: URL | string) {
+        constructed.push(String(url));
+      }
+      postMessage(): void {}
+      addEventListener(): void {}
+      removeEventListener(): void {}
+      terminate(): void {}
+      close(): void {}
+    }
+    const previousWorker = globalThis.Worker;
+    const previousSharedWorker = globalThis.SharedWorker;
+    globalThis.Worker = StubWorkerGlobal as unknown as typeof Worker;
+    globalThis.SharedWorker = StubWorkerGlobal as unknown as typeof SharedWorker;
+    const handlers = { onMessage: () => undefined, onStatus: () => undefined, onError: () => undefined };
+    const config = { url: 'ws://example.invalid/connection/websocket' };
+    try {
+      const cjs = require('../dist/cjs/centrifuge.cjs') as {
+        CentrifugeWorkerTransport: new (options: { workerMode: string }) => Transport;
+      };
+      for (const [mode, message] of [
+        ['dedicated', 'default Centrifuge Worker URL is unavailable'],
+        ['shared', 'default Centrifuge SharedWorker URL is unavailable']
+      ] as const) {
+        expect(() => new cjs.CentrifugeWorkerTransport({ workerMode: mode }).start(config, handlers))
+          .toThrow(message);
+      }
+
+      const esm = (await import(/* @vite-ignore */ `../dist/${'centrifuge.js'}`)) as {
+        CentrifugeWorkerTransport: new (options: { workerMode: string }) => Transport;
+      };
+      for (const mode of ['dedicated', 'shared'] as const) {
+        const transport = new esm.CentrifugeWorkerTransport({ workerMode: mode });
+        expect(() => transport.start(config, handlers)).not.toThrow();
+        transport.stop();
+      }
+      expect(constructed).toHaveLength(2);
+      expect(constructed[0]).toContain('centrifuge.worker.js');
+      expect(constructed[1]).toContain('centrifuge.shared.worker.js');
+    } finally {
+      globalThis.Worker = previousWorker;
+      globalThis.SharedWorker = previousSharedWorker;
+    }
+  });
+
   it('materialises every path declared in package.json exports', () => {
     const pkg = require('../package.json') as {
       exports: Record<string, Record<string, string> | string>;
