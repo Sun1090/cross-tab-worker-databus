@@ -794,6 +794,58 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('never lets the connect timer tear down a handshake that already completed', async () => {
+    // Two protections keep a completed attempt from being timed out: `onopen`
+    // cancels the pending timer, and the callback's own `handshakeCompleted`
+    // term returns if it fires anyway. Either one alone is enough, so this
+    // pins the pair — deleting just the cancel or just the term still passes,
+    // deleting both makes a healthy socket die, which is the failure that
+    // actually reaches a user: a 30-second default budget on a connection that
+    // opened at 29s, reported as an error and aborted.
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeWebSocket[] = [];
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => {
+          const socket = new FakeWebSocket(url);
+          sockets.push(socket);
+          return socket;
+        }
+      });
+      const onStatus = vi.fn();
+      const onError = vi.fn();
+      const opening = Promise.resolve(
+        transport.start(
+          { url: 'wss://example.test/ws', connectTimeoutMs: 25 },
+          { onMessage: () => {}, onStatus, onError }
+        )
+      ).then(() => null, error => error);
+
+      sockets[0]!.open();
+      expect(await opening).toBeNull();
+      expect(onStatus).toHaveBeenCalledWith('connected');
+
+      onStatus.mockClear();
+      onError.mockClear();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(onStatus).not.toHaveBeenCalledWith('error');
+      expect(onError).not.toHaveBeenCalled();
+      expect(sockets[0]!.closeCalls).toBe(0);
+      expect(sockets[0]!.readyState).toBe(1);
+
+      // The socket is still the live one, so frames still go out on it.
+      transport.subscribe('room.a');
+      expect(JSON.parse(String(sockets[0]!.sent.at(-1)))).toEqual({
+        op: 'subscribe',
+        topic: 'room.a'
+      });
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('aborts a socket that errors before the handshake completes', async () => {
     const sockets: FakeWebSocket[] = [];
     const transport = new WebSocketTransport({

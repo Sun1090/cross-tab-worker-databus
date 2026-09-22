@@ -144,6 +144,15 @@ export class WebSocketTransport<TData = unknown>
         config.connectTimeoutMs ?? this.connection.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
       if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
         this.connectTimer = setTimeout(() => {
+          // The `handshakeCompleted` term cannot be reached today: `onopen`
+          // cancels this timer directly and again through `settleConnect()`, so a
+          // completed attempt has no live timer left to fire. Measured — deleting
+          // only that term leaves all 880 tests green, while deleting it *and*
+          // both cancels makes the transport report a phantom
+          // `onStatus('error')` and abort a socket that had already connected.
+          // The term stays because that is the asymmetric cost, and because
+          // tests/websocket.test.ts's 'never lets the connect timer tear down a
+          // handshake that already completed' now holds the pair.
           if (this.socket !== socket || this.handlers !== handlers || handshakeCompleted) return;
           handshakeFailed = true;
           this.connectTimer = null;
