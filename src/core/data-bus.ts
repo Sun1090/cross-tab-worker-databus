@@ -688,9 +688,22 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         // transport.stop().
         if (!isCurrentLifecycle() || this.stopping || this.suspended) return;
         // A stop we actually chained after has settled; this opening now owns
-        // the lifecycle. A stop created concurrently (e.g. by suspendTransport)
-        // is a different promise and must stay visible to later catch/resume
-        // paths so cleanup is not duplicated.
+        // the lifecycle. The condition is always true here, and that is a
+        // consequence of the epoch, not luck: `pendingStop` is written in
+        // exactly four places — this line, the failed-open path below,
+        // performStop()'s finally, and suspendTransport()'s chained stop — and
+        // the last three all sit behind a `lifecycleEpoch` increment
+        // (`beginStop()` and `suspendTransport()` each bump before they touch
+        // the field), while the failed-open write belongs to this same chain and
+        // runs strictly after this continuation. So an opening that arrives here
+        // with its captured epoch still current cannot have had a different stop
+        // chained meanwhile. The check is kept anyway, because the two ways it
+        // could go wrong are not symmetric: an unconditional clear silently
+        // depends on the invariant above, and if a future lifecycle transition
+        // ever stops without bumping the epoch it would drop a live
+        // `pendingStop` and let `stop()` issue a second `transport.stop()`.
+        // Deleting it moves no coverage number, because the false arm has never
+        // been taken and by that enumeration never can be.
         if (this.pendingStop === chainedPendingStop) this.pendingStop = null;
         // A fresh transport instance starts from scratch: until it reports
         // `connected` again its status is "not connected yet".
@@ -720,6 +733,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           if (this.status === WORKER_STATUS.ERROR) {
             throw new Error('Transport failed during startup.');
           }
+          // The two flags below can never be set for an opening that is still
+          // current, which is why the false arm of this guard has never been
+          // taken: `suspended` is assigned true in exactly one place, and
+          // `stopping` in two. `suspendTransport()` and `beginStop()` each
+          // increment `lifecycleEpoch` *before* raising the flag, so either one
+          // having run makes the check above return first; the third site is the
+          // failed-open cleanup below, which raises and lowers `stopping` inside
+          // this same chain's catch, strictly after this continuation. Kept as
+          // written, because the guard is the only thing that would notice a
+          // future transition that suspends without superseding — marking a
+          // hidden transport ready is the worse mistake.
           if (!this.suspended && !this.stopping) {
             this.recoveryGeneration += 1;
             this.lastSuccessAt = this.now();
