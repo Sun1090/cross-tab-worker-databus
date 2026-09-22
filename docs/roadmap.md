@@ -1,6 +1,15 @@
 # Roadmap
 
-0.21.6 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.7 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.7 delivered scope
+
+- A statement that ships inside the package was wrong. `docs/api.md` promised replay buffers are "cleared when the last handler for the topic unsubscribes" while also saying a wildcard replays across every matching buffered topic — and a pattern is not a topic: history is recorded under the concrete publication topic, so releasing `chat.*` clears none of it, and the durable cleanup is asked for a key no row lives under. The English and Chinese references now name which key each cleanup addresses, state that `maxPerTopic` bounds ring depth and never ring count, and list the calls that do reclaim it. The behaviour is unchanged (pattern-aware pruning would evict topics another live subscription owns), and a test pins the boundary so the text cannot drift back.
+- One genuine test gap closed: the hydration epoch check in `ReplayManager`'s catch had never executed. A buffer reset leaves the retry generation current, so a load failure arriving after it could report through the *replacement* session and latch the completion state that suppresses its load — a phantom persistence error plus durable history missing for the rest of the instance's life.
+- The receiver-side frame-validation rules (0.21.5 / 0.21.6) moved from maintainer notes into `docs/architecture.md` in both languages, including the two deliberate non-checks and what a non-JS peer must do to be accepted — the fail-closed guards drop frames without any response, which is invisible to an integrator unless it is written down.
+- Roughly a dozen zero-count legs across five modules were settled by experiment rather than assumption: one was pinned, and the rest were labelled at the site with the condition that covers them and what deleting it would cost. None was deleted, and no release claims a coverage win that was not measured.
+- The coverage gate went back to being a gate: floors of 96 / 92 / 96 / 97 had drifted 4.7 points under the tree's measured branch coverage, enough for a module's worth of lost tests to pass every check including the release one. Now 98 / 96 / 98 / 99, with the remaining margin reserved for the one runner-dependent input, and verified to fail when raised above measurement.
+- No behaviour, wire format, or storage layout changed in this release.
 
 ## 0.21.6 delivered scope
 
