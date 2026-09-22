@@ -17,7 +17,7 @@
  *
  * Requires `pnpm build` (imports from dist/) and `pnpm examples` to serve it.
  */
-import { createApp, defineComponent, h, ref } from 'vue';
+import { computed, createApp, defineComponent, h, ref } from 'vue';
 import { createCentrifugeDataBus } from '../../dist/centrifuge.js';
 import {
   useCrossTabDataBus,
@@ -34,7 +34,11 @@ const queryTopic = new URL(location.href).searchParams.get('topic');
 
 const App = defineComponent({
   setup() {
-    const topic = ref(queryTopic || 'vue.example');
+    const topicInput = ref(queryTopic || 'vue.example');
+    // The bus rejects an empty topic at its own boundary, so the page owns the
+    // fallback: clearing the box rebinds to the default rather than throwing
+    // inside the composable's reactive re-subscribe.
+    const topic = computed(() => topicInput.value.trim() || 'vue.example');
     const draft = ref('{"hello":"from-vue"}');
     const messages = ref([]);
     // The factory runs once per mounted instance; the composable stops the
@@ -70,7 +74,7 @@ const App = defineComponent({
           h('span', { id: 'receivedCount' }, `  已接收 ${messages.value.length} 条`),
           h('span', { id: 'topicBadge' }, `  Topic: ${topic.value}`)
         ]),
-        h('input', { id: 'topicInput', value: topic.value, placeholder: 'topic', onInput: event => { topic.value = event.target.value; } }),
+        h('input', { id: 'topicInput', value: topicInput.value, placeholder: 'topic', onInput: event => { topicInput.value = event.target.value; } }),
         h('input', {
           id: 'draftInput',
           value: draft.value,

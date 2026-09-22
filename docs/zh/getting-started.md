@@ -199,7 +199,7 @@ const bus = new CrossTabDataBus({
 
 在 `1.0.0` 之前，SDK 允许增量新增，并在明确的弃用周期后才移除 API。根导出面由回归套件与 tag 间兼容性门禁钉住，意外删除会令 CI 失败，而不是静默破坏既有消费者。
 
-当前处于弃用中：`subscribe()`、`publish()`、`publishBatch()` 的空 topic 字符串。传入 `""` 的调用仍然可用，实例首次遇到时会输出一条 `console.warn`，但没有任何 transport 能寻址空 channel，因此经由它的订阅永远不会收到消息——警告针对的是一个无法工作的订阅，后续小版本会直接拒绝它。
+当前没有处于弃用中的 API。项目唯一一次弃用周期已经结束：`subscribe()`、`publish()`、`publishBatch()` 的空 topic 字符串自 0.20.96 起每个实例告警一次，**自 0.21.0 起改为抛出 `TypeError`**。这些调用的其他语义都没有变化——拒绝发生在任何副作用之前，因此空 topic 不再请求 start、登记 handler，或为没有任何 transport 能寻址的 channel 写入路由。迁移方式是给出真实的 channel 名称；若 topic 来自用户输入或配置字段，请在调用前校验或回退，随仓库附带的示例页就是这样做的（`input.trim() || 'demo.flow'`）。
 
 升级时请注意：
 

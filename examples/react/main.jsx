@@ -52,7 +52,11 @@ function useCrossTabBus(topic) {
 }
 
 function App() {
-  const [topic, setTopic] = useState('react.example');
+  const [topicInput, setTopicInput] = useState('react.example');
+  // The bus rejects an empty topic at its own boundary, so the page owns the
+  // fallback: clearing the box rebinds to the default rather than throwing
+  // inside the subscription effect.
+  const topic = topicInput.trim() || 'react.example';
   const [draft, setDraft] = useState('{"hello":"from-react"}');
   const { status, messages, received, publish } = useCrossTabBus(topic);
 
@@ -78,8 +82,8 @@ function App() {
       `  已接收 ${received} 条`
     ),
     createElement('input', {
-      value: topic,
-      onChange: event => setTopic(event.target.value),
+      value: topicInput,
+      onChange: event => setTopicInput(event.target.value),
       placeholder: 'topic'
     }),
     createElement('input', {

@@ -175,6 +175,20 @@ export function assertHeartbeatInterval(value: number): void {
   );
 }
 
+/** Public topic boundary. An empty string is not a channel any transport can
+ * address: the cluster happily routes it as a literal topic key, but a Centrifuge
+ * channel or a WebSocket frame topic of `''` never matches a publication, so a
+ * subscription to it can never receive anything and a publication to it is
+ * dropped without a trace. Accepted-and-warned from 0.20.96, rejected from
+ * 0.21.0 so the mistake surfaces at the call instead of as missing data.
+ * @throws {TypeError} when `topic` is the empty string. */
+export function assertPublicTopic(operation: string, topic: string): void {
+  if (topic !== '') return;
+  throw new TypeError(
+    `CrossTabDataBus.${operation}("") addresses a channel no transport can route; use a non-empty topic.`
+  );
+}
+
 /** Validate that `value` is structured-cloneable. Throws early so config errors
  * surface on the main thread rather than silently failing inside the Worker
  * (where a DataCloneError would be reported as a generic Worker error with no

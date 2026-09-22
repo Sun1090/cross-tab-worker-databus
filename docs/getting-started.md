@@ -199,7 +199,7 @@ The fallback is opt-in because coordination payloads (plaintext topic names) the
 
 Before `1.0.0` the SDK is allowed to grow additively and, behind an explicit deprecation cycle, remove APIs. The root export surface is pinned by the regression suite and a tag-to-tag compatibility gate, so an unintended removal fails CI rather than silently breaking consumers.
 
-Currently deprecated: an empty topic string in `subscribe()`, `publish()` and `publishBatch()`. Calls with `""` still work and the bus warns once per instance, but no transport can address an empty channel, so nothing is ever delivered through it — the warning is about a subscription that cannot function, and a future minor will reject it outright.
+Nothing is currently deprecated. The one cycle the project has run is closed: an empty topic string in `subscribe()`, `publish()` and `publishBatch()` warned once per instance from 0.20.96 and is **rejected with a `TypeError` from 0.21.0**. Nothing else about those calls changed — the rejection happens before any other effect, so an empty topic no longer starts a transport, registers a handler, or writes a route for a channel no transport can address. To migrate, give the call a real channel name; if a topic comes from user input or a config field, validate or fall back before calling, the way the bundled example pages do (`input.trim() || 'demo.flow'`).
 
 When you upgrade:
 

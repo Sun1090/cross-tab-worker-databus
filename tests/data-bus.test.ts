@@ -1588,38 +1588,67 @@ describe('CrossTabDataBus', () => {
     expect(() => new CrossTabDataBus({ clusterKey: 'bad-max-float', transport: new FakeTransport(), recovery: { maxAttempts: 1.5 } })).toThrow('recovery.maxAttempts');
   });
 
-  it('warns once per bus about an empty topic and keeps the legacy behavior', async () => {
-    // The deprecation is announced, not enforced: `''` still flows through
-    // routing as a literal channel that reaches the transport. Two things have to
-    // hold — exactly one warning however many empty-topic calls follow, and the
-    // calls themselves behave exactly as they did before.
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'empty-topic' });
-      const transport = new FakeTransport<unknown>();
-      const bus = new CrossTabDataBus({
-        clusterKey: 'empty-topic',
-        environment: environment.environment,
-        initialConfig: {},
-        transport
-      });
-      bus.subscribe('', vi.fn());
-      await bus.ready();
-      bus.subscribe('', vi.fn());
-      bus.publish('', { a: 1 });
-      bus.publishBatch('', [{ data: { b: 2 } }, { data: { c: 3 } }]);
+  it('rejects an empty topic at every public boundary without touching the lifecycle', async () => {
+    // Deprecated in 0.20.96 with a warning, rejected from 0.21.0. Two things are
+    // under test: each boundary throws, and it throws *before* any side effect —
+    // an argument bug must not autostart a transport, register a handler, or
+    // write a route record for a channel nothing can address.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'empty-topic' });
+    const transport = new FakeTransport<unknown>(undefined, { supportsPublishBatch: true });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'empty-topic',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    const handler = vi.fn();
 
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(String(warnSpy.mock.calls[0]![0])).toContain('no transport can route');
-      expect(transport.subscribeCalls).toEqual(['']);
-      expect(transport.publishCalls.length).toBeGreaterThan(0);
-      // A non-empty topic never warns.
-      bus.subscribe('real.topic', vi.fn());
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      await bus.stop();
-    } finally {
-      warnSpy.mockRestore();
-    }
+    expect(() => bus.subscribe('', handler)).toThrow(TypeError);
+    expect(() => bus.subscribe('', handler)).toThrow('CrossTabDataBus.subscribe("") addresses a channel no transport can route');
+    expect(() => bus.publish('', { a: 1 })).toThrow('CrossTabDataBus.publish("")');
+    // Each message names the operation the caller used: a single-item batch
+    // delegates to publish(), so without its own guard it would be reported as
+    // `publish("")`.
+    expect(() => bus.publishBatch('', [{ data: { b: 2 } }])).toThrow('CrossTabDataBus.publishBatch("")');
+    expect(() => bus.publishBatch('', [{ data: { b: 2 } }, { data: { c: 3 } }])).toThrow('CrossTabDataBus.publishBatch("")');
+
+    expect(transport.startCalls).toBe(0);
+    expect(transport.subscribeCalls).toEqual([]);
+    expect(transport.publishCalls).toEqual([]);
+    expect(transport.publishBatchCalls).toEqual([]);
+    expect(bus.getHealthSummary().state).not.toBe('connected');
+
+    // A real topic is unaffected, including through the same code paths.
+    await bus.ready();
+    bus.subscribe('real.topic', handler);
+    bus.publish('real.topic', { a: 1 });
+    bus.publishBatch('real.topic', [{ data: { b: 2 } }, { data: { c: 3 } }]);
+    await Promise.resolve();
+    expect(transport.subscribeCalls).toEqual(['real.topic']);
+    expect(transport.publishCalls.map(call => call.topic)).toEqual(['real.topic']);
+    expect(transport.publishBatchCalls.map(call => call.topic)).toEqual(['real.topic']);
+    expect(handler).not.toHaveBeenCalled();
+    await bus.stop();
+  });
+
+  it('validates the batch topic ahead of the empty-array no-op', () => {
+    // `publishBatch(topic, [])` is documented to do nothing, and this is the only
+    // probe that distinguishes a guard placed before that return from one placed
+    // after it: with the guard moved down, every other empty-topic batch call
+    // still throws through publish()'s own check, because a non-empty batch
+    // funnels through publish() item by item.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'empty-batch' });
+    const transport = new FakeTransport<unknown>(undefined, { supportsPublishBatch: true });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'empty-batch',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    expect(() => bus.publishBatch('', [])).toThrow('CrossTabDataBus.publishBatch("")');
+    expect(transport.startCalls).toBe(0);
+    expect(transport.publishBatchCalls).toEqual([]);
   });
 
   it('resets recovery diagnostics after an explicit stop and restart', async () => {
