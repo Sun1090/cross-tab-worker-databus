@@ -149,6 +149,7 @@ Wire protocol (JSON text frames):
 
 - client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
 - server → client: the canonical publication is `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`. The legacy flat `{"topic":"...","data":...}` frame remains accepted. Frames without a string topic are ignored; malformed JSON is reported through `handlers.onError` without throwing.
+- A publication that carries its own string `topic` is addressed by **that** value rather than by the channel it arrived on — that is how a server delivering through a wildcard channel (`chat.*`) names the concrete topic. A payload whose top level happens to contain a `topic` string is therefore re-addressed, and dropped when no tab owns the resulting topic. On Centrifuge the channel normally arrives out of band, which is why the rule needs stating here: it is the one transport where "the topic was already in the frame" is not otherwise visible.
 
 When `data` is an `ArrayBuffer`, publish uses a binary frame with a small
 header (`0xc7`, UTF-8 topic length, topic, payload). Servers may echo the same

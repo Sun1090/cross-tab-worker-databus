@@ -135,6 +135,7 @@ const bus = createWebSocketDataBus({
 
 - client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
 - server → client：标准 publication 为 `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`；旧的扁平 `{"topic":"...","data":...}` 帧仍然兼容。没有字符串 topic 的帧会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
+- 自带字符串 `topic` 的 publication 会按**该值**寻址，而不是按它到达的 channel——这正是 server 通过通配 channel（`chat.*`）投递时指明具体 topic 的方式。因此顶层恰好含 `topic` 字段的负载会被重新寻址，若集群中没有任何 Tab 拥有重定向后的 topic，就会被丢弃。Centrifuge 的 channel 通常由客户端库在带外给出，这也是必须在此说明该规则的原因：只有在这条链路上，"topic 本来就写在帧里"这件事才可见。
 
 当 `data` 是 `ArrayBuffer` 时，publish 使用二进制帧：帧头为 `0xc7`，随后是
 UTF-8 topic 长度、topic 和 payload。服务器可以原样回显该帧；其他 payload 仍走

@@ -23,7 +23,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Unit test | `pnpm test` (vitest) |
 | Watch tests | `pnpm test:watch` |
 | E2E test | `pnpm test:e2e` (Playwright, requires `pnpm build` first) |
-| Run demo | `pnpm examples` → http://localhost:4173/examples/demo/ |
+| Run demo | `pnpm examples` → http://localhost:4173/examples/demo/ (adapter pages: `/examples/react/`, `/examples/vue/`) |
 
 ## Directory layout
 
@@ -76,6 +76,7 @@ tests/
   demo-centrifuge-server.test.ts # Demo server contract tests
 e2e/
   demo.spec.ts                  # Playwright multi-tab browser E2E
+  adapters.spec.ts              # Vue composables driven in real tabs (examples/vue)
 docs/
   architecture.md               # Detailed design doc (English + Chinese)
   api.md                        # Public API reference
