@@ -6229,10 +6229,13 @@ corroborates the 26-spec collection.)
   Phase 110's "measured, not reachable" and from the enumerated-dominated legs. Kept, because the
   redundancy is a property of today's two neighbours (an inert stopped cluster and a duplicate-absorbing
   gate), not of the loop.
-- Ledger after this pass: ten branch arms in `data-bus.ts` still carry a zero-count slot — seven
-  recorded as dominated by enumeration, two as measured-not-reachable (this one and Phase 110's), and
-  the remainder as the queued-start/stop-gate legs from earlier passes. Re-derived from
-  `coverage/coverage-final.json`, not from the line numbers quoted in older entries.
+- Ledger after this pass: **twelve** branch arms in `data-bus.ts` still carry a zero-count slot — the same
+  twelve as after Phase 108, because a measurement that concludes "not reachable" closes nothing. Two of
+  them are the legs Phases 110 and 111 measured; the rest are recorded in earlier entries as
+  dominated-by-enumeration or kept-for-asymmetric-failure. Corrected during Phase 112: this entry
+  originally said ten, which was the two worked legs being subtracted from the count as if measuring them
+  had covered them. Re-derived from `coverage/coverage-final.json`, not from the line numbers quoted in
+  older entries.
 - Changed files: `src/core/data-bus.ts` (comment), `CHANGELOG.md`, `docs/progress.md`. Also flips
   Phase 109's status line, which was written before the release shipped.
 - Verification: `pnpm check` clean (37 files / 879 tests + 5 perf gates), `pnpm lint` clean; the two
@@ -6249,6 +6252,44 @@ corroborates the 26-spec collection.)
   caller. `started` is the raw flag and reads true until that teardown's `finally` clears it; awaited,
   the summary is consistent (`started: false`, measured by the deleted test's own passing assertion).
   Nothing to reconcile.
+## Phase 112 / The receive-path rules existed only for maintainers
+
+- Version: documentation only; no behaviour change. Branch `docs/protocol-validation`, off
+  `origin/main` while PR #191 is still open.
+- Three arm hunts in a row came back as negative results, which is the signal to work the part of the
+  same subject that had no test or comment failure behind it: what an integrator is told. The
+  receiver-side rules added across 0.21.5 and 0.21.6 were written into code comments and `AGENTS.md`, and
+  `AGENTS.md` is the contributor contract — `docs/architecture.md`, the document that actually explains
+  the protocol to users, still described only the `CONTROL/SUBSCRIBE` route check and said nothing about
+  the other two.
+- Added to both language versions: the three checks as a table (target, key/topic pairing on **both**
+  point-to-point frame types, batch shape), the reason each exists stated as a consequence rather than a
+  rule, the two deliberate non-checks with their justification, and a short paragraph addressed to a
+  non-JS peer or a custom `ClusterEnvironment`: derive the key from the topic, never send an empty batch,
+  and expect a bad frame to vanish without a response.
+- The silently-dropped part is the substantive addition. Every one of these guards fails closed with no
+  reply, so an integrator whose custom sender computes `topicKey` differently sees "subscriptions never
+  confirmed", not an error — the failure mode is documented behaviour only if the document says so.
+- Changed files: `docs/architecture.md`, `docs/zh/architecture.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `git diff --check` clean; `pnpm check` clean (37 files / 879 tests + 5 perf gates),
+  `pnpm lint` clean and `pnpm verify:compat` clean, run because the change is prose-only and their
+  passing is the evidence that no code path moved.
+- Risk / rollback: documentation drift is the risk, so each claim here is traceable to a guard in
+  `src/core/cluster.ts` and to the tests that name them (`drops a control frame whose topicKey disagrees
+  with its topic`, `drops a ROUTE_RELEASED whose topicKey disagrees with its topic`,
+  `drops a batched PUBLISH whose items are not a usable batch`,
+  `never hands a non-array batch to the transport publish path`). `git revert` is the rollback.
+- Also corrected in passing: Phase 111 and its CHANGELOG bullet claimed the ledger stood at ten arms
+  after that pass. It is still twelve — the same twelve as after Phase 108 — because a hunt that concludes
+  "not reachable in the scenarios that reach it" covers nothing, and subtracting the legs worked from the
+  legs remaining is exactly the arithmetic error this project's ledger discipline exists to prevent. Both
+  entries now say twelve and say why the number did not move.
+- Verification of the count: re-derived from `coverage/coverage-final.json` on the rebased tree (`b` is an
+  object keyed by branch id, so an arm is `entry.b[id][i] === 0`; `entry.branches` does not exist).
+- Next: fold the TypeScript 7 re-verification (TS 7.0.2 published; `typescript-eslint` pins
+  `>=4.8.4 <6.1.0` on every channel including the canary `8.70.1-alpha.6`, so it remains
+  upstream-blocked) into the next dependency-inspection entry rather than a phase of its own. `pnpm
+  outdated` on this tree reports that one package and nothing else.
 - Updated: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
