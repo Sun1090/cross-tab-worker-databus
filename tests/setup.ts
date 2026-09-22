@@ -8,9 +8,15 @@
  * 100-seed floor and CI's 120s ceiling were decided by a clock that had been
  * advanced ~45 simulated seconds per seed elsewhere. Per-file `afterEach` hooks
  * only cover the describes that declare them, so this is the net for the ones
- * that do not — and the fuzzers additionally budget on `performance.now()`,
- * which no test in this repository fakes, so a future leak cannot move their
- * depth again.
+ * that do not.
+ *
+ * What this net does *not* cover is a clock read while a fake window is still
+ * open — and `vi.useFakeTimers()` moves `performance` as well as `Date` on the
+ * pinned Vitest 5 (measured: global `performance.now()` and
+ * `process.hrtime.bigint()` both advanced by the full 60 simulated seconds,
+ * while `node:perf_hooks`' untouched object read 216ms of real time). Restoring
+ * here is what makes a read at the *top* of a seed loop real; anything that
+ * samples inside a window uses `realNowMs()` from `tests/fakes.ts` instead.
  */
 import { afterEach, vi } from 'vitest';
 

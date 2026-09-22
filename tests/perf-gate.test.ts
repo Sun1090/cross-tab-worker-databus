@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { selectActiveWorkers, selectLeastLoadedWorker, topicMatchesPattern } from '../src/core/routing';
 import type { WorkerRecord } from '../src/core/types';
 import { createOpaqueKey } from '../src/core/hash';
+import { realNowMs } from './fakes';
 
 function makeWorkers(count: number): WorkerRecord[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -38,13 +39,21 @@ function makeWorkers(count: number): WorkerRecord[] {
  * the one that was not preempted, and a real regression is slow on *every*
  * repeat, so the minimum keeps the gate's teeth and drops its sensitivity to
  * load.
+ *
+ * The clock is `realNowMs()` from `tests/fakes.ts`, not the global
+ * `performance.now()`: these ceilings are absolute milliseconds, and a faked
+ * `performance.now()` reports simulated time, which would make a 200k-iteration
+ * loop measure ~0 and pass every gate here without running anything. This file
+ * opens no fake-timer window itself, so the exposure is a leaked one — that is
+ * `tests/setup.ts`'s job — but a sampling helper has no way to check where its
+ * worker's clock stands, so it reads the source that cannot move.
  */
 function bestOfMs(repeats: number, work: () => void): number {
   let best = Number.POSITIVE_INFINITY;
   for (let run = 0; run < repeats; run += 1) {
-    const start = performance.now();
+    const start = realNowMs();
     work();
-    best = Math.min(best, performance.now() - start);
+    best = Math.min(best, realNowMs() - start);
   }
   return best;
 }
