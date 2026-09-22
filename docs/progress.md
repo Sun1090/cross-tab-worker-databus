@@ -6242,6 +6242,13 @@ corroborates the 26-spec collection.)
 - Next: the remaining ten legs are documented as a set rather than hunted one at a time; the productive
   direction is a structural probe of what a *stopped-but-live-transport* state can do, which is the
   premise both measurements turned on.
+- The `state: 'stopped'` beside `started: true` this pass sampled by accident is resolved, not owed:
+  `getHealthSummary()` derives `state` as `!started || stopping ? stopped : …`, and `stopping` is the
+  authoritative in-flight signal the whole lifecycle enumeration rests on — every operation is already
+  rejected while teardown runs, so reporting HEALTHY there would contradict the verdict the bus gives the
+  caller. `started` is the raw flag and reads true until that teardown's `finally` clears it; awaited,
+  the summary is consistent (`started: false`, measured by the deleted test's own passing assertion).
+  Nothing to reconcile.
 - Updated: 2026-09-22.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
