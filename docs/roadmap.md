@@ -1,6 +1,15 @@
 # Roadmap
 
-0.21.4 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.5 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.5 delivered scope
+
+- A protocol hole closed, not a coverage leg: `handleControlMessage` authorized ownership from the durable route keyed by `message.topicKey` and then used `message.topic` as the plaintext to remember, assign, and hand to the transport. Because `topicKey` is `createOpaqueKey(topic)`, a single post onto a cluster's `BroadcastChannel` — unauthenticated, same-origin, no credentials — carrying a real key next to an arbitrary topic passed the check that was keyed by the key and renamed the channel the receiving worker subscribes to. Control frames are now dropped unless the pair agrees, which conforming senders satisfy by construction.
+- The same audit answered its follow-up question in the other direction and said so: `EVENT` is validated by shape only, because delivery still requires a local subscriber and the worst a forged frame buys is a publication on a topic this tab already watches — strictly inside what a same-origin script can do through the page's own bus. `AGENTS.md` records that distinction so the path is not "hardened" into breaking mixed-version peers.
+- A hang contract made explicit: `createStopPromise()`'s comment claimed `performStop()` "never rejects", and the rejection arm of the teardown gate had therefore never run in any test. It can reject — its `catch` reports through `reportError()`, which runs error subscribers, which are absorbed only by writing to `console.warn` — and on that path `resolveGate()` is the only thing that ever settles `await bus.stop()`. The comment now names the chain, and the test races the stop against a watchdog so deleting the leg fails loudly in 250ms instead of as a timeout.
+- The last leg of that reporting path is pinned too: with a console that has no `warn`, an unguarded log call would have raised a `TypeError` from inside the handler meant to contain a failure, escaping the dispatch loop into the transport's message callback.
+- Harness diagnosability, from a CI failure that could not be diagnosed: both seeded fuzzers now report sweep depth *while* running, because the post-loop truncation log cannot fire on the one event it exists to explain (a host killing the test on its own ceiling prints only `Test timed out`). A budget or ceiling change was deliberately deferred until that heartbeat says which of the two causes it is.
+- Ledger movement over the release: `data-bus.ts` uncovered branch arms 17 → 13 and uncovered functions 3 → 2, with three legs reclassified as dominated-by-enumeration rather than hunted, and one attempted construction measured, disproved, and reverted. Whole-suite branch coverage 96.41 → 96.63; 876 tests.
 
 ## 0.21.4 delivered scope
 
