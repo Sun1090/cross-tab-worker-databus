@@ -1247,6 +1247,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // history can attribute each entry to the tab that produced it. Locally
     // we publish first and dispatch second to keep the contract: a handler
     // called before the broadcast settled would still observe originTabId.
+    // A frame that already names its producer keeps it — `DataBusTransport` is a
+    // public extension point, and a proxying or replaying one delivers someone
+    // else's publication. Re-stamping here would attribute it to this tab, and
+    // the EVENT fan-out and replay history both inherit that. Pinned by
+    // 'keeps a producer stamp that arrives on the transport'.
     const stamped: DataBusMessage<TData> = message.originTabId === undefined
       ? { ...message, originTabId: this.cluster.tabId }
       : message;

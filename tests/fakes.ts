@@ -253,12 +253,17 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     if (this.stopGate) return this.stopGate;
   }
 
-  emit(topic: string, data: TData, messageId?: string, timestamp?: number): void {
+  /** Deliver an incoming frame. `originTabId` is passed only when the test wants
+   * a transport that reports a producer, which is what a proxying or replaying
+   * custom transport does — the core must keep that stamp instead of overwriting
+   * it with the receiving tab's own id. */
+  emit(topic: string, data: TData, messageId?: string, timestamp?: number, originTabId?: string): void {
     this.handlers?.onMessage({
       topic,
       data,
       ...(messageId ? { messageId } : {}),
-      ...(timestamp === undefined ? {} : { timestamp })
+      ...(timestamp === undefined ? {} : { timestamp }),
+      ...(originTabId === undefined ? {} : { originTabId })
     });
   }
 
