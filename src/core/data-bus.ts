@@ -532,6 +532,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   /** Return a cancellation-aware readiness view of the current queued start. */
   private getQueuedStartReady(): Promise<void> {
     const queued = this.queuedStart;
+    // Unreachable from today's only caller — `ready()` guards with the identical
+    // `if (this.queuedStart)` and calls this synchronously, with nothing in
+    // between that could run user code — so the rejection below has never been
+    // produced. Kept, because the two ways to drop it are not equal: without it
+    // a future second caller gets `TypeError: Cannot read properties of null`
+    // from the `.then` below, which is a formatter-shaped complaint about the
+    // internals rather than the documented "No queued start is in flight."
     if (!queued) {
       return Promise.reject(new Error('No queued start is in flight.'));
     }
@@ -556,6 +563,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /** Queue exactly one fresh start after an in-flight explicit stop settles. */
   private queueStartAfterStop(config: TConfig): Promise<void> {
+    // Also unreachable from the only caller: `start()` returns `this.queuedStart`
+    // one statement before it calls this, synchronously, so the dedupe below can
+    // never fire. Kept for the same reason as the check above, but the asymmetry
+    // is stronger here — dropping it would let a second caller queue a second
+    // restart, and the "exactly one queued start" contract is what keeps a
+    // burst of operations behind one stop from opening that many transports.
     if (this.queuedStart) return this.queuedStart;
     // No `.catch` on this await-then, and none is needed: `stopPromise` is
     // assigned a non-null value in exactly one place — stop()'s hand-resolved
