@@ -5976,6 +5976,54 @@ corroborates the 26-spec collection.)
   Phase 103 only sees the outer `topic`.
 - Updated: 2026-09-22.
 
+## Phase 106 / A batched PUBLISH frame could carry a batch that is not an array
+
+- Version: behaviour change inside the `CONTROL` receive path, so another patch is owed. Branch
+  `fix/control-frame-batch-shape`, off `origin/main` (`701b531`, the 0.21.5 release commit).
+- The question Phase 104 deferred — "each item carries its own metadata and the frame-level key check
+  only sees the outer `topic`" — had a different answer than expected, because the item *metadata* is
+  already harmless and the item *container* was not checked at all. `handleControlMessage` gated the
+  batch on `message.items && message.items.length > 0` and then either iterated it or passed it to
+  `onPublishBatch`. `publishBatch()`'s `Array.prototype.map` is the only producer, so anything else
+  reaching that branch is a hand-built frame on the unauthenticated cluster channel.
+- Two shapes, two different failures, both measured rather than argued. `{ length: 2, 0: {...} }` threw
+  `TypeError: message.items is not iterable` out of the runtime's own `BroadcastChannel` listener —
+  exactly the failure mode the `EVENT` path is deliberately lax about on purpose. `"ab"` did not throw:
+  it is iterable with a length, so it reached the batch handler as two one-character items whose `data`
+  is `undefined`, and the owning worker published them to the backend under its own session. A third,
+  quieter one: `items: []` satisfied neither half of the old test, fell out of the switch into the
+  single-publication tail, and published the frame's absent `data` — `undefined` — instead of nothing.
+- Guard: presence and shape are decided together — a frame that carries `items` at all must carry a
+  non-empty array, or it is dropped. Deciding them together is what makes the empty case safe; checking
+  only `Array.isArray` would still let `[]` reach a batch-capable transport, and checking only emptiness
+  keeps the throw. A cross-worker `publish(topic, undefined)` is untouched, because its frame has no
+  `items` key at all.
+- Three mutants, each killed by a different leg, which is the part worth recording: restoring the old
+  gate fails both new tests (the throw and the `"ab"` batch); keeping only `Array.isArray` fails just the
+  batch-handler test; keeping only the emptiness check fails just the array-like test. The emptiness
+  check is genuinely dominated on the no-handler leg — the loop runs zero times and returns either way —
+  so the test that falsifies it is the one with an `onPublishBatch` handler, and that asymmetry is now
+  written into the test's comment instead of being rediscovered.
+- Deliberately not done: validating item *content*. `{ data: anything }` is what a legitimate item looks
+  like, so a per-item shape check stops nothing a well-formed frame cannot already do, and it would buy
+  a false sense of the boundary. `messageId`/`timestamp` are forwarded only into `transport.publish()`,
+  and the receiving side already discards a non-string id and a non-finite timestamp in
+  `parseDataBusPublication`, so nothing downstream does arithmetic on them.
+- Changed files: `src/core/cluster.ts`, `tests/cluster.test.ts`, `AGENTS.md` (the protocol section gains
+  the third receiver-checked invariant and the reason item content is left alone), `CHANGELOG.md`,
+  `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 878 tests + 5 perf gates); `pnpm lint`
+  clean; `pnpm test:coverage` whole-suite 98.98 / 96.63 / 99.26 / 99.69 (unchanged at that precision),
+  `cluster.ts` branches 94.22 → 94.25; the two new tests fail against the pre-fix gate in three distinct
+  ways as described above.
+- Risk / rollback: strictly a narrowing of what the receiver accepts, and no sender in this repository,
+  in the packed ESM/CJS artifacts, or in the examples produces a non-array `items`. Rollback is
+  `git revert`; no storage or wire-format change, and no version has to be moved.
+- Next: the 13-arm `data-bus.ts` ledger (task #22), and a look at whether the same "presence implies a
+  contract" reading applies to the remaining optional frame fields (`data` on a `SUBSCRIBE`,
+  `protocolVersion` on the legacy path) before the next patch cut.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

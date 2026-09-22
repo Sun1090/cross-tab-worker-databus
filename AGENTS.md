@@ -178,6 +178,19 @@ it belongs to, and pin the forged-frame case — `tests/cluster.test.ts`'s
 "drops a control frame whose topicKey disagrees with its topic" is the shape, and it must fail when the
 guard comes out.
 
+A third check is the *shape* of an optional field rather than its value: a `CONTROL/PUBLISH` frame that
+carries `items` at all must carry a non-empty array of them, because `publishBatch()`'s
+`Array.prototype.map` is the only producer. Both halves of that sentence are load-bearing, and they are
+load-bearing on different legs — dropping a non-array is what keeps a `{ length: 2 }` value from throwing
+out of the message listener and a `"ab"` string from becoming two publications of `undefined`, while
+requiring non-empty is only visible when the runtime has an `onPublishBatch` handler (without one the loop
+runs zero times either way). Presence and emptiness are checked together for the same reason: a frame with
+`items` has no `data`, so letting an unusable batch fall through to the single-publication tail makes the
+owner publish `undefined`. Do not extend this to validating item *content*: `{ data: anything }` is what a
+legit batch looks like, so per-item shape checks would stop nothing a well-formed frame cannot do, and
+`messageId`/`timestamp` are forwarded only into `transport.publish()` — the receiving side already drops a
+non-string id and a non-finite timestamp in `parseDataBusPublication`.
+
 `EVENT` is deliberately *not* held to that standard, and this is decided rather than an oversight: it
 checks `eventType === PUBLICATION_EVENT` and the minimum payload shape (a `topic` string), and forwards
 the rest. Delivery then requires `cluster.hasLocalSubscriber(topic)` and reaches `dispatch()`, so the

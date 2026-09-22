@@ -77,6 +77,108 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('drops a batched PUBLISH whose items are not a usable batch', async () => {
+    // The batched branch gates on `message.items.length`, then iterates. Every
+    // sender builds `items` with `Array.prototype.map`, so a value with a length
+    // and no iterator reaches only from a hand-built frame — and here it throws
+    // out of the cluster's own message listener instead of publishing.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControl = vi.fn();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'batch-shape' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'batch-shape',
+      environment: env.environment,
+      tabId: 'tab-batch-shape',
+      workerId: 'worker-batch-shape',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    runtime.start();
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('batch-shape')}`);
+    const arrayLike = { length: 2, 0: { data: 'first' } };
+    expect(() => {
+      channel.postMessage({
+        type: CLUSTER_MESSAGE_TYPE.CONTROL,
+        sourceWorkerId: 'forged-peer',
+        targetWorkerId: 'worker-batch-shape',
+        action: 'PUBLISH' as WorkerControlAction,
+        topic: 'chat.a',
+        topicKey: createOpaqueKey('chat.a'),
+        items: arrayLike
+      } as unknown as WorkerClusterMessage);
+    }).not.toThrow();
+    // An empty batch is the other unusable shape, and the one the old gate let
+    // through: `items: []` failed `length > 0` and fell out of the switch into
+    // the single-publication tail, so the owner published the frame's absent
+    // `data` instead of nothing at all.
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'forged-peer',
+      targetWorkerId: 'worker-batch-shape',
+      action: 'PUBLISH' as WorkerControlAction,
+      topic: 'chat.a',
+      topicKey: createOpaqueKey('chat.a'),
+      items: []
+    } as unknown as WorkerClusterMessage);
+    channel.close();
+    await Promise.resolve();
+
+    expect(onControl).not.toHaveBeenCalled();
+    runtime.stop();
+  });
+
+  it('never hands a non-array batch to the transport publish path', async () => {
+    // A string satisfies both `items.length > 0` and iteration, so this frame
+    // does not throw — it walks the batch handler with one-character items whose
+    // `data` is `undefined`. The consequence is worse than the array-like case:
+    // the owner publishes nothing-of-interest to the backend under its own
+    // session, and the same-origin sender never had that channel at all.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControl = vi.fn();
+    const onPublishBatch = vi.fn();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'batch-string' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'batch-string',
+      environment: env.environment,
+      tabId: 'tab-batch-string',
+      workerId: 'worker-batch-string',
+      handlers: { onControl, onPublishBatch, onEvent: vi.fn() }
+    });
+    runtime.start();
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('batch-string')}`);
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'forged-peer',
+      targetWorkerId: 'worker-batch-string',
+      action: 'PUBLISH' as WorkerControlAction,
+      topic: 'chat.a',
+      topicKey: createOpaqueKey('chat.a'),
+      items: 'ab'
+    } as unknown as WorkerClusterMessage);
+    // The empty batch is the shape that only this leg can falsify: with no batch
+    // handler the loop below runs zero times either way, so `length === 0` is
+    // dominated there. Here it is the difference between dropping the frame and
+    // handing `[]` to a batch-capable transport, which posts a wire frame for it.
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'forged-peer',
+      targetWorkerId: 'worker-batch-string',
+      action: 'PUBLISH' as WorkerControlAction,
+      topic: 'chat.a',
+      topicKey: createOpaqueKey('chat.a'),
+      items: []
+    } as unknown as WorkerClusterMessage);
+    channel.close();
+    await Promise.resolve();
+
+    expect(onPublishBatch).not.toHaveBeenCalled();
+    expect(onControl).not.toHaveBeenCalled();
+    runtime.stop();
+  });
+
   it('keeps one topic owner and migrates it when the owner stops', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
