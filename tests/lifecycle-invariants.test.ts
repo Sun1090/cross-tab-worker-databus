@@ -92,12 +92,11 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   // loaded runner doubles it again: the same sweep measured 13.2s idle and
   // 29.6s under load, so the previous 30s budget was already 98% consumed
   // before CI entered the picture. Depth is therefore bounded by wall clock
-  // against the 120s per-test ceiling — re-measured at 29–114 seeds/s on this
-  // host, so the full 1,500-seed sweep costs 13–52s unloaded and only a loaded
-  // runner can push it near the ceiling. MIN_SEEDS (100 seeds needs 1.7 seeds/s
-  // over the 60s budget, ~5x slower than the worst observed CI rate) keeps a
-  // slow machine from "passing" on a handful of interleavings instead of
-  // quietly shrinking the sweep.
+  // against the 120s per-test ceiling, and MIN_SEEDS keeps a slow machine from
+  // "passing" on a handful of interleavings instead of quietly shrinking the
+  // sweep. The clock is `performance.now()` because `Date` is faked per test
+  // and a reused worker can carry a leaked fake clock into this file — see the
+  // header of tests/coordination-invariants.test.ts.
   const MAX_SEEDS = 1_500;
   const MIN_SEEDS = 100;
   const SEED_BUDGET_MS = 60_000;
@@ -105,9 +104,9 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
     let completed = 0;
-    const startedAt = Date.now();
+    const startedAt = performance.now();
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 5; seed += 1) {
-      if (completed >= MIN_SEEDS && Date.now() - startedAt > SEED_BUDGET_MS) break;
+      if (completed >= MIN_SEEDS && performance.now() - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       try {
@@ -253,6 +252,12 @@ describe('CrossTabDataBus lifecycle invariants', () => {
         vi.useRealTimers();
         completed += 1;
       }
+    }
+    if (completed < MAX_SEEDS) {
+      console.log(
+        `[lifecycle-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
+          `${Math.round(performance.now() - startedAt)}ms`
+      );
     }
     expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);
     expect(failures).toEqual([]);

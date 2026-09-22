@@ -150,17 +150,14 @@ function forgeSubscribe(hub: ChannelHub, targetWorkerId: string, topic: string):
 }
 
 describe('cross-tab coordination invariants', () => {
-  // Depth is bounded by wall clock, not by seed count. Locally the sweep runs
-  // 18–76 seeds/s depending on machine load, so all 5,000 seeds cost 66–278s;
-  // its first CI run reported 553s and *still* had not finished, because 37
-  // other files shared 4 cores — well past the 120s per-test ceiling, which is
-  // how the gate failed. Seeds still stop at MAX_SEEDS, and MIN_SEEDS stops a
-  // machine from "passing" on a handful of interleavings without anyone
-  // noticing: 100 seeds in 60s needs 1.7 seeds/s, roughly 5x slower than the
-  // worst CI rate above. The floor is not arbitrary — the heaviest mutant this
-  // harness was proved against (an emptied `reconcileAssignedTopics` sweep) is
-  // caught at seed 12, so 100 keeps 8x the depth that detects a regression
-  // while the budget bounds the cost.
+  // Depth is bounded by wall clock, not by seed count: all 5,000 seeds take
+  // 66s on an idle desktop and did not finish inside CI's 120s per-test ceiling
+  // (its first run reported 539s and still had the loop running). Seeds still
+  // stop at MAX_SEEDS, and MIN_SEEDS stops a machine from "passing" on a
+  // handful of interleavings. The floor is not arbitrary — the heaviest mutant
+  // this harness was proved against (an emptied `reconcileAssignedTopics`
+  // sweep) is caught at seed 12, so 100 keeps 8x the depth that detects a
+  // regression while the budget bounds the cost.
   const MAX_SEEDS = 5_000;
   const MIN_SEEDS = 100;
   const SEED_BUDGET_MS = 60_000;
@@ -168,11 +165,16 @@ describe('cross-tab coordination invariants', () => {
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
     let completed = 0;
-    // Read at the top of each iteration, which is after the previous one's
-    // `useRealTimers()`, so this is wall time rather than faked cluster time.
-    const startedAt = Date.now();
+    // `performance.now()`, never `Date.now()`: this suite fakes `Date` per
+    // test, a reused worker can carry that clock into the next file, and a
+    // baseline poisoned by it silently decides whether this sweep stops at all
+    // (the same file measured 60.2s alone and 16.4s in a full run before the
+    // net in tests/setup.ts existed). Performance time is not in vitest's
+    // default fake set and is monotonic, so the budget is one wall clock even
+    // when the cluster clock is 45 simulated seconds ahead per seed.
+    const startedAt = performance.now();
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
-      if (completed >= MIN_SEEDS && Date.now() - startedAt > SEED_BUDGET_MS) break;
+      if (completed >= MIN_SEEDS && performance.now() - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
@@ -304,6 +306,15 @@ describe('cross-tab coordination invariants', () => {
         vi.useRealTimers();
         completed += 1;
       }
+    }
+    // A truncated sweep is the interesting case, and the one that is invisible
+    // from a pass/fail CI line: log the depth actually reached so a runner that
+    // is too slow to clear the floor is diagnosable instead of mysterious.
+    if (completed < MAX_SEEDS) {
+      console.log(
+        `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
+          `${Math.round(performance.now() - startedAt)}ms`
+      );
     }
     // A budget that always fires early would let the suite go quiet on a slow
     // runner without anyone noticing, so depth is floored as well as capped.
