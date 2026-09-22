@@ -4634,6 +4634,47 @@ corroborates the 26-spec collection.)
   coordination fuzzer, the credential pin and this removal in its range.
 - Updated: 2026-09-22.
 
+## Release 0.20.97 prepared (2026-09-22)
+
+- Version: `0.20.96` → `0.20.97` (patch). Branch `release/0.20.97` off
+  `main@704b6d1`; range `v0.20.96..704b6d1` is PRs #147-#153.
+- **Why this is worth cutting.** The shipped `src/` artifact differs from
+  `0.20.96` by `centrifuge.ts` only — two unreachable `typeof Worker` /
+  `typeof SharedWorker` throws removed and comments recording which guard is
+  load-bearing. No public export changed (`verify:compat` green against the
+  `v0.20.96` baseline), no observable behavior changed, and the release carries
+  the Vue adapter's first real-browser coverage, the between-tabs coordination
+  fuzzer, and the fix that makes the release gate deterministic.
+- Freeze checklist, run on this branch: `pnpm check` → typecheck + build +
+  37 files / 859 tests + `pnpm test:perf` 5 tests; `pnpm lint` clean;
+  `pnpm test:coverage` → 98.68 / 96.17 / 98.54 / 99.46 against floors
+  96 / 92 / 96 / 97; `pnpm bench` green; `pnpm test:e2e` → **30 passed** in real
+  Chromium (the three `adapters.spec.ts` cases included); `pnpm bench:browser`
+  twice then `pnpm bench:compare --fail-above-pct 50` → "no metric regressed more
+  than 50%" (largest move `dedup1000Ms` +8.8%, `publishBatch1000Ms` +11.9%,
+  `traceAndPublish1000Ms` −9.5% — inside the documented alternating-mode spread);
+  `pnpm bench:trend` regenerated both `docs/benchmarks.md` from 44 archived
+  reports; `pnpm verify:compat` and `pnpm verify:pack` green (the packed
+  `cross-tab-worker-databus-0.20.97.tgz` imports as ESM and CJS at the root and
+  every subpath); public-registry `pnpm audit --audit-level high` → "No known
+  vulnerabilities found"; `git diff --check` clean.
+- Prepare commit contents: `package.json` version, `CHANGELOG.md` (`Unreleased`
+  → `## [0.20.97] - 2026-09-22`), `docs/roadmap.md` + `docs/zh/roadmap.md`
+  delivered scope, both `docs/benchmarks.md`, this entry, and one doc addition
+  that belonged with the release: `docs/getting-started.md` (en + zh) now names
+  the `/examples/react/` and `/examples/vue/` adapter pages that ship beside the
+  demo, which nothing outside `AGENTS.md` did before.
+- Risks / rollback: the runtime delta is dead-code removal, so the defect class
+  this release could introduce is "a branch that was reachable after all". The
+  reachability argument is recorded in the code and pinned by the two tests in
+  #152/#153 rather than asserted in prose. npm versions are immutable: a defect
+  ships as `0.20.98`, and `v0.20.97` is never moved or reused.
+- Next after publish: the deferred minor that turns the empty-topic `console.warn`
+  into a `TypeError` at the public boundary (policy-owned, its own release
+  section and doc updates), then a re-check of the `typescript-eslint` peer
+  ceiling for TypeScript 7.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

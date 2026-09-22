@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.20.97] - 2026-09-22
+
 ### Added
 - `examples/vue/` — a runnable page for the shipped `cross-tab-worker-databus/vue` entry, served from the local `vue` install (no CDN) and driven by real browser tests in `e2e/adapters.spec.ts`: two tabs publish through `useCrossTabDataBus` / `useCrossTabStatus` / `useCrossTabSubscription`, a reactive topic change is shown to re-attach the subscription and release the old one on the server, and a publication still crosses tabs after the owning tab closes. Until now the Vue adapter was only ever exercised in jsdom, and the existing React example hand-rolls its own effect wiring rather than using the adapter.
 - `docs/transports.md` (en + zh) states the publication addressing rule that the new tests bump into: a publication carrying its own string `topic` is re-addressed to it instead of the channel it arrived on — which is how a wildcard-channel delivery names a concrete topic, and why application data shaped `{ "topic": … }` can silently go nowhere.
