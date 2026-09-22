@@ -18,7 +18,7 @@
 import type { CentrifugeWorkerInput } from '../centrifuge-protocol';
 import { CentrifugeSession } from '../centrifuge-session';
 import { PortReaper } from './port-reaper';
-import { CENTRIFUGE_INPUT_TYPE } from '../utils/constants';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from '../utils/constants';
 
 const sharedWorkerScope = self as unknown as SharedWorkerGlobalScope;
 // One session per connecting port — each tab gets its own subscription scope.
@@ -36,6 +36,11 @@ sharedWorkerScope.addEventListener('connect', event => {
     }
   });
   reaper.register(port, {
+    // Last message this port will ever deliver. The main thread's transport turns
+    // it into a backend failure, which is what lets a tab whose heartbeat was
+    // merely starved (long task, background throttling) recover instead of going
+    // on owning routes that post into a closed port.
+    notify: () => port.postMessage({ type: CENTRIFUGE_OUTPUT_TYPE.SESSION_REAPED }),
     close: () => port.close(),
     stop: () => session.handle({ type: CENTRIFUGE_INPUT_TYPE.STOP })
   });
