@@ -6428,6 +6428,38 @@ corroborates the 26-spec collection.)
   product question #194 recorded (whether releasing a pattern should prune the concrete topics it filled).
 - Updated: 2026-09-23.
 
+## Phase 116 / The coverage gate had drifted four points below what it was guarding
+
+- Version: test-gate configuration; no behaviour change and no test change. Branch
+  `ci/tighten-coverage-floors`, off `81bd830` (#196).
+- #196 merged (squash, branch deleted, refs pruned). The next item was not on any list: `vitest.config.ts`
+  still justified its thresholds with "measured at HEAD: 98.13 / 94.59 / 98.17 / 99.19", and the tree now
+  measures 99.01 / 96.74 / 99.26 / 99.69. The floors themselves had stayed at 96 / 92 / 96 / 97 — 3.0 /
+  4.7 / 3.3 / 2.7 points of daylight, which is the amount of branch coverage a change could destroy (most
+  of one module) and still pass every gate including the release one.
+- Measured before tightening, because a floor is only worth its margin. Three consecutive local
+  `pnpm test:coverage` runs agreed to the last decimal, and CI's own "Coverage thresholds" step on run
+  35759459844 reported the identical four numbers for the same tree — so measurement noise is not what the
+  margin is for. What it *is* for: the seeded fuzzers bound depth by wall clock, so a loaded runner
+  explores fewer interleavings than this machine. The depth floor is an assertion rather than a
+  precondition (a runner too slow to reach it fails instead of quietly passing), which is why 1.3 points
+  was chosen for branches rather than a rounding-error margin.
+- New floors: 98 / 96 / 98 / 99. Teeth verified rather than assumed — raising `branches` to 99 makes the
+  run fail with `ERROR: Coverage for branches (96.74%) does not meet global threshold (99%)` and exit 1,
+  so this is an enforced gate, not a comment. `docs/release-checklist.md` and its Chinese counterpart quote
+  the numbers and were updated in the same change; this PR's own `verify` job is the second sample of the
+  new floors on a runner that is not this machine.
+- Changed files: `vitest.config.ts`, `docs/release-checklist.md`, `docs/zh/release-checklist.md`,
+  `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm test:coverage` green at the new floors; the raised-threshold failure above; `pnpm
+  check` clean (37 files / 882 tests + 5 perf gates) and `pnpm lint` clean.
+- Risk / rollback: `git revert`. The intended failure mode is a future change that lands uncovered code
+  and trips the gate; the response then is a test, not a lowered floor.
+- Next: the 0.21.7 patch release (task #37). `docs/api.md` and `docs/zh/api.md` ship inside the package
+  (`package.json` `files`), so #195's correction of a false statement is a shipped-artifact fix; the rest
+  of `[Unreleased]` is test pins, leg labels, and this gate.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
