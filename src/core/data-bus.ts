@@ -807,6 +807,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // from a dead transport. The promise is rejected, not thrown, so the
     // caller can retry by calling ready() or start() again.
     if (this.lastError !== null) return Promise.reject(this.lastError);
+    // Unreachable by construction, and deliberately *not* hunted for a test.
+    // Reaching it needs `started && !transportReady && !suspended`, with
+    // `startPromise` null and `lastError` null. `transportReady = false` is
+    // written in exactly four places: `openTransport`'s entry (an opening owns
+    // the gate, so the check above returns it), its failure path (which calls
+    // `recordError` before it clears that gate, so the line above rejects with
+    // the real reason), `performStop`'s finally (which also clears `started`,
+    // so `ensureStarted` above has already either installed a fresh opening or
+    // thrown for want of an `initialConfig`), and `reopenTransport` (which
+    // assigns its opening synchronously a few lines earlier). Every other read
+    // of the flag is true.
+    //
+    // It is kept rather than turned into an assertion because it is the last
+    // `return` on a promise every caller awaits: a future path that cleared the
+    // ready flag without recording a failure or installing an opening would
+    // otherwise fall off the end and have `ready()` resolve on a dead transport,
+    // which is the one mistake here that no caller could detect.
     return Promise.reject(
       new Error('Transport is not ready and no start operation is in flight')
     );
