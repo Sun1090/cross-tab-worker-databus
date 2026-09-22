@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Fixed
+- The seeded fuzzers' wall-clock fuse could not fire on exactly the runner it was written for. Both harnesses bounded depth with `if (completed >= MIN_SEEDS && elapsed > SEED_BUDGET_MS) break`, so a host too slow to clear the depth floor inside the budget never became eligible to stop: the sweep ran as long as the machine was slow and then died on the test's own 120s ceiling reporting nothing but `Test timed out`. Reproduced on `main` (1,046/5,000 seeds after 509s against a 60s fuse, no invariant violation) and twice on a PR that turned out not to be the cause. The budget is now unconditional and the floor stays an assertion, so a slow runner degrades depth and says so in ~60s instead of hanging for ~8 minutes; demonstrated locally by setting the budget to 0 — the gated form still ran 100 seeds and passed, the unconditional one stops at once and fails with `explored only 0 seeds`.
+- The budget clock had a single source whose immunity was contextual rather than inherent. `realNowMs()` trusted `node:perf_hooks`' `performance`, which survives fake timers only because the global binding and that export are different objects in some Node contexts; a worker thread makes them the same object, so a fake-timer configuration that includes `performance` freezes the budget at 0 elapsed. It now takes the max of that source and `process.uptime()`, which no fake-timer toolbox replaces — measured by blocking 250ms of real time inside a fake window with `Atomics.wait`: `node:perf_hooks` 260, `process.uptime()` 260, and global `performance.now()`, `Date.now()` and `process.hrtime.bigint()` all 0.
+- The clock's own pin asserted only the harmless direction. "60 simulated seconds must not cost 60 measured ones" passes trivially when the clock is frozen, so it could not have caught the bug above; the pin now also requires that real blocked time inside a fake window still measures as having passed. Verified against a mutant returning a constant: it passes the original assertion and fails only the new one.
+- A truncated sweep now logs its slowest seed next to the depth reached. A fuse sampled between iterations cannot bound an iteration, so a seed that wedges on an `await` needing a timer the fake clock never advances was previously visible only as an unexplained total.
+
+### Documentation
+- `AGENTS.md` corrects the claim that the budget clock "is immune wherever it is called" to what was measured, records that the depth floor must never gate the fuse, and adds the rule that a clock guard has to be pinned in both directions — with `blockRealTimeMs()` as the way to do it, since a `while (Date.now() < stop)` busy wait never terminates inside a fake window where `Date` is frozen.
+
+
 ## [0.21.4] - 2026-09-22
 
 ### Fixed

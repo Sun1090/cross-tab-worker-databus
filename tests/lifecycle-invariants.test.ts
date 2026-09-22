@@ -94,7 +94,10 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   // before CI entered the picture. Depth is therefore bounded by wall clock
   // against the 120s per-test ceiling, and MIN_SEEDS keeps a slow machine from
   // "passing" on a handful of interleavings instead of quietly shrinking the
-  // sweep. The clock is `realNowMs()` because the global `performance` and
+  // sweep. The floor is an assertion only, never a precondition on the fuse —
+  // gating it on `completed >= MIN_SEEDS` makes the budget inert on exactly the
+  // slow runner it exists for; see tests/coordination-invariants.test.ts.
+  // The clock is `realNowMs()` because the global `performance` and
   // `Date` both move inside this file's fake-timer windows — see the pin in
   // tests/coordination-invariants.test.ts.
   const MAX_SEEDS = 1_500;
@@ -104,9 +107,11 @@ describe('CrossTabDataBus lifecycle invariants', () => {
   it('keeps the DataBus, cluster, and transport lifecycle flags consistent across interleavings', async () => {
     const failures: string[] = [];
     let completed = 0;
+    let slowestSeedMs = 0;
     const startedAt = realNowMs();
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 5; seed += 1) {
-      if (completed >= MIN_SEEDS && realNowMs() - startedAt > SEED_BUDGET_MS) break;
+      const seedStartedAt = realNowMs();
+      if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       try {
@@ -251,12 +256,14 @@ describe('CrossTabDataBus lifecycle invariants', () => {
       } finally {
         vi.useRealTimers();
         completed += 1;
+        const seedMs = realNowMs() - seedStartedAt;
+        if (seedMs > slowestSeedMs) slowestSeedMs = seedMs;
       }
     }
     if (completed < MAX_SEEDS) {
       console.log(
         `[lifecycle-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
-          `${Math.round(realNowMs() - startedAt)}ms`
+          `${Math.round(realNowMs() - startedAt)}ms (slowest seed ${Math.round(slowestSeedMs)}ms)`
       );
     }
     expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);

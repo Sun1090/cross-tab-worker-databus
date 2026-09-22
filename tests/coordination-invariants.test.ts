@@ -56,6 +56,7 @@ import {
   ChannelHub,
   FakeTransport,
   MemoryStorage,
+  blockRealTimeMs,
   createFakeEnvironment,
   flushMicrotasks,
   mulberry32,
@@ -161,23 +162,45 @@ describe('cross-tab coordination invariants', () => {
   // floor is not arbitrary — the heaviest mutant this harness was proved against
   // (an emptied `reconcileAssignedTopics` sweep) is caught at seed 12, so 100
   // keeps 8x the depth that detects a regression while the budget bounds cost.
+  //
+  // The floor is an assertion, never a precondition on the fuse. It used to be
+  // both (`completed >= MIN_SEEDS && elapsed > budget`), which is exactly
+  // backwards: on a runner too slow to clear 100 seeds inside the budget the
+  // condition cannot fire while the budget is the only thing that matters, so the
+  // sweep runs as long as the machine is slow and dies on the test's own timeout
+  // with nothing to show for it. Observed that way — 1,046 seeds in 485s against
+  // a 60s fuse. Demonstrated locally: with the budget set to 0 the gated form
+  // still ran its 100 seeds and *passed*, the unconditional one stops at once and
+  // fails with "explored only 0 seeds".
   const MAX_SEEDS = 5_000;
   const MIN_SEEDS = 100;
   const SEED_BUDGET_MS = 60_000;
 
-  it('budgets on a clock that fake timers cannot move', async () => {
-    // Every seed opens its own fake-timer window and advances ~45 simulated
-    // seconds through it, so a budget reading the faked clock stops the sweep
-    // for reasons that have nothing to do with how long anything took — which is
-    // what a per-operation check did when it was tried (three seeds, 48ms of
-    // real time). The immunity has to come from the source, not from where the
-    // read happens, so this pins the source itself: 60 simulated seconds must
-    // not cost 60 measured ones. 5s is deliberately loose next to 60 — it still
-    // fails on the mutant that reads the fake clock, and never on load.
+  it('budgets on a clock that fake timers can neither advance nor stop', () => {
+    // Both directions have to be pinned, and only one of them was. Advancing 60
+    // simulated seconds must not cost 60 measured ones (the clock must not run
+    // fast); 120ms of *real* blocked time inside a fake window must still measure
+    // as ~120ms (the clock must not freeze). The first assertion passes trivially
+    // on a frozen clock — 0 is well under 5,000 — which is exactly how the
+    // per-source immunity looked proven while a CI worker was freezing it, and a
+    // frozen budget is the dangerous direction: the sweep then never stops for
+    // being slow and dies on the test's own timeout instead.
     vi.useFakeTimers();
-    const before = realNowMs();
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(realNowMs() - before).toBeLessThan(5_000);
+    try {
+      const beforeAdvance = realNowMs();
+      vi.advanceTimersByTime(60_000);
+      expect(realNowMs() - beforeAdvance).toBeLessThan(5_000);
+
+      const beforeBlock = realNowMs();
+      blockRealTimeMs(120);
+      const blocked = realNowMs() - beforeBlock;
+      // 80 of 120 is loose enough to survive scheduler granularity and the cost
+      // of the fake-timer machinery, and tight enough to fail on any clock that
+      // stops counting inside a window.
+      expect(blocked, 'budget clock froze inside the fake-timer window').toBeGreaterThanOrEqual(80);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
@@ -189,8 +212,10 @@ describe('cross-tab coordination invariants', () => {
     // restored them, which is the only reason a live read used to work. The
     // test above pins the source instead of the placement.
     const startedAt = realNowMs();
+    let slowestSeedMs = 0;
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
-      if (completed >= MIN_SEEDS && realNowMs() - startedAt > SEED_BUDGET_MS) break;
+      const seedStartedAt = realNowMs();
+      if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
@@ -321,6 +346,12 @@ describe('cross-tab coordination invariants', () => {
         for (const tab of tabs) await tab.bus.stop().catch(() => undefined);
         vi.useRealTimers();
         completed += 1;
+        // A fuse sampled between seeds cannot bound a seed that wedges — an
+        // `await` in its teardown that needs a timer the fake clock never
+        // advances bypasses the check entirely, and used to show up only as a
+        // huge total. Recording the worst seed makes that a line in the log.
+        const seedMs = realNowMs() - seedStartedAt;
+        if (seedMs > slowestSeedMs) slowestSeedMs = seedMs;
       }
     }
     // A truncated sweep is the interesting case, and the one that is invisible
@@ -329,7 +360,7 @@ describe('cross-tab coordination invariants', () => {
     if (completed < MAX_SEEDS) {
       console.log(
         `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
-          `${Math.round(realNowMs() - startedAt)}ms`
+          `${Math.round(realNowMs() - startedAt)}ms (slowest seed ${Math.round(slowestSeedMs)}ms)`
       );
     }
     // A budget that always fires early would let the suite go quiet on a slow

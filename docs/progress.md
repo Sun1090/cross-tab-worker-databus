@@ -5439,6 +5439,72 @@ corroborates the 26-spec collection.)
   and `version.ts:12`.
 - Updated: 2026-09-22.
 
+## Phase 94 / The fuse that could not fire, and a clock pinned in only one direction
+
+- Version: no release — harness and documentation only; `src/` is untouched.
+  Branch `fix/fuzz-fuse-not-gated`.
+- Opened as an investigation, not a plan: `main`'s CI `verify` went red
+  (`coordination-invariants`, 1,046/5,000 seeds after 509s, failing with a bare
+  `Test timed out in 120000ms` and **no invariant violation anywhere in the log**), and
+  the same signature had just burned PR #170 twice (its original run and a re-run). That
+  PR was then exonerated by
+  evidence rather than by assumption: `main` at 0.21.4 fails identically and does not
+  contain #170's change.
+- Two independent defects, both in the harness, both reachable from the log:
+  1. **The fuse was gated on the depth floor.** `if (completed >= MIN_SEEDS && elapsed
+     > BUDGET) break` cannot fire on a runner too slow to clear 100 seeds inside the
+     budget — which is precisely the situation the budget exists for, so the sweep ran as
+     long as the host was slow. Demonstrated by setting `SEED_BUDGET_MS = 0`: the gated
+     form still ran 100 seeds and **passed**; the unconditional form stops at once and
+     fails with `explored only 0 seeds`. The floor is preserved as an assertion, so a slow
+     runner still cannot pass on a handful of interleavings — it now says so in ~60s
+     instead of ~8 minutes.
+  2. **The budget clock had one source whose immunity was contextual.** `realNowMs()`
+     trusted `node:perf_hooks`, which survives fake timers only because the global binding
+     and that export are different objects in some contexts — a worker thread makes them
+     the same object, so a `toFake` list containing `performance` freezes the budget at 0
+     elapsed. Measured by blocking 250ms of real time inside a fake window with
+     `Atomics.wait`: `node:perf_hooks` 260, `process.uptime()` 260, global
+     `performance.now()` 0, `Date.now()` 0, `process.hrtime.bigint()` 0. Now the max of
+     the two immune sources.
+- The pin that was supposed to guarantee #2 asserted only the harmless direction: "60
+  simulated seconds must not cost 60 measured ones" passes trivially when the clock is
+  frozen. It now also requires real blocked time inside a window to still measure as
+  having passed. Verified against a constant-returning mutant — **passes** the original
+  assertion, fails only the new one, which is the proof that the old pin was vacuous
+  exactly where it mattered.
+- Also records the slowest seed beside the truncation depth. A fuse sampled between
+  iterations cannot bound an iteration, and a seed wedged on an `await` that needs a timer
+  the fake clock never advances was previously visible only as an unexplained total.
+- **What is deliberately NOT claimed:** none of this establishes why that runner spends
+  ~460ms per seed where every local run — including one under twelve competing busy
+  loops — spends under 2ms, and the identical 1,046 across runs says deterministic while
+  a single-seed local run of seed 1046 finished in 153ms. The change makes the fuse able
+  to fire and the depth reached legible; the root cause stays open, and CI on this branch
+  is the experiment that decides whether the bounded behaviour is what was needed.
+- Result of that experiment, recorded honestly as **inconclusive**: this branch's `verify`
+  passed, but the sweep completed all 5,000 seeds and printed no truncation line — the
+  runner was fast, so the repaired fuse was never exercised. The pass shows no regression,
+  not a fix in action. What the fix *is* proven by is the local control: at budget 0 the
+  gated form passes on 100 seeds and the unconditional form stops immediately, and a
+  constant-returning clock fails only the new freeze assertion. Under the original starved
+  conditions the repaired clock+pair should now break at ~60s having explored ~130 seeds
+  — above the 100 floor, so bounded *and* green — but that combination has not been
+  observed yet, and a future starved run is the real test of it.
+- Two process notes, both self-inflicted and worth keeping: the first draft of the clock
+  pin busy-waited on `Date.now()`, which is frozen inside the window, so it never
+  terminated and hung the run — hence `blockRealTimeMs()`; and a `git checkout
+  tests/fakes.ts` on a tree with uncommitted edits to that same file discarded them, so
+  restoration here was done from a `cp` copy.
+- Changed files: `tests/fakes.ts`, `tests/coordination-invariants.test.ts`,
+  `tests/lifecycle-invariants.test.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck`, `pnpm lint`, `npx vitest run` (37 files / 871 tests),
+  `pnpm test:perf` (5 gates), fuzzer re-run under load, both mutants above.
+- Risk / rollback: harness-only; `git revert` either commit independently.
+- Next: watch this branch's CI as the experiment; then re-run #170 on top of the fixed
+  fuse and merge it (its Phase entry needs renumbering to keep the log ordered).
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
