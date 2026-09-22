@@ -41,6 +41,13 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
   let dbPromise: Promise<IDBDatabase> | null = null;
   const invalidate = (db: IDBDatabase): void => {
     if (dbPromise) {
+      // The rejection arm is what keeps this total: `invalidate` can chain onto a
+      // *replacement* open that is still in flight, and `.then(current => …)`
+      // alone would derive a rejected promise nobody observes, turning that
+      // open's failure into an unhandled rejection on top of the caller's. No
+      // test reaches it — it needs a scheduled failure racing a rejecting reopen
+      // — and it is not the `open()` catch below, which is registered on the
+      // promise it guards and only clears the cache.
       void dbPromise.then(current => {
         if (current === db) {
           current.close();
@@ -163,6 +170,12 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
       });
     })();
   const open = (): Promise<IDBDatabase> => {
+    // The two `if (dbPromise …)` guards inside have never had their false arm
+    // execute. Reaching either needs a connection that is live but no longer
+    // cached, so a versionchange could land on an empty slot, or a slot replaced
+    // before its own rejection catch runs — and both are excluded here because a
+    // replacement can only start from a cleared slot, which is what the clearing
+    // path itself performs. Defensive, so recorded rather than pinned.
     if (dbPromise) return dbPromise;
     const pending = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDb.open(dbName, 1);
@@ -203,6 +216,18 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
           reject(error);
           return;
         }
+        // One-shot settlement, the same latch in all four `invalidate`+`reject`
+        // closures here. Entering it twice is reachable — one aborting
+        // transaction dispatches `error` and then `abort` — but measured
+        // harmless: `reject` on a settled promise is a no-op, and the extra
+        // `invalidate` cannot see a replaced cache because both signals are
+        // dispatched inside one microtask batch, so their callbacks run before
+        // the serialized queue reopens. Deleting all four latches leaves the
+        // suite green and the connection count unchanged; they stay because that
+        // proof rests on dispatch timing outside this file. The stale-signal case
+        // that is inside this file is pinned by tests/replay-persistence.test.ts's
+        // 'keeps the connection a later operation reopened when an older signal
+        // lands late'.
         let settled = false;
         const fail = (error: unknown): void => {
           if (settled) return;

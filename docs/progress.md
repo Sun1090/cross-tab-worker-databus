@@ -6513,6 +6513,50 @@ corroborates the 26-spec collection.)
   release (8.70.1 and 8.70.2-alpha.4 both peer on `<6.1.0`).
 - Updated: 2026-09-23.
 
+## Phase 118 / The stale-signal hazard was real, just not where the four latches were
+
+- Version: test + comments; no behaviour change. Branch `test/durable-settle-double-fire`, off
+  `41e0f99` (main after #199).
+- Phase 117's queue item described `replay-persistence.ts`'s eight zero-count arms as "seven of them
+  `if (settled) return` guards". Re-derived from `coverage/coverage-final.json`: **four** are those
+  guards, two are the false arms of `invalidate`'s `if (dbPromise)` and `if (current === db)`, two are
+  the false arms of the guards inside `open()`, and there is one uncovered function besides.
+- Started as the double-fire hunt: an aborting transaction dispatches `error` and then `abort` for one
+  outcome, so all four `fail` closures were expected to have a live second entry. Built a
+  `transaction-errors-then-aborts` stub for it and an assertion that a redundant invalidation would
+  evict the connection the serialized queue reopens. Both measurements came back empty. Deleting all
+  four latches leaves the suite green (882 tests at that point), and the instrumented run showed why:
+  the stub dispatches both signals inside one microtask batch, so both `invalidate` callbacks run
+  *before* the queue resumes, and the reopen count read 2 with the guards and 2 without. The test was
+  kept in the branch for exactly as long as it took to measure that, then removed — an assertion that
+  passes against its own mutant is the artifact this file warns about most.
+- What is reachable is the same hazard with the signals separated by a task rather than by nothing,
+  which is how a real implementation queues them. `makeScheduledFailureFactory` dispatches one abort
+  immediately, one after 15ms, one after 40ms across three loads sharing a connection, so the second
+  finds the cache cleared and the third finds a *different*, live connection cached. That reaches both
+  `invalidate` legs, and they have teeth: deleting the identity check fails as `expected 3 to be 2`
+  (the stale signal closes the live connection and evicts it); deleting the `if (dbPromise)` guard
+  throws a `TypeError` out of the IndexedDB handler so the operation never settles, which is why the
+  settlement is raced against a 500 ms real-timer watchdog and reads `expected 'hung' to be
+  'rejected'` in half a second instead of as a bare timeout.
+- Verdicts recorded at the sites, none counted as closed by coverage: the four latches are **dominated**
+  (kept, because the proof rests on dispatch timing outside the file while a latch's does not), the two
+  `open()` guards are **excluded by an invariant** (a slot is only replaced by the path that clears it),
+  and `invalidate`'s rejection handler is **the only handler** against an unhandled rejection but needs a
+  scheduled failure racing a rejecting reopen to reach.
+- Changed files: `tests/replay-persistence.test.ts` (scheduled-signal factory, the
+  `expectRejectedSettling` watchdog helper, one new test), `src/core/replay-persistence.ts` (three
+  comments), `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 883 tests + 5 perf gates), `pnpm lint`
+  clean. Coverage re-measured after: `replay-persistence.ts` branches 89.74% → 92.30%, tree
+  99.01 / 96.74 → 99.01 / 96.84, still above the 98 / 96 / 98 / 99 floors. The two mutations killed and
+  the one that survived are the evidence quoted in the entry above.
+- Risk / rollback: `git revert`; the shipped code is byte-identical apart from comments.
+- Next: `cluster.ts`'s 22 arms are the largest remaining block and the only one where a scheduled-signal
+  harness has no obvious analogue; then the same treatment for `websocket.ts` (3) and `trace.ts` (3).
+  Product question #194 and the TypeScript 7 re-check are unchanged.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
