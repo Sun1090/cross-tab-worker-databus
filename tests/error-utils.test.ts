@@ -1,11 +1,12 @@
 /**
- * Direct unit coverage for the Worker-boundary error serialization helpers.
- * The session-level tests exercise the happy paths indirectly; these pin the
- * exact branch behavior: stack preservation, non-Error shapes, undefined
- * context omission, and round-trip reconstruction.
+ * Direct unit coverage for the error-rendering helpers. The session-level tests
+ * exercise the happy paths indirectly; these pin the exact branch behavior:
+ * stack preservation, non-Error shapes, undefined context omission, round-trip
+ * reconstruction, and the totality of `describeFailure` over reasons that have no
+ * primitive conversion at all.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { deserializeWorkerError, serializeError } from '../src/utils/error-utils';
+import { deserializeWorkerError, describeFailure, serializeError } from '../src/utils/error-utils';
 
 describe('error-utils', () => {
   it('serializes an Error with name, message, and stack when present', () => {
@@ -115,5 +116,42 @@ describe('error-utils', () => {
       vi.stubGlobal('structuredClone', original);
       vi.unstubAllGlobals();
     }
+  });
+
+  it('describes an Error by its message and other values by their coercion', () => {
+    expect(describeFailure(new RangeError('out of range'))).toBe('out of range');
+    expect(describeFailure('backend said no')).toBe('backend said no');
+    expect(describeFailure(404)).toBe('404');
+    expect(describeFailure(undefined)).toBe('undefined');
+    expect(describeFailure(null)).toBe('null');
+    expect(describeFailure({ code: 42 })).toBe('[object Object]');
+  });
+
+  it('describes a value that has no primitive conversion instead of throwing', () => {
+    // The whole point of the helper: it runs while *reporting* a failure, so a
+    // throw here replaces the real reason with one about the formatter and turns
+    // a resolving `.catch(error => reportError(error))` chain into a rejecting one.
+    expect(() => String(Object.create(null))).toThrow(TypeError);
+    expect(describeFailure(Object.create(null))).toBe('[unstringifiable object]');
+
+    const hostile = {
+      toString() {
+        throw new Error('nope');
+      }
+    };
+    expect(() => String(hostile)).toThrow('nope');
+    expect(describeFailure(hostile)).toBe('[unstringifiable object]');
+
+    // A throwing `message` getter is still the `Error` branch, so the guard has to
+    // cover it rather than only the `String()` path. Defined on the instance,
+    // because `new Sub('x')` writes an own data property that shadows a prototype
+    // getter and never reaches it.
+    const badMessage = new Error('x');
+    Object.defineProperty(badMessage, 'message', {
+      get(): string {
+        throw new Error('cannot read message');
+      }
+    });
+    expect(describeFailure(badMessage)).toBe('[unstringifiable object]');
   });
 });

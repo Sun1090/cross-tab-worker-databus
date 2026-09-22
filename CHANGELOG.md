@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [0.21.4] - 2026-09-22
+
+### Fixed
+- Reporting a failure can no longer throw. `recordError()` rendered the rejection reason with `String(error)`, and that coercion is not total: `String(Object.create(null))` throws `TypeError: Cannot convert object to primitive value`, and any object can carry a `toString` that throws. Since a transport may reject with any value — `DataBusTransport` is a public, application-implemented port — one class of transport failure used to produce a second, unrelated failure from inside the code reporting the first. The same unguarded coercion also sat in `getRecoveryStats()`, so `getHealthSummary()` threw for a bus whose last failure was unstringifiable: the probe that is supposed to explain an outage refused to answer during one.
+- Concretely, a retry after a failed open whose cleanup *also* failed never reopened the transport. `createStopPromise()`'s terminal `.catch(error => this.reportError(error))` ran the thrower, so `pendingStop` rejected, `start()`'s chained `.then()` was skipped, `transport.start()` was never reached, and the caller got `TypeError: Cannot convert object to primitive value` — a message about the formatter's limits rather than about their transport. Failure messages now go through `describeFailure()`, which is total and renders such a value as `[unstringifiable object]`; both ledgers are guaranteed to describe the same failure identically.
+- This also restores the premise that `0.21.2` and `0.21.3` were built on. Both removed rejection-absorbers by enumerating `pendingStop`'s assignment sites and concluding each chain "ends in a terminal `.catch(error => this.reportError(error))`, therefore resolves". The enumeration was right; the last step silently assumed `reportError` cannot throw. It is now stated as what it is, in the comments at both sites and with a test that drives the double-failed-open chain end to end, so the removals rest on something checked rather than assumed.
+- The same defect shape was fixed one layer out, in the option validators: `assertPositiveSafeInteger()`, `assertPruneStrategy()` and `assertHeartbeatInterval()` interpolated caller input with `String(value)`, so constructing a bus with a null-prototype option failed with the formatter's `TypeError` instead of the documented complaint about the option — and in `assertPruneStrategy()` the coercion is the membership test itself.
+
+### Added
+- `describeFailure(error)` in `src/utils/error-utils.ts`, alongside the `serializeError()` that already avoided this trap. Internal helper; no public export changed.
+- `FakeTransport.stopRejection` selects the *reason* a failing `stop()` rejects with, where `stopShouldFail` only selected the fact. `toThrow(TypeError)` could not have caught this bug — the formatter's error is also a `TypeError` — so the new assertions check the message, and one of them asserts the pre-existing `toThrow(TypeError)` shape would have passed either way.
+
+### Coverage
+- Whole-suite 98.85 / 96.41 / 99.08 / 99.57 over 37 files / 871 tests, against unchanged ceilings of 96 / 92 / 96 / 97. `src/utils/error-utils.ts` is now clear at both tiers (zero uncovered lines, arms and functions); `src/core/data-bus.ts` keeps 17 uncovered branch arms, which is a different claim and is recorded as such.
+
+
 ## [0.21.3] - 2026-09-22
 
 ### Changed

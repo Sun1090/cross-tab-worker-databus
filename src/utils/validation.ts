@@ -13,12 +13,16 @@ import type {
   DataBusReplayOptions
 } from '../core/data-bus';
 import type { LoadWeightingOptions } from '../core/types';
+import { describeFailure } from './error-utils';
 import { PRUNE_STRATEGY } from './constants';
 
-/** Assert `value` is a positive safe integer. Throws a TypeError otherwise. */
+/** Assert `value` is a positive safe integer. Throws a TypeError otherwise.
+ * The offending value is rendered through `describeFailure` because it is
+ * arbitrary caller input: `String(Object.create(null))` throws, which would
+ * replace "your option is wrong" with a complaint about this message. */
 export function assertPositiveSafeInteger(value: unknown, name: string): void {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${name} must be a positive safe integer, got ${String(value)}.`);
+    throw new TypeError(`${name} must be a positive safe integer, got ${describeFailure(value)}.`);
   }
 }
 
@@ -39,7 +43,7 @@ export function assertNonNegativeFiniteNumber(value: unknown, name: string): voi
 /** Assert `value` is a valid replay prune strategy ('count' | 'age' | 'both'). */
 export function assertPruneStrategy(value: unknown): asserts value is 'count' | 'age' | 'both' {
   const allowed: readonly string[] = [PRUNE_STRATEGY.COUNT, PRUNE_STRATEGY.AGE, PRUNE_STRATEGY.BOTH];
-  if (!allowed.includes(String(value))) {
+  if (!allowed.includes(describeFailure(value))) {
     throw new TypeError('pruneStrategy must be count, age, or both.');
   }
 }
@@ -171,7 +175,7 @@ export function assertHeartbeatInterval(value: number): void {
   if (value === Infinity) return;
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return;
   throw new TypeError(
-    `Centrifuge heartbeatIntervalMs must be a positive number or Infinity, got ${String(value)}.`
+    `Centrifuge heartbeatIntervalMs must be a positive number or Infinity, got ${describeFailure(value)}.`
   );
 }
 

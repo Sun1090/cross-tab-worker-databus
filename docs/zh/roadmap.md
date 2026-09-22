@@ -1,6 +1,14 @@
 # 路线图
 
-0.21.3 已于 2026 年 9 月 22 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+0.21.4 已于 2026 年 9 月 22 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+
+## 0.21.4 已完成范围
+
+- 修掉的是一个真实缺陷，而不是覆盖率数字：失败记录用 `String(error)` 渲染拒绝原因，而这个转换并不是全覆盖的——`Object.create(null)` 根本没有原始值转换，而 `DataBusTransport` 是由应用实现的公开端口，可以用任意值 reject。于是"报告一次失败"会制造出第二次失败；`getRecoveryStats()` 里也有同样的裸转换，所以最后一场失败无法字符串化的总线，其 `getHealthSummary()` 会直接抛异常——本该解释故障的探针在故障期间拒绝回答。
+- 可观察的那一条：open 失败、其清理又同时失败之后的重试，永远不会重新打开传输。因为 `createStopPromise()` 以 `.catch(error => this.reportError(error))` 收尾，这个 handler 自己抛了，于是 `pendingStop` 变成 reject，`start()` 串在它后面的 `.then()`（正是 `0.21.3` 删掉吞除分支的那一处）被跳过，`transport.start()` 再也没被调用，调用方只拿到 `TypeError: Cannot convert object to primitive value`——一句关于格式化器上限的话，而不是关于他的传输。`describeFailure()` 让记录器变成全覆盖，而这正是那条链式 await 一直需要的性质。
+- 这同时补回了 `0.21.2` 与 `0.21.3` 立论所依赖的那一步。两次删除吞除分支所依据的 `pendingStop` 赋值点枚举是对的；但"以 `.catch(error => this.reportError(error))` 收尾，因此一定 resolve"这个结论，悄悄假设了 `reportError` 不会抛。两处注释现在明确写出这层依赖，并有一个测试端到端驱动"两次都失败的 open"链条，于是那两次删除依据的是验证过的事实而非假设。
+- 同样的缺陷形状在配置校验里也被修掉（`assertPositiveSafeInteger`、`assertPruneStrategy`、`assertHeartbeatInterval`）：对调用方传入的值做 `String(value)`，使一条本应说明配置项写错的告警，变成格式化器抛出的 `TypeError`；而在 `assertPruneStrategy` 里，这个转换本身就是枚举值成员判定。
+- 顺带得到一条测试经验：无论校验器是在拒绝这个选项，还是在拼接消息时报错，`toThrow(TypeError)` 都会通过，所以新增断言钉的是消息文本；并且因为 `stopShouldFail` 只能以真实 `Error` 失败，`FakeTransport` 增加了 `stopRejection` 来指定 reject 的**原因**。
 
 ## 0.21.3 已完成范围
 

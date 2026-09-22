@@ -1755,6 +1755,68 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('records a failure that has no primitive conversion without throwing from the ledger', async () => {
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'unstringifiable-ledger' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'unstringifiable-ledger', environment: environment.environment, initialConfig: {}, transport
+    });
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // `Object.create(null)` has no `toString` and no `Symbol.toPrimitive`, so
+    // `String(reason)` throws `TypeError: Cannot convert object to primitive
+    // value`. A transport may reject with any value, so the failure-recording
+    // path has to be total: a throw from *reporting* turns one transport failure
+    // into two, escapes synchronously through the transport's `onError` callback
+    // into whatever the transport was doing, and leaves `lastFailure` unset so
+    // the next health snapshot has nothing to explain the outage with.
+    const reason = Object.create(null);
+    expect(() => transport.emitError(reason)).not.toThrow();
+
+    // Both read sides render the same ledger, so both must survive the value too.
+    expect(() => bus.getRecoveryStats()).not.toThrow();
+    expect(() => bus.getHealthSummary()).not.toThrow();
+    expect(bus.getRecoveryStats()).toMatchObject({ hasError: true, errorAt: expect.any(Number) });
+    expect(typeof bus.getRecoveryStats().errorMessage).toBe('string');
+    expect(bus.getHealthSummary().lastFailure).toMatchObject({
+      source: 'transport', message: expect.any(String)
+    });
+    // Two ledgers, one rendering: a support bundle that reads both must not see
+    // the same failure described two different ways.
+    expect(bus.getRecoveryStats().errorMessage).toBe(bus.getHealthSummary().lastFailure?.message);
+    await bus.stop();
+  });
+
+  it('opens the transport on a retry when the failed open stop also failed unrecordably', async () => {
+    // `start()` chains the new open behind `pendingStop` with no `.catch`, on the
+    // documented premise that every `pendingStop` ends in a terminal
+    // `.catch(error => this.reportError(error))` and therefore resolves. A stop
+    // rejecting with a value that `reportError` cannot stringify breaks that
+    // premise: the handler's own throw makes `pendingStop` reject, the chained
+    // `.then()` is skipped so `transport.start()` is never reached, and the retry
+    // comes back as `TypeError: Cannot convert object to primitive value` — a
+    // message about the formatter's limits rather than about the transport.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'unrecordable-stop' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'unrecordable-stop', environment: environment.environment, transport
+    });
+    transport.startShouldFail = true;
+    transport.stopShouldFail = true;
+    transport.stopRejection = Object.create(null);
+    await expect(bus.start({})).rejects.toThrow(/failed during startup/i);
+    expect(transport.startCalls).toBe(1);
+    expect(transport.stopCalls).toBe(1);
+
+    transport.startShouldFail = false;
+    transport.stopShouldFail = false;
+    await expect(bus.start({})).resolves.toBeUndefined();
+    expect(transport.startCalls).toBe(2);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, state: 'healthy' });
+    await bus.stop();
+  });
+
   it('keeps non-transport failures out of the transport recovery ledger', async () => {
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'dispatch-error-ledger' });
     const transport = new FakeTransport<number>();
@@ -4207,6 +4269,31 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       expect(build({ pruneStrategy })).not.toThrow();
     }
     expect(build({ maxPerTopic: 1 })).not.toThrow();
+  });
+
+  it('reports the offending option when the value itself cannot be stringified', () => {
+    // Same defect shape as the failure ledger, one layer out: the validators built
+    // their messages with `String(value)` over arbitrary caller input. A
+    // null-prototype object has no primitive conversion, so construction failed
+    // with "Cannot convert object to primitive value" — a TypeError that names no
+    // option — instead of the documented complaint. `pruneStrategy` is the worse
+    // half: there the coercion is the membership test itself.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'unstringifiable-option' });
+    const build = (replay: Record<string, unknown>) => () =>
+      new CrossTabDataBus({
+        autoStart: true,
+        clusterKey: 'unstringifiable-option',
+        environment: environment.environment,
+        initialConfig: {},
+        transport: new FakeTransport<unknown>(),
+        replay
+      } as never);
+
+    const value = Object.create(null);
+    expect(build({ maxPerTopic: value })).toThrow(
+      /replay\.maxPerTopic must be a positive safe integer, got \[unstringifiable object\]/
+    );
+    expect(build({ pruneStrategy: value })).toThrow(/pruneStrategy must be count, age, or both/);
   });
 
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
