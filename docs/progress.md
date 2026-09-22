@@ -5797,6 +5797,33 @@ corroborates the 26-spec collection.)
   squash-merge it before this branch lands (both touch `AGENTS.md`/`CHANGELOG.md`/`docs/progress.md`).
 - Updated: 2026-09-22.
 
+## Phase 101 / Two queued-start guards that their own callers had already answered
+
+- Version: no release — `## [Unreleased]`. Branch `test/queued-start-guard-enumerations`, rebased
+  onto `1c24c49` (#177 + #178) before measurement.
+- Closes the ledger's "want the enumeration, not a test" items. `getQueuedStartReady()`'s
+  `if (!queued) return Promise.reject('No queued start is in flight.')` and
+  `queueStartAfterStop()`'s `if (this.queuedStart) return this.queuedStart;` are each preceded, by
+  their only caller, by the *same* test on the same field, synchronously and with no user code in
+  between: `ready()` guards `if (this.queuedStart)` before calling the first, and `start()` returns
+  `this.queuedStart` one statement before calling the second. Neither arm can be taken.
+- Both kept, on the asymmetry rule rather than on inertia: deleting the first swaps a documented
+  rejection for `TypeError: Cannot read properties of null` the moment a second caller appears, and
+  deleting the second breaks "exactly one queued restart per stop", which is the behaviour the line
+  is a statement of. Comments now name the call site that dominates each, so a future caller is
+  written against the enumeration instead of rediscovering it.
+- Measured, not asserted: `data-bus.ts` holds at 14 uncovered branch arms / 2 uncovered functions and
+  the suite at 37 files / 874 tests, identical to `main`. Comments only.
+- Changed files: `src/core/data-bus.ts`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck`, `pnpm lint`, `npx vitest run --coverage` all clean.
+- Risk / rollback: none behavioural; `git revert`.
+- Next: 14 arms, of which the remaining honest targets are the demand-recovery bail-out under
+  suspension (needs a failed automatic reopen, then a hide, then an operation — the contract being
+  that hiding does not burn the one-shot demand token), the re-subscribe loop's break, the failed-open
+  reuse of an existing `pendingStop`, `reopenTransport()`'s rejection-arm gate clear, and the
+  `onControl` switch default. Then the other modules' arm tiers.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
