@@ -161,6 +161,16 @@ describe('cross-tab coordination invariants', () => {
   // floor is not arbitrary — the heaviest mutant this harness was proved against
   // (an emptied `reconcileAssignedTopics` sweep) is caught at seed 12, so 100
   // keeps 8x the depth that detects a regression while the budget bounds cost.
+  //
+  // The floor is an assertion, never a precondition on the fuse. It used to be
+  // both (`completed >= MIN_SEEDS && elapsed > budget`), which is exactly
+  // backwards: on a runner too slow to clear 100 seeds inside the budget the
+  // condition cannot fire while the budget is the only thing that matters, so the
+  // sweep runs as long as the machine is slow and dies on the test's own timeout
+  // with nothing to show for it. Observed that way — 1,046 seeds in 485s against
+  // a 60s fuse. Demonstrated locally: with the budget set to 0 the gated form
+  // still ran its 100 seeds and *passed*, the unconditional one stops at once and
+  // fails with "explored only 0 seeds".
   const MAX_SEEDS = 5_000;
   const MIN_SEEDS = 100;
   const SEED_BUDGET_MS = 60_000;
@@ -189,8 +199,10 @@ describe('cross-tab coordination invariants', () => {
     // restored them, which is the only reason a live read used to work. The
     // test above pins the source instead of the placement.
     const startedAt = realNowMs();
+    let slowestSeedMs = 0;
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
-      if (completed >= MIN_SEEDS && realNowMs() - startedAt > SEED_BUDGET_MS) break;
+      const seedStartedAt = realNowMs();
+      if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
       const random = mulberry32(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
@@ -321,6 +333,12 @@ describe('cross-tab coordination invariants', () => {
         for (const tab of tabs) await tab.bus.stop().catch(() => undefined);
         vi.useRealTimers();
         completed += 1;
+        // A fuse sampled between seeds cannot bound a seed that wedges — an
+        // `await` in its teardown that needs a timer the fake clock never
+        // advances bypasses the check entirely, and used to show up only as a
+        // huge total. Recording the worst seed makes that a line in the log.
+        const seedMs = realNowMs() - seedStartedAt;
+        if (seedMs > slowestSeedMs) slowestSeedMs = seedMs;
       }
     }
     // A truncated sweep is the interesting case, and the one that is invisible
@@ -329,7 +347,7 @@ describe('cross-tab coordination invariants', () => {
     if (completed < MAX_SEEDS) {
       console.log(
         `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
-          `${Math.round(realNowMs() - startedAt)}ms`
+          `${Math.round(realNowMs() - startedAt)}ms (slowest seed ${Math.round(slowestSeedMs)}ms)`
       );
     }
     // A budget that always fires early would let the suite go quiet on a slow
