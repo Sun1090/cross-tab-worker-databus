@@ -145,6 +145,15 @@ export class PortReaper {
     const now = this.now();
     let reapedAny = false;
     for (const [port, target] of Array.from(this.targets)) {
+      // Both `??` arms are uncovered and dominated, and the enumeration is the
+      // tracking contract above: `targets` gains a port only in `register()`,
+      // which writes all three maps, and loses one only in `remove()` and in the
+      // loop below, and in the whole-map `clear()`s of dispose(): a port in
+      // `targets` is therefore in the other two as well. Measured — replacing the
+      // first fallback with a non-null assertion leaves all 37 test files green.
+      // It stays because of what a half-registered port would cost: `lastSeen` 0
+      // reads as silent-since-epoch, so the next tick closes a session that was
+      // never late, which is a worse failure than the undefined it stands in for.
       const lastSeen = this.lastSeenAt.get(port) ?? 0;
       const timeout = this.sessionTimeoutMs.get(port) ?? DEFAULT_SESSION_TIMEOUT_MS;
       if (now - lastSeen <= timeout) continue;

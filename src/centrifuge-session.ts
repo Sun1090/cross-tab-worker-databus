@@ -214,7 +214,16 @@ export class CentrifugeSession<TData = unknown> {
   /** Forward a publication to the transport. Binary payloads take the
    * zero-copy `MESSAGE_BIN` path when `transferable` is enabled; everything
    * else is structured-cloned via `MESSAGE`. An empty topic means the
-   * publication carried no channel info and is silently dropped. */
+   * publication carried no channel info and is silently dropped.
+   *
+   * That drop is uncovered and dominated: the connection-level caller tests the
+   * same emptiness before calling, and the subscription-level caller reads the
+   * topic out of a key this session only ever populates from a SUBSCRIBE frame.
+   * Measured — deleting this line leaves all 37 test files green, and the frame
+   * it withholds could not be delivered anyway, because `topicMatchesPattern`
+   * answers false for an empty topic against both `*` and `prefix.*` (so no
+   * wildcard handler sees it either) and `subscribe('')` throws. Kept as the
+   * boundary statement, not counted as a closed leg. */
   private postPublication(topic: string, data: unknown): void {
     if (!topic) return;
     if (this.transferable && data instanceof ArrayBuffer) {

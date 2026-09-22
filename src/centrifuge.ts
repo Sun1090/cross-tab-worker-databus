@@ -341,6 +341,14 @@ export class CentrifugeWorkerTransport<TData = unknown>
 
   /** Periodically ping the SharedWorker so its session reaper can detect a dead tab. */
   private startHeartbeat(): void {
+    // Uncovered and dominated. The only caller is `startSharedWorker()`, which
+    // `start()` reaches past its own `if (this.backend) return` guard, and
+    // `backend` becomes null only through `stop()` and `onWorkerFailed()` — both
+    // of which call `clearHeartbeat()` first. Measured: deleting this line leaves
+    // all 37 test files green. It stays because `clearHeartbeat()` can only ever
+    // drop the one handle it holds, so a double-arm would leak an interval that
+    // nothing can clear afterwards — doubled PINGs at the SharedWorker for the
+    // rest of the page, which reads to the reaper as a tab that never goes away.
     if (this.heartbeatHandle !== null) return;
     // Infinite disables the heartbeat (e.g. for environment where the
     // SharedWorker reaper is not needed).

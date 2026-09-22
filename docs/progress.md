@@ -6386,6 +6386,48 @@ corroborates the 26-spec collection.)
   a write-pairing enumeration that has to be measured rather than asserted.
 - Updated: 2026-09-23.
 
+## Phase 115 / Four legs looked reachable; measured, all four were covered from elsewhere
+
+- Version: comments and one roadmap line; no behaviour change. Branch `docs/dominated-leg-enumerations`,
+  off `567ef3c` (#195).
+- #193, #194 and #195 merged (squash, branches deleted, refs pruned). This closes the list #194 left
+  named as "the four zero-count legs that still look reachable rather than dominated".
+- Method, because the verdict is only worth as much as the check: delete the leg, run the whole suite,
+  and only then write the enumeration. All four survived deletion with 37 files green, so none of them is
+  an untested behaviour — each is a leg some *other* statement already guarantees.
+- `PortReaper.reap()`'s two `??` fallbacks: the three maps gain a port only in `register()` and lose one
+  only in `remove()`, the reap loop, and `dispose()`'s whole-map clears, so a port in `targets` is in the
+  other two. The fallback stays for what a half-registered port would cost — `lastSeen` 0 reads as
+  silent-since-epoch and the session is closed on the next tick, which is worse than the undefined it
+  stands in for.
+- `CentrifugeWorkerTransport.startHeartbeat()`'s already-armed guard: `start()` returns early while a
+  backend exists, and the only two routes to `backend === null` (`stop()`, `onWorkerFailed()`, measured as
+  the two `resetBackend()` call sites) both clear the heartbeat first. It stays because
+  `clearHeartbeat()` holds one handle, so a double-arm leaves an interval nothing can cancel afterwards —
+  doubled PINGs for the rest of the page.
+- `CentrifugeSession.postPublication()`'s empty-topic drop was the one I expected to be a real gap, and it
+  is the weakest of the four: its two callers test emptiness or read a key this session only fills from a
+  SUBSCRIBE frame, and an empty topic cannot be delivered downstream anyway —
+  `topicMatchesPattern('*', '')` and `topicMatchesPattern('chat.*', '')` both measured false, and
+  `subscribe('')` throws. Recorded as a boundary statement, not a closed leg.
+- Dependency re-check (the standing TypeScript 7 item): `typescript-eslint`'s newest release is still
+  8.70.1 and its newest canary 8.70.2-alpha.4, and both declare `typescript >=4.8.4 <6.1.0`, so the blocker
+  is unchanged and — new this cycle — there is no prerelease on either channel to trial against. The
+  roadmap line now carries the date and the two versions queried, so the next pass starts from evidence
+  rather than a guess.
+- Changed files: `src/workers/port-reaper.ts`, `src/centrifuge.ts`, `src/centrifuge-session.ts`
+  (comments), `docs/roadmap.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: four delete-mutants, each against the full unit suite; `pnpm check` clean (37 files / 882
+  tests + 5 perf gates) and `pnpm lint` clean after the comments land. No coverage movement is claimed:
+  every leg this phase touched was and stays a zero-count arm behind a covered condition.
+- Risk / rollback: `git revert`; nothing but prose changed.
+- Next: cut the patch release. `docs/api.md` and its Chinese counterpart are **inside the published
+  package** (`package.json` `files`), so #195's correction of a false statement is a shipped-artifact fix,
+  not just repository prose — that is what makes 0.21.7 a release rather than a backlog item. After it, the
+  ledger that remains is `cluster.ts` 22 / `data-bus.ts` 12 / `replay-persistence.ts` 8, and the open
+  product question #194 recorded (whether releasing a pattern should prune the concrete topics it filled).
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
