@@ -6024,6 +6024,47 @@ corroborates the 26-spec collection.)
   `protocolVersion` on the legacy path) before the next patch cut.
 - Updated: 2026-09-22.
 
+## Phase 107 / The 0.21.5 guard covered one handler, and a second one read the same pair
+
+- Version: behaviour change in the handoff receive path — a third protocol fix in this range, so the
+  owed patch release now carries three. Branch `fix/control-frame-batch-shape`, second commit, off
+  Phase 106.
+- Phase 106's next step was to read the remaining frame fields the same way ("does presence imply a
+  contract?"). Enumerating the four `handleMessage` branches for that answer found a real second hole
+  instead: `handleRouteReleasedMessage` is the only other place a receiver reads both `topicKey` and
+  `topic` and acts on both, and 0.21.5's pairing check went into `handleControlMessage`, which never
+  covers it.
+- The shape is identical to the one that was fixed, and the handoff makes it sharper. A
+  `ROUTE_RELEASED` is authorized by the durable route — it must still name this worker, must come from
+  the recorded `handoffFromWorkerId`, and must carry the exact generation. All three are readable:
+  route records are plain localStorage under a key the attacker already needs for the channel name. So
+  a correctly-formed ACK for a live handoff, with the frame's `topic` swapped, passed every staleness
+  check and then wrote the attacker's plaintext into `assignedTopics` under the real key *and*
+  subscribed this worker's transport to that channel. Measured before the fix: the recipient's
+  `onControl` fired twice for a topic no tab had subscribed.
+- Consequence worth naming, because it explains why fixing the receiver is enough: `assignedTopics` is
+  what `reconcileAssignedTopics()` later reads back to build an outgoing ACK, so a poisoned entry turns
+  into a *legitimately sent* mismatched frame — the receiver check closes the sender side too, and no
+  ACK sender needs its own guard.
+- Fix: the same one-line invariant, in the one handler that was missing it, with the reasoning at the
+  site rather than a "see cluster.ts:NNN" pointer. `EVENT` and `REGISTRY` need no such check and now say
+  so in `AGENTS.md`: an `EVENT` carries a payload and no key/plaintext pair, a `REGISTRY` nudges
+  reconciliation and acts on no field at all.
+- Verification: `pnpm check` clean (typecheck + build + 37 files / 879 tests + 5 perf gates);
+  `pnpm lint` clean; `pnpm test:coverage` whole-suite 98.98 / 96.63 / 99.26 / 99.69 unchanged,
+  `cluster.ts` branches 94.22 → 94.25 → 94.28 across the two guards. The new test fails without the
+  guard as `expected "vi.fn()" to not be called at all, but actually been called 2 times`.
+- The lesson for the ledger, recorded in `AGENTS.md`: a guard that protects an *invariant* belongs to the
+  protocol, not to the handler where the first violation happened to be found. After 0.21.5 the pairing
+  was stated as a protocol rule and implemented as one `if` in one method, and that is exactly how a
+  second reader of the same pair stays open for a release. When pinning an invariant, enumerate every
+  reader of the fields it constrains and say which of them need it.
+- Risk / rollback: no conforming peer can produce a mismatched ACK, since the pair is derived at all
+  three senders; `git revert` of this commit, no storage or wire-format change.
+- Next: re-walk `handleMessage`'s four branches for anything else that trusts a field by shape alone,
+  then the 13-arm `data-bus.ts` ledger (task #22), then cut the patch release these three fixes earn.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

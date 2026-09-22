@@ -2048,6 +2048,72 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
   });
 
+  it('drops a ROUTE_RELEASED whose topicKey disagrees with its topic', async () => {
+    // 0.21.5 put the key/topic pairing check in `handleControlMessage`, which is
+    // the only place it looked at the time — but `handleRouteReleasedMessage`
+    // reads both fields too, and this is the frame that *completes* a handoff.
+    // A route record is plain localStorage, so a same-origin script can read the
+    // real `topicKey`, the previous owner's id and the generation, and answer an
+    // in-flight handoff with its own channel name: the durable route authorizes
+    // the ACK, `assignedTopics` then stores the attacker's plaintext under the
+    // real key, and `onControl(SUBSCRIBE)` subscribes the transport to it.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+
+    a.runtime.start();
+    a.runtime.subscribe('release-guard');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    const topicKey = route.topicKey as string;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+    expect(topicKey).toBe(createOpaqueKey('release-guard'));
+
+    hub.create(bChannelName).postMessage({
+      type: 'ROUTE_RELEASED',
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-b',
+      topic: 'substituted-release',
+      topicKey,
+      generation: 2
+    });
+
+    expect(controlB).not.toHaveBeenCalled();
+    expect(b.runtime.isAssigned('substituted-release')).toBe(false);
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('substituted-release');
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
+  });
+
   it('ignores a stale CONTROL/SUBSCRIBE while a handoff is awaiting ROUTE_RELEASED', async () => {
     // Regression: a delayed CONTROL/SUBSCRIBE from an earlier assignment round
     // must not authorize a pending handoff before its ROUTE_RELEASED ACK. The

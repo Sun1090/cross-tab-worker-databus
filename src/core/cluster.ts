@@ -969,6 +969,14 @@ export class WorkerClusterRuntime {
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED }>
   ): void {
     if (message.targetWorkerId !== this.workerId) return;
+    // The same pairing invariant `handleControlMessage` applies, and for the same
+    // reason: this frame is the one that *completes* a handoff, and its
+    // authorization is the durable route stored under `topicKey` while the
+    // plaintext handed to `assignedTopics` and the transport is `topic`. Route
+    // records are plain localStorage, so a same-origin script can read the real
+    // key, the previous owner's id and the generation to pass every staleness
+    // check below, and still name the channel this worker subscribes.
+    if (createOpaqueKey(message.topic) !== message.topicKey) return;
     const route = this.readRoute(message.topicKey);
     if (!route || this.isStaleRouteRelease(route, message)) return;
     this.assignedTopics.set(message.topicKey, message.topic);
