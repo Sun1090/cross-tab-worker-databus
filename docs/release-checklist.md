@@ -1,6 +1,6 @@
 # Release checklist
 
-Use this checklist for each pre-1.0 release. The repository does not publish from the assistant; run the final npm command manually after reviewing the packed artifact.
+Use this checklist for each pre-1.0 release. Pushing the version tag *is* the publish: the `Release` workflow runs on the tag, publishes to npm because the `NPM_TOKEN` secret is configured for this repository, and then runs the blocking `verify:published` gate. The manual `npm publish` at the end of this document applies only to a repository state where that secret is absent.
 
 ## Public API stability and deprecation policy (pre-1.0)
 
