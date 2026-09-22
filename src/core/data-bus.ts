@@ -641,6 +641,20 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * reopen is issued; every waiter stays behind the gate until it succeeds. */
   private startDemandRecovery(): void {
     if (!this.recoveryDemandAllowed) return;
+    // `suspended` and `stopping` cannot take this arm from either caller: the
+    // `allowDemandRecovery()` call above already requires both to be clear, and
+    // `runTransport()` returns on `suspended` and only enters the gate branch
+    // when `!stopping`. Only `status !== ERROR` can fire, and reaching it needs
+    // an `updateStatus()` away from error that neither releases the gate nor
+    // consumes the token — `releaseRecoveryGate()` clears both, and the CONNECTED
+    // arm releases when `transportReady` is set. Two constructions were tried
+    // against that: a transport-level reconnect after a failed automatic attempt
+    // (measured: the token was already consumed, so the guard at the line above
+    // returned and the write went straight out), and the same with a
+    // `disconnected` status (measured: a later automatic attempt reopened, so the
+    // reopen-count assertion failed). Not proven dominated — an open zero-count
+    // arm — and kept because deleting it would let any of those futures reopen a
+    // connection that is reported up.
     if (this.status !== WORKER_STATUS.ERROR || this.suspended || this.stopping) return;
     this.recoveryDemandAllowed = false;
     const opening = this.reopenTransport();
