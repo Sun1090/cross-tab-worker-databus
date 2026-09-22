@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.3 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.4 was released on September 22, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.4 delivered scope
+
+- A real defect closed rather than a coverage leg: the failure recorder rendered reasons with `String(error)`, which is not total — `Object.create(null)` has no primitive conversion, and `DataBusTransport` is a public port that may reject with any value. Reporting a failure therefore produced a second failure, and `getHealthSummary()` threw for a bus whose last failure could not be stringified, so the outage-explaining probe refused to answer during the outage.
+- The observable case: a retry after a failed open whose cleanup also failed never reopened the transport, because `createStopPromise()`'s terminal `.catch(error => this.reportError(error))` ran the thrower, `pendingStop` rejected, and `start()`'s chained `.then()` — the one whose absorber `0.21.3` removed — was skipped. `describeFailure()` makes the recorder total, which is what the chained await actually needed.
+- That also repairs the load-bearing step of the argument `0.21.2` and `0.21.3` used to delete two absorbers. Their enumeration of `pendingStop`'s assignment sites was correct; the conclusion that a chain ending in `.catch(error => this.reportError(error))` therefore resolves silently assumed `reportError` cannot throw. Both comments now say so, and a test drives the double-failed-open chain end to end, so those removals rest on something checked.
+- The same shape was fixed in the option validators (`assertPositiveSafeInteger`, `assertPruneStrategy`, `assertHeartbeatInterval`), where `String(value)` on caller input turned a documented config complaint into a formatter `TypeError` — and, in `assertPruneStrategy`, the coercion *was* the membership test.
+- A testing lesson came out of it: `toThrow(TypeError)` passes whether the validator rejects the option or the message builder throws while naming it, so the new assertions pin the message, and `FakeTransport.stopRejection` was added because `stopShouldFail` could only fail with a real `Error`.
 
 ## 0.21.3 delivered scope
 

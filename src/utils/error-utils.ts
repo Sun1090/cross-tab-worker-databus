@@ -61,3 +61,24 @@ export function deserializeWorkerError(error: SerializedWorkerError): Error {
   if (error.context !== undefined) Object.assign(result, { context: error.context });
   return result;
 }
+
+/** Render an arbitrary rejection reason as a message, guaranteed not to throw.
+ *
+ * `String(value)` is *not* total: a null-prototype object has no primitive
+ * conversion at all (`TypeError: Cannot convert object to primitive value`), and
+ * any object can carry a `toString` that throws. Both are inside the public
+ * contract, which lets a transport reject with any value — so the coercion runs
+ * on the path that reports a failure, where throwing is worse than the failure
+ * itself: it replaces the real reason with a message about the formatter's
+ * limits, and it turns a chain ending in `.catch(error => reportError(error))`
+ * from a resolved promise into a rejected one. The whole `try` covers the
+ * `Error` branch too, because `instanceof` and a `.message` getter can each be
+ * made to throw by the value being recorded. */
+export function describeFailure(error: unknown): string {
+  try {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  } catch {
+    return `[unstringifiable ${typeof error}]`;
+  }
+}

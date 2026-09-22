@@ -5368,6 +5368,77 @@ corroborates the 26-spec collection.)
   `version.ts:12` (whose `typeof __SDK_VERSION__ === 'string'` guard is injected by every build).
 - Updated: 2026-09-22.
 
+## Phase 93 / 0.21.4 — the failure recorder could fail
+
+- Version: **0.21.4** (patch, released). Branch `fix/failure-record-totality`.
+- Opened as a ledger pass on the three never-invoked rejection swallows in
+  `reopenTransport()`. Before touching them I re-read the premise those legs and
+  `performStop()`'s comment rest on — "every non-null `pendingStop` chain ends in a
+  terminal `.catch(error => this.reportError(error))`, therefore resolves" — and the
+  last step is an assumption, not a fact: `.catch(handler)` produces a *rejected*
+  promise when `handler` throws, and `recordError()` rendered the reason with
+  `String(error)`. `String(Object.create(null))` throws
+  `TypeError: Cannot convert object to primitive value`, and `DataBusTransport` is a
+  public, application-implemented port that may reject with any value. So the leg I
+  went in to classify was reachable, and reachable through two released versions'
+  deletions of the absorbers that would have hidden it.
+- Shipped consequence, not just a smell: after an open fails and its cleanup
+  `stop()` *also* fails with such a value, `pendingStop` rejects, `start()`'s chained
+  `.then()` is skipped, `transport.start()` is never reached, and the retry surfaces
+  `TypeError: Cannot convert object to primitive value` — a message about the
+  formatter's limits instead of about the caller's transport. Reproduced first, red,
+  with the stack landing on `recordError` ← `reportError` ← `createStopPromise`.
+- Fix: `describeFailure()` in `src/utils/error-utils.ts` (the module whose existing
+  `serializeError()` already sidesteps this), total over the `Error` branch as well as
+  the coercion, so a throwing `message` getter is covered too. Wired into both
+  `recordError()` and `getRecoveryStats()` — the second was the worse one, because
+  `getHealthSummary()` calls it, so the outage-explaining probe threw during an
+  outage. Same shape fixed one layer out in `assertPositiveSafeInteger()`,
+  `assertPruneStrategy()` (where the coercion *is* the membership test) and
+  `assertHeartbeatInterval()`.
+- Tests: 6 new. Two in `data-bus.test.ts` (reporter/renderer totality; the
+  double-failed-open retry actually reopening), three in `error-utils.test.ts`
+  (coercion shapes, the unstringifiable case, the throwing-`message`-getter case),
+  one in `centrifuge.test.ts` (the heartbeat validator's message). New seam
+  `FakeTransport.stopRejection`, because `stopShouldFail` can only fail with a real
+  `Error` and the *reason* is the thing under test here.
+- Why `toThrow(TypeError)` was never going to catch this: the formatter's error is
+  also a `TypeError`. The new validator assertion checks the message text, and the
+  `error-utils` test asserts `String(...)` itself throws for the same input to prove
+  the case is the one that breaks a bare type assertion. Recorded in `AGENTS.md`.
+- Mutation-checked, four mutants, all killed: dropping `describeFailure`'s guard kills
+  3 tests; reverting only the `getRecoveryStats()` call site kills exactly the
+  totality test (so the read side is independently load-bearing, not carried by the
+  write side); reverting only `recordError()` kills 2 including the reopen test (the
+  premise's own leg); reverting all three validator sites kills both validator tests.
+  `src/` verified clean after each; `git diff --stat` inspected because two of these
+  are `/g`-style multi-site edits.
+- Ledger, at the tier it belongs to: `src/utils/error-utils.ts` is now clear at
+  **both** tiers — 0 uncovered lines, 0 uncovered branch arms, 0 uncovered functions.
+  `src/core/data-bus.ts` still shows 17 uncovered branch arms after this change, and
+  that is expected rather than a miss: the two coercions it lost were ternaries whose
+  arms were both already taken, so the fix moved statements and functions, not arms.
+  Whole suite 98.85 / 96.41 / 99.08 / 99.57 over 37 files / 871 tests, against
+  unchanged ceilings (96 / 92 / 96 / 97).
+- Changed files: `src/utils/error-utils.ts`, `src/core/data-bus.ts`,
+  `src/utils/validation.ts`, `tests/error-utils.test.ts`, `tests/data-bus.test.ts`,
+  `tests/centrifuge.test.ts`, `tests/fakes.ts`, `AGENTS.md`, `CHANGELOG.md`,
+  `docs/roadmap.md`, `docs/zh/roadmap.md`, `docs/progress.md`, `package.json`.
+- Verification: `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm test` (871),
+  `pnpm test:perf` (5 gates), `pnpm test:coverage` green; `pnpm verify:pack` and
+  `pnpm verify:compat` against the previous tag; browser E2E in CI.
+- Risk / rollback: the only behavior change is the *text* of a failure message for
+  values that previously threw (`[unstringifiable object]`), plus validators that now
+  report the option instead of throwing. No export, protocol or storage change.
+  `git revert` the release commit and drop the tag.
+- Next: back to the three `reopenTransport()`/`performStop()` absorbers this pass
+  started on — with `reportError` now total, `pending.catch(() => undefined)` at the
+  top of `reopenTransport` has a genuine domination proof, so it is either deletable
+  on the same method as 0.21.2/0.21.3 or owed a pin; then the arm tiers of
+  `replay-manager`, `replay-persistence`, `trace`, `websocket`, `centrifuge-session`,
+  and `version.ts:12`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

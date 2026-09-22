@@ -804,6 +804,19 @@ describe('CentrifugeWorkerTransport heartbeatIntervalMs validation', () => {
     ).toThrow(TypeError);
   });
 
+  it('names the option when the value has no primitive conversion', () => {
+    // The message interpolates the offending value, and `String(Object.create(null))`
+    // throws `TypeError: Cannot convert object to primitive value` — so this still
+    // rejects with a TypeError and the `toThrow(TypeError)` assertions above pass
+    // while reporting the formatter's limit instead of the bad option. The
+    // message is the contract here.
+    expect(
+      () => new CentrifugeWorkerTransport({
+        heartbeatIntervalMs: Object.create(null) as unknown as number
+      })
+    ).toThrow(/heartbeatIntervalMs must be a positive number or Infinity, got \[unstringifiable object\]/);
+  });
+
   it('accepts a positive heartbeatIntervalMs', () => {
     expect(() => new CentrifugeWorkerTransport({ heartbeatIntervalMs: 5_000 })).not.toThrow();
   });

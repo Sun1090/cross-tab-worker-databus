@@ -42,6 +42,7 @@ import {
   WORKER_STATUS
 } from '../utils/constants';
 import { publicationMetadata } from '../utils/metadata';
+import { describeFailure } from '../utils/error-utils';
 import { assertDedupOptions, assertPublicTopic, assertReplayOptions, assertRecoveryOptions } from '../utils/validation';
 
 /** Default ring size per topic when replay is enabled without a limit. */
@@ -667,8 +668,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `before` resolves by construction, so no `.catch` is chained onto it: it is
     // either `Promise.resolve()` from reopenTransport() or `this.pendingStop` from
     // start(), and every non-null assignment of that field is a chain ending in a
-    // terminal `.catch(error => this.reportError(error))` (see performStop(), which
-    // awaits the same promise for the same reason).
+    // terminal `.catch(error => this.reportError(error))`. That handler resolves
+    // because `reportError` cannot throw: its one coercion goes through
+    // `describeFailure()`, which is total over any value a transport may reject
+    // with. Revert that and this promise rejects, the `.then()` below is skipped,
+    // and `transport.start()` is never reached — so keep the totality and this
+    // premise together. (See performStop(), which awaits the same promise.)
     return before
       .then(() => {
         // stop(), suspendTransport(), or a newer reopen may have arrived while
@@ -1004,7 +1009,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     generation: number;
     lastSuccessAt: number | null;
   } {
-    const errorMessage = this.lastError instanceof Error ? this.lastError.message : this.lastError === null ? null : String(this.lastError);
+    const errorMessage = this.lastError === null ? null : describeFailure(this.lastError);
     return {
       attempt: this.recoveryAttempt,
       exhausted: this.recoveryExhausted,
@@ -1215,6 +1220,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // this await would mean a third assignment site had been added. (Compare the
       // line above: `startPromise` genuinely can reject, because it holds the
       // opening that a failing `ready()` reports to its caller.)
+      //
+      // "Resolves" rests on `reportError` being total, i.e. on `describeFailure()`
+      // never throwing for any rejection reason a transport can produce. Pinned by
+      // "opens the transport on a retry when the failed open stop also failed
+      // unrecordably", which is the same chain seen from the public API.
       const pendingStop = this.pendingStop;
       if (pendingStop) await pendingStop;
       else await this.transport.stop();
@@ -1397,7 +1407,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     }
     this.lastFailure = {
       source,
-      message: error instanceof Error ? error.message : String(error),
+      message: describeFailure(error),
       at
     };
     if (source === FAILURE_SOURCE.PERSISTENCE) {

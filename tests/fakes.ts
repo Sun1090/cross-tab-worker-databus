@@ -203,6 +203,12 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   stopGate?: Promise<void>;
   /** When true, stop() returns a rejected promise instead of completing. */
   stopShouldFail = false;
+  /** Rejection reason used by `stopShouldFail`, defaulting to a real Error.
+   * A transport is free to reject with any value, and the ones that matter here
+   * have no primitive conversion at all (`Object.create(null)`), so a test that
+   * wants to pin how the bus *records* such a failure needs to set the reason,
+   * not just the fact of failure. */
+  stopRejection: unknown = new Error('transport stop failed');
   /** Only assigned when the transport is constructed with batch support, so
    * consumers see the same `typeof transport.publishBatch === 'function'`
    * distinction real batch-capable transports present. */
@@ -255,7 +261,7 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
     this.stopCalls += 1;
     this.handlers = null;
     this.subscribed.clear();
-    if (this.stopShouldFail) return Promise.reject(new Error('transport stop failed'));
+    if (this.stopShouldFail) return Promise.reject(this.stopRejection);
     if (this.stopGate) return this.stopGate;
   }
 
