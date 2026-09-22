@@ -138,6 +138,24 @@ interface WorkerRoute {
 
 路由不保存原始 Topic 字符串或 payload。真实 owner 收到 `CONTROL/SUBSCRIBE` 时，原始 Topic 字符串只通过 BroadcastChannel 内存消息传递。接收方只有在持久化 route 当前指向自己时才接受该控制帧；来自较早分配轮的迟到帧会被丢弃，等待 `ROUTE_RELEASED` 的交接也只能由精确匹配的 ACK 确认。`confirmedAt` 在 owner 处理控制消息后写入；在路由确认之前，持有原始 Topic 字符串的订阅方 Runtime 会重发 `SUBSCRIBE`，以从"有路由但无真实订阅"的 BroadcastChannel 消息丢失中恢复。
 
+### 接收侧的帧校验
+
+控制通道是 `BroadcastChannel`：同源、无鉴权，同源内的任意脚本都能写入，因此接收方会把帧字段当作攻击者可控数据处理，除非它做了检查。以下三项属于线协议契约的一部分；未通过的帧被**静默丢弃**而不是报错——没有可以对端的接收者。
+
+| 检查 | 位置 | 未通过的后果 |
+|---|---|---|
+| `targetWorkerId` 指向本 worker | 所有点对点处理器 | 帧被忽略 |
+| `topicKey === createOpaqueKey(topic)` | `CONTROL`（任意 action）与 `ROUTE_RELEASED` | 帧被忽略 |
+| 携带 `items` 的 `CONTROL/PUBLISH` 帧必须给出非空**数组** | `CONTROL/PUBLISH` | 帧被忽略 |
+
+第二行是所有权的授权前提。`topicKey` 是 `topic` 的纯函数，所以本库构造的每个帧两者必然一致；不一致就是替换而非变体。由于所有权依据 `topicKey` 对应的持久路由判定，而传输层订阅的名字来自 `topic`，不校验就允许一帧借用某个频道的授权去命名另一个频道。持久路由记录只保存 `topicKey`、从不保存明文，因此 key → 明文的映射只存在于内存中，无法通过 localStorage 注入。
+
+第三行存在是因为批量路径会迭代负载：只有 `length` 而没有迭代器的值会从消息监听器里抛出异常；可迭代的非数组（字符串）会被当成多个单字符条目，其 `data` 为 `undefined`，随后 owner 会以自己的会话把它们发布出去。
+
+有两处是**故意不校验**的。`EVENT` 帧只做形状校验（`eventType` 加一个含字符串 `topic` 的负载）并转发其余字段，因为投递仍要求本地存在该频道的订阅者，而这种宽容正是新旧 SDK 版本能共处一个集群的前提。批量条目内部的*内容*也不校验：`{ data: 任意} ` 就是合法条目的样子，而 `messageId` / `timestamp` 只会被转发给 `transport.publish()`——接收侧在解析发布数据时会丢弃非字符串 id 与非有限数值时间戳。
+
+**给非 JS 对端或自定义 environment 的约定：**用 `createOpaqueKey` 从 topic 推导 `topicKey`，不要发送零条目的批次，并预期不一致的帧会被忽略且没有任何响应。
+
 ### `topic`、`topicKey`、`tabId`、`workerId` 与 BroadcastChannel 的关联
 
 这几个标识分别表示不同层次的对象，不应混用：
