@@ -633,7 +633,24 @@ test.describe('cross-tab databus demo', () => {
     // neither is allowed here: what is under test is that the tab notices on its
     // own and reopens, so the only inputs after the stall are the clock and the
     // library.
-    await expect.poll(async () => (await holders()).length, { timeout: 90_000 }).toBe(1);
+    //
+    // Poll for the *replacement*, not for "one holder". A poll for the count is
+    // satisfied by the very socket the reaper is about to reclaim: measured on CI,
+    // where the SharedWorker's timers share the blocked thread and so cannot tick
+    // during the stall, the count read 1 throughout and the assertion that then
+    // compared ids failed against the original socket. Waiting for the channel to
+    // be held by a different connection is the same claim and works whichever
+    // thread the worker's clock lives on — the reap lands as soon as that clock
+    // next runs, which on that architecture is after the tab unblocks.
+    await expect
+      .poll(
+        async () => {
+          const found = await holders();
+          return found.length === 1 && found[0]!.id !== originalSocket.id;
+        },
+        { timeout: 90_000 }
+      )
+      .toBe(true);
     const rebuilt = (await holders())[0]!;
     expect(rebuilt.id, `rebuilt session: ${formatSockets([rebuilt])}`).not.toBe(originalSocket.id);
     console.log(
