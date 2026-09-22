@@ -5439,6 +5439,60 @@ corroborates the 26-spec collection.)
   and `version.ts:12`.
 - Updated: 2026-09-22.
 
+## Phase 94 / Three verdicts that all look like "uncovered": dominated, only-handler, and running-but-redundant
+
+- Version: no release — recorded under `## [Unreleased]`, deliberately not cut, per the cadence
+  rule that a single cleanup does not earn a version. Branch `refactor/dominated-reopen-absorbers`,
+  based on `7b2c322` (0.21.4).
+- This is the pass Phase 93 deferred: the never-invoked rejection swallows in `reopenTransport()`.
+  Finished with one handler deleted and the other two re-labelled, because they turned out to be
+  three different kinds of leg.
+- Deleted: the trailing `void opening.catch(() => undefined)` after `opening.then(f, g)`. The proof
+  is Promise semantics, not an assignment enumeration — passing `onRejected` to `.then` registers
+  *that* as a handler of `opening`, so `opening` can never be an unhandled rejection on that path,
+  whatever it rejects with. Chosen over an enumeration-style argument deliberately: 0.21.2/0.21.3
+  deleted two legs on enumeration proofs and 0.21.4 then found the enumeration's last step
+  (".catch(handler) resolves") was false whenever `handler` throws, so a proof that never mentions a
+  handler is the sturdier one here.
+- Kept, and now labelled as the guard it is: the early-return arm's `void opening.catch(...)`. That
+  arm returns before any `.then(f, g)` is installed and `resumeTransport()` calls with `void`, so
+  this swallow is the only handler the opening ever receives on that path. Uncovered, load-bearing,
+  not a gap.
+- Kept, dominated, with the cost of deletion measured: the `pending.catch(() => undefined)` at the
+  top of the method. `pending` provably resolves (the `startPromise !== this.pendingStop` guard above
+  returned for every other in-flight opening; `pendingStop`'s two sites now genuinely end in a
+  resolving `.catch(reportError)`, which is what 0.21.4 bought). Measured both ways: forcing `pending`
+  to reject fails exactly one test — "reopens after repeated hide/show cycles that all precede a
+  pending initial open" — *with and without* the guard, so no assertion protects the premise. Deletion
+  is still refused on the shape of the failure: with the absorb a superseded resume reopens anyway,
+  without it the skipped `.then()` leaves the bus silently closed after a pageshow. "Degraded" versus
+  "stuck" is the tie-breaker, and the measurement is written into the comment so the next reader does
+  not re-run it.
+- A claim corrected before it shipped, because it would have been the easy kind of wrong: this change
+  moves **no** coverage number. The deleted handler was not among `data-bus.ts`'s three uncovered
+  functions — its callback executed in existing tests, which is exactly why it read as covered. The
+  module stays at 3 uncovered functions and 17 uncovered branch arms; what was removed was a handler
+  that ran and could not matter. `AGENTS.md` now separates the three verdicts (dominated /
+  only-handler / executing-but-redundant) so "uncovered" stops standing in for all of them.
+- Also fixed: `reopenTransport()`'s `activeConfig` guard still pointed at `performStop()`'s absorber
+  as its contrast, and that absorber was deleted in 0.21.2 — a cross-reference to code that no longer
+  exists. It now contrasts with the live absorb eleven lines below, which is the comparison that
+  actually illustrates the difference.
+- Changed files: `src/core/data-bus.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
+- Verification: `pnpm typecheck` clean, `pnpm lint` clean, full suite green after the deletion
+  (37 files / 871 tests, no unhandled rejection reported by Vitest), `pnpm test:coverage` re-measured
+  to confirm the tier claim rather than assume it.
+- Risk / rollback: one redundant handler removed, two comments rewritten; `git revert`, no artifact
+  consequence. The deletion's safety rests on `.then(f, g)` keeping its `onRejected` — flagged in the
+  comment so a future edit that drops `g` knows to reinstate the swallow.
+- Next: `data-bus.ts`'s remaining zero arms are now all classified or owed a construction — the
+  `queuedStart`/`getQueuedStartReady` pair (529/553), `switch#3` default (334), and the
+  `stopPromise ?? Promise.resolve()` fallbacks (451/557), which are the same "dominated by an
+  enumeration" shape and should be argued with the Promise-semantics style where possible. Then the
+  arm tiers of `replay-manager`, `replay-persistence`, `trace`, `websocket`, `centrifuge-session`,
+  `version.ts:12`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

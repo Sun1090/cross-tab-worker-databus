@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Changed
+- One redundant rejection handler deleted from `reopenTransport()`, on a proof that needs no enumeration: the `opening.then(onFulfilled, onRejected)` a few lines above passes an `onRejected`, which registers *that* as a handler of `opening` — so `opening` can never surface as an unhandled rejection on that path whatever it rejects with, and the trailing `void opening.catch(() => undefined)` could only ever duplicate a handler that was already installed. Unlike the `0.21.2` / `0.21.3` deletions this argument rests on Promise semantics rather than on a list of assignment sites, which is also why it does not depend on `reportError` staying total.
+- The two rejection swallows that remain in that method are now each labelled with what they actually are, because they are two different kinds of leg and only one of them is deletable. The early-return arm's `void opening.catch(...)` is the *only* handler that opening ever gets on that path (`resumeTransport()` calls with `void`, and the `.then(f, g)` below is unreachable from the arm), so it is a guard, not a gap. The one at the top of the method is dominated — `pending` provably resolves — but is deliberately kept, and the reason is recorded with a measurement: forcing `pending` to reject fails exactly one test whether the line is present or deleted, so nothing asserts the premise; with the absorb a superseded resume still reopens, without it the bus silently stays closed after a pageshow. A guard whose deletion turns "degraded" into "stuck" is worth its uncovered function.
+- Corrects a claim this pass initially made about itself: the deleted handler was **not** one of `data-bus.ts`'s three uncovered functions — its callback ran in existing tests, so the module's uncovered-function count stays at three and its uncovered-line count is unchanged. What was removed was a handler that executed and could not matter. Coverage movement here is zero, and saying so is the point: the change is justified by the proof, not by a number.
+
+### Documentation
+- `AGENTS.md` gains the tier distinction these two legs demonstrate (a guard that is dominated, a guard that is the only handler, and a handler that runs but is redundant are three different verdicts, and only the middle one is a coverage gap), and the stale cross-reference from `reopenTransport()`'s `activeConfig` guard to `performStop()`'s absorber — deleted in `0.21.2` — now points at the live comparison in the same method.
+
+
 ## [0.21.4] - 2026-09-22
 
 ### Fixed
