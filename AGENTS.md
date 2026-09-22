@@ -178,6 +178,18 @@ it belongs to, and pin the forged-frame case — `tests/cluster.test.ts`'s
 "drops a control frame whose topicKey disagrees with its topic" is the shape, and it must fail when the
 guard comes out.
 
+`EVENT` is deliberately *not* held to that standard, and this is decided rather than an oversight: it
+checks `eventType === PUBLICATION_EVENT` and the minimum payload shape (a `topic` string), and forwards
+the rest. Delivery then requires `cluster.hasLocalSubscriber(topic)` and reaches `dispatch()`, so the
+blast radius of a forged frame is "a publication appears on a topic this tab already subscribes to, and
+lands in that topic's replay ring buffer" — strictly weaker than what a same-origin script can already do
+by calling the page's own bus. A forged `CONTROL` frame was different in kind, not in degree: it wrote
+*shared* coordination state (ownership, the durable route confirmation, the transport subscription name)
+that other tabs then observe. Do not "harden" `EVENT` with an `isAssigned`/route gate: it buys nothing
+against the same-origin threat and would break the older and newer SDK versions the shape-only check
+exists to tolerate. Reopen this only if `EVENT` payloads gain reach beyond local handlers plus that
+topic's own replay buffer.
+
 ## Reconcile loop (3s default)
 
 Every heartbeat tick: prune stale workers (TTL), orphaned subscribers (no live tab), orphaned routes (no subscribers + expired TTL); refresh role; re-send unconfirmed CONTROL/SUBSCRIBE; recompute load. Write to worker/route/subscriber storage also broadcasts a REGISTRY nudge so peers reconcile immediately instead of waiting for the next heartbeat.

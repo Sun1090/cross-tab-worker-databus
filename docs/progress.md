@@ -5889,6 +5889,38 @@ corroborates the 26-spec collection.)
   question applied to the `EVENT` fan-out path and to `message.items` in batched `PUBLISH`.
 - Updated: 2026-09-22.
 
+## Phase 104 / The EVENT path was audited for the same hole and left alone, on purpose
+
+- Version: no code change; documents a decision so it is not re-litigated. Branch
+  `docs/event-trust-boundary`, off `c1330b1` (#181).
+- Phase 103's fix raised the obvious follow-up: `handleMessage` forwards an `EVENT` frame's
+  `eventType`, `payload`, `sourceWorkerId` and `originTabId` to `handlers.onEvent` with no route or key
+  check, so is that the same substitution hole one layer up? It is not, and the reason is worth more
+  than the answer. `CrossTabDataBus`'s handler validates `eventType === PUBLICATION_EVENT` and the
+  minimum payload shape (an object with a string `topic`) — deliberately lax, so a peer on another SDK
+  version cannot throw from inside the channel listener and break subsequent delivery — and then hands
+  the publication to `dispatch()`, whose reach is bounded by the receiving tab's own
+  `topicHandlers` map plus the wildcard patterns it registered, and only once
+  `cluster.hasLocalSubscriber(message.topic)` passes; `dispatch()` also records the publication into
+  that topic's replay ring buffer, which is the one piece of durable-ish state this path can write.
+- So the blast radius of a forged `EVENT` is "a same-origin script delivers a publication to a topic
+  this tab already subscribes to", which is strictly weaker than what that script can already do by
+  calling the page's own bus. The forged `CONTROL` frame was different in kind, not in degree: it wrote
+  shared coordination state — `assignedTopics`, the durable route confirmation, the transport
+  subscription name — that *other* tabs then observe, which is exactly what the route check exists to
+  authorize.
+- Consequence recorded in `AGENTS.md`: do not "harden" `EVENT` with an `isAssigned`/route gate. It would
+  buy nothing against the same-origin threat and would break the older/newer peers that the shape-only
+  check tolerates. The paragraph names the one change that would reopen the question — `EVENT` payloads
+  gaining the ability to mutate state beyond invoking local handlers.
+- Changed files: `AGENTS.md`, `docs/progress.md`. No source or test change, so no verification beyond
+  `pnpm lint` and reading the diff; nothing to measure.
+- Risk / rollback: documentation only; `git revert`.
+- Next: the owed 0.21.5 patch release (see Phase 103), then the 13-arm ledger with the
+  "what does the receiver trust" question applied to batched `PUBLISH` `message.items`, where each item
+  carries its own metadata and the frame-level key check only sees the outer `topic`.
+- Updated: 2026-09-22.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
