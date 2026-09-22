@@ -6926,9 +6926,18 @@ corroborates the 26-spec collection.)
 - Changed files: `e2e/demo.spec.ts`, `AGENTS.md`, `CHANGELOG.md`, `docs/progress.md`.
 - Risk / rollback: `git revert`. No shipped-code change; the only new runtime surface is a `console.log`
   line in a test.
-- Next: the shared-mode specs still assert delivery and socket lifecycle but not *reap latency under
-  migration* — if a takeover races the reaper, the survivor's session can be closed while it is acquiring
-  a route. Worth one probe before deciding whether it is testable at browser level or is unit-only.
+- What this phase also settled, so it stops being on the list:
+  - Phase 123's open item — re-read the other E2E specs for the global-counter mistake. Done by
+    enumeration: the only server-state reads left in `e2e/` are `serverSubscribers()` in
+    `adapters.spec.ts` and the `publishBatch` spec's `/debug/wsstats` access, and both are already
+    keyed by this test's own channel or `topics[topic]` counter. No remaining count-of-all-connections
+    assertion.
+  - The suspected "reap races migration" gap is not a gap, and this spec is the evidence. In
+    `centrifuge.shared.worker.ts` the reaper's targets are keyed by `MessagePort` and one port owns one
+    `CentrifugeSession` with its own WebSocket, so a takeover in a survivor runs entirely inside that
+    survivor's already-registered target — nothing a departing tab can reap. The containment assertion
+    added here (the post-migration holder was open *before* the close) is the browser-level statement of
+    that: a reaper that killed the survivor mid-handover would show up as a fresh socket id.
 - Updated: 2026-09-23.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
