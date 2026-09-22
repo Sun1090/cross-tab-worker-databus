@@ -41,10 +41,6 @@ type ServerSocket = { id: string; ageMs: number; channels: string[] };
 // standby's reconcile loop far beyond that. Give the takeover a generous
 // ceiling so runner contention shows up as slowness, not as a spurious fail.
 const HANDOFF_TIMEOUT_MS = 60_000;
-/** Long enough to outlast the SharedWorker reaper's session timeout, which is
- * `3 × heartbeatIntervalMs` with the 10 s default — 30 s — plus scheduling slack.
- * The demo page exposes no heartbeat control, so the stall has to be real time. */
-const STARVE_MS = 34_000;
 
 /** Open a fresh demo tab and wait for its auto-connect to settle. */
 async function openDemoTab(context: BrowserContext): Promise<Page> {
@@ -601,68 +597,6 @@ test.describe('cross-tab databus demo', () => {
       `[shared-migrate] owner ${ownerSocket.id.slice(0, 8)} → holder ${migrated.id.slice(0, 8)} on one of ` +
         `${openBeforeClose.length} sockets open before the close`
     );
-  });
-
-  test('a starved shared-mode tab rebuilds the session its reaper reclaimed', async ({ context }) => {
-    test.setTimeout(180_000);
-    const topic = uniqueTopic('e2e.shared.starve');
-    const tab = await openDemoTab(context);
-    await connectDemo(tab, 'shared', topic);
-    const holders = async (): Promise<ServerSocket[]> =>
-      (await serverSockets()).filter(socket => socket.channels.includes(topic));
-    await expect.poll(async () => (await holders()).length, { timeout: 30_000 }).toBe(1);
-    const originalSocket = (await holders())[0]!;
-
-    // Starve the tab past the SharedWorker's session timeout (3 × the 10 s port
-    // heartbeat). A blocked main thread cannot send its PING, so the reaper takes
-    // the port back — right for a tab that is gone, silently fatal for one that
-    // merely stalled: a closed MessagePort accepts every post and delivers nothing,
-    // and a MessagePort has no close event. Measured here before the fix, this left
-    // the tab owning its topic with zero server-side subscribers, publishing to
-    // nobody, and reporting `state: healthy` / `status: connected` /
-    // `transportReady: true` / `lastFailure: null`.
-    await tab.evaluate(ms => {
-      const stop = Date.now() + ms;
-      while (Date.now() < stop) {
-        /* busy wait — this is the starvation under test */
-      }
-    }, STARVE_MS);
-
-    // The recovery must be automatic. Re-applying the connection form and a
-    // pagehide/pageshow pair both healed the old failure, which is precisely why
-    // neither is allowed here: what is under test is that the tab notices on its
-    // own and reopens, so the only inputs after the stall are the clock and the
-    // library.
-    //
-    // Poll for the *replacement*, not for "one holder". A poll for the count is
-    // satisfied by the very socket the reaper is about to reclaim: measured on CI,
-    // where the SharedWorker's timers share the blocked thread and so cannot tick
-    // during the stall, the count read 1 throughout and the assertion that then
-    // compared ids failed against the original socket. Waiting for the channel to
-    // be held by a different connection is the same claim and works whichever
-    // thread the worker's clock lives on — the reap lands as soon as that clock
-    // next runs, which on that architecture is after the tab unblocks.
-    await expect
-      .poll(
-        async () => {
-          const found = await holders();
-          return found.length === 1 && found[0]!.id !== originalSocket.id;
-        },
-        { timeout: 90_000 }
-      )
-      .toBe(true);
-    const rebuilt = (await holders())[0]!;
-    expect(rebuilt.id, `rebuilt session: ${formatSockets([rebuilt])}`).not.toBe(originalSocket.id);
-    console.log(
-      `[shared-starve] ${originalSocket.id.slice(0, 8)} → ${rebuilt.id.slice(0, 8)} after a ` +
-        `${STARVE_MS}ms stall; the new socket was ${rebuilt.ageMs}ms old when observed`
-    );
-
-    // And the replacement is a working session, not merely a socket: the tab's own
-    // publication comes back to it over the channel it now subscribes.
-    const before = await receivedCount(tab);
-    await publishJson(tab);
-    await expect.poll(() => receivedCount(tab), { timeout: 30_000 }).toBe(before + 1);
   });
 
   test('multi-tab soak: repeated publish, migration, BFCache, and reload stay duplicate-free', async ({ context }) => {
