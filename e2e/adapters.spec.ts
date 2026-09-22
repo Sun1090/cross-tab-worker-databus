@@ -23,6 +23,7 @@
  */
 import { expect, test } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
+import { uniqueTopic } from './topics';
 
 type ExamplePage = {
   /** Where the page is served. */
@@ -111,10 +112,40 @@ async function messages(page: Page): Promise<string[]> {
   return page.$$eval('#messageList li', nodes => nodes.map(node => node.textContent ?? ''));
 }
 
+/** The worker ids *this tab* currently believes own a topic — i.e. the addresses
+ * it would send a relayed publication to. Each test opens one topic per cluster,
+ * so this is a single entry while an owner is alive. It is read from the sender
+ * rather than from a survivor because the sender is the one that can lose a
+ * publication: delivery is at-most-once, and a CONTROL frame addressed at a tab
+ * that no longer exists has no receiver to retry it. */
+function routeWorkers(page: Page, example: ExamplePage): Promise<string[]> {
+  return page.evaluate(hook => {
+    const read = (window as unknown as Record<
+      string,
+      (() => { getClusterSnapshot(): { routes: Array<{ workerId: string }> } }) | undefined
+    >)[hook];
+    const bus = read?.();
+    const routes = bus?.getClusterSnapshot().routes ?? [];
+    return [...new Set(routes.map(route => route.workerId))];
+  }, example.hook);
+}
+
+/** Wait until this tab's cluster has stopped naming any of `dead` as an owner.
+ * A released route that has not been re-elected yet counts: with no route the tab
+ * takes the topic itself instead of writing to the departed worker. */
+async function awaitRouteCleared(page: Page, example: ExamplePage, dead: string[]): Promise<void> {
+  await expect
+    .poll(
+      async () => (await routeWorkers(page, example)).some(workerId => dead.includes(workerId)),
+      { timeout: HANDOFF_TIMEOUT_MS }
+    )
+    .toBe(false);
+}
+
 for (const example of [VUE_PAGE, REACT_PAGE]) {
   test.describe(`${example.name} example page`, () => {
     test('fans a publication out to the other open tabs', async ({ browser }) => {
-      const topic = `${example.name}.fanout.${Date.now()}`;
+      const topic = uniqueTopic(`${example.name}.fanout`);
       const context = await browser.newContext();
       const sender = await openTab(context, example, topic);
       const receiver = await openTab(context, example, topic);
@@ -139,7 +170,7 @@ for (const example of [VUE_PAGE, REACT_PAGE]) {
     });
 
     test('rebinds when the topic changes and leaves the old topic behind', async ({ browser }) => {
-      const topic = `${example.name}.rebind.${Date.now()}`;
+      const topic = uniqueTopic(`${example.name}.rebind`);
       const context = await browser.newContext();
       const mover = await openTab(context, example, topic);
       const follower = await openTab(context, example, topic);
@@ -169,7 +200,7 @@ for (const example of [VUE_PAGE, REACT_PAGE]) {
     });
 
     test('keeps delivering after the tab that owned the topic closes', async ({ browser }) => {
-      const topic = `${example.name}.handoff.${Date.now()}`;
+      const topic = uniqueTopic(`${example.name}.handoff`);
       const context = await browser.newContext();
       const owner = await openTab(context, example, topic);
       const survivor = await openTab(context, example, topic);
@@ -178,7 +209,20 @@ for (const example of [VUE_PAGE, REACT_PAGE]) {
       await publish(owner, '{"tag":"before-close"}');
       await expect(survivor.locator('#messageList')).toContainText('{"tag":"before-close"}');
 
+      // The sender's own view of the topic is captured *before* the close, because
+      // that view is what has to change: publishing once into the window where this
+      // tab still addresses the departed worker cannot be rescued by waiting, since
+      // the publication was at-most-once the moment it was written. The earlier
+      // version did exactly that and passed only while the runner was fast enough
+      // for the handoff to land before the click — it failed 3/3 attempts on two
+      // loaded runners while the identical React case passed on the same job.
+      const dead = await routeWorkers(latecomer, example);
+      expect(dead).toHaveLength(1);
+
       await owner.close();
+      await awaitRouteCleared(latecomer, example, dead);
+      // A live tab has taken the channel over, so the publication has a holder.
+      await expect.poll(() => serverSubscribers(topic), { timeout: HANDOFF_TIMEOUT_MS }).toBe(1);
 
       await publish(latecomer, '{"tag":"after-close"}');
       await expect
@@ -199,7 +243,7 @@ for (const example of [VUE_PAGE, REACT_PAGE]) {
       // probed because they are different arms: whitespace-only falls back through
       // `trim()`, the raw empty string through `||`. The recovery is then shown to
       // be a live subscription, not just a badge that changed.
-      const topic = `${example.name}.fallback.${Date.now()}`;
+      const topic = uniqueTopic(`${example.name}.fallback`);
       const context = await browser.newContext();
       const page = await context.newPage();
       const thrown: string[] = [];
