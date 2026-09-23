@@ -11,9 +11,9 @@
 
 ## 自动化门禁（CI）
 
-`CI` 工作流的 `verify` job 在每次 push 与 pull request 上运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`（`vitest.config.ts` 中的下限：语句 98% / 分支 96% / 函数 98% / 行 99%）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench` 与 `pnpm audit`；`browser` job 运行 Playwright E2E 套件。`Release` 工作流在发布前重跑 `verify:compat` 与 `verify:pack`，随后执行阻塞式 `verify:published` 门禁。两个工作流的 checkout 均使用 `fetch-depth: 0` + `fetch-tags: true`，因为 `verify:compat` 需要从最近的发布 tag 解析基线。
+`CI` 工作流的 `verify` job 在**以 `main` 为目标分支**的 push 与 pull request 上运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`（`vitest.config.ts` 中的下限：语句 98% / 分支 96% / 函数 98% / 行 99%）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench` 与 `pnpm audit`——`ci.yml` 里两个触发器都被过滤为 `branches: [main]`，因此推送 topic 分支什么都不会跑，这项工作要到开出 PR 时才第一次进入 CI（base 不是 main 的 PR 同样不在覆盖范围内）；`browser` job 运行 Playwright E2E 套件。`Release` 工作流在发布前重跑 `verify:compat` 与 `verify:pack`，随后执行阻塞式 `verify:published` 门禁。两个工作流的 checkout 均使用 `fetch-depth: 0` + `fetch-tags: true`，因为 `verify:compat` 需要从最近的发布 tag 解析基线。
 
-只有 `pnpm bench:browser` / `pnpm bench:compare` 保持仅本地执行：共享 runner 的计时噪声会让数值型 CI 门禁不可靠。
+只有 `pnpm bench:browser` / `pnpm bench:compare` / `pnpm bench:trend` 保持仅本地执行：共享 runner 的计时噪声会让数值型 CI 门禁不可靠，而 `bench:trend` 会依据本地归档重写 `docs/benchmarks.md`，这本就不该由 CI 来做。
 
 ## 打 tag 前
 
@@ -30,7 +30,7 @@
 
 ## 打 tag 的发布工作流
 
-推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行与手动执行相同预算的**阻塞式**消费者验证（`PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`，即 6 分钟上限）。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败。若为 registry 传播延迟或基础设施故障，针对不变的 tag 重跑工作流；若为产物缺陷，发布新的 patch 版本。禁止移动或重用已发布 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
+推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行**阻塞式**消费者验证，其预算是手动默认值的十二倍——工作流在自己的 env 里设置 `PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`（约 6 分钟上限），而手动运行 `scripts/verify-published-consumer.mjs` 时的默认值是 6 × 5000 ms = 30 秒。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败。若为 registry 传播延迟或基础设施故障，针对不变的 tag 重跑工作流；若为产物缺陷，发布新的 patch 版本。禁止移动或重用已发布 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
 
 ## 发布（手动场景）
 
@@ -42,4 +42,4 @@
 2. 在干净消费者中安装已发布版本或 tarball，并导入主入口及所有公开子路径。
 3. 将结果记录到发布说明。在公开 API 和协议弃用策略明确冻结前，不进入 `1.0.0`。
 
-打 tag 的发布工作流已自动执行上述消费者验证；仅在需要离线复验时才手动运行 `PUBLISHED_VERSION=<version> pnpm verify:published`。工作流默认的 6 分钟上限足以吸收 npm CDN 的正常传播延迟（0.20.89 tag 首次运行在发布成功后排空了旧的 2 分钟预算）；只有遇到异常慢的镜像才需要继续调大 `PUBLISHED_VERIFY_ATTEMPTS` 和 `PUBLISHED_VERIFY_DELAY_MS`。
+打 tag 的发布工作流已自动执行上述消费者验证；仅在需要离线复验时才手动运行 `PUBLISHED_VERSION=<version> pnpm verify:published`。工作流默认的 6 分钟上限足以吸收 npm CDN 的正常传播延迟（0.20.89 tag 首次运行在发布成功后排空了旧的 2 分钟预算）；只有遇到异常慢的镜像才需要继续调大 `PUBLISHED_VERIFY_ATTEMPTS` 和 `PUBLISHED_VERIFY_DELAY_MS`。手动复验时要注意这个不对称：`verify-published-consumer.mjs` 的默认值是 `6` 次 × `5_000` ms——30 秒而不是 6 分钟——因为更大的那一对是由 tag 工作流以 env 传入、而非脚本自带。于是手动复跑可能在一个 CI 全绿的版本上报出 `ETARGET`，这看起来像发布失败而实际不是；要对齐 CI 预算就显式执行 `PUBLISHED_VERSION=<version> PUBLISHED_VERIFY_ATTEMPTS=48 PUBLISHED_VERIFY_DELAY_MS=7500 pnpm verify:published`，否则请按你实际跑到的 30 秒预算来判断手动失败。*绿色*的 tag 运行里出现约 39/48 次重试是预期内的：那是 registry 传播，不是症状。
