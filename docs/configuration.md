@@ -54,7 +54,7 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 
 `replay.retentionSweepMs` optionally schedules the same cleanup on a periodic interval. It is useful for quiet topics whose old durable records should still expire; it requires `retentionMs` and a persistence adapter with `clearBefore()`. The timer follows visibility and lifecycle transitions and is disabled by default.
 
-`replay.persistenceRetry` optionally controls transient persistence recovery. `maxAttempts` is the total number of attempts (default `1`), and `backoffMs` is the initial delay before retry (default `50`). Delays grow exponentially and are capped; final failures retain the existing `onError` and reliability behavior. A batch flush still queued in a microtask when the bus suspends or stops is discarded with its lifecycle generation rather than starting a durable append after teardown.
+`replay.persistenceRetry` optionally controls transient persistence recovery. `maxAttempts` is the total number of attempts (default `1`), and `backoffMs` is the initial delay before retry (default `50`). Delays are capped only where they grow: after a failed attempt the delay doubles and the doubled value is capped at 1600 ms, while `backoffMs` itself is waited verbatim as the first delay — so `backoffMs: 5000` waits 5000 ms, then 1600 ms, rather than being clamped to the ceiling; final failures retain the existing `onError` and reliability behavior. A batch flush still queued in a microtask when the bus suspends or stops is discarded with its lifecycle generation rather than starting a durable append after teardown.
 
 ### Replay Options
 
@@ -65,7 +65,7 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 | `retentionMs` | `number` | — | Producer-timestamp retention window; history older than the cutoff is pruned through the adapter's `clearBefore` |
 | `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` caps each topic at `maxPerTopic`; `age` prunes timestamped history by `retentionMs` and caps timestamp-less legacy entries by `maxPerTopic`; `both` applies both. `age` without `retentionMs` has nothing to prune by and falls back to the count cap |
 | `retentionSweepMs` | `number` | — | Periodic durable-retention sweep for quiet topics; requires `retentionMs` and a `clearBefore` adapter |
-| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | Bounded retry for transient persistence failures; delays grow exponentially and are capped |
+| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | Bounded retry for transient persistence failures; the delay doubles after each attempt and the doubled value is capped at 1600 ms, `backoffMs` being waited verbatim first |
 
 ### Deduplication Options
 

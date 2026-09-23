@@ -54,7 +54,7 @@ const bus = new CrossTabDataBus({
 
 `replay.retentionSweepMs` 可选地按周期触发同一清理逻辑。它适合安静 topic 的 durable 旧记录也需要过期的场景；需要同时配置 `retentionMs` 和实现 `clearBefore()` 的持久化适配器。定时器遵循页面可见性和生命周期切换，默认关闭。
 
-`replay.persistenceRetry` 可选地控制瞬时持久化失败的恢复。`maxAttempts` 是总尝试次数（默认 `1`），`backoffMs` 是首次重试前的延迟（默认 `50`）；延迟会指数增长并封顶。最终失败仍沿用现有 `onError` 和 reliability 行为。bus 挂起或停止时仍排队在微任务中的批量 flush 会随其生命周期代际一起丢弃，不会在 teardown 后启动 durable append。
+`replay.persistenceRetry` 可选地控制瞬时持久化失败的恢复。`maxAttempts` 是总尝试次数（默认 `1`），`backoffMs` 是首次重试前的延迟（默认 `50`）；封顶只作用在增长上：每次尝试失败后延迟翻倍，翻倍后的值封顶在 1600 ms；`backoffMs` 作为首次延迟按配置值原样等待，所以 `backoffMs: 5000` 会先等 5000 ms、之后才回落到 1600 ms，而不是被压到封顶值。最终失败仍沿用现有 `onError` 和 reliability 行为。bus 挂起或停止时仍排队在微任务中的批量 flush 会随其生命周期代际一起丢弃，不会在 teardown 后启动 durable append。
 
 ### Replay 选项
 
@@ -65,7 +65,7 @@ const bus = new CrossTabDataBus({
 | `retentionMs` | `number` | — | 生产者时间戳保留窗口；早于 cutoff 的历史通过适配器的 `clearBefore` 清理 |
 | `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | `count` 按 `maxPerTopic` 截断；`age` 按 `retentionMs` 清理带时间戳历史，并以 `maxPerTopic` 限制无时间戳的 legacy 条目；`both` 两者都应用。`age` 未配置 `retentionMs` 时无 age 可依，回退为数量上限 |
 | `retentionSweepMs` | `number` | — | 面向安静 topic 的周期性 durable retention sweep；需要 `retentionMs` 与实现 `clearBefore` 的适配器 |
-| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | 瞬时持久化失败的有界重试；延迟指数增长并封顶 |
+| `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | 瞬时持久化失败的有界重试；每次失败后延迟翻倍，翻倍值封顶 1600 ms，`backoffMs` 首次按原值等待 |
 
 ### 去重选项
 
