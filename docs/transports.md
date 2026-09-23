@@ -26,8 +26,9 @@ interface DataBusTransport<TConfig = unknown, TData = unknown> {
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
   /** Optional: one frame for a burst. Without it the DataBus loops `publish`.
    * Each item is `{ data, messageId?, timestamp? }` — the same metadata `publish`
-   * takes, per entry. (That entry type is internal: name it inline, or widen the
-   * `ReadonlyArray` to whatever your backend accepts.) */
+   * takes, per entry. That entry type is exported as `DataBusPublicationItem`;
+   * name it, write it inline, or widen the `ReadonlyArray` to whatever your
+   * backend accepts. */
   publishBatch?(topic: string, items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>): MaybePromise<void>;
   stop(): MaybePromise<void>;
 }

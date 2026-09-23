@@ -316,7 +316,8 @@ interface DataBusTransport<TConfig, TData> {
   subscribe(topic): void | Promise<void>;
   unsubscribe(topic): void | Promise<void>;
   publish(topic, data): void | Promise<void>;
-  /** 可选：将多条消息合并为一帧发送。未提供时 DataBus 回退为逐条 `publish`。 */
+  /** 可选：将多条消息合并为一帧发送。未提供时 DataBus 回退为逐条 `publish`。
+   * 每条是 `DataBusPublicationItem` —— `{ data, messageId?, timestamp? }`，已导出。 */
   publishBatch?(topic, items): void | Promise<void>;
   stop(): void | Promise<void>;
 }
@@ -501,7 +502,7 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 - `shared` / `auto`：SharedWorker → Dedicated Worker → 本地模式
 - `dedicated`（默认）：Dedicated Worker → SharedWorker → 本地模式
 
-`availability` 可显式传入 `worker` / `sharedWorker` 能力标记，用于 SSR、测试或嵌入环境，避免访问不存在的全局对象。
+`availability`（`WorkerAvailability`，已导出）可显式传入 `worker` / `sharedWorker` 能力标记，用于 SSR、测试或嵌入环境，避免访问不存在的全局对象。
 
 ### `effectiveWorkerLoad(worker, options?)`
 

@@ -25,7 +25,8 @@ interface DataBusTransport<TConfig = unknown, TData = unknown> {
   publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
   /** 可选：突发时用一帧发多条。没有它，DataBus 会退化成逐条 `publish`。
    * 每条是 `{ data, messageId?, timestamp? }`，即 `publish` 那份元数据的逐条版本。
-   * （这个条目类型是内部的：要么按内联结构写，要么按你的后端放宽 `ReadonlyArray`。） */
+   * 这个条目类型已作为 `DataBusPublicationItem` 导出：可以直接引用它、按内联结构写，
+   * 或按你的后端放宽 `ReadonlyArray`。 */
   publishBatch?(topic: string, items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>): MaybePromise<void>;
   stop(): MaybePromise<void>;
 }

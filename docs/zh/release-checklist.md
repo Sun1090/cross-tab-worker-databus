@@ -11,14 +11,14 @@
 
 ## 自动化门禁（CI）
 
-`CI` 工作流的 `verify` job 在**以 `main` 为目标分支**的 push 与 pull request 上运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`（`vitest.config.ts` 中的下限：语句 98% / 分支 96% / 函数 98% / 行 99%）、`pnpm verify:compat`、`pnpm verify:pack`、`pnpm bench` 与 `pnpm audit`——`ci.yml` 里两个触发器都被过滤为 `branches: [main]`，因此推送 topic 分支什么都不会跑，这项工作要到开出 PR 时才第一次进入 CI（base 不是 main 的 PR 同样不在覆盖范围内）；`browser` job 运行 Playwright E2E 套件。`Release` 工作流在发布前重跑 `verify:compat` 与 `verify:pack`，随后执行阻塞式 `verify:published` 门禁。两个工作流的 checkout 均使用 `fetch-depth: 0` + `fetch-tags: true`，因为 `verify:compat` 需要从最近的发布 tag 解析基线。
+`CI` 工作流的 `verify` job 在**以 `main` 为目标分支**的 push 与 pull request 上运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`（`vitest.config.ts` 中的下限：语句 98% / 分支 96% / 函数 98% / 行 99%）、`pnpm verify:compat`、`pnpm verify:types`、`pnpm verify:pack`、`pnpm bench` 与 `pnpm audit`——`ci.yml` 里两个触发器都被过滤为 `branches: [main]`，因此推送 topic 分支什么都不会跑，这项工作要到开出 PR 时才第一次进入 CI（base 不是 main 的 PR 同样不在覆盖范围内）；`browser` job 运行 Playwright E2E 套件。`Release` 工作流在发布前重跑 `verify:compat`、`verify:types` 与 `verify:pack`，随后执行阻塞式 `verify:published` 门禁。两个工作流的 checkout 均使用 `fetch-depth: 0` + `fetch-tags: true`，因为 `verify:compat` 与 `verify:types` 需要从最近的发布 tag 解析基线。
 
 只有 `pnpm bench:browser` / `pnpm bench:compare` / `pnpm bench:trend` 保持仅本地执行：共享 runner 的计时噪声会让数值型 CI 门禁不可靠，而 `bench:trend` 会依据本地归档重写 `docs/benchmarks.md`，这本就不该由 CI 来做。
 
 ## 打 tag 前
 
 1. 更新 `package.json`、`CHANGELOG.md` 和中英文 roadmap。
-2. 运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS。`verify:compat` 从最近的发布 tag 解析基线，因此浅克隆或缺少 tag 的克隆需先执行 `git fetch --tags`，否则会以 "no version tag found" 失败）。
+2. 运行 `pnpm check`、`pnpm lint`、`pnpm test:coverage`、`pnpm bench`、`pnpm test:e2e`、`pnpm bench:browser`、`pnpm verify:pack`、`pnpm verify:compat`、`pnpm verify:types` 以及 `git diff --check`（`verify:compat` 断言 `COMPAT_BASE_TAG` 基线中的 package `exports` 子路径与类型字段仍然存在；`verify:pack` 从打包产物冒烟导入完整根公共面与全部子路径的 ESM/CJS；`verify:types` 用同一基线冻结每个公共入口声明层导出的名字，并断言没有任何公共签名引用了「任何入口都未导出」的类型——纯类型导出不会在运行时产生任何键，因此 `tests/dual-format.test.ts` 的 `Object.keys()` 冻结和 `verify:compat` 都看不到它的变化。`verify:compat` 与 `verify:types` 从最近的发布 tag 解析基线，因此浅克隆或缺少 tag 的克隆需先执行 `git fetch --tags`，否则会以 "no version tag found" 失败）。
 3. 依赖安全门禁：`pnpm audit --registry=https://registry.npmjs.org`（配置的镜像 registry 缺少 audit 端点；CI 在 verify job 中于公共 registry 运行）。任一已知漏洞公告即视为发布失败；`pnpm-workspace.yaml` overrides 钉住补丁版本。
 4. 浏览器基准回归门禁：运行 `pnpm bench:browser`（至少两次；门禁将最新报告与之前最多五份归档报告中同一指标的中位数比较），随后执行 `pnpm bench:compare --fail-above-pct 50`。采用中位数基线是因为页内热路径指标在同一份代码上会在快/慢两档之间来回跳——`dedup1000Ms` 相邻两次实测分别为 12.7 ms 与 25.6 ms，只看"上一份报告"时，一次偶发噪声就能在无代码改动的情况下击穿既定上限。`publish/dedicated/perMessageMs` 同样如此：同一份代码相邻两次实测为 49.9 ms 与 71.1 ms，令门禁以 +75.7% 失败，而同一份报告里 `dedup1000Ms` 与 `traceAndPublish1000Ms` 反而*变快*——"单指标上涨、其余下降"正是噪声的特征，第三次实测为 49.4 ms 并通过。因此在采信或处理失败前先复跑并观察离散度；若改动涉及热路径，就直接量化其开销（0.20.95 有界映射改写的微基准显示三种写法均为 80–86 ns/op，落在运行间波动之内）。基线迁移（例如某指标从空操作变为真实路径）属预期内的一次性失败。用 `pnpm bench:trend` 刷新长期趋势文档，表格变化时一并提交。
 5. 用 `npm pack --dry-run --json` 确认发布包只包含预期文件。

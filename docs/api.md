@@ -317,7 +317,8 @@ interface DataBusTransport<TConfig, TData> {
   unsubscribe(topic): void | Promise<void>;
   publish(topic, data): void | Promise<void>;
   /** Optional: one wire frame for many items. The DataBus falls back to
-   * per-item `publish` calls when this is absent. */
+   * per-item `publish` calls when this is absent. Each item is a
+   * `DataBusPublicationItem` — `{ data, messageId?, timestamp? }`, exported. */
   publishBatch?(topic, items): void | Promise<void>;
   stop(): void | Promise<void>;
 }
@@ -502,7 +503,7 @@ Selects the actual backend based on `WorkerMode` and capability detection, retur
 - `shared` / `auto`: SharedWorker -> Dedicated Worker -> local mode
 - `dedicated` (default): Dedicated Worker -> SharedWorker -> local mode
 
-`availability` can explicitly pass `worker` / `sharedWorker` capability flags, for use in SSR, testing, or embedded environments, avoiding access to non-existent global objects.
+`availability` (`WorkerAvailability`, exported) can explicitly pass `worker` / `sharedWorker` capability flags, for use in SSR, testing, or embedded environments, avoiding access to non-existent global objects.
 
 ### `effectiveWorkerLoad(worker, options?)`
 
