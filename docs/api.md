@@ -376,7 +376,7 @@ createStorageEventChannel(options: {
 }): ClusterChannel | null
 ```
 
-Creates a `ClusterChannel` backed by localStorage `storage` events — the coordination fallback for environments without BroadcastChannel. Returns `null` when storage or a storage-event source is unavailable. Delivery semantics mirror BroadcastChannel (no echo to the sender, JSON-serializable messages, closed channels refuse further posts); a monotonic sequence in the payload envelope keeps consecutive identical messages deliverable. Opt in via `createBrowserEnvironment({ channelFallback: 'storage-event' })`; see the security note in [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
+Creates a `ClusterChannel` backed by localStorage `storage` events — the coordination fallback for environments without BroadcastChannel. Returns `null` when storage or a storage-event source is unavailable. Delivery semantics mirror BroadcastChannel (no echo to the sender, JSON-serializable messages, closed channels refuse further posts); the payload envelope carries a per-channel sender nonce **and** a monotonic sequence, which is what keeps consecutive identical messages deliverable — including two tabs whose first frame would otherwise store the same `seq=1` value and be silently suppressed. Opt in via `createBrowserEnvironment({ channelFallback: 'storage-event' })`; see the security note in [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
 
 ## WebSocket Transport Backend
 

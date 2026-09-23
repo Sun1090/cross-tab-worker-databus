@@ -85,7 +85,7 @@ Terms are explained in plain language; the code and the rest of this document us
 | Term | Short name in code | Plain-language meaning |
 |---|---|---|
 | **Topic** | `topic` | A named channel (e.g. `price.feed`) that applications subscribe to or publish on. |
-| **Topic key** | `topicKey` | An opaque 128-bit hash of the Topic name. The Topic name itself is never persisted in coordination storage. |
+| **Topic key** | `topicKey` | An opaque 128-bit hash of the Topic name. The Topic name never appears in the worker, route or subscriber records; the two opt-in exceptions that do write plaintext are `replay.persistence` (IndexedDB) and `channelFallback: 'storage-event'`. |
 | **Tab** | `tabId` | One browser page instance. `tabId` survives refresh so a tab keeps its identity across the page lifecycle. |
 | **Worker** | `workerId` | One runtime instance inside a Tab. Each Worker publishes its own heartbeat and can own Topics. A Tab can briefly run two Workers during a restart/handoff. |
 | **Topic owner** | — | The Worker responsible for the real transport subscription of a Topic. "Owner" is a hat a Worker wears, not a permanent role: it receives the Topic's publications from the server and fans them out to other Tabs. |
@@ -117,9 +117,13 @@ Unlike the old single-JSON route table, subscribers use per-Tab independent keys
 
 ```ts
 interface WorkerRecord {
+  /** Cluster protocol version advertised by this worker; absent from a legacy peer. */
+  protocolVersion?: number;
   workerId: string;
   tabId: string;
   load: number;
+  /** Rolling traffic sample, present only when `loadWeighting` is enabled. */
+  throughput?: WorkerThroughputSample;
   role: 'active' | 'standby';
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   visibilityState: 'visible' | 'hidden';
@@ -146,7 +150,7 @@ interface WorkerRoute {
 
 `generation` increments on every re-assignment and must match across the handoff handshake; `handoffFromWorkerId` records the previous owner during a graceful handoff. The interface above matches the current protocol — see [Failover](#failover) for how these two fields drive takeover.
 
-Routes do not store the original topic string or payload. When the actual owner receives `CONTROL/SUBSCRIBE`, the original topic string is only passed through the BroadcastChannel in-memory message. The receiver accepts that control frame only when the durable route currently names it; a delayed frame from an earlier assignment round is dropped, and a route awaiting `ROUTE_RELEASED` can be confirmed only by the matching handoff ACK. `confirmedAt` is written after the owner processes the control message; before the route is confirmed, the subscriber Runtime holding the original topic string will resend `SUBSCRIBE` to recover from BroadcastChannel message loss that results in "a route without a real subscription".
+Routes do not store the original topic string or payload. When the actual owner receives `CONTROL/SUBSCRIBE`, the topic plaintext reached it only through the coordination channel (in-memory on BroadcastChannel; part of the stored frame under `channelFallback: 'storage-event'`). The receiver drops that control frame when the durable route names a *different* worker, so a delayed frame from an earlier assignment round cannot make a non-owner subscribe, and a route awaiting `ROUTE_RELEASED` can be confirmed only by the matching handoff ACK. A topic whose route cannot be read is accepted rather than dropped — `confirmRoute` writes nothing without a route to stamp, so the frame mints no durable ownership, and the next reconcile withdraws the assignment; the tolerance exists so coordination still works when storage is absent or the record has expired. `confirmedAt` is stamped as the frame is accepted, **before** the control action is handed to the transport, so it records "this Worker took the assignment", not "the server subscription is live" — which is exactly why an unconfirmed route is re-sent: it is how "a route without a real subscription" is recovered from BroadcastChannel message loss.
 
 ### Receiver-side frame validation
 
@@ -166,7 +170,10 @@ The second row is what makes ownership authorization meaningful. `topicKey` is a
 substitution, not a variant — and because ownership is authorized by the route stored under `topicKey`
 while the transport subscription is named by `topic`, an unchecked mismatch lets a frame borrow one
 channel's authorization to name another. The durable route record stores only `topicKey`, never the
-plaintext, so the key → name mapping exists only in memory and cannot be injected through localStorage.
+plaintext, so the key → name mapping exists only in memory and cannot be injected through the
+coordination records. The storage-event fallback channel is the one path where a frame — and with it
+a key/plaintext pair — does arrive through localStorage; the pairing rule is what makes a frame
+written by any other tenant of that storage just as invalid as one posted into the channel.
 
 The third row exists because the batch path iterates its payload: a value with a `length` but no
 iterator threw out of the message listener, and an iterable non-array (a string) walked the batch as
@@ -195,6 +202,7 @@ These identifiers represent different layers:
 | `tabId` | Stable identity of a browser Tab | Identifies which Tab subscribes to a `topicKey` | Yes, in subscriber keys |
 | `workerId` | Identity of the current Runtime/Worker instance | Identifies the Worker that owns the transport subscription | Yes, in worker/route records |
 | `BroadcastChannel` | Same-origin, in-memory real-time channel | Carries control actions, publication events, and reconciliation signals | No |
+| storage-event channel | The same channel interface over localStorage `storage` events, used only when `channelFallback: 'storage-event'` is set and BroadcastChannel is unavailable | Carries exactly the frames above | **Yes** — each frame is written whole under `cross-tab-worker-databus:channel:*`, so plaintext topics and `PUBLISH` payloads persist until the channel closes (indefinitely if the tab dies first) |
 
 ```text
 topic
@@ -211,7 +219,7 @@ BroadcastChannel CONTROL
 
 ### In-memory topic key cache (`knownTopics`)
 
-Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, `unsubscribe`, and inbound `CONTROL` message.
+Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives the `topicKey` pairing check — a frame dropped for disagreeing about that pair is dropped before its plaintext is ever read, so invalid pairs cannot grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
 
 The cache exists for two reasons:
 
@@ -302,7 +310,10 @@ This decentralized structure is a trade-off for concurrency correctness, not for
 | Single large JSON for Worker/route/subscriber | High | Only whole read/write | Multiple Tabs doing read-modify-write concurrently can easily overwrite each other, losing subscribers |
 | Independent key per entity | Low | Can clean up per Worker, per route, per Topic+Tab precisely | More keys, requires TTL-based garbage collection |
 
-The SDK does not rely on `storage` events to drive coordination; control notifications use BroadcastChannel. Although Worker heartbeats update their own independent key, this does not trigger repeated business callbacks or message dispatch within the SDK. The core benefit of separate keys is that different Tabs write different records, avoiding overwrite contention on a shared large object.
+By default the SDK does not rely on `storage` events to drive coordination; control notifications use
+BroadcastChannel. That is a default, not a guarantee: `channelFallback: 'storage-event'` selects a
+channel implemented entirely on `storage` events, which is the one configuration where coordination
+notifications do arrive that way. Although Worker heartbeats update their own independent key, this does not trigger repeated business callbacks or message dispatch within the SDK. The core benefit of separate keys is that different Tabs write different records, avoiding overwrite contention on a shared large object.
 
 Under normal conditions, the number of keys is approximately: `Number of Workers + Number of Topic routes + Number of Topic/Tab subscription relationships`. The Runtime cleans up timed-out Workers, orphaned subscribers without active Tabs, and orphaned routes that have exceeded the Worker TTL and no longer have subscribers. Other naming structures left over from older versions do not belong to the current SDK protocol and do not participate in current route resolution.
 
@@ -348,7 +359,11 @@ The two `topicKey → topic` maps (`assignedTopics`, `knownTopics`) deliberately
 
 ## BroadcastChannel Protocol
 
-All real-time coordination flows through one BroadcastChannel per cluster, whose name is derived from `clusterKey`. Messages on it exist only in memory: they never touch localStorage and never pass through the transport server. Four message types are exchanged:
+All real-time coordination flows through one channel per cluster, whose name is derived from
+`clusterKey`. BroadcastChannel — the implementation unless `channelFallback` is set — keeps its
+messages in memory only; they never touch localStorage. The storage-event fallback is the exception
+by construction: it *is* localStorage, so every frame on it persists as long as the key does. Neither
+implementation passes through the transport server. Four message types are exchanged:
 
 | Type | Direction | Purpose |
 |---|---|---|
@@ -513,7 +528,12 @@ sequenceDiagram
 
 BroadcastChannel does not echo to its sender, so the owner receives no `EVENT` back for its own broadcast — its local dispatch is the only local delivery.
 
-Publications are not written to localStorage. Message data and publication metadata only exist in the BroadcastChannel in-memory event and within the transport; batch writes only cover coordination metadata.
+Publications are not written to localStorage by the coordination layer or the transport; message data
+and publication metadata exist in the BroadcastChannel in-memory event and in the transport, and batch
+writes cover coordination metadata only. Two opt-ins do put payloads in browser storage, and each is
+named where it is documented: the `channelFallback: 'storage-event'` channel writes every frame it
+carries — including `PUBLISH` payloads — under its channel key, and `replay.persistence` stores the
+publications themselves in IndexedDB, keyed by the plaintext topic.
 
 ### Service Worker boundary
 
@@ -588,7 +608,7 @@ These invariants are pinned by regression tests (see `tests/stability.test.ts` a
 - **Last-subscriber release.** An owning Worker learns a topic is unserved from the last subscriber's `CONTROL/UNSUBSCRIBE`: it drops the assignment *and* dispatches the release to its transport. Consuming the message inside the handoff short-circuit alone would leave the server subscription — and its inbound fan-out — alive after every tab has left.
 - **Assignment drift repair.** Every reconcile tick drops any topic this Worker holds in `assignedTopics` once the durable route no longer names it, releasing the transport subscription as it goes. Ownership thus follows the storage record rather than whichever message arrived last: a stale `CONTROL/SUBSCRIBE`, a lost route write, or a tab that claimed a route it does not own all converge back to exactly one owner within a heartbeat. `tests/coordination-invariants.test.ts` fuzzes three tabs through those corruptions and asserts the quiescent result (pinned by regression: emptying this sweep makes the fuzzed end state fail).
 - **Stranded-handoff recovery.** If the previous owner is gone and its `ROUTE_RELEASED` never arrives (dropped channel message under load, or a crash between the route write and the ACK), the reconcile loop re-elects a live owner once the unconfirmed handoff has been stuck longer than a worker TTL (10 s default): the route is rewritten with a fresh generation and the handoff marker cleared, so the normal confirmation path completes (pinned by regression). The age gate matters — a fresh unconfirmed route may simply be waiting out its confirmation flush — and while the previous owner is still alive the new owner keeps waiting, so the strict handoff keeps its no-overlap guarantee.
-- **Loss and recovery matrix.** Each coordination message has a bounded recovery path: a lost `CONTROL/SUBSCRIBE` is re-sent by the heartbeat reconcile for any route still lacking `confirmedAt`; a lost `REGISTRY` nudge costs at most one heartbeat interval (3 s default) because every tick reconciles anyway; a lost `ROUTE_RELEASED` is recovered by reconcile re-election once the previous owner is gone and the handoff has been stuck longer than a worker TTL (see the stranded-handoff invariant above, pinned by regression); publications dropped during a transport disconnect window are the one documented unrecoverable loss (transport contract). The storage-event fallback channel guarantees value-change delivery via a monotonic sequence in the envelope, and a dropped dispatch recovers through the same reconcile loop.
+- **Loss and recovery matrix.** Each coordination message has a bounded recovery path: a lost `CONTROL/SUBSCRIBE` is re-sent by the heartbeat reconcile for any route still lacking `confirmedAt`; a lost `REGISTRY` nudge costs at most one heartbeat interval (3 s default) because every tick reconciles anyway; a lost `ROUTE_RELEASED` is recovered by reconcile re-election once the previous owner is gone and the handoff has been stuck longer than a worker TTL (see the stranded-handoff invariant above, pinned by regression); publications dropped during a transport disconnect window are the one documented unrecoverable loss (transport contract). The storage-event fallback channel makes every write a distinct value — a per-channel sender nonce *and* a monotonic sequence in the envelope — because a browser suppresses the `storage` event when `setItem` leaves the stored value unchanged, and the nonce is what separates two tabs whose first identical frame would each be `seq=1`; a dropped dispatch still recovers through the same reconcile loop.
 - **Recovery diagnostics.** `getHealthSummary()` derives a single readiness verdict from the lifecycle flags (`stopped` / `starting` / `healthy` / `recovering` / `suspended` / `degraded`); the unified `lastFailure` ledger and persistence counters reset on every explicit `start()`.
 
 ## Transport Reconnection

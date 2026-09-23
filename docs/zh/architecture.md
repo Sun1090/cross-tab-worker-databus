@@ -75,7 +75,7 @@ graph TB
 | 术语 | 代码中的简称 | 通俗含义 |
 |---|---|---|
 | **Topic**（主题） | `topic` | 一个有名字的频道（如 `price.feed`），应用订阅它或向它发布消息。 |
-| **Topic key**（主题键） | `topicKey` | Topic 名称的 128-bit 不透明哈希。Topic 名称本身从不写入协调存储。 |
+| **Topic key**（主题键） | `topicKey` | Topic 名称的 128-bit 不透明哈希。worker / route / subscriber 三类协调记录里都不出现 Topic 名称；会写明文的只有两个需显式开启的选项：`replay.persistence`（IndexedDB）与 `channelFallback: 'storage-event'`。 |
 | **Tab**（标签页） | `tabId` | 一个浏览器页面实例。`tabId` 在刷新后保持稳定，让标签页在页面生命周期内保留身份。 |
 | **Worker**（工作器） | `workerId` | Tab 内的一个运行时实例。每个 Worker 发布自己的心跳，也可以拥有 Topic。重启/交接时一个 Tab 可能短暂存在两个 Worker。 |
 | **Topic owner**（主题持有者） | — | 负责某个 Topic 真实 transport 订阅的 Worker。"owner"是 Worker 戴的一顶帽子，不是永久角色：它从服务器接收该 Topic 的 publication 并扇出给其他 Tab。 |
@@ -107,9 +107,13 @@ cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
 
 ```ts
 interface WorkerRecord {
+  /** 该 Worker 声明的集群协议版本；legacy 对端不写这个字段。 */
+  protocolVersion?: number;
   workerId: string;
   tabId: string;
   load: number;
+  /** 滚动流量采样，仅在开启 `loadWeighting` 时出现。 */
+  throughput?: WorkerThroughputSample;
   role: 'active' | 'standby';
   status: 'connecting' | 'connected' | 'disconnected' | 'error';
   visibilityState: 'visible' | 'hidden';
@@ -136,7 +140,7 @@ interface WorkerRoute {
 
 `generation` 在每次重新分配时递增，交接握手必须匹配该值；`handoffFromWorkerId` 记录优雅迁移时的前任 owner。上面的接口与当前协议一致——这两个字段如何驱动接管见 [故障转移](#故障转移)。
 
-路由不保存原始 Topic 字符串或 payload。真实 owner 收到 `CONTROL/SUBSCRIBE` 时，原始 Topic 字符串只通过 BroadcastChannel 内存消息传递。接收方只有在持久化 route 当前指向自己时才接受该控制帧；来自较早分配轮的迟到帧会被丢弃，等待 `ROUTE_RELEASED` 的交接也只能由精确匹配的 ACK 确认。`confirmedAt` 在 owner 处理控制消息后写入；在路由确认之前，持有原始 Topic 字符串的订阅方 Runtime 会重发 `SUBSCRIBE`，以从"有路由但无真实订阅"的 BroadcastChannel 消息丢失中恢复。
+路由不保存原始 Topic 字符串或 payload。真实 owner 收到 `CONTROL/SUBSCRIBE` 时，Topic 明文只经由协调通道到达它（BroadcastChannel 上存在于内存；`channelFallback: 'storage-event'` 下它本身就是被写入 localStorage 的那帧的一部分）。当持久路由指向**另一个** Worker 时接收方才丢弃该控制帧，因此较早分配轮的迟到帧不能让非 owner 完成订阅；等待 `ROUTE_RELEASED` 的交接也只能由精确匹配的 ACK 确认。读不到路由的 topic 是被接受而非丢弃——没有路由可盖章时 `confirmRoute` 什么都不写，所以这一帧凭空造不出持久所有权，下一次 reconcile 会收回这条 assignment；保留这个容忍是为了在存储不可用、或记录已过期时协调仍能工作。`confirmedAt` 是在接受该帧时就写入，**早于**把控制动作交给 transport，所以它记录的是"这个 Worker 认领了任务"，而不是"服务端订阅已建立"——这也正是未确认路由要被重发的原因：它是从"有路由但无真实订阅"的 BroadcastChannel 消息丢失中恢复的手段。
 
 ### 接收侧的帧校验
 
@@ -148,7 +152,7 @@ interface WorkerRoute {
 | `topicKey === createOpaqueKey(topic)` | `CONTROL`（任意 action）与 `ROUTE_RELEASED` | 帧被忽略 |
 | 携带 `items` 的 `CONTROL/PUBLISH` 帧必须给出非空**数组** | `CONTROL/PUBLISH` | 帧被忽略 |
 
-第二行是所有权的授权前提。`topicKey` 是 `topic` 的纯函数，所以本库构造的每个帧两者必然一致；不一致就是替换而非变体。由于所有权依据 `topicKey` 对应的持久路由判定，而传输层订阅的名字来自 `topic`，不校验就允许一帧借用某个频道的授权去命名另一个频道。持久路由记录只保存 `topicKey`、从不保存明文，因此 key → 明文的映射只存在于内存中，无法通过 localStorage 注入。
+第二行是所有权的授权前提。`topicKey` 是 `topic` 的纯函数，所以本库构造的每个帧两者必然一致；不一致就是替换而非变体。由于所有权依据 `topicKey` 对应的持久路由判定，而传输层订阅的名字来自 `topic`，不校验就允许一帧借用某个频道的授权去命名另一个频道。持久路由记录只保存 `topicKey`、从不保存明文，因此 key → 明文的映射只存在于内存中，无法通过协调记录注入。storage-event 降级通道是唯一一帧"经由 localStorage 到达"的路径；配对规则的作用不变——其他租户写进这块存储的帧，和直接 post 进通道一样无效。
 
 第三行存在是因为批量路径会迭代负载：只有 `length` 而没有迭代器的值会从消息监听器里抛出异常；可迭代的非数组（字符串）会被当成多个单字符条目，其 `data` 为 `undefined`，随后 owner 会以自己的会话把它们发布出去。
 
@@ -167,6 +171,7 @@ interface WorkerRoute {
 | `tabId` | 一个浏览器 Tab 的稳定身份 | 标识哪个 Tab 订阅了某个 `topicKey` | 是，体现在 subscriber key 中 |
 | `workerId` | 当前 Runtime/Worker 实例身份 | 标识哪个 Worker 负责实际 transport 订阅 | 是，体现在 worker/route 记录中 |
 | `BroadcastChannel` | 同源 Tab 间的实时内存通道 | 传递控制动作、publication 事件和重协调通知 | 否，不持久化消息 |
+| storage-event 通道 | 建立在 localStorage `storage` 事件上的同一套 channel 接口，仅在设置了 `channelFallback: 'storage-event'` 且 BroadcastChannel 不可用时启用 | 传递与上面完全相同的帧 | **是**——每帧整体写到 `cross-tab-worker-databus:channel:*` 之下，因此明文 Topic 与 `PUBLISH` payload 会保留到该 channel 关闭（tab 先退出则无限期保留） |
 
 它们通过以下 key 和消息字段关联：
 
@@ -185,7 +190,7 @@ BroadcastChannel CONTROL
 
 ### 内存 Topic key 缓存 (`knownTopics`)
 
-每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它由 `rememberTopic()` 填充，`subscribe`、`publish`、`unsubscribe` 和入站 `CONTROL` 消息都会调用它。
+每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它由 `rememberTopic()` 填充：`subscribe`、`publish`、`unsubscribe` 都会调用它，入站 `CONTROL` 消息则只在通过 `topicKey` 配对校验后才走到这一步——一对不相符的帧在读到明文之前就被丢弃，因此无效配对无法撑大这张表。合法调用仍然可以（同源脚本能通过页面上自己的 bus 触达这些 API），约束它们的正是下面的上限。
 
 该缓存存在两个原因：
 
@@ -277,7 +282,7 @@ console.table(__bus.getClusterSnapshot().routes)
 | 单个大 JSON 存放 Worker/路由/subscriber | 高 | 只能整体读写 | 多个 Tab 并发读-改-写容易互相覆盖，丢失 subscriber |
 | 每个实体独立 key | 低 | 可精确按 Worker、路由、Topic+Tab 清理 | key 更多，需要基于 TTL 的垃圾回收 |
 
-SDK 不依赖 `storage` 事件驱动协调，控制通知使用 BroadcastChannel。虽然 Worker 心跳会更新自己的独立 key，但这不会在 SDK 内部触发重复的业务回调或消息分发。独立 key 的核心好处是不同 Tab 写不同的记录，避免对共享大对象产生覆盖竞争。
+默认情况下 SDK 不依赖 `storage` 事件驱动协调，控制通知使用 BroadcastChannel。这是默认值而非保证：`channelFallback: 'storage-event'` 选的正是一条完全建立在 `storage` 事件上的通道，那也是协调通知唯一经由这种事件到达的配置。虽然 Worker 心跳会更新自己的独立 key，但这不会在 SDK 内部触发重复的业务回调或消息分发。独立 key 的核心好处是不同 Tab 写不同的记录，避免对共享大对象产生覆盖竞争。
 
 正常条件下 key 数量约为：`Worker 数量 + Topic 路由数量 + Topic/Tab 订阅关系数量`。Runtime 会清理超时的 Worker、无活跃 Tab 的孤儿 subscriber，以及超过 Worker TTL 且不再有 subscriber 的孤儿路由。旧版本遗留的其他命名结构不属于当前 SDK 协议，不参与当前路由解析。
 
@@ -323,7 +328,7 @@ SDK 不依赖 `storage` 事件驱动协调，控制通知使用 BroadcastChannel
 
 ## BroadcastChannel 通信协议
 
-所有实时协调都经由每个集群唯一的一条 BroadcastChannel（名称由 `clusterKey` 派生）传递。通道上的消息只存在于内存：不写入 localStorage，也不经过 transport 服务器。共四类消息：
+所有实时协调都经由每个集群唯一的一条通道传递（名称由 `clusterKey` 派生）。BroadcastChannel——未设置 `channelFallback` 时的实现——其消息只存在于内存：不写入 localStorage。storage-event 降级通道是构造上的例外：它本身就是 localStorage，所以帧在 key 存续期间一直留在盘上。两种实现都不经过 transport 服务器。共四类消息：
 
 | 类型 | 方向 | 用途 |
 |---|---|---|
@@ -467,7 +472,7 @@ sequenceDiagram
 
 BroadcastChannel 不会把消息回传给发送者，因此 owner 收不到自己广播的 `EVENT`——本地分发是唯一一次本地投递。
 
-publication 不写入 localStorage。消息数据与 publication 元数据只存在于 BroadcastChannel 内存事件和 transport 内；批量写入只覆盖协调元数据。
+协调层与 transport 都不会把 publication 写入 localStorage；消息数据与 publication 元数据只存在于 BroadcastChannel 内存事件和 transport 内，批量写入只覆盖协调元数据。两个需要显式开启的选项确实会把 payload 放进浏览器存储，并且各自在文档里点名：`channelFallback: 'storage-event'` 通道把它承载的每一帧（含 `PUBLISH` payload）写到自己的 channel key 下；`replay.persistence` 则把 publication 本体存进 IndexedDB，并以明文 Topic 作为 key。
 
 ### Service Worker 边界
 
@@ -541,7 +546,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 - **最后一个订阅者的释放。** owner Worker 通过最后一个订阅者发来的 `CONTROL/UNSUBSCRIBE` 得知某 Topic 已无人订阅：它会同时丢弃本地 ownership 并把释放动作派发给自己的 transport。若只在交接短路里消费该消息，server 订阅（以及它的入站扇出）会在所有 Tab 离开后依然存活。
 - **归属漂移的修复。** 每一轮 reconcile 都会丢弃那些 `assignedTopics` 里仍持有、但持久路由已不再指向本 Worker 的 Topic，并顺带释放对应的 transport 订阅。于是 ownership 跟随存储记录，而不是最后到达的那条消息：陈旧的 `CONTROL/SUBSCRIBE`、丢失的路由写入、或某个抢到了不属于自己的路由的 Tab，都会在一个 heartbeat 内收敛回“恰好一个 owner”。`tests/coordination-invariants.test.ts` 会针对三个 Tab 随机制造这些破坏并断言静默后的结果（由回归测试固定：把这一轮清扫掏空，模糊测试的终态就会失败）。
 - **悬挂交接恢复。** 若前任 owner 已消失而其 `ROUTE_RELEASED` 始终未到达（高负载下通道消息丢失，或 route 写入与 ACK 发送之间崩溃），reconcile 循环会在该未确认交接悬挂超过一个 worker TTL（默认 10 秒）后重新选举存活 owner：路由以全新 generation 重写并清除交接标记，使常规确认路径得以完成（已有回归固化）。年龄门限很关键——刚写入的未确认路由可能只是在等确认落盘，不能误判为悬挂；而只要前任 owner 仍然存活，新 owner 会继续等待，因此严格交接的无重叠保证不受影响。
-- **丢失与恢复矩阵。** 每类协调消息都有有界恢复路径：丢失的 `CONTROL/SUBSCRIBE` 由心跳 reconcile 对未确认路由重发；丢失的 `REGISTRY` 通知最多损失一个心跳间隔（默认 3 秒），因为每次 tick 都会 reconcile；丢失的 `ROUTE_RELEASED` 由 reconcile 在前任 owner 消失且交接悬挂超过一个 worker TTL 后重新选举恢复（见上文悬挂交接不变量，已有回归固化）；transport 断连窗口内被丢弃的 publication 是唯一文档化的不可恢复丢失（transport 契约）。storage-event 降级通道通过信封内的单调序列号保证变值投递，丢失的派发由同一 reconcile 循环恢复。
+- **丢失与恢复矩阵。** 每类协调消息都有有界恢复路径：丢失的 `CONTROL/SUBSCRIBE` 由心跳 reconcile 对未确认路由重发；丢失的 `REGISTRY` 通知最多损失一个心跳间隔（默认 3 秒），因为每次 tick 都会 reconcile；丢失的 `ROUTE_RELEASED` 由 reconcile 在前任 owner 消失且交接悬挂超过一个 worker TTL 后重新选举恢复（见上文悬挂交接不变量，已有回归固化）；transport 断连窗口内被丢弃的 publication 是唯一文档化的不可恢复丢失（transport 契约）。storage-event 降级通道让每次写入都是一个不同的值——信封里同时带一个**每通道 sender nonce** 和一个单调递增的序列号——因为浏览器在 `setItem` 没有改变存储值时会抑制 `storage` 事件，而两个 Tab 各自的第一帧同样都是 `seq=1`，把它们区分开靠的是那个 nonce；丢失的派发仍由同一 reconcile 循环恢复。
 - **恢复诊断。** `getHealthSummary()` 从生命周期标志推导单一就绪判定（`stopped` / `starting` / `healthy` / `recovering` / `suspended` / `degraded`）；统一的 `lastFailure` 账本与持久化计数在每次显式 `start()` 后重置。
 
 ## Transport 重连

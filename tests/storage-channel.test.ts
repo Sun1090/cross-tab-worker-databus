@@ -202,6 +202,37 @@ describe('createStorageEventChannel', () => {
     expect(received).toEqual([message, message]);
   });
 
+  it('stores the frame verbatim, which is the trade-off the docs price the fallback at', async () => {
+    // `channelFallback: 'storage-event'` is opt-in because the envelope *is* the
+    // frame: topic plaintext and a publication payload both land in localStorage
+    // under the channel key, where they stay until `close()` and indefinitely if
+    // the tab dies first. No delivery test can notice that, because it is a claim
+    // about what storage holds rather than about what peers receive — so it is
+    // asserted here, against the corrected absolutes in `docs/architecture.md`.
+    const storage = new MemoryStorage();
+    const hub = new StorageEventHub(storage);
+    const a = makeTab(hub, 'chan');
+    a.channel.postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-b',
+      action: 'PUBLISH',
+      topic: 'chat.private',
+      topicKey: 'opaque-topic-key',
+      data: { body: 'payload plaintext' }
+    });
+
+    const written = storage.entries().find(([key]) => key === 'cross-tab-worker-databus:channel:chan');
+    expect(written, 'the fallback must have written its frame into storage').toBeDefined();
+    const [, value] = written!;
+    expect(value).toContain('chat.private');
+    expect(value).toContain('payload plaintext');
+
+    // The flip side the docs promise: closing removes the key.
+    a.channel.close();
+    expect(storage.entries().some(([key]) => key.startsWith('cross-tab-worker-databus:channel:'))).toBe(false);
+  });
+
   it('keeps delivering after consecutive writes and cleans up on close', async () => {
     const storage = new MemoryStorage();
     const hub = new StorageEventHub(storage);

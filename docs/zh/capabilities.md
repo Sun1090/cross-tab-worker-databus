@@ -22,7 +22,7 @@
 | 降级 | localStorage 或 BroadcastChannel 不可用时本地运行 | ✅ 已实现 | 保留当前 Tab 的连接和订阅能力 |
 | 降级 | BroadcastChannel 不可用时 opt-in 启用 localStorage storage-event 协调通道 | ✅ 已实现 | `createBrowserEnvironment({ channelFallback: 'storage-event' })`；协调载荷（明文 Topic 名称）会写入 localStorage，已在文档中标注权衡 |
 | Centrifuge | 内置 Dedicated / Shared Worker transport | ✅ 已实现 | 支持 subscribe、unsubscribe、publish、连接状态和错误上报；`auto` 从 SharedWorker → Dedicated Worker → 主线程 WebSocket 降级 |
-| 安全边界 | localStorage 使用连接和 Topic 派生不透明 key；BroadcastChannel 协调消息以明文传输 Topic 名称 | ✅ 已实现 | 不持久化 URL、原始 Topic 名称、凭证或 publication payload。BroadcastChannel 协调消息仅存在于内存中，以明文传输 Topic 名称——不会被持久化。 |
+| 安全边界 | localStorage 使用连接和 Topic 派生不透明 key；BroadcastChannel 协调消息以明文传输 Topic 名称 | ✅ 已实现 | 协调记录本身不持久化 URL、凭证、原始 Topic 名称或 publication payload；BroadcastChannel 协调消息仅存在于内存中（带明文 Topic 名称，但从不落盘）。两个需要显式开启的选项会写入默认路径不写的数据，且都是文档化的取舍：`replay.persistence`（IndexedDB）以明文 Topic 作为对象仓的 key，并把 publication payload 存进去；`channelFallback: 'storage-event'` 会把每一帧协调消息——明文 Topic 名称，以及 `PUBLISH` 帧的 payload——写到 localStorage 的 channel key 下，直到该 channel 关闭。 |
 | 诊断 | 聚合生命周期、吞吐量、分发延迟、去重结果、恢复重试、路由确认和迁移 | ✅ 已实现 | 默认关闭；默认每 5 秒输出指标，并以有界 reliability 事件记录恢复和路由协调。按需 `getMetrics()` / `getDiagnostics().metrics` 无需 sink 即可同步暴露当前窗口 |
 | 诊断 | `getHealthSummary()` 单对象健康判定与统一失败账本 | ✅ 已实现 | `healthy`/`state` 覆盖未启动、启动中、恢复中、BFCache 挂起与恢复耗尽降级；`lastFailure` 统一 transport/persistence/dispatch 来源，`start()` 时重置 |
 | 性能 | 协调元数据批量写入 + 退避重试 | ✅ 已实现 | 心跳、路由和 subscriber 写入合并后在微任务中 flush；失败时指数退避；`pagehide` / `stop()` 同步 flush |
@@ -35,7 +35,8 @@
 | 可观测性 | owner 确认、迁移和恢复尝试的指标/事件 | ✅ 已实现 | `DataBusReliabilityTraceEvent` 记录有界的 route ack/migration 与 transport recovery；服务端最终确认仍由 transport 决定 |
 | 运行时模型 | SharedWorker / Dedicated Worker transport | ✅ 已实现 | `workerMode` 支持 `dedicated`、`shared` 和 `auto`，默认 `dedicated` |
 | 运行时模型 | Service Worker transport | 未实现 | 刻意延后；生命周期与长连接约束见 `docs/zh/architecture.md` |
-| 持久消息 | 跨页面关闭持久化 publication 或发布命令 | 未实现 | SDK 不持久化业务 payload，也不在恢复后重放发布命令 |
+| 持久消息 | 向稍后加载的 Tab 回放已发布的 payload | ✅ 已实现 | 需要显式开启：`createIndexedDbReplayPersistence` 保存 publication 自身——包含业务 payload，并以明文 Topic 作为对象仓的 key——下次加载时重新水合，因此历史可以跨越 reload 或页面关闭。这是给订阅方的入站回放，不是投递保证 |
+| 持久消息 | 页面关闭后重发外发发布命令 | 未实现 | 发布命令不会被持久化；已经被丢弃的 publication（transport 断连窗口，或 local-mode 降级）是唯一文档化的不可恢复丢失 |
 
 ## 已验证保证（由回归套件钉住）
 
@@ -43,7 +44,7 @@
 
 | 不变量 | 领域 | 被回归固化的保证 |
 |---|---|---|
-| SUBSCRIBE 路由绑定 | 协调 | 仅当持久化 route 当前指向接收方、且不在等待 `ROUTE_RELEASED` 时才执行入站 `CONTROL/SUBSCRIBE`；较早分配轮的迟到帧不能创建 ownership、订阅 transport 或确认悬挂交接 |
+| SUBSCRIBE 路由绑定 | 协调 | 当持久化 route 指向另一个 Worker 时，入站 `CONTROL/SUBSCRIBE` 会被丢弃；等待 `ROUTE_RELEASED` 的 route 只被匹配的交接 ACK 确认——因此较早分配轮的迟到帧不能创建持久 ownership、订阅 transport 或确认悬挂交接。topic 读不到 route 时该帧是被接受而非丢弃，而这个容忍是有界的：没有 route 可盖章时 `confirmRoute` 什么都不写，下一次 reconcile 会收回这条 assignment。它换来的是存储不可用、或记录已过期时协调仍能工作 |
 | 交接 ACK 有效性 | 协调 | 仅当 route 仍指向接收方、释放方匹配 `handoffFromWorkerId`、且 ACK 代数与存储 route 代数精确相等时才接受 `ROUTE_RELEASED`——其他交接轮次的过期 ACK（如 a↔b 乒乓）会被丢弃 |
 | 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 丢弃整个待写批次）；已清或已停止会话的历史不会被进行中的 flush 重新追加 |
 | 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）而不阻塞其他排队键；队列清空或 `clear()` 取消后退避重置 |

@@ -375,7 +375,7 @@ createStorageEventChannel(options: {
 }): ClusterChannel | null
 ```
 
-创建以 localStorage `storage` 事件为载体的 `ClusterChannel`——面向无 BroadcastChannel 环境的协调降级通道。storage 或 storage-event 来源缺失时返回 `null`。投递语义与 BroadcastChannel 一致（不回显给发送方、消息可 JSON 序列化、关闭后拒绝再写入）；载荷信封内的单调序列号保证连续相同消息仍可投递。通过 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 启用；安全权衡见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
+创建以 localStorage `storage` 事件为载体的 `ClusterChannel`——面向无 BroadcastChannel 环境的协调降级通道。storage 或 storage-event 来源缺失时返回 `null`。投递语义与 BroadcastChannel 一致（不回显给发送方、消息可 JSON 序列化、关闭后拒绝再写入）；载荷信封里同时带一个**每通道 sender nonce** 和一个单调序列号，正是这两者共同保证连续相同的消息仍可投递——包括两个 Tab 各自的第一帧都会写入相同的 `seq=1`、否则会被静默抑制的情况。通过 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 启用；安全权衡见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
 
 ## WebSocket 传输后端
 

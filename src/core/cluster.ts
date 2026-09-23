@@ -873,11 +873,18 @@ export class WorkerClusterRuntime {
     switch (message.action) {
       case CONTROL_ACTION.SUBSCRIBE: {
         const route = this.readRoute(message.topicKey);
-        // A CONTROL/SUBSCRIBE authorizes ownership only for the worker named
-        // by the durable route. A delayed frame from an earlier assignment
-        // round must not make a non-owner subscribe. A pending graceful
-        // handoff is stricter still: only its exact ROUTE_RELEASED ACK may
-        // authorize the new owner, otherwise the old and new transport
+        // A CONTROL/SUBSCRIBE is dropped when the durable route names a
+        // *different* worker: a delayed frame from an earlier assignment round
+        // must not make a non-owner subscribe. A missing route passes, and that
+        // is a tolerance rather than a hole — `confirmRoute` writes nothing when
+        // there is no route to stamp, so the frame cannot mint durable ownership,
+        // and `reconcileAssignedTopics` takes the assignment back on the next
+        // tick. Both halves are pinned by tests/cluster.test.ts's "accepts a
+        // CONTROL/SUBSCRIBE that has no durable route to check, then sweeps it".
+        // What the tolerance buys is coordination when a route cannot be read at
+        // all: expired, corrupted, or storage that is not present. A pending
+        // graceful handoff is stricter still: only its exact ROUTE_RELEASED ACK
+        // may authorize the new owner, otherwise the old and new transport
         // subscriptions can overlap.
         if (route && route.workerId !== this.workerId) return;
         if (

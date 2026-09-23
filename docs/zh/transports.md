@@ -14,10 +14,19 @@ WebSocket、socket.io、SSE 等）。
 
 ```ts
 interface DataBusTransport<TConfig = unknown, TData = unknown> {
+  /** 可选的身份/后端标签，经 diagnostics 暴露。 */
+  readonly diagnosticsName?: string;
+  readonly diagnosticsBackend?: string;
   start(config: TConfig, handlers: DataBusTransportHandlers<TData>): MaybePromise<void>;
   subscribe(topic: string): MaybePromise<void>;
   unsubscribe(topic: string): MaybePromise<void>;
-  publish(topic: string, data: unknown): MaybePromise<void>;
+  /** `options` 带上调用方的 `{ messageId, timestamp }`；后端若悄悄丢掉它，
+   * 对端就同时失去了去重身份与 producer 时间戳。 */
+  publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
+  /** 可选：突发时用一帧发多条。没有它，DataBus 会退化成逐条 `publish`。
+   * 每条是 `{ data, messageId?, timestamp? }`，即 `publish` 那份元数据的逐条版本。
+   * （这个条目类型是内部的：要么按内联结构写，要么按你的后端放宽 `ReadonlyArray`。） */
+  publishBatch?(topic: string, items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>): MaybePromise<void>;
   stop(): MaybePromise<void>;
 }
 
@@ -30,7 +39,7 @@ interface DataBusTransportHandlers<TData = unknown> {
 
 `start()` 接收用户提供的连接配置（无类型 `TConfig`——后端自行定义其形状）和
 三个回调。连接状态变化时调 `onStatus`；收到 publication 时调 `onMessage`；
-非致命错误调 `onError`（DataBus 有恢复冷却窗口，避免抖动连接死循环重试）。
+非致命错误调 `onError`。只有 `onStatus('error')` 会启动自动恢复——DataBus 用恢复冷却窗口给重开节流，并用 `recovery.maxAttempts` 限定次数，因此抖动连接不会死循环重试。`onError` 只是把失败记入 `getHealthSummary().lastFailure` 并通知订阅者，除此之外不做任何事：只用 `onError` 上报死掉的 socket 的后端，永远不会被重开。
 
 `start()` MUST 在后端真正连接后才 settle 返回的 Promise；尝试失败时必须 reject。
 DataBus 把这个 settlement 当作就绪与恢复边界：处于 `CONNECTING` 的 socket 不算
@@ -59,8 +68,9 @@ DataBus 层负责跨 Tab 协调（BroadcastChannel 控制面、localStorage 路�
 
 参照 Centrifuge 后端的 `centrifuge-protocol.ts`：一个主线程发给 Worker 的
 判别联合（`INIT` / `SUBSCRIBE` / `UNSUBSCRIBE` / `PUBLISH` / `PUBLISH_BIN` /
-`PING` / `STOP`）和一个 Worker 回传的联合（`STATUS` / `MESSAGE` / `MESSAGE_BIN` /
-`ERROR`）。保持结构化克隆安全
+`PING` / `STOP`，外加回应凭证请求的 `TOKEN_RESPONSE` / `TOKEN_ERROR`）和一个
+Worker 回传的联合（`STATUS` / `MESSAGE` / `MESSAGE_BIN` / `ERROR`，外加凭证桥用的
+`TOKEN_REQUEST`，以及 SharedWorker 端口被回收时的 `SESSION_REAPED`）。保持结构化克隆安全
 （无函数、无类实例——`Error` 必须序列化）。
 
 ### 2. 实现 session
@@ -82,8 +92,7 @@ transport 选择后端（SharedWorker / Dedicated Worker / 本地），向它发
 
 - **后端选举**：复用 `worker-mode.ts` 的 `selectWorkerBackend`，使你的后端与
   SDK 其余部分降级行为一致。
-- **generation 守卫**：创建后端时递增单调计数器；错误处理检查它，使被取代的
-  Worker 的迟到错误不会污染新 session。
+- **generation 守卫**：创建后端或停止 transport 时递增单调计数器。参考实现里只有异步凭证桥会比较它，因为 provider 可能在它所应答的 Worker 已经消失之后才 settle。Worker 的 error 处理并不读这个计数器——`stop()` 与 `onWorkerFailed()` 在 generation 前移之前就移除了这些监听器，被取代的后端根本到不了这个对象。只有当你的后端会让某个监听器跨过后端替换继续存活时，才需要自己加这层检查。
 - **SharedWorker 心跳**：若用 SharedWorker，定期发 PING，让 `PortReaper` 能
   回收死 tab 的 session，并处理回收器在关闭端口前发出的 `SESSION_REAPED`
   消息。对被饿死但仍存活的 tab 来说，那是唯一能收到的信号（`MessagePort` 没有
@@ -137,6 +146,7 @@ const bus = createWebSocketDataBus({
 线协议（JSON 文本帧）：
 
 - client → server：`{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
+- client → server（批量）：`{"op":"publishBatch","topic":"...","items":[{data,...,"messageId"?,"timestamp"?}]}`——一帧携带多条，由服务端拆成一条条 publication 重新扇出。二进制 payload 以字节数组内嵌其中。只有一条的 batch 会改走普通 `publish` 帧，因此只实现 `publish` 的服务端仍能看到旧的单条形状；空批次在发出前就被丢弃。socket 未打开时收到的批次会通过 `handlers.onError` 上报并丢弃。
 - server → client：标准 publication 为 `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`；旧的扁平 `{"topic":"...","data":...}` 帧仍然兼容。没有字符串 topic 的帧会被忽略；非法 JSON 通过 `handlers.onError` 上报而不会抛出。
 - 自带字符串 `topic` 的 publication 会按**该值**寻址，而不是按它到达的 channel——这正是 server 通过通配 channel（`chat.*`）投递时指明具体 topic 的方式。因此顶层恰好含 `topic` 字段的负载会被重新寻址，若集群中没有任何 Tab 拥有重定向后的 topic，就会被丢弃。Centrifuge 的 channel 通常由客户端库在带外给出，这也是必须在此说明该规则的原因：只有在这条链路上，"topic 本来就写在帧里"这件事才可见。
 

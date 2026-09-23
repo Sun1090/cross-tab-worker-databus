@@ -2356,6 +2356,50 @@ describe('WorkerClusterRuntime resilience', () => {
     });
   });
 
+  it('accepts a CONTROL/SUBSCRIBE that has no durable route to check, then sweeps it', async () => {
+    // The guard reads `route && route.workerId !== this.workerId`, so a *missing*
+    // route is a pass, not a drop. That is a tolerance rather than a hole:
+    // `confirmRoute` returns without writing when there is no route
+    // (`if (!route || route.workerId !== this.workerId …)`), so the frame cannot
+    // mint durable ownership, and `reconcileAssignedTopics` drops any assignment
+    // whose route does not name this worker — including no route at all — so the
+    // grant lasts at most one reconcile tick. What it buys is that coordination
+    // still works when a route cannot be read: expired, corrupted, or a storage
+    // that is not there. `docs/architecture.md` and the capabilities matrix claimed
+    // the stricter rule ("accepted only when the durable route names the receiver"),
+    // which is not what ships; both now state this.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const onControl = vi.fn();
+    const b = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-b', workerId: 'worker-b', onControl });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+    b.runtime.start();
+    await Promise.resolve();
+
+    hub.create(bChannelName).postMessage({
+      type: 'CONTROL',
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-b',
+      action: 'SUBSCRIBE',
+      topic: 'routeless-topic',
+      topicKey: createOpaqueKey('routeless-topic')
+    });
+    await Promise.resolve();
+
+    expect(b.runtime.getSnapshot().assignedTopics).toContain('routeless-topic');
+    expect(onControl).toHaveBeenCalledWith('SUBSCRIBE', 'routeless-topic', undefined);
+    expect(storage.entries().some(([key]) => key.includes(':route:'))).toBe(false);
+
+    b.env.runIntervals();
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('routeless-topic');
+    expect(onControl).toHaveBeenCalledWith('UNSUBSCRIBE', 'routeless-topic', undefined);
+  });
+
   it('recovers a stranded unconfirmed handoff once the previous owner is dead', async () => {
     // Regression: if the previous owner's ROUTE_RELEASED never arrives
     // (dropped channel message under load, or a crash between the route

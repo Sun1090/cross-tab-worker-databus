@@ -14,7 +14,8 @@ The package provides the following entry points:
 - `cross-tab-worker-databus/centrifuge`: the built-in Centrifuge Worker transport
 - `cross-tab-worker-databus/centrifuge.worker`: the Dedicated Worker build artifact, loaded by default by the built-in factory; typically no need to reference it directly
 - `cross-tab-worker-databus/centrifuge.shared.worker`: the SharedWorker build artifact, loaded by default by the built-in factory; typically no need to reference it directly
-- `cross-tab-worker-databus/hooks`: optional React hooks adapter (`useCrossTabDataBus`, `useCrossTabSubscription`, `useCrossTabStatus`); React (>= 18) is an optional peer dependency
+- `cross-tab-worker-databus/hooks`: optional React hooks adapter (`useCrossTabDataBus`, `useCrossTabSubscription`, `useCrossTabStatus`, `useCrossTabHealth`); React (>= 18) is an optional peer dependency
+- `cross-tab-worker-databus/vue`: optional Vue composables with the same four names (`useCrossTabDataBus`, `useCrossTabSubscription`, `useCrossTabStatus`, `useCrossTabHealth`); Vue (>= 3.3) is an optional peer dependency
 - `cross-tab-worker-databus` also exports a zero-dependency native `WebSocketTransport` / `createWebSocketDataBus` for servers that speak plain WebSockets
 
 The `cross-tab-worker-databus/centrifuge` entry point relies on the optional peer dependency `centrifuge` (^5.5.3). Install it alongside this package when using the built-in Centrifuge transport: `pnpm add centrifuge`.
@@ -46,7 +47,7 @@ export const dataBus = createCentrifugeDataBus<ResourceEvent>({
 
 `clusterKey` is derived from the connection URL by default. It is only used for cluster isolation and is converted to an opaque key before entering localStorage and as the BroadcastChannel channel name. Note that topic names and event types sent over the BroadcastChannel coordination channel are transmitted in plaintext; only localStorage metadata is obfuscated via hashing.
 
-By default, a Dedicated Worker is used, one Worker per Tab. To have same-origin Tabs reuse a single connection, set `workerMode: 'shared'` or `'auto'`:
+By default, a Dedicated Worker is used, one Worker per Tab. `workerMode: 'shared'` (or `'auto'`, which tries shared first) puts same-origin Tabs into **one** SharedWorker process — but it does not merge their connections. Each connecting port gets its own `CentrifugeSession` and so its own WebSocket, which is why closing or refreshing one tab leaves the others subscribed: N tabs still mean N server-side connections and N channel subscriptions. Shared mode saves the Worker process, not the socket:
 
 ```ts
 export const dataBus = createCentrifugeDataBus<ResourceEvent>({
@@ -144,7 +145,7 @@ pnpm examples
 
 Open `http://localhost:4173/examples/demo/` and open it in multiple browser Tabs at the same time to observe cross-Tab data flow. The page supports:
 
-- Connecting to the public Centrifugo demo address `wss://faye.centrifugal.dev/connection/websocket` by default
+- Connecting to the demo's own local Centrifugo endpoint by default (`<scheme>://<host>/centrifuge/demo/connection/websocket`, seeded into the address box on load); the public `wss://faye.centrifugal.dev/connection/websocket` is one of the selectable presets, not the default
 - Modifying the WSS address, `workerMode`, Topic, and `transferable` configuration in the page
 - Switching to "Local Broadcast" mode, which does not depend on an external server and demonstrates multi-Tab collaboration using only BroadcastChannel
 - Data flow animations, event stream, distribution latency metrics, and cluster Worker routing status
