@@ -7544,6 +7544,49 @@ corroborates the 26-spec collection.)
   now in place is the instrumentation that names it if it recurs.
 - **Update date:** 2026-09-24.
 
+## Phase 139 / The claim that hid in a table cell, and the enumeration nobody re-read
+
+- **Milestone / version:** post-`0.21.13`, unreleased. Branch `docs/knowntopics-enumeration`, off `main`
+  at `907521d` (#229). Docs only — four files, both languages, no `src/` change, so it is patch material.
+- **Status:** open PR, locally green; not yet merged or released.
+- **Why this pass existed.** Phase 137 closed with one item left: `docs/architecture.md`'s tables were the
+  last shipped rows written before that pass, and could carry the same absolute in a different phrasing.
+  They did.
+- **Method, since it is what found the first two.** Rather than re-reading the sentences, the claim was
+  turned into a question with an enumerable answer: which methods call `rememberTopic()`? A script that
+  walks `src/core/cluster.ts` and attributes each call to its nearest preceding method signature answers
+  it — `subscribe`, `publish`, `publishBatch`, `releaseSubscription` (reached from `unsubscribe`),
+  `activate`, `reconcileSubscriptions`, `handleControlMessage`. The shipped section named three of those
+  six in-process sites, in both languages, in the prose *and* in the lifecycle table; `unsubscribe`'s row
+  showed only the conditional `delete` although the same call derives the key one line earlier.
+- **The cell.** The identifier table's `topic` row said "No; kept in Runtime memory and control messages"
+  — the storage absolute this cycle has retracted six times elsewhere, in a form no earlier grep could
+  see: four passes corrected the paragraph, the option row, and the storage-event row of that very table,
+  which is the row that contradicts the cell. It now states which records the plaintext stays out of and
+  names the exception. Same shape, second instance: `docs/configuration.md`'s boundary list filed the
+  tab-id key with the three `localStorage` coordination records, and `getOrCreateTabId()` writes it
+  through `environment.sessionStorage` (`src/core/environment.ts:275`) — a medium `architecture.md:585`
+  and `api.md:497` both state correctly, so the list was the only place left implying otherwise.
+- **Cleared on inspection, recorded so nobody re-hunts it.** The table's `tabId` row ("Yes, in subscriber
+  keys") is right — the id appears in the *key*, not the value. The `isAssigned` bypass paragraph matches
+  `:734-737`. The zh lifecycle table is at parity with English including its FIFO row. `api.md:497`'s
+  "the stored value is deliberately not reused when `window.opener` is present" re-derived against
+  `environment.ts:286-299` and holds: the guard skips the cloned value on the first call, and the fresh id
+  is written back at `:299`, so later calls in the same document read the id the document issued.
+- **Changed files:** `docs/architecture.md`, `docs/zh/architecture.md`, `docs/configuration.md`,
+  `docs/zh/configuration.md`, `CHANGELOG.md`, `AGENTS.md` (the table-cell instance appended to the
+  paraphrase-grep rule), `docs/progress.md`.
+- **Verification:** `npx vitest run tests/documentation.test.ts` 17 passed; `pnpm lint` 0;
+  `npx tsc --noEmit` 0; full suite 37 files / 898 tests green; `git diff --check` 0; no `src/` or `dist/`
+  input touched, so no public-surface gate can move.
+- **Risks / rollback:** prose only, but it is published prose (`docs/**` and both READMEs are in
+  `package.json` `files`). `git revert`.
+- **Next:** merge, then `0.21.14`. Remaining candidates from this method: run the same
+  attribute-to-enclosing-method script over the other enumerations the docs make by hand — the
+  `BatchingStorageWriter` call sites and the `notifyRegistry()` nudge list are the two whose rows a
+  reader is most likely to trust as complete.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
