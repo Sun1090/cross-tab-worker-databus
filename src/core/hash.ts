@@ -2,10 +2,16 @@
  * Derives a stable 128-bit hex key from a string.
  *
  * This is a non-cryptographic four-way hash (inspired by MurmurHash-style
- * mixing). It exists so connection URLs and topic plaintext never touch
- * localStorage or BroadcastChannel namespaces — consumers only ever see the
- * opaque key. It trades collision resistance for speed and zero dependencies:
- * use `crypto.subtle.digest` if you need a cryptographic hash.
+ * mixing). It exists so no *derived identifier* — a localStorage key, a route
+ * record key, a BroadcastChannel or cluster name — is built from a connection
+ * URL or a topic plaintext. That is all it bounds, and it is not
+ * confidentiality: a `CONTROL` frame carries the plaintext `topic` beside its
+ * `topicKey` (see `types.ts`), and under `channelFallback: 'storage-event'`
+ * whole frames, plaintext included, are written into localStorage. What the
+ * receiver acts on is the pair, guarded by the key/plaintext check documented in
+ * `AGENTS.md`'s BroadcastChannel protocol section. It trades collision
+ * resistance for speed and zero dependencies: use `crypto.subtle.digest` if you
+ * need a cryptographic hash.
  */
 export function createOpaqueKey(value: string): string {
   // Four independent lanes mix the input so a short value still diffuses
@@ -46,7 +52,11 @@ const SEED_H2 = 0x41c6ce57;
 const SEED_H3 = 0xc0decafe;
 const SEED_H4 = 0x9e3779b9;
 
-/** Distinct large primes for the four per-character mix steps. */
+/** Distinct odd 32-bit multipliers for the four per-character mix steps.
+ * Oddness — coprimality with 2^32 — is what makes a `Math.imul` multiply a
+ * bijection, so it is the property that matters here; primality is not required
+ * and only H1, H3 and H4 happen to be prime (H2 = 929 × 1_719_413). Do not
+ * "correct" a value to a prime: the digest keys records already in localStorage. */
 const PRIME_H1 = 2_654_435_761;
 const PRIME_H2 = 1_597_334_677;
 const PRIME_H3 = 2_246_822_519;
@@ -60,7 +70,7 @@ const AVALANCHE_CROSS = 3_266_489_909;
 /** One step of the final avalanche: mix `self` with a shift and prime, then
  * XOR with a cross-mix of `neighbor` (also shifted and primed) so a change
  * in any lane propagates to the others. The 16/13 shifts spread bits across
- * the 32-bit word before the prime multiply scrambles them further. */
+ * the 32-bit word before the odd multiplier mixes them across it. */
 function avalancheMix(self: number, neighbor: number): number {
   return (
     Math.imul(self ^ (self >>> 16), AVALANCHE_PRIME) ^

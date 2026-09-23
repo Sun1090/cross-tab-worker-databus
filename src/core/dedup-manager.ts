@@ -63,8 +63,10 @@ export interface DedupManagerOptions {
 
 /** Fixed observation window for adaptive TTL rate computation (5 s). */
 const ADAPTIVE_WINDOW_MS = 5_000;
-/** Message rate per ms treated as "quiet" — at or below this the adaptive TTL
- * relaxes toward `maxMs`. */
+/** Adaptive-TTL clamp point, in accepted messages per ms. `factor` saturates at
+ * 1 here (`currentTtl`), and factor 1 selects `minMs` — so at *or above* this
+ * rate the TTL is pinned at the short end, and `maxMs` is approached only as the
+ * rate falls toward 0. Rates strictly below it interpolate. */
 const QUIET_RATE_PER_MS = 0.01;
 
 export class DedupManager {

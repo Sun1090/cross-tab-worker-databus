@@ -7240,6 +7240,125 @@ corroborates the 26-spec collection.)
   regression) is next behind it.
 - **Updated:** 2026-09-23.
 
+## Phase 134 / The rest of the shipped-comment surface: 23 claims in 13 modules, and the dependency claims among them
+
+- **Milestone / version:** post-`0.21.12`, unreleased (accumulating; comment-only, no CHANGELOG section until a freeze).
+- **Status:** branch `docs/body-comment-audit-pass2`, PR open against `main`.
+- **Completed work.** Phase 133 closed `data-bus.ts` and `cluster.ts` and named what was left —
+  internal comments in the other JS-emitting modules. Two read-only passes collected 24 candidates
+  across 13 files; **23 were confirmed against `src/` (and, for the transport half, against the
+  installed `centrifuge` build) and fixed; 1 was narrowed rather than deleted, and roughly a dozen
+  were cleared on inspection and are listed below so nobody re-hunts them.**
+  - **The retired mechanism had a sixth copy.** Phase 133's own closing step was "grep the claim, not
+    the file", and it still missed this one: `src/core/trace.ts`'s declaration of the coordination
+    event said "after the transport has opened and the just-issued subscriptions have flushed, so the
+    route list is populated rather than empty" — the same refuted fiction, paraphrased, so the
+    distinguishing-phrase grep could not match it. What does survive paraphrase is the *symbol*: the
+    correction now points at `data-bus.ts`'s measurement instead of restating a mechanism, and
+    AGENTS.md carries the rule (grep the mechanism's vocabulary, then every declaration naming the
+    function or field you just fixed).
+  - **Dependency claims, which `src/` cannot verify.** Four sentences asserted what Centrifuge does,
+    and each needed the package itself. `centrifuge@5.7.4` has **one** client-level credential hook
+    (`getToken`, `types.d.ts:126`, also used for renewal); `getChannelToken` appears nowhere in its
+    types or build, and this session creates subscriptions with `newSubscription(topic)` and no
+    per-subscription options — so the `'channelToken'` request kind is produced only by the test
+    fake, which is why `centrifuge.ts`'s `channel ?? ''` arm has never executed. That is now stated
+    with the version pinned. The harder one: `CentrifugeSession.unsubscribe()` calls
+    `removeAllListeners('error')`, which deletes **Centrifuge's own** no-op `error` listener —
+    installed in the `Subscription` constructor "to avoid unhandled exception in EventEmitter for
+    non-set error handler" (`build/index.js:762`) — and that emitter throws on an `error` emit with
+    no listener (`:162`). The old comment claimed internal listeners are "preserved". Recorded
+    honestly as an open question, not as a fixed bug: every `emit('error')` site in
+    `BaseSubscription` that was read is behind `_isSubscribing()`/`_isSubscribed()`, so no
+    post-unsubscribe throw has been produced; the one un-guarded candidate is a token-refresh
+    rejection that lands after the app unsubscribed. Proving it needs the **real** package — the
+    test fake's `removeAllListeners` deletes the key outright and cannot exhibit the guard — and
+    `tests/centrifuge-session.test.ts` is built on that fake, so no existing test can see this.
+  - **Numeric adjectives, all grep-decidable.** `metricsActive` is read by seven methods, not "the
+    four record / flush methods", and the guard quoted in that sentence omits the `!stopped` term the
+    getter actually carries. `generation` is bumped on two of three backend-creation paths (the
+    in-process `localSession` is not one), and `stop()` bumps it at `:189` *before* removing
+    listeners at `:193-194`, inverting the ordering the comment credited. `defaultWebSocketFactory`
+    documents "or null" and has no null arm — it throws, and `start()`'s catch is what turns that
+    into a report. `unsubscribe()` is documented "a no-op" and unconditionally sends an UNSUBSCRIBE
+    frame. `trace.start()` "no-ops" in events mode but clears `stopped` one statement earlier, which
+    is what re-opens the event stream after a `stop()`.
+  - **Wrong mechanism, right conclusion — three more.** `storage-batch.flush()`'s snapshot was
+    justified against a re-entrant `scheduleFlush`, which cannot happen (it defers through
+    `queueMicrotask`/`setTimeout`, and the gate is dropped at `:99`); the snapshot is for entries
+    written *during* the pass, which a live `Map` iterator would visit. `replay-manager.suspend()`'s
+    `retentionCutoff = null` was credited with stopping the cleanup loop, which its own
+    `generation === this.retryGeneration` condition already does — the drop is for the `finally`
+    handoff that would otherwise re-arm a fresh pass. And the `hydrationEpoch` leg claimed "a
+    clear/unsubscribe invalidated this snapshot" when the epoch has exactly two writers,
+    `suspend()` and `resetBuffers()`, while the clear paths set *filter* flags and report their own
+    failures.
+  - **Facts about the world, checked rather than reasoned about.** "Distinct large primes for the
+    four per-character mix steps": `PRIME_H2 = 929 × 1_719_413`, and both avalanche constants are
+    composite too (factored with a five-line script). The property 32-bit multiplicative mixing
+    needs is oddness, all six are odd, and the comment now says so *plus* that the values are
+    load-bearing because the digest keys records already in localStorage — so nobody "fixes" a
+    number into a prime and re-clusters every existing route key.
+  - **Two claims worth their space because a third party acts on them.** `websocket.ts`'s header
+    enumerated a JSON-only wire protocol while `sendBinaryFrame` writes a tagged
+    `0xc7 | uint16 len | topic | payload` frame (and degrades to JSON-with-metadata-array when
+    `messageId`/`timestamp` are present); the demo server implements both directions, so a
+    JSON-only integrator silently drops binary publications. And the same file's `sendFrame` doc
+    said "the only real loss is a publish during a disconnect window" — a dropped UNSUBSCRIBE is
+    also unrecoverable, because `subscribedTopics.delete` has already run and the reopen re-assert
+    only re-sends SUBSCRIBE. `hash.ts`'s module header claimed plaintext "never touches
+    localStorage or BroadcastChannel namespaces — consumers only ever see the opaque key"; CONTROL
+    frames carry the plaintext `topic` beside the key by design, and
+    `channelFallback: 'storage-event'` writes them whole into localStorage. Both now state the
+    narrower truth that `docs/capabilities.md` already had right.
+  - **Narrowed, not deleted.** `centrifuge-session.ts`'s empty-topic drop leaned on "and
+    `subscribe('')` throws", which is false at the layer cited — `assertPublicTopic` runs only on the
+    DataBus's public surface, and the SDK does not validate a channel name, so a SUBSCRIBE frame
+    naming `''` does create a subscription. The conclusion survives for a better reason: no `''`
+    handler can exist because every write to the one registry sits behind that validator, so the
+    frame is undeliverable-but-posted, and this guard is the only one at this layer. That is what
+    the text now says.
+  - **Cleared on inspection** (so the next pass starts from a verdict, not a re-derivation):
+    `centrifuge.ts`'s `startHeartbeat` dominated-leg argument and its three-backend `handleOutput`
+    claim; `websocket.ts`'s `handshakeCompleted` unreachability (with its cited test); the CJS
+    `import.meta` catch pair pinned through `dist/`; `requestId` restart-per-session; the superseded
+    backend listener removals; `replay-persistence`'s four latches, `drain` merge, and the two
+    `if (dbPromise …)` false arms; `replay-manager`'s four other "uncovered and dominated" legs
+    (each verified against `coverage/coverage-final.json`, and its `pendingReplayPersistence`
+    same-task claim genuinely reachable because that queue is a plain array + `queueMicrotask`, not
+    the batch writer); `routing.ts`'s NaN-ordering and depth-cap notes; `environment.ts`'s negative
+    age and sibling-channel notes; `validation.ts`'s "only exception is clearBefore" count (9 + 1);
+    `dedup-manager`'s insertion-order claim; `error-utils`'s `describeFailure` totality;
+    `centrifuge-protocol.ts:11`'s "can never drift apart" (true of the source constants it names);
+    `version.ts:5` — `build.mjs` defines `__SDK_VERSION__` from `package.json` at all three bundle
+    sites and `vitest.config.ts:28` matches.
+- **Changed files:** `src/centrifuge.ts`, `src/centrifuge-protocol.ts`,
+  `src/centrifuge-session.ts`, `src/websocket.ts`, `src/hooks.ts`, `src/core/{hash,trace,
+  storage-batch,dedup-manager,replay-manager}.ts`, `src/utils/validation.ts`,
+  `src/workers/{port-reaper,centrifuge.shared.worker}.ts`, `AGENTS.md`, `docs/progress.md`.
+- **Verification:** all green — `pnpm check` 0, `pnpm lint` 0, `pnpm test:coverage` 0 (37 files,
+  **99.01 / 96.90 / 99.26 / 99.69** — the same four numbers as Phases 132 and 133, which is the
+  expected signature of an edit that touches no executable line), `pnpm verify:compat` 0,
+  `pnpm verify:types` 0 (`6 entries, 90 importable names, surface closed`), `pnpm verify:pack` 0,
+  `pnpm test:e2e` **37 passed** in 35.2 s, `git diff --check` 0, `pnpm bench` 0, `pnpm bench:browser`
+  0 twice, `pnpm bench:compare` 0 (worst `publish/dedicated/perMessageMs` **+6.2 %**, and the two
+  known-bimodal metrics swung the *other* way at −11.4 % and −20.3 % — see `bench-compare.mjs:89-96`
+  before reading anything into either), `pnpm audit --registry=https://registry.npmjs.org` → no
+  known vulnerabilities. Mechanical proof it is documentation-only:
+  `git diff -U0 src/` with comment lines filtered returns **zero** lines across all 13 files.
+- **Blockers:** none. Standing: wildcard-pattern replay pruning (#194) is the user's product
+  decision; TypeScript 7 is blocked upstream.
+- **Risks / rollback:** no executable line changed; the shipped diff is prose in the declarations
+  and the bundles. The one substantive risk is the *recording* of the Centrifuge `error`-listener
+  question: it is now visible in a shipped comment, so a future reader may "fix" it by re-adding a
+  no-op sink without building the interleaving. The comment says explicitly that no throw has been
+  produced and what would have to be built first. Rollback is `git revert` of the merge.
+- **Next task:** the queues for `src/**` body comments are empty. What remains of this surface is
+  outside `src/` — `scripts/**` and `examples/**` prose — and the one behavior question this pass
+  opened (the Centrifuge `error` guard, above). Task #61 (record a report's within-run spread so
+  `bench:compare` can tell a mode-shift from a regression) is next on the queue.
+- **Updated:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

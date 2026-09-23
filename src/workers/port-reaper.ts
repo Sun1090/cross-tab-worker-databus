@@ -79,12 +79,19 @@ export class PortReaper {
    * `Infinity` is the documented way to disable the PING heartbeat, and it means
    * this port can never be judged silent: `startHeartbeat()` sends nothing at all
    * once configured that way, so a timeout would be a death sentence with no
-   * possible appeal. A non-finite-or-non-positive *other* value falls back to the
-   * default so a bad payload cannot degenerate the reaper into a busy loop or
-   * silence it — those three (NaN, 0, negative) are rejected by
-   * `assertHeartbeatInterval` at the transport constructor and so can only arrive
-   * from a main thread that is not this library. No-op for untracked ports (e.g.
-   * setTimeout arrives after remove/STOP). */
+   * possible appeal. A non-finite-or-non-positive *other* value falls back to
+   * the default, which keeps the timeout comparison from degenerating into
+   * "always expired" — a NaN timeout reaps every port on the first tick. Read
+   * that narrowly, because it is not a busy-loop guard: the busy-loop vector is
+   * a tiny *positive* interval, which the ternary passes through untouched
+   * (0.0001 → a 0.0003 ms timeout → every tick reaps everything), and the
+   * reaper's own cadence is bounded elsewhere — `computeMinHeartbeat` starts
+   * from DEFAULT_HEARTBEAT_INTERVAL_MS and only takes a minimum, so a payload
+   * can shorten the sweep but never stretch it past 10 s. The three values
+   * rejected here (NaN, 0, negative) are also rejected by
+   * `assertHeartbeatInterval` at the transport constructor and so can only
+   * arrive from a main thread that is not this library. No-op for untracked
+   * ports (e.g. setTimeout arrives after remove/STOP). */
   setTimeout(port: MessagePort, heartbeatIntervalMs: number): void {
     if (!this.targets.has(port)) return;
     const safe = heartbeatIntervalMs === Infinity
@@ -143,8 +150,11 @@ export class PortReaper {
   }
 
   /** Smallest heartbeat interval among active ports, derived from each port's
-   * configured session timeout. Exposed as a method so the cadence logic can
-   * be unit-tested in isolation from the timer plumbing. */
+   * configured session timeout. Extracted because `schedule()` derives its delay
+   * from it on every re-arm. Not a test seam: nothing in `tests/` calls it
+   * (grep: zero hits), and the cadence is asserted through the injected
+   * `setTimer` — i.e. through the same plumbing this note used to claim it was
+   * isolated from. */
   private computeMinHeartbeat(): number {
     let minHeartbeat = DEFAULT_HEARTBEAT_INTERVAL_MS;
     for (const timeout of this.sessionTimeoutMs.values()) {

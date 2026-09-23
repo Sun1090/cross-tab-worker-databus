@@ -53,10 +53,12 @@ export interface DataBusSubscriptionTraceEvent {
   timestamp: number;
 }
 
-/** Emitted once per successful `start()`, after the transport has opened and
- * the just-issued subscriptions have flushed, so the route list is populated
- * rather than empty. A recovery reopen does not emit another one. Reports the
- * coordinated cluster state, including the settled route list. */
+/** Emitted once per successful `start()`, on the opening's success arm — the
+ * rejection arm emits nothing, and a recovery reopen does not produce a second
+ * snapshot. It is *not* positioned there to wait for storage flushes:
+ * `BatchingStorageWriter` serves pending writes on read, so a snapshot taken
+ * before the opening resolved listed the same routes. Reports the coordinated
+ * cluster state, including the route list as settled at that point. */
 export interface DataBusCoordinationTraceEvent {
   type: typeof TRACE_EVENT_TYPE.COORDINATION;
   coordinated: boolean;
@@ -232,8 +234,10 @@ export class DataBusTraceReporter {
     this.now = now;
   }
 
-  /** Start the periodic metrics flush interval. No-op when mode is 'events'
-   * (no metrics to emit), when disabled, or when already running. */
+  /** Start the periodic metrics flush interval. Only the `!enabled` return is a
+   * true no-op: in 'events' mode, or with an interval already armed, it returns
+   * without arming anything but has already cleared `stopped` one statement
+   * earlier — which is what re-opens the event stream after a `stop()`. */
   start(): void {
     if (!this.enabled) return;
     this.stopped = false;
@@ -358,9 +362,11 @@ export class DataBusTraceReporter {
     if (this.metricsActive) this.dedupSuppressed += 1;
   }
 
-  /** True when metrics recording is active: enabled and mode includes metrics.
-   * Extracted so the four record / flush methods share one guard expression
-   * instead of repeating `!this.enabled || this.mode === 'events'` at each. */
+  /** True when metrics recording is active: enabled, not stopped, and the mode
+   * includes metrics. Extracted so the seven readers — `getMetrics`, the five
+   * `record*` methods and `flush` — share one guard instead of repeating it.
+   * The `!stopped` term is part of the contract, not a bonus: `event()` does not
+   * go through this getter and gates on `stopped` itself. */
   private get metricsActive(): boolean {
     return this.enabled && !this.stopped && this.mode !== TRACE_MODE.EVENTS;
   }

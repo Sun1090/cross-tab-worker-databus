@@ -121,9 +121,13 @@ export function assertRecoveryOptions(recovery: {
  * Each weight is a non-negative finite number of "topic-equivalents" added per
  * unit of the sampled signal; `0` (the default) disables that signal. A
  * negative weight would invert the documented policy — biasing NEW routes
- * toward the *busiest* Worker instead of the quietest — and a non-finite one
- * would poison the score, so both are rejected here rather than silently
- * steering traffic. */
+ * toward the *busiest* Worker instead of the quietest. A non-finite one cannot
+ * poison an individual score either: `effectiveWorkerLoad` ends in a
+ * `Number.isFinite` fallback (`routing.ts:64-70`), which is what its own
+ * comment says a non-finite weight is for. What it does instead is worse to
+ * notice — that fallback fires for *every* worker, so all loads collapse to the
+ * raw topic count and the adaptive term is switched off silently. Both are
+ * rejected here so the misconfiguration fails loudly. */
 export function assertLoadWeightingOptions(loadWeighting: LoadWeightingOptions | undefined): void {
   if (!loadWeighting) return;
   const weights: Record<string, number | undefined> = {

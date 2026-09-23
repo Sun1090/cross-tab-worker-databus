@@ -98,11 +98,15 @@ export class BatchingStorageWriter implements StorageLike {
   flush(): void {
     this.flushScheduled = false;
     this.cancelRetry();
-    // Apply writes from a snapshot so a concurrent scheduleFlush during the
-    // loop cannot re-enter or corrupt the pending map mid-iteration.
-    // Array.from is preferred over [...this.pending] here: it avoids the
-    // spread's intermediate iterator allocation on a hot path that heartbeats
-    // and route writes hit every few seconds.
+    // Iterate a snapshot so an entry written *during* the pass is not visited by
+    // it: a live Map iterator does reach keys added after its position, so a
+    // storage adapter that re-enters setItem would otherwise extend this pass.
+    // `scheduleFlush` is not that re-entry — it defers through queueMicrotask /
+    // setTimeout and cannot call flush() synchronously, and `:99` above has
+    // already dropped the gate. Deleting while iterating needs no snapshot
+    // (Map's own iteration is deletion-safe, the same finding recorded for
+    // PortReaper.reap). Both forms allocate a result array, so the choice here
+    // is about the entry list, not about allocation.
     for (const [key, value] of Array.from(this.pending)) {
       try {
         if (value === null) this.storage.removeItem(key);

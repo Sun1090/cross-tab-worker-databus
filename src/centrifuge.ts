@@ -107,12 +107,17 @@ export class CentrifugeWorkerTransport<TData = unknown>
   private heartbeatHandle: ReturnType<typeof setInterval> | null = null;
   private localSession: CentrifugeSession<TData> | null = null;
   private handlers: DataBusTransportHandlers<TData> | null = null;
-  // Monotonically increasing counter, bumped each time a backend is created or
-  // the transport stops. Only the asynchronous credential bridge compares it:
-  // a provider may settle after the Worker it was answering is gone. Worker
-  // error events need no such check — stop() and onWorkerFailed() remove those
-  // listeners before the generation moves on, so a superseded backend can no
-  // longer reach this object at all.
+  // Monotonically increasing counter, bumped when a *Worker* backend is created
+  // (`startDedicatedWorker`, `startSharedWorker`) and when the transport stops.
+  // The in-process `localSession` creation does not bump it, which is why
+  // `isCurrentBackend()` compares worker/port/localSession identity as well.
+  // Only the asynchronous credential bridge reads the counter: a provider may
+  // settle after the backend it was answering is gone. Worker error events need
+  // no such check, but not for the reason this note used to give — `stop()`
+  // bumps at `:189` and removes the listeners at `:193-194`, so the generation
+  // moves on *before* the removal, not after. The containment is that both
+  // happen in one synchronous task, together with `handlers = null`, and no
+  // message or error event can be delivered to this object mid-task.
   private generation = 0;
 
   get diagnosticsBackend(): string {
