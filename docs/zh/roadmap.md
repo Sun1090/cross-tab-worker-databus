@@ -1,6 +1,29 @@
 # 路线图
 
-0.21.10 已于 2026 年 9 月 23 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+0.21.11 已于 2026 年 9 月 23 日发布。项目会先持续完成可靠性发布，再进入 1.0.0 稳定性冻结。
+
+## 0.21.11 已完成范围
+
+- 一轮针对此前从未被扫过的四个文档文件（`architecture.md`、`capabilities.md`、`getting-started.md`、
+  `transports.md`，以及它们共同依赖的 `api.md`）的文案审计，找出约十五句代码并不支持的表述，中英文一并修正。
+  最要紧的都是"从不持久化"这一类。`architecture.md` 用六句话承诺协调流量绝不写入 localStorage，而
+  `channelFallback: 'storage-event'` 在构造上就与之相反：信封本身就是那一帧，因此明文 topic 与 publication
+  payload 会留在 channel key 下直到通道关闭，页面崩溃后更是无限期。能力矩阵声称 SDK 不持久化业务 payload，
+  而它自己导出的 `createIndexedDbReplayPersistence` 就是反例（对象仓以明文 topic 为 key）；矩阵与入门文档还把
+  `workerMode: 'shared'` 说成"复用同一条连接"，实际上每个 port 都有自己的 `CentrifugeSession` 和自己的
+  WebSocket——shared 模式省的是进程，从来不是 socket。
+- 两条写给 transport 实现者的指引指错了回调、也指错了守卫。自动恢复由 `onStatus('error')` 启动、按恢复冷却窗口
+  节流；`onError` 只做记录与通知，因此只通过它上报死连接的 backend 永远不会被重开。generation 计数器只有异步凭证桥
+  会比较它——被取代的 Worker 根本到不了 transport，因为监听器早已移除。同一文件的接口块、Worker 联合与 wire 草图
+  各自漏掉了确实发布的成员（`publish` 的元数据参数、可选的 `publishBatch`、两个 diagnostics 标签、`TOKEN_*` 与
+  `SESSION_REAPED` 类型、批量帧）。
+- 有一处过度绝对的说法同时出现在三个地方，其中包括 `cluster.ts` 的一条注释：路由校验丢弃的是指向*另一个* Worker 的
+  `CONTROL/SUBSCRIBE`，读不到路由的 topic 会被接受。这个容忍是有界的——没有路由可盖章时 `confirmRoute` 什么都不写，
+  下一次 reconcile 会收回 assignment——并由新增测试固化。实测：按旧文案描述采用更严格的规则，会让这条新测试和两条本就依赖
+  该容忍的负载加权测试一起失败。
+- 同一次"把说法拿去测量、而不是重读一遍"的改动也在此发布：`configuration.md` 的重试封顶语句现在说明了 1600 ms
+  上限究竟约束哪一半，两条新测试固化完整的翻倍序列与原样生效的首次等待，两条 `PortReaper` 注释改为描述其真实的保护作用。
+- 无行为、wire 格式、存储布局或集群协议变更。全树覆盖率保持 99.01 / 96.90 / 99.26 / 99.69，共 **895** 个测试。
 
 ## 0.21.10 已完成范围
 

@@ -1,6 +1,39 @@
 # Roadmap
 
-0.21.10 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.11 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.11 delivered scope
+
+- A prose audit of the four docs files no earlier sweep had covered — `architecture.md`,
+  `capabilities.md`, `getting-started.md`, `transports.md`, plus the `api.md` entry they lean on —
+  produced roughly fifteen sentences the code does not support, corrected in English and Chinese. The
+  load-bearing ones are all of the "never persists" family. `architecture.md` promised in six sentences
+  that coordination traffic never touches localStorage, which `channelFallback: 'storage-event'`
+  contradicts by construction: the envelope *is* the frame, so plaintext topics and publication
+  payloads live under the channel key until the channel closes and indefinitely after a tab crash. The
+  matrix said the SDK does not persist business payloads, which its own exported
+  `createIndexedDbReplayPersistence` disproves (its object store is keyed by the plaintext topic), and
+  it sold `workerMode: 'shared'` as reusing one connection when every port gets its own
+  `CentrifugeSession` and its own WebSocket — shared mode saves the process, never the socket.
+- Two instructions written for people implementing a transport pointed at the wrong callback and the
+  wrong guard. Auto-recovery is started by `onStatus('error')` and paced by the recovery cooldown;
+  `onError` records and notifies and does nothing else, so a backend that reports a dead socket only
+  there is never reopened. The generation counter is compared only by the asynchronous credential
+  bridge — a superseded Worker cannot reach the transport, because its listeners are removed first.
+  The same file's interface block, Worker unions and wire sketch each omitted members that ship
+  (`publish`'s metadata argument, optional `publishBatch`, the diagnostics labels, the `TOKEN_*` and
+  `SESSION_REAPED` types, the batch frame).
+- One over-absolute claim sat in three places, a `cluster.ts` comment among them: the route check
+  drops a `CONTROL/SUBSCRIBE` naming a *different* worker, and a topic whose route cannot be read is
+  accepted. The tolerance is bounded — `confirmRoute` writes nothing without a route to stamp and the
+  next reconcile withdraws the assignment — and is now pinned by a test. Measured, the stricter rule
+  the prose described fails that test *and* two load-weighting tests that already relied on it.
+- Also in this release, from the same "measure the claim rather than re-read it" pass: the
+  persistence-retry sentence in `configuration.md` now says which half the 1600 ms ceiling bounds, two
+  tests carry the full doubling schedule and the verbatim first wait, and two `PortReaper` comments
+  describe what their legs actually protect.
+- No behaviour, wire-format, storage-layout or cluster-protocol change. Whole-tree coverage is
+  unchanged at 99.01 / 96.90 / 99.26 / 99.69 over **895** tests.
 
 ## 0.21.10 delivered scope
 
