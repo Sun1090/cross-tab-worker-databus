@@ -1057,7 +1057,7 @@ describe('ReplayManager — persistence retry policy', () => {
     expect(received).toEqual([1]);
   });
 
-  it('honors the backoff delay between attempts, capped by the retry ceiling', async () => {
+  it('doubles the backoff delay between attempts', async () => {
     vi.useFakeTimers();
     try {
       const persistence = new FakePersistence();
@@ -1073,6 +1073,71 @@ describe('ReplayManager — persistence retry policy', () => {
       await vi.advanceTimersByTimeAsync(50);
       expect(persistence.appendCalls).toBe(2);
       await vi.advanceTimersByTimeAsync(100);
+      expect(persistence.appendCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caps the doubled delay at the retry ceiling and holds it there', async () => {
+    vi.useFakeTimers();
+    try {
+      const persistence = new FakePersistence();
+      persistence.failures.append = 99;
+      const { manager, persistenceErrors } = createManager({
+        persistence,
+        persistenceRetryBackoffMs: 50,
+        persistenceRetryMaxAttempts: 8
+      });
+      manager.record(message('t', 1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(persistence.appendCalls).toBe(1);
+      // Each row is [wait before this attempt, attempts issued by then]. The
+      // ceiling is only reachable from the seventh wait, so every assertion
+      // above it pins the doubling and the last two pin that it *stops* doubling:
+      // without the cap attempt 8 would arrive 3200ms later, not 1600.
+      const schedule: ReadonlyArray<readonly [number, number]> = [
+        [50, 2],
+        [100, 3],
+        [200, 4],
+        [400, 5],
+        [800, 6],
+        [1600, 7],
+        [1600, 8]
+      ];
+      for (const [wait, attempts] of schedule) {
+        await vi.advanceTimersByTimeAsync(wait - 1);
+        expect(persistence.appendCalls).toBe(attempts - 1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(persistence.appendCalls).toBe(attempts);
+      }
+      expect(persistenceErrors).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits the configured backoffMs verbatim even when it exceeds the ceiling', async () => {
+    vi.useFakeTimers();
+    try {
+      const persistence = new FakePersistence();
+      persistence.failures.append = 99;
+      const { manager } = createManager({
+        persistence,
+        persistenceRetryBackoffMs: 5_000,
+        persistenceRetryMaxAttempts: 3
+      });
+      manager.record(message('t', 1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(persistence.appendCalls).toBe(1);
+      // The ceiling bounds the doubling, not the configured first wait. Clamping
+      // `backoffMs` to it would be the other way to make "delays are capped"
+      // true, and would silently ignore a value the integrator set.
+      await vi.advanceTimersByTimeAsync(1_600);
+      expect(persistence.appendCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(3_400);
+      expect(persistence.appendCalls).toBe(2);
+      await vi.advanceTimersByTimeAsync(1_600);
       expect(persistence.appendCalls).toBe(3);
     } finally {
       vi.useRealTimers();
