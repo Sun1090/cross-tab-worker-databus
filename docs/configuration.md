@@ -165,7 +165,7 @@ Main configuration for `createCentrifugeDataBus<TData>(options)`:
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING heartbeat interval (see SharedWorker Session Reaper below); `Infinity` disables heartbeats entirely and exempts that port from reaping. Distinct from the Core cluster heartbeat (default 3000 ms) which tracks worker liveness via localStorage |
 | `workerFactory` | `() => Worker` | Built-in Worker | For testing or custom Worker loading |
 | `sharedWorkerFactory` | `() => SharedWorker` | Built-in SharedWorker | For testing or custom SharedWorker loading |
-| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | Async credential refresh bridge: the Worker asks the main thread for each fresh token (`getToken` / `getChannelToken`) and this provider supplies it from application context. Required because function-valued Centrifuge options cannot be structured-cloned into the Worker |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | Async credential refresh bridge: the Worker asks the main thread for each fresh token and this provider supplies it from application context. In practice that ask is `getToken`, the only credential hook `centrifuge@5.7.4` exposes — the type carries `getChannelToken` and the Worker protocol carries that request kind so a later SDK needs no change on this side, but nothing asks it today. Required because function-valued Centrifuge options cannot be structured-cloned into the Worker |
 | Other Core config | Corresponding type | Core defaults | `storagePrefix`, heartbeat, TTL, etc. |
 
 ```ts
@@ -256,21 +256,26 @@ When non-clonable data is passed, `CentrifugeWorkerTransport` will throw a clear
 
 ## Storage Data Boundaries
 
-Storage only holds:
+The coordination records this library writes itself — `{clusterHash}:worker:{workerId}`, `{clusterHash}:route:{topicKey}`, `{clusterHash}:subscriber:{topicKey}:{tabId}`, and the tab-id key — hold only:
 
-- Worker ID, Tab ID, status, visibility, load, and heartbeat
-- Opaque Topic key, owner Worker, and last update time
-- Topic subscriber's Tab ID
+- Worker and Tab identity, role, status, visibility, the owned-topic `load` figure, an optional rolling throughput sample, the advertised protocol version, and the heartbeat / first-registration timestamps
+- The opaque Topic key, its owner's Worker and Tab identity, the last-update and generation numbers, and — during a graceful handoff — the previous owner and the owner's confirmation timestamp
+- A subscriber record's Tab ID and its last-update timestamp
+- The tab's own persisted id, which is what lets a reload reclaim its routes
 
-Storage does NOT hold:
+Those records never hold:
 
 - Connection URL plaintext
 - Topic names
 - Connection credentials
 - Publication data
-- Publish data
 
-Note: BroadcastChannel coordination messages carry topic names, event types, and publication payloads in plaintext (in-memory only). Only localStorage metadata is hashed via `createOpaqueKey()`.
+That is a boundary around *those keys*, not around browser storage in general. Two opt-ins put Topic plaintext and payloads into it:
+
+- `channelFallback: 'storage-event'` writes every coordination **frame** whole under `cross-tab-worker-databus:channel:*`, and a `CONTROL/PUBLISH` frame carries its Topic name and payload — so they sit in `localStorage` until the channel is closed, and indefinitely if the tab is killed first.
+- `replay.persistence` (e.g. `createIndexedDbReplayPersistence`) keeps replay history in IndexedDB in an object store keyed by the plaintext Topic, with the payloads in its rows.
+
+Note: BroadcastChannel coordination messages carry topic names, event types, and publication payloads in plaintext (in memory only, unless the fallback above is what is carrying them). Only localStorage metadata is hashed via `createOpaqueKey()`.
 
 ## Security & Trust Model
 
@@ -282,7 +287,7 @@ The coordination plane has **no authentication**. Only use this library on pages
 - `clusterKey` is hashed via `createOpaqueKey` (a non-cryptographic 128-bit hash) to derive the storage prefix and BroadcastChannel name. In practice `clusterKey` is always a connection URL or a developer-controlled namespace, so a hash collision between two different clusterKeys (~2⁻⁶⁴ birthday bound) is not a practical concern.
 - Mitigations: keep the page free of untrusted third-party scripts; load coordination on an isolated origin; treat the origin's `localStorage` and BroadcastChannel namespaces as public. CSP cannot restrict BroadcastChannel or localStorage access from same-origin scripts.
 
-The transport plane (e.g. the Centrifuge WebSocket) has its own security model — tokens, TLS, and server-side permissions — and is unaffected by the above. The cluster only routes which tab owns the transport subscription; it never proxies the payload through `localStorage` (payloads travel via BroadcastChannel in memory or via the server directly).
+The transport plane (e.g. the Centrifuge WebSocket) has its own security model — tokens, TLS, and server-side permissions — and is unaffected by the above. The cluster only decides which tab owns the transport subscription; a payload then reaches a tab from that owner over the BroadcastChannel, or from the server directly for the tab holding the subscription. The one exception is the `channelFallback: 'storage-event'` path above: there the channel *is* `localStorage`, so those same frames — payloads included — are written into it.
 
 ## Cluster Isolation Recommendations
 

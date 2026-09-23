@@ -39,7 +39,7 @@ graph TB
   end
 ```
 
-By default, when `workerMode: 'dedicated'`, each Tab has its own dedicated transport Worker. When configured as `shared` or `auto` and the browser supports SharedWorker, same-origin tabs share the same SharedWorker; each connection port within the SharedWorker creates its own independent `CentrifugeSession`, so one Tab refreshing or stopping does not affect other Tabs. The `auto` mode degrades in order of **SharedWorker → Dedicated Worker → Local mode**, while the `dedicated` mode degrades in order of **Dedicated Worker → SharedWorker → Local mode**. `BroadcastChannel` is only responsible for control messages and real-time publication forwarding; localStorage is only responsible for eventually-consistent coordination metadata.
+By default, when `workerMode: 'dedicated'`, each Tab has its own dedicated transport Worker. When configured as `shared` or `auto` and the browser supports SharedWorker, same-origin tabs share the same SharedWorker; each connection port within the SharedWorker creates its own independent `CentrifugeSession`, so one Tab refreshing or stopping does not affect other Tabs. The `auto` mode degrades in order of **SharedWorker → Dedicated Worker → Local mode**, while the `dedicated` mode degrades in order of **Dedicated Worker → SharedWorker → Local mode**. `BroadcastChannel` is only responsible for control messages and real-time publication forwarding, and what localStorage holds for the cluster is eventually-consistent coordination metadata — with the one exception that under `channelFallback: 'storage-event'` the channel itself is localStorage, so the frames travel through it; see [Storage Data Boundaries](./configuration.md#storage-data-boundaries).
 
 Because `MessagePort` has no `close` event, a tab that crashes before sending `STOP` would otherwise leak its session and WebSocket. The main thread therefore sends a `PING` every 10 seconds, and the SharedWorker reaps any port that stays silent for more than 30 seconds, releasing the session and its subscriptions. Silence is not the same as absence, though, so a reclaimed port is announced before it is closed: a tab whose heartbeat was merely starved (a long synchronous task, the throttling a backgrounded tab gets) learns its backend is gone, reports the failure, and rebuilds the session on a fresh port.
 
@@ -219,7 +219,7 @@ BroadcastChannel CONTROL
 
 ### In-memory topic key cache (`knownTopics`)
 
-Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives the `topicKey` pairing check — a frame dropped for disagreeing about that pair is dropped before its plaintext is ever read, so invalid pairs cannot grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
+Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives both frame guards at the top of `handleControlMessage` — a frame naming another worker, or one whose pair disagrees, is dropped before its plaintext is ever read, so neither can grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
 
 The cache exists for two reasons:
 
@@ -248,7 +248,7 @@ Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds 
 | `subscribe(topic)` | `rememberTopic(topic)` → `set(topicKey, topic)` | Populate the reverse mapping; needed for storage-less `readRoute` |
 | `publish(topic, data)` | `rememberTopic(topic)` → `set(topicKey, topic)` | Populate; same reason |
 | `unsubscribe(topic)` | `delete(topicKey)` if not in `assignedTopics` | No longer needed; only keep it if we still own the topic |
-| `CONTROL` received (any action: SUBSCRIBE / UNSUBSCRIBE / PUBLISH) | `rememberTopic(message.topic)` → `set(topicKey, topic)` | Every inbound control message carries the plaintext topic and the handler caches it before acting |
+| `CONTROL` received (any action: SUBSCRIBE / UNSUBSCRIBE / PUBLISH) | `rememberTopic(message.topic)` → `set(topicKey, topic)` | Inbound frames carry the plaintext topic — but `rememberTopic` runs *after* the `targetWorkerId` and `topicKey` pairing guards, so a frame either guard drops is never cached |
 | `CONTROL/UNSUBSCRIBE` received | no direct deletion | `rememberTopic` still caches the topic; the entry is later removed by `reconcileAssignedTopics` once the route no longer points to this worker |
 | `reconcileAssignedTopics` | `delete(topicKey)` if not subscribed and not owned | Route no longer points to us — clean up unless we're still a subscriber |
 | `stop()` | `clear()` | Full teardown |
@@ -286,7 +286,7 @@ sequenceDiagram
   RuntimeA->>App: invoke handler(payload)
 ```
 
-A second Tab subscribing to the same Topic adds only its own subscriber record; it does not create another transport subscription while the existing owner is alive. Unsubscribe removes the current Tab's subscriber record. The owner unsubscribes the transport and removes the route only when no subscriber remains.
+A second Tab subscribing to the same Topic adds only its own subscriber record; it does not create another transport subscription while the existing owner is alive. Unsubscribe removes the current Tab's subscriber record and, when that was the last one, the same Tab deletes the route and sends `CONTROL/UNSUBSCRIBE` to the worker the route named, which then drops its assignment and releases the transport subscription.
 
 ### Console diagnostics
 
@@ -367,7 +367,7 @@ implementation passes through the transport server. Four message types are excha
 
 | Type | Direction | Purpose |
 |---|---|---|
-| `CONTROL` | point-to-point (A → B) | Ask the target Worker to `SUBSCRIBE`, `UNSUBSCRIBE`, or `PUBLISH` a topic. Carries `action`, `topic`, `topicKey`, `targetWorkerId`, and an optional `data` payload. A `SUBSCRIBE` is honored only when the durable route currently names the target and is not awaiting `ROUTE_RELEASED`. |
+| `CONTROL` | point-to-point (A → B) | Ask the target Worker to `SUBSCRIBE`, `UNSUBSCRIBE`, or `PUBLISH` a topic. Carries `action`, `topic`, `topicKey`, `targetWorkerId`, and an optional `data` payload. A `SUBSCRIBE` is dropped when the durable route names a *different* worker, and a route still awaiting `ROUTE_RELEASED` accepts no frame but its matching ACK; a route that cannot be read at all passes, because such a frame mints no durable ownership and the next reconcile withdraws the assignment. |
 | `EVENT` | broadcast (owner → all Tabs) | Fan out a publication that the transport delivered to the owning Worker. Carries `eventType` and `payload`. |
 | `REGISTRY` | broadcast | Nudge every Tab to reconcile immediately after a registry or route write, instead of waiting for the next heartbeat. |
 | `ROUTE_RELEASED` | point-to-point (old owner → new owner) | Acknowledge a graceful handoff; only the new owner whose route `generation` matches may `SUBSCRIBE` (see Failover). |
@@ -569,7 +569,7 @@ Transport message → isAssigned(topic)? → Yes → broadcastEvent(EVENT)
 Cluster convergence is driven on two timelines:
 
 - **Heartbeat + reconcile loop** (default `3000 ms`, `heartbeatIntervalMs`). On every tick each Worker refreshes its own record and runs a reconcile pass: prunes Workers past `workerTtlMs`, orphaned subscribers whose Tab is no longer active, and orphaned routes that have no subscribers and exceed the TTL; recomputes its own active/standby role; re-writes its subscriber records; and re-sends `CONTROL/SUBSCRIBE` for any route that still lacks `confirmedAt` — which also recovers control messages lost on the channel.
-- **`REGISTRY` nudge**. Writes to Worker records, routes, or subscribers broadcast a `REGISTRY` message so every peer reconciles immediately rather than waiting for the next heartbeat.
+- **`REGISTRY` nudge**. Writes to Worker records and routes broadcast a `REGISTRY` message so every peer reconciles immediately rather than waiting for the next heartbeat. A subscriber-only write does not: `subscribe()` on a topic whose owner is still live writes this Tab's subscriber record and returns.
 
 Heartbeat writes are not announced, so a stale record is only noticed within one heartbeat interval. The worst case for failing to detect a dead owner is `heartbeatIntervalMs + workerTtlMs` (default about 13 s); see [TTL Message-Loss Window](./configuration.md#ttl-message-loss-window) for the trade-offs.
 
@@ -595,7 +595,7 @@ This process prevents overlap during graceful owner handoff while retaining avai
 
 These invariants are pinned by regression tests (see `tests/stability.test.ts` and `tests/replay-persistence.test.ts`) and must hold through future refactors:
 
-- **SUBSCRIBE route binding.** An inbound `CONTROL/SUBSCRIBE` is accepted only when the durable route currently names the receiver and is not an unconfirmed graceful handoff. A delayed frame from an earlier assignment round cannot add ownership, subscribe the transport, or confirm the route; only the matching `ROUTE_RELEASED` can authorize a pending handoff. Ownership follows the current route record, not the order in which control frames arrive.
+- **SUBSCRIBE route binding.** An inbound `CONTROL/SUBSCRIBE` is dropped when the durable route names a *different* worker, and a handoff still awaiting its ACK accepts no frame but the matching `ROUTE_RELEASED`. A route that cannot be read — expired, corrupt, or storage absent — is the accepted exception: `confirmRoute` writes nothing without a route to stamp, so the frame mints no durable ownership and `reconcileAssignedTopics` withdraws the assignment on the next tick. Both halves are pinned by `tests/cluster.test.ts`. Ownership follows the current route record, not the order in which control frames arrive.
 - **Handoff ACK validity.** A `ROUTE_RELEASED` is accepted only when the route still points at the receiver, the release comes from the recorded `handoffFromWorkerId`, and the ACK generation exactly matches the stored route generation. Replayed ACKs from any other handoff round (e.g. an a↔b ping-pong) are dropped instead of confirming the current route.
 - **Replay persistence cleanup ordering.** A batched persistence flush queued behind the current task is filtered against the cleanup that wins the race: `unsubscribe` and `clearReplayTopic` drop the topic's pending entries, `clearReplayBefore` drops entries older than the cutoff, and `suspend()`/`stop()` discard the whole queued batch before it can start under the next lifecycle generation. Cleared or stopped-session history is never re-appended by an in-flight flush.
 - **Storage write recovery.** Coalesced writes retry with exponential backoff (50 ms → 1.6 s cap). A structurally failing key is dropped after 5 attempts (with a `console.warn`) without permanently blocking other queued keys, and the backoff delay resets once the queue fully drains or `clear()` cancels the retries.

@@ -169,7 +169,7 @@ clearReplay(): Promise<void>
 
 Clears in-memory replay buffers and invokes the persistence adapter's optional `clear()` hook. Useful for retention policies, logout, or tenant switching. Durable history is otherwise preserved across `stop()`.
 
-`clearReplayTopic(topic)` applies the same cleanup to one exact topic. `getDedupStats()` returns bounded counters (`enabled`, `tracked`, `accepted`, `suppressed`), and `resetDedup()` clears remembered IDs and counters without changing configuration.
+`clearReplayTopic(topic)` applies the same cleanup to one exact topic. `getDedupStats()` returns bounded counters (`enabled`, `tracked`, `accepted`, `suppressed`, plus the current `ttlMs` whenever `dedup.adaptiveTtl` is configured), and `resetDedup()` clears remembered IDs and counters without changing configuration.
 
 `clearReplayBefore(timestamp)` removes entries with an explicit producer timestamp older than an epoch-millisecond cutoff from memory and from adapters that implement optional `clearBefore(timestamp)`. Legacy messages without a producer timestamp are preserved for compatibility. Incoming messages receive a bus timestamp when the transport does not provide one; that bus timestamp is not treated as producer metadata for retention cleanup.
 
@@ -345,7 +345,7 @@ Creates an auto-starting Centrifuge DataBus. Defaults:
 - Uses the bundled `centrifuge.worker.js`
 - Worker name is `cross-tab-worker-databus`
 
-SharedWorker mode uses the bundled `centrifuge.shared.worker.js`. With `workerMode: 'auto'`, it degrades from SharedWorker to Dedicated Worker to local mode. See [configuration.md](./configuration.md) for full configuration.
+SharedWorker mode uses the bundled `centrifuge.shared.worker.js`, and its Worker is named `cross-tab-worker-databus-shared`. With `workerMode: 'auto'`, it degrades from SharedWorker to Dedicated Worker to local mode. See [configuration.md](./configuration.md) for full configuration.
 
 ## `CentrifugeWorkerTransport<TData>`
 
@@ -431,7 +431,7 @@ React (>= 18) is an optional peer dependency; this entry is separate so non-Reac
 
 ### `useCrossTabDataBus(create, deps?)`
 
-Creates a bus for the component's lifetime: created on mount, stopped on unmount. StrictMode-safe — the double-invoked effect exercises the same stop/recreate path as BFCache suspend/resume. Returns the active bus or `null` before the first effect (SSR / initial render).
+Creates a bus for the component's lifetime: created on mount, stopped on unmount. StrictMode-safe — the double-invoked effect runs create → `stop()` → create across **separate** instances, so it exercises the stop path but not the BFCache one: page-hide takes `onSuspend()`, which keeps this same bus, its handlers and its replay buffers, and resume reverses it. Coverage of suspend/resume therefore has to come from a real hide/show, not from this hook. Returns the active bus or `null` before the first effect (SSR / initial render).
 
 Pass a fresh bus per effect run (an inline factory); key recreation through `deps`.
 

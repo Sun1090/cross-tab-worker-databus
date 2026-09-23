@@ -19,9 +19,13 @@
 - Claims about a *dependency* now name it. Against `centrifuge@5.7.4` there is one client-level
   credential hook and no `getChannelToken` in the package at all, so that request kind has never
   fired outside a test fake; and `CentrifugeSession.unsubscribe()` removes the emitter's own no-op
-  `error` guard under a comment claiming internals were preserved. The second is recorded as an open
-  question with the interleaving it would take to call it a defect — the test double cannot exhibit
-  the guard, so no existing test can see it either way.
+  `error` guard under a comment claiming internals were preserved. The second was first recorded as
+  an open question — the test double cannot exhibit the guard, so no existing test could see it
+  either way — and has since been closed against the same pinned version: all twelve `emit('error')`
+  sites in `BaseSubscription` but one sit behind a `_isSubscribing()`/`_isSubscribed()` test, and the
+  three ways back into that one after `unsubscribe()` are closed by a state re-test, by the client's
+  `Subscribing`-only reconnect pass, and by the refresh timer `_clearSubscribedState()` cancels. The
+  enumeration is in the comment, and no defensive re-attach was warranted.
 - `pnpm bench:compare --fail-above-pct 50` gained the leg its median baseline could not supply: a
   value must now also exceed the highest sample in its own baseline window, because a median over a
   bimodal metric is stable only while the modes stay mixed. What that excuses is printed rather than
