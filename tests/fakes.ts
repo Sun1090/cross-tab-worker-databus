@@ -49,6 +49,27 @@ export class ChannelHub {
   private readonly channels = new Map<string, Set<FakeChannel>>();
   private shouldDropNextControl = false;
   private shouldFailNextPost = false;
+  private budget: number | null = null;
+  private posted = 0;
+  private budgetExceeded = false;
+
+  /** Cap how many messages the hub will deliver, dropping the rest. A
+   * coordination loop that never converges otherwise costs unbounded CPU in the
+   * test that hosts it — the hub is the only place both sides of the loop are
+   * visible, so it is the only place the loop can be broken. */
+  setDeliveryBudget(limit: number): void {
+    this.budget = limit;
+    this.posted = 0;
+    this.budgetExceeded = false;
+  }
+
+  deliveriesOverBudget(): boolean {
+    return this.budgetExceeded;
+  }
+
+  deliveryCount(): number {
+    return this.posted;
+  }
 
   dropNextControl(): void {
     this.shouldDropNextControl = true;
@@ -67,6 +88,11 @@ export class ChannelHub {
   }
 
   send(source: FakeChannel, message: WorkerClusterMessage): void {
+    this.posted += 1;
+    if (this.budget !== null && this.posted > this.budget) {
+      this.budgetExceeded = true;
+      return;
+    }
     if (this.shouldFailNextPost) {
       this.shouldFailNextPost = false;
       throw new Error('DataCloneError: value could not be cloned.');

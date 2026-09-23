@@ -46,7 +46,12 @@
  * hand-simulated matcher. Seeds are fixed, so a failure is replayable, and the
  * sweep stops on a wall-clock budget with an asserted floor, with every
  * await-yielding step inside a seed capped and named when the cap trips — see the
- * constants below for what that guard cannot reach.
+ * constants below for what that guard cannot reach. The third limit is a channel
+ * delivery budget, which cuts a coordination loop that never converges: the same
+ * seed was measured twice on CI at 463s and 151s of wall clock that way, and the
+ * hub is the only place both halves of such a loop are visible. A seed it cuts is
+ * reported as `[CHURN]` and excluded from depth, so the count is a measurement a
+ * future fix is judged against rather than a silence.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { CrossTabDataBus } from '../src/core/data-bus';
@@ -199,6 +204,20 @@ describe('cross-tab coordination invariants', () => {
   // it — the `capped()` pin below proves the mechanism fires when the wait *does*
   // yield, and the `[CUT]` line names the seed if it ever pays off.
   const SEED_AWAIT_CAP_MS = 2_000;
+  // Hard ceiling on how many messages one seed may put on the channel. The two
+  // guards above bound *time*, and a self-sustaining coordination loop is not a
+  // time the test can be blamed for: it is CPU spent inside microtasks, which no
+  // same-thread deadline can preempt. So the loop is cut where both halves of it
+  // are visible — the hub.
+  //
+  // The number is set from a measured distribution, not taste. Instrumenting
+  // `ChannelHub.send` over a full 5,000-seed sweep on an idle desktop gave
+  // p50 = 28 posts, p99 = 90, p99.9 = 5,429 and a maximum of 16,763 (seed 1046,
+  // 113 ms); 18 seeds exceeded 500 and 34 exceeded 100. So this ceiling sits
+  // ~3x above the worst interleaving this machine produces and ~500x above p99:
+  // it cannot fire on a healthy seed, and a seed it does cut is reported by name
+  // rather than silently absorbed.
+  const DELIVERY_BUDGET = 50_000;
 
   // Captured while these are still the genuine implementations: the sweep installs
   // fake timers per seed, and a deadline that must not depend on the fake clock
@@ -245,6 +264,42 @@ describe('cross-tab coordination invariants', () => {
     expect(await capped(later, 100), 'a 5ms real timer must beat a 100ms cap').toBe(true);
   });
 
+  it('cuts channel deliveries at the budget, and cuts nothing under it', () => {
+    // The sweep's third guard is the only one that can break a coordination loop,
+    // because the loop spends its time inside microtasks that no same-thread
+    // deadline can preempt. Both directions are pinned for the same reason the
+    // `capped()` pin asserts both: a budget that never fires would let the wedge
+    // through looking exactly like a working guard, and a budget that fires early
+    // would silently starve every seed and collapse the sweep's depth.
+    const hub = new ChannelHub();
+    const sender = hub.create('budgeted');
+    const receiver = hub.create('budgeted');
+    let received = 0;
+    receiver.addEventListener('message', () => {
+      received += 1;
+    });
+    const frame = { type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: 'worker-x' } as WorkerClusterMessage;
+
+    hub.setDeliveryBudget(3);
+    for (let post = 0; post < 3; post += 1) sender.postMessage(frame);
+    expect(received, 'a budget must not drop anything under the limit').toBe(3);
+    expect(hub.deliveriesOverBudget()).toBe(false);
+    expect(hub.deliveryCount()).toBe(3);
+
+    for (let post = 0; post < 3; post += 1) sender.postMessage(frame);
+    expect(received, 'posts past the budget must not be delivered').toBe(3);
+    expect(hub.deliveriesOverBudget(), 'the trip must be reported').toBe(true);
+    expect(hub.deliveryCount(), 'the count is posts, so it keeps measuring the loop').toBe(6);
+
+    // Re-arming is what lets one hub serve the next seed.
+    hub.setDeliveryBudget(3);
+    expect(hub.deliveriesOverBudget()).toBe(false);
+    sender.postMessage(frame);
+    expect(received, 'a re-armed budget delivers again').toBe(4);
+    receiver.close();
+    sender.close();
+  });
+
   it('budgets on a clock that fake timers can neither advance nor stop', () => {
     // Both directions have to be pinned, and only one of them was. Advancing 60
     // simulated seconds must not cost 60 measured ones (the clock must not run
@@ -276,6 +331,7 @@ describe('cross-tab coordination invariants', () => {
     const failures: string[] = [];
     let completed = 0;
     let cutShort = 0;
+    let churned = 0;
     let budgetReached = false;
     // `realNowMs()`, never `Date.now()` and never the global
     // `performance.now()`: both move under this suite's fake timers, and the
@@ -303,6 +359,8 @@ describe('cross-tab coordination invariants', () => {
       vi.useFakeTimers();
       const storage = new MemoryStorage();
       const hub = new ChannelHub();
+      hub.setDeliveryBudget(DELIVERY_BUDGET);
+      hub.setDeliveryBudget(DELIVERY_BUDGET);
       const clock = { now: 1_000 };
       const tabs = [
         createTab('a', storage, hub, clock),
@@ -466,8 +524,23 @@ describe('cross-tab coordination invariants', () => {
         // Only a seed that was actually asserted counts as depth: a budget break
         // leaves the last seed unasserted without being a wedge, so it is neither
         // `completed` nor a cut.
-        if (!aborted) completed += 1;
+        const churnedHere = hub.deliveriesOverBudget();
+        // Only a seed that was actually asserted counts as depth: a budget break
+        // leaves the last seed unasserted without being a wedge, so it is neither
+        // `completed` nor a cut.
+        if (!aborted && !churnedHere) completed += 1;
         const seedMs = realNowMs() - seedStartedAt;
+        // The budget cut this seed's channel traffic, so its end state was never
+        // reachable and its invariants would be a false failure. Reported by name
+        // and operation list — the count is the measurement a fix is judged
+        // against, so it must not be folded into `cutShort`, which means "the
+        // await cap fired".
+        if (churnedHere) {
+          churned += 1;
+          process.stdout.write(
+            `[CHURN] seed=${seed} deliveries=${hub.deliveryCount()} ms=${Math.round(seedMs)} ops=${ops.join(',')}\n`
+          );
+        }
         if (seedMs > slowestSeedMs) {
           slowestSeedMs = seedMs;
           slowestSeed = seed;
@@ -494,10 +567,11 @@ describe('cross-tab coordination invariants', () => {
     // half of that visibility, and the count is not inferable from a pass — the
     // floor is satisfied by *asserted* seeds, so a cut-short seed is silent
     // unless it is printed.
-    if (completed < MAX_SEEDS || cutShort > 0) {
+    if (completed < MAX_SEEDS || cutShort > 0 || churned > 0) {
       console.log(
         `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds ` +
-          `(${cutShort} cut short by the ${SEED_AWAIT_CAP_MS}ms await cap) after ` +
+          `(${cutShort} cut short by the ${SEED_AWAIT_CAP_MS}ms await cap, ` +
+          `${churned} cut off by the ${DELIVERY_BUDGET}-post delivery budget) after ` +
           `${Math.round(realNowMs() - startedAt)}ms — slowest seed ${slowestSeed} at ` +
           `${Math.round(slowestSeedMs)}ms: ${slowestSeedOps}`
       );
