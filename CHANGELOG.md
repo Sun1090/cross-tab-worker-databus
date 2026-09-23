@@ -5,6 +5,11 @@
 - `handleControlMessage`'s addressee check is now pinned. `handleMessage` dispatches on `type` alone and the cluster channel is broadcast, so that first line is the only thing keeping a runtime from acting on a CONTROL frame addressed to someone else — and nothing asserted it. Measured by deleting it: 369 tests across `cluster`/`stability`/`data-bus`/`centrifuge`/`worker-mode` stayed green while the three-tab coordination fuzz churned 16+ minutes of CPU against a ~1-minute baseline. The fuzz reaches the leg constantly (every point-to-point frame is a non-target for the other tabs) and cannot assert it, because its invariants are end-state checks and a slower convergence still passes.
 - The pin asserts the non-target's own behavior — no `onControl` dispatch, no assignment, and no `knownTopics` entry for a plaintext it was never meant to serve — plus the addressee's, which is what shows the frame was deliverable rather than malformed. That distinction was earned: the first version died against the mutant too, but at the *addressee's* assertion, which pinned something other than the guard. Why the mutant also suppresses the addressee's claim is not yet explained, and is recorded as an open question rather than as a passing test.
 
+### Documentation
+
+- Both release checklists now record that `pnpm bench:compare` can be closed by the act of investigating it. Its baseline — the median *and* the maximum leg — is drawn from the same rolling archive every `pnpm bench:browser` run appends to, so re-runs taken to "check the spread" become the baseline that excuses the failure. Measured while preparing 0.21.14: two runs at host load 7.7–15.1 failed the ceiling on `publish/dedicated` (77.3 ms against a ~38 ms fast mode), five further re-runs reported OK with the baseline median slid to 70.6 ms, and one clean run after removing those samples showed every metric up together — the contention signature, not a regression. The instruction is now: read `uptime` before re-running, record a suspect failure as deferred with its load, keep off-mode samples out of the archive, and do not regenerate `docs/benchmarks.md` from them.
+
+
 ## [0.21.14] - 2026-09-24
 
 ### Documentation
