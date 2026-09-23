@@ -7829,19 +7829,19 @@ corroborates the 26-spec collection.)
   expected 2 to be 3"* — two different assertions, one per direction.
 - **What this does NOT do: fix anything.** The bound is CI immunity plus a measurement, and the underlying
   behavior is a real defect. Localizing it was the bulk of the phase:
-  - Under a replay of seed 1046 one runtime re-elected itself as owner of a topic it already owned **791
-    times in ~110 ms**, each time writing the same owner with the same generation; the write broadcasts a
-    `REGISTRY` nudge, every peer's `reconcile()` runs on that nudge, and the pass re-elects again.
-  - The same window shows a single tab issuing **2,642 transport `subscribe` and 2,609 `unsubscribe`** calls,
-    and its `assignedTopics` entry for that topic appearing and disappearing pass after pass, while
+  - Under a replay of seed 1046 a single tab issued **2,642 transport `subscribe` and 2,641 `unsubscribe`**
+    calls inside one seed (median seed: 28 channel posts; this one: 16,763), and the reads inside one awaited
+    `stop()` reached **18,379–26,719 `getItem`** calls depending on the run — which is the shape of the cost:
+    CPU spent reading, not time spent waiting.
+  - Its `assignedTopics` entry for one topic appeared and disappeared pass after pass while
     `storage.setItem`/`removeItem` filtered on `:route:` keys recorded **no** competing writes. So this is not
     two tabs fighting over durable ownership — the durable record never changes.
-  - `readWorkers()` was called ~89k times in the window, which is why the cost is CPU rather than waiting.
   - The mechanism *stops* short of an explanation on purpose: the re-election at
-    `reconcileSubscriptions()`'s `!route || !liveWorkerIds.has(route.workerId)` branch calls `writeRoute`
-    with the same generation, so something answers that write as stale on the next pass, and the instrumented
-    evidence so far does not say what. Guessing in a comment would be the failure mode this repository keeps
-    having to retract, so it is left as the named next question.
+    `reconcileSubscriptions()`'s `!route || !liveWorkerIds.has(route.workerId)` branch writes the route, so
+    something must answer that write as stale on the next pass, and the instrumented evidence collected so far
+    does not say what. Guessing in a comment would be the failure mode this repository keeps having to retract,
+    so it is left as the named next question — and the `[CHURN]` count is the number a fix has to drive to
+    zero, which is why a cut seed is printed by name instead of being absorbed.
 - **Verification:** `npx tsc --noEmit` 0; `npx eslint tests/fakes.ts tests/coordination-invariants.test.ts
   --max-warnings 0` 0; `npx vitest run` 37 files / **901** tests; the fuzz file alone 4 tests / 16.0 s with no
   `[CHURN]` line (the budget does not fire on this machine at 5,000 seeds); both mutants run individually with
