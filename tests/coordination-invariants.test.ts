@@ -44,8 +44,9 @@
  * Concrete topics only: wildcard patterns have their own mutation-verified
  * pins, and folding them in here would replace a checkable expectation with a
  * hand-simulated matcher. Seeds are fixed, so a failure is replayable, and the
- * sweep stops on a wall-clock budget with an asserted floor — see the constants
- * below.
+ * sweep stops on a wall-clock budget with an asserted floor, with every
+ * await-yielding step inside a seed capped and named when the cap trips — see the
+ * constants below for what that guard cannot reach.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { CrossTabDataBus } from '../src/core/data-bus';
@@ -180,6 +181,69 @@ describe('cross-tab coordination invariants', () => {
   // the three separate limits when raising one — the seed cap, this fuse, and the 120 s ceiling passed to
   // it() below, which is what ended the first deep attempt at depth 65k with a bare test timeout.
   const SEED_BUDGET_MS = 60_000;
+  // No single *awaiting* step inside a seed may cost more than this. The budget
+  // above is a between-seeds fuse, and one CI run showed what that leaves
+  // unbounded: `[coordination-invariants] stopped at 1046/5000 seeds after
+  // 158476ms (slowest seed 151850ms)`, i.e. 1,045 seeds summed to ~6.6 ms each and
+  // one interleaving ate 96% of the sweep's wall clock. The 120s per-test ceiling
+  // fired 113s into that seed — Vitest marks the test failed but the loop keeps
+  // running, which is why the truncation line exists in the log at all, after the
+  // failure it describes.
+  //
+  // What this caps is *queue-yielding* waits, and the limit is measured, not
+  // assumed: with the deadline forced to 12 ms a full 5,000-seed sweep trips zero
+  // times, because the slow seeds this harness can actually reproduce locally are
+  // synchronous (see the teardown note in the sweep's `finally`). A call that
+  // never returns control to the macrotask queue cannot be preempted from the same
+  // thread, so if the CI wedge was one of those this guard would not have caught
+  // it — the `capped()` pin below proves the mechanism fires when the wait *does*
+  // yield, and the `[CUT]` line names the seed if it ever pays off.
+  const SEED_AWAIT_CAP_MS = 2_000;
+
+  // Captured while these are still the genuine implementations: the sweep installs
+  // fake timers per seed, and a deadline that must not depend on the fake clock
+  // cannot use a function it patches. `realNowMs()` has the same reason for
+  // existing. `capped(work, capMs)` returns false when the deadline wins. Nothing
+  // is lost by giving up: every promise the sweep passes here carries its own
+  // `catch`, so an abandoned one cannot reject unobserved, and `useRealTimers()`
+  // discards whatever the fake clock was holding.
+  const realSetTimeout = setTimeout;
+  const realClearTimeout = clearTimeout;
+  const capped = async (work: Promise<unknown>, capMs = SEED_AWAIT_CAP_MS): Promise<boolean> => {
+    let timer: unknown;
+    const expired = new Promise<boolean>(resolve => {
+      timer = realSetTimeout(() => resolve(false), capMs);
+    });
+    const finished = await Promise.race([work.then(() => true), expired]);
+    realClearTimeout(timer as ReturnType<typeof setTimeout>);
+    return finished;
+  };
+
+  it('expires a capped await that yields to the timer queue, and never an already-settled one', async () => {
+    // Without this the sweep's guard could be entirely decorative and stay green:
+    // the shipped 2s deadline is far above anything the local runner produces, and
+    // forcing it down to 12 ms over 5,000 seeds tripped zero times (measured). So
+    // the teeth are pinned directly, on both sides — a cap that can never expire
+    // would pass the sweep exactly like a cap that works.
+    const pending = new Promise<never>(() => {});
+    const startedAt = realNowMs();
+    expect(await capped(pending, 25), 'a never-settling await must hit the cap').toBe(false);
+    expect(realNowMs() - startedAt).toBeGreaterThanOrEqual(20);
+    // The other direction is the one that makes the first assertion mean anything:
+    // a chain that settles in microtasks must win even against a zero-delay cap. If
+    // `capped()` expired eagerly, every seed would be cut short and depth would
+    // collapse to zero, which is the failure this guard must not cause — and it is
+    // why a 0 ms deadline over a full sweep trips nothing, which was measured
+    // before the value below was chosen.
+    expect(await capped(Promise.resolve(), 0), 'a microtask chain must beat even a 0ms cap').toBe(
+      true
+    );
+    expect(await capped(pending, 0), 'a 0ms cap must still beat a never-settling await').toBe(
+      false
+    );
+    const later = new Promise(resolve => realSetTimeout(resolve, 5));
+    expect(await capped(later, 100), 'a 5ms real timer must beat a 100ms cap').toBe(true);
+  });
 
   it('budgets on a clock that fake timers can neither advance nor stop', () => {
     // Both directions have to be pinned, and only one of them was. Advancing 60
@@ -211,6 +275,8 @@ describe('cross-tab coordination invariants', () => {
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
     let completed = 0;
+    let cutShort = 0;
+    let budgetReached = false;
     // `realNowMs()`, never `Date.now()` and never the global
     // `performance.now()`: both move under this suite's fake timers, and the
     // budget check sits right where a seed's `vi.useRealTimers()` has just
@@ -218,6 +284,8 @@ describe('cross-tab coordination invariants', () => {
     // test above pins the source instead of the placement.
     const startedAt = realNowMs();
     let slowestSeedMs = 0;
+    let slowestSeed = 0;
+    let slowestSeedOps = '';
     for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
       const seedStartedAt = realNowMs();
       if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
@@ -242,9 +310,23 @@ describe('cross-tab coordination invariants', () => {
         createTab('c', storage, hub, clock)
       ];
       const ops: string[] = [];
+      // A seed whose await cap tripped never reached quiescence, so its end state proves
+      // nothing; it is counted separately instead of asserted on. `capTripped` is the
+      // narrower flag — the budget break below also leaves a seed unasserted, but that
+      // is the fuse doing its job, not a wedge, so the two are not reported together.
+      let aborted = false;
+      let capTripped = false;
       try {
         const steps = 6 + Math.floor(random() * 10);
         for (let step = 0; step < steps; step += 1) {
+          // Sampled inside the iteration as well as between seeds: a sweep of
+          // slow-but-healthy seeds should stop at the budget, not after one more
+          // full interleaving.
+          if (realNowMs() - startedAt > SEED_BUDGET_MS) {
+            budgetReached = true;
+            aborted = true;
+            break;
+          }
           const tab = pick(random, tabs);
           const topic = pick(random, TOPICS);
           const roll = random();
@@ -278,7 +360,11 @@ describe('cross-tab coordination invariants', () => {
           } else if (roll < 0.88) {
             ops.push('tick');
             clock.now += 3_000;
-            await vi.advanceTimersByTimeAsync(3_000);
+            if (!(await capped(vi.advanceTimersByTimeAsync(3_000)))) {
+              aborted = true;
+              capTripped = true;
+              break;
+            }
             for (const each of tabs) each.env.runIntervals();
           } else if (roll < 0.905) {
             ops.push(`${tab.label}:forge:${topic}`);
@@ -302,12 +388,18 @@ describe('cross-tab coordination invariants', () => {
           }
           await flushMicrotasks();
         }
-        await settle(tabs, clock, 12);
+        if (!(await capped(settle(tabs, clock, 12)))) {
+          aborted = true;
+          capTripped = true;
+        }
 
+        // `aborted` gates the whole end-state comparison: an interleaving cut
+        // short has not been given its twelve settle rounds, and the invariants
+        // below are statements about a *quiesced* cluster.
         const state = tabs.map(tab => ({ tab, cluster: tab.bus.getClusterSnapshot() }));
         const trace = ops.join(',');
         const labels = (list: Tab[]) => `[${list.map(tab => tab.label).join(' ')}]`;
-        for (const topic of TOPICS) {
+        for (const topic of aborted ? [] : TOPICS) {
           const topicKey = createOpaqueKey(topic);
           const expecters = tabs.filter(tab => tab.handlers.has(topic));
           const owners = state.filter(entry => entry.cluster.assignedTopics.includes(topic)).map(entry => entry.tab);
@@ -358,24 +450,56 @@ describe('cross-tab coordination invariants', () => {
           }
         }
       } finally {
-        for (const tab of tabs) await tab.bus.stop().catch(() => undefined);
+        // The cap covers the teardown as well as the steps. Measured on the
+        // instrumented ~112k-seed run, six seeds cost more than 100 ms and in
+        // every one of them the first tab's `stop()` was essentially the whole
+        // cost (`stops=[a=109..132 b=0 c=0]` inside a 111-135 ms seed). The
+        // 151,850 ms seed CI reported was not attributed to a specific await —
+        // that run carried no per-phase measurement — so this guard bounds
+        // whichever one it was, and the log below names the seed if it recurs.
+        const stopping = tabs.map(tab => tab.bus.stop().catch(() => undefined));
+        if (!(await capped(Promise.all(stopping)))) {
+          aborted = true;
+          capTripped = true;
+        }
         vi.useRealTimers();
-        completed += 1;
-        // A fuse sampled between seeds cannot bound a seed that wedges — an
-        // `await` in its teardown that needs a timer the fake clock never
-        // advances bypasses the check entirely, and used to show up only as a
-        // huge total. Recording the worst seed makes that a line in the log.
+        // Only a seed that was actually asserted counts as depth: a budget break
+        // leaves the last seed unasserted without being a wedge, so it is neither
+        // `completed` nor a cut.
+        if (!aborted) completed += 1;
         const seedMs = realNowMs() - seedStartedAt;
-        if (seedMs > slowestSeedMs) slowestSeedMs = seedMs;
+        if (seedMs > slowestSeedMs) {
+          slowestSeedMs = seedMs;
+          slowestSeed = seed;
+          slowestSeedOps = ops.join(',');
+        }
+        // Named by id *and* operation list, because that pair is what turns the
+        // next occurrence from a bare `Test timed out` into a seed that can be
+        // replayed with `MAX_SEEDS` pointed at it. A slow seed whose every await
+        // stayed under the cap is not a wedge — it is just a slow seed — so this
+        // fires on the cap tripping, not on the wall clock.
+        if (capTripped) {
+          cutShort += 1;
+          process.stdout.write(
+            `[CUT] seed=${seed} ms=${Math.round(seedMs)} ops=${ops.join(',')}\n`
+          );
+        }
       }
+      if (budgetReached) break;
     }
     // A truncated sweep is the interesting case, and the one that is invisible
     // from a pass/fail CI line: log the depth actually reached so a runner that
-    // is too slow to clear the floor is diagnosable instead of mysterious.
-    if (completed < MAX_SEEDS) {
+    // is too slow to clear the floor is diagnosable instead of mysterious. A
+    // sweep that completed all `MAX_SEEDS` but lost some to the cap is the other
+    // half of that visibility, and the count is not inferable from a pass — the
+    // floor is satisfied by *asserted* seeds, so a cut-short seed is silent
+    // unless it is printed.
+    if (completed < MAX_SEEDS || cutShort > 0) {
       console.log(
-        `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds after ` +
-          `${Math.round(realNowMs() - startedAt)}ms (slowest seed ${Math.round(slowestSeedMs)}ms)`
+        `[coordination-invariants] stopped at ${completed}/${MAX_SEEDS} seeds ` +
+          `(${cutShort} cut short by the ${SEED_AWAIT_CAP_MS}ms await cap) after ` +
+          `${Math.round(realNowMs() - startedAt)}ms — slowest seed ${slowestSeed} at ` +
+          `${Math.round(slowestSeedMs)}ms: ${slowestSeedOps}`
       );
     }
     // A budget that always fires early would let the suite go quiet on a slow
