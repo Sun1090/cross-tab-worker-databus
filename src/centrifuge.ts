@@ -1,7 +1,10 @@
 /**
  * Centrifuge WebSocket transport that runs inside a Web Worker.
  *
- * Supports three backends, selected in order of preference:
+ * Supports three backends. Which one is tried first depends on `workerMode`:
+ * - `dedicated` (the default): Dedicated Worker → SharedWorker → in-process
+ * - `shared` / `auto`: SharedWorker → Dedicated Worker → in-process
+ *
  * 1. SharedWorker — one WebSocket per tab session, hosted in a shared process
  * 2. Dedicated Worker — one WebSocket per tab
  * 3. In-process (local) — Centrifuge runs on the main thread (fallback when
@@ -80,9 +83,12 @@ export interface CreateCentrifugeDataBusOptions<TData = unknown>
  * Transport layer that runs a Centrifuge WebSocket client inside a Web Worker.
  *
  * Delegates the actual WebSocket connection to a Worker (dedicated or shared)
- * or falls back to an in-process CentrifugeSession. The Worker is isolated from
- * the main thread so that WebSocket lifecycle, token refresh, and binary data
- * handling never block the UI.
+ * or falls back to an in-process CentrifugeSession. On the two Worker backends
+ * the Worker is isolated from the main thread, so WebSocket lifecycle, token
+ * refresh, and binary data handling stay off the UI thread. On the `local`
+ * fallback there is no Worker: the same work runs on the main thread, which is
+ * the point of the fallback (it keeps the transport usable where no Worker API
+ * exists) rather than a property it preserves.
  */
 export class CentrifugeWorkerTransport<TData = unknown>
   implements DataBusTransport<CentrifugeDataBusConfig, TData>

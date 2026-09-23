@@ -39,8 +39,8 @@ export class BatchingStorageWriter implements StorageLike {
   constructor(private readonly storage: StorageLike) {}
 
   /** Number of writes queued in memory but not yet flushed to storage.
-   * Used by tests to assert the coalescing window and by flush() to detect
-   * the all-drained state. */
+   * Test-only as a reader: `flush()` tests `pending.size` directly rather than
+   * going through this getter, so it is not part of the drain decision. */
   get pendingSize(): number {
     return this.pending.size;
   }

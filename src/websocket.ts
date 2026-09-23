@@ -368,8 +368,11 @@ export class WebSocketTransport<TData = unknown>
   }
 
   /** Parse a server frame. Only objects carrying a string `topic` are
-   * publications; malformed JSON and unknown shapes are ignored so a chatty
-   * server cannot crash the message path. */
+   * publications, and unknown shapes are dropped silently so a chatty server
+   * cannot crash the message path. Malformed JSON is *not* dropped silently: it
+   * goes to `handlers.onError` as "WebSocket server sent a non-JSON frame.",
+   * which also records it in the bus's last-failure diagnostics. Neither case
+   * throws out of the socket listener. */
   private async handleMessage(raw: unknown): Promise<void> {
     // Browser WebSockets may deliver binary frames as Blob unless
     // `binaryType = 'arraybuffer'` is explicitly configured by the host.

@@ -376,7 +376,7 @@ createStorageEventChannel(options: {
 }): ClusterChannel | null
 ```
 
-创建以 localStorage `storage` 事件为载体的 `ClusterChannel`——面向无 BroadcastChannel 环境的协调降级通道。storage 或 storage-event 来源缺失时返回 `null`。投递语义与 BroadcastChannel 一致（不回显给发送方、消息可 JSON 序列化、关闭后拒绝再写入）；载荷信封里同时带一个**每通道 sender nonce** 和一个单调序列号，正是这两者共同保证连续相同的消息仍可投递——包括两个 Tab 各自的第一帧都会写入相同的 `seq=1`、否则会被静默抑制的情况。通过 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 启用；安全权衡见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
+创建以 localStorage `storage` 事件为载体的 `ClusterChannel`——面向无 BroadcastChannel 环境的协调降级通道。storage 或 storage-event 来源缺失时返回 `null`。在跨 Tab 协调需要的维度上，投递语义跟随 BroadcastChannel（不回显给发送方、消息可 JSON 序列化、关闭后拒绝再写入），但有一处刻意差异：`postMessage` 同样不会派发给通道自己的监听器，所以**同一文档**内创建的两个通道互相看不到，而真正的 BroadcastChannel 是可以的。这个降级通道只关心跨 Tab 投递，该差异由 `tests/storage-channel.test.ts` 的 sibling-channel 用固定住；载荷信封里同时带一个**每通道 sender nonce** 和一个单调序列号，正是这两者共同保证连续相同的消息仍可投递——包括两个 Tab 各自的第一帧都会写入相同的 `seq=1`、否则会被静默抑制的情况。通过 `createBrowserEnvironment({ channelFallback: 'storage-event' })` 启用；安全权衡见 [configuration.md](./configuration.md#协调通道降级broadcastchannel-不可用)。
 
 ## WebSocket 传输后端
 
@@ -512,7 +512,7 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 ### `approximatePayloadBytes(payload)`
 
-低成本、零分配的 payload 线长估算，用于自适应负载采样的字节侧。仅在启用自适应路由时运行，因此近似值足够——目标是跨 Worker 的稳定比较，而非精确字节数。
+低成本估算 payload 的线长，用于自适应负载采样的字节侧，也用于给保留的 replay 缓冲估算体积（`getDiagnostics().replay` 的 `bytes` 按需计算）——因此它并不只在启用自适应路由时运行。它也不是零分配的：对象节点会物化一份 `Object.values`。两种场景下近似值都够用，目标是跨 Worker 的稳定比较，而非精确字节数。
 
 尺寸规则：`null`/`undefined` 与 symbol/function 为 `0`，boolean 为 `4`，number 与 bigint 为 `8`，字符串为长度，`ArrayBuffer` 与 TypedArray 视图为 `byteLength`，数组为 8 字节头部加各元素之和，普通对象为各值之和。
 

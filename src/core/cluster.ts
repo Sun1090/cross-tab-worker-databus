@@ -59,12 +59,12 @@ export interface WorkerClusterHandlers {
     topic: string,
     items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>
   ) => void;
+  /** Optional hook for forward-compatible messages from newer runtimes. */
+  onUnknownMessage?: (message: unknown) => void;
   /** A fan-out publication event was received from another Worker.
    * `originTabId` is the tab that produced the original publication when the
    * cluster forwards one; it survives the BroadcastChannel hop so listeners
    * can tell a local dispatch from a cross-tab relay. */
-  /** Optional hook for forward-compatible messages from newer runtimes. */
-  onUnknownMessage?: (message: unknown) => void;
   onEvent: (
     eventType: string,
     payload: unknown,
@@ -147,7 +147,10 @@ const MAX_KNOWN_TOPICS = 500;
  *
  * Key responsibilities:
  * - Heartbeat-based failure detection (stale workers pruned after `workerTtlMs`)
- * - Topic-to-Worker routing with load-based rebalancing
+ * - Topic-to-Worker routing with sticky ownership: load and visibility steer
+ *   only the placement of *new* routes, and an established owner is never
+ *   migrated (see `selectRebalanceTarget`, which the runtime deliberately
+ *   does not call)
  * - Page lifecycle integration (suspend on hide, resume on show)
  * - Storage-backed coordination with BatchingStorageWriter for write coalescing
  */
@@ -1258,7 +1261,10 @@ export class WorkerClusterRuntime {
     return Array.from(subscribers);
   }
 
-  /** Read the current route for `topicKey`, returning null when no storage layer exists. */
+  /** Read the current route for `topicKey`. With a storage layer this returns
+   * the durable route, or null when none is recorded. Without one (degraded
+   * mode) it returns the synthesized local route from `buildLocalRoute`, which
+   * is itself null unless this worker actually holds the topic. */
   private readRoute(topicKey: string): WorkerRoute | null {
     if (!this.storage) return this.buildLocalRoute(topicKey);
     return readJson<WorkerRoute>(this.storage, this.routeStorageKey(topicKey));
@@ -1357,8 +1363,9 @@ export class WorkerClusterRuntime {
    * @param notify — when true, broadcast a REGISTRY nudge so peers reconcile
    *   immediately instead of waiting for the next heartbeat. False on the
    *   periodic heartbeat tick (peers will notice on their own heartbeat) to
-   *   avoid a REGISTRY storm every 3 s; true on status/role changes that
-   *   peers should observe promptly. */
+   *   avoid a REGISTRY storm every 3 s. Which sites pass what: activation,
+   *   status, visibility and load changes pass true; the heartbeat tick and a
+   *   role change pass false. */
   private writeRecord(notify: boolean): void {
     const now = this.environment.now();
     const sample = this.loadWeighting !== undefined ? this.sampleThroughput(now) : undefined;
@@ -1412,10 +1419,15 @@ export class WorkerClusterRuntime {
    * Despite the name, this is NOT a cache lookup — it unconditionally writes
    * the `topicKey → topic` pair. Hashing is cheap enough that a caller needing
    * the key should always call this rather than check `knownTopics` first;
-   * the cache's FIFO eviction below keeps it bounded. Only `isAssigned`
-   * deliberately bypasses this (it must not pollute the cache on a read-only
-   * query), so if you add a new call site, prefer `rememberTopic` unless you
-   * have the same "read-only query" reason.
+   * the cache's FIFO eviction below keeps it bounded. Two sites deliberately
+   * bypass it, and for the same kind of reason — neither may write a plaintext
+   * into the reverse cache before it is authorized: `isAssigned` re-derives the
+   * key as a read-only query, and the `ROUTE_RELEASED` handler hashes the
+   * frame's own `topic` only to compare it against `topicKey`, on a channel
+   * where that field is attacker-controlled until the comparison passes. (The
+   * `CONTROL` handler performs the same re-derivation but then *does* call this
+   * method, so it is not a bypass.) If you add a new call site, prefer
+   * `rememberTopic` unless you have one of those reasons.
    */
   private rememberTopic(topic: string): string {
     const topicKey = createOpaqueKey(topic);

@@ -228,7 +228,8 @@ export class ReplayManager<TData = unknown> {
     }
   }
 
-  /** Clear replay history for one exact topic, including durable storage. */
+  /** Clear replay history for one exact topic, and for its durable history when
+   * the injected adapter provides the optional `clearTopic`. */
   async clearTopic(topic: string): Promise<void> {
     if (!this.buffers) return;
     const clearing = this.persistence?.clearTopic

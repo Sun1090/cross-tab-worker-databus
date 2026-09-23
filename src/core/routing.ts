@@ -71,10 +71,14 @@ export function effectiveWorkerLoad(
 }
 
 /**
- * Cheap, allocation-free estimate of a payload's wire size, used to populate
- * the byte side of an adaptive load sample. Only runs when adaptive routing is
- * enabled, so approximate sizes are fine — the goal is a stable cross-worker
- * comparison, not an exact byte count. Sizes: null/undefined 0, booleans 4,
+ * Cheap estimate of a payload's wire size, used to populate the byte side of an
+ * adaptive load sample and by `ReplayManager.getStats()` to size the retained
+ * buffers — so it is *not* gated on adaptive routing, despite the first caller.
+ * Approximate by design: the goal is a stable cross-worker comparison, not an
+ * exact byte count. Not allocation-free: an object node materialises
+ * `Object.values`, which is fine at these depths but rules the function out of a
+ * path that cannot tolerate garbage.
+ * Sizes: null/undefined 0, booleans 4,
  * numbers 8, strings their length, binary views their byteLength, arrays an
  * 8-byte header plus elements, plain objects the sum of their values.
  */
@@ -153,7 +157,10 @@ export function selectLeastLoadedWorker(
  * Select the (up to `maxActiveWorkers`) Workers eligible to own topics.
  *
  * Eligibility cascade:
- * 1. Only `connecting` / `connected` workers are candidates.
+ * 1. `connecting` / `connected` workers are the candidates — but only while at
+ *    least one of them exists. If every record is `error` or `disconnected` the
+ *    set falls back to all records, because an empty candidate list would leave
+ *    the cluster with no eligible owner at all rather than a degraded one.
  * 2. If any candidate is visible, prefer visible tabs (hidden tabs yield as owner).
  * 3. Fall back to all available workers when none is visible, so the cluster
  *    does not stall when every tab is in the background.
@@ -181,12 +188,14 @@ export function selectActiveWorkers(
 /**
  * Decide whether `currentWorkerId` should hand one topic to a less-loaded peer.
  * Returns the target Worker only when its load gap is significant (more than
- * one topic lighter), so the cluster does not churn over a single-topic
- * imbalance. One topic is migrated per reconciliation round to avoid thrashing.
+ * one topic lighter), so a caller does not churn over a single-topic imbalance.
  *
  * This remains exported as a standalone routing utility for API compatibility.
- * WorkerClusterRuntime intentionally does not use it: established routes are
- * sticky and load balancing applies only when selecting a new owner.
+ * WorkerClusterRuntime intentionally does not use it — it has no caller in `src/`
+ * besides the barrel — so nothing here migrates a route on any cadence:
+ * established routes are sticky and load applies only when selecting a *new*
+ * owner. Pinned by tests/cluster.test.ts's `sticky-existing-routes` case and
+ * tests/routing.test.ts's "keeps a live owner sticky before considering load".
  */
 export function selectRebalanceTarget(
   workers: readonly WorkerRecord[],

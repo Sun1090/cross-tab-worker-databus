@@ -74,10 +74,15 @@ export interface WorkerThroughputSample {
   messageCount: number;
   /** Approximate payload bytes shipped by this Worker within the window. */
   byteCount: number;
-  /** Cumulative positive scheduling overrun in ms: how much later the
-   * heartbeat ticks landed than their nominal interval. A starved event loop
-   * (the browser-observable equivalent of CPU saturation) pushes this up, so
-   * peers can steer new routes away from a throttled Worker. */
+  /** Positive scheduling overrun **of the last sample window**, in ms:
+   * `max(0, windowMs - heartbeatIntervalMs)`. Not an accumulator — each sample
+   * recomputes it and resets the window, so it reports the most recent gap, not
+   * a running total. The window is anchored at the previous worker-record write,
+   * which the heartbeat tick causes but a status, visibility or load change also
+   * causes, so a frequently-writing worker sees a small window and a low value.
+   * A starved event loop (the browser-observable equivalent of CPU saturation)
+   * stretches the gap, so peers can steer new routes away from a throttled
+   * Worker. */
   overrunMs: number;
   /** Timestamp (ms) when the sample was captured. */
   sampledAt: number;
@@ -105,7 +110,10 @@ export interface LoadWeightingOptions {
 export interface WorkerRecord {
   /** Cluster protocol version advertised by this worker. */
   protocolVersion?: number;
-  /** Stable identity of this runtime instance. Random-suffixed; survives refresh. */
+  /** Identity of *this runtime instance*, not of the tab: random-suffixed at
+   * construction and never persisted, so a refresh produces a new one. What
+   * survives a refresh is `tabId` below, which is what lets a reloaded tab
+   * reclaim its routes instead of looking brand new. */
   workerId: string;
   /** Identity of the browser tab hosting this worker. Survives refresh. */
   tabId: string;

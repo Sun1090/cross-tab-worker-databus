@@ -37,7 +37,11 @@ export interface ClusterEnvironment {
   storage: StorageLike | null;
   /** sessionStorage (or null if unavailable). Used for stable tab IDs. */
   sessionStorage: StorageLike | null;
-  /** Monotonic clock; injected so tests can control time. */
+  /** Epoch milliseconds. In the browser this is `Date.now()`, which is a *wall*
+   * clock, not a monotonic one: an NTP correction or a user changing the system
+   * time can move it backwards, and the TTL math above tolerates that by
+   * treating a negative age as "not expired". Injected so tests can control
+   * time — the injected clock is the only monotonic one in the picture. */
   now: () => number;
   /** Generates a random ID (UUID when crypto is available, else Math.random). */
   randomId: () => string;
@@ -95,10 +99,15 @@ export interface StorageEventWindow {
  * unavailable. Returns null when localStorage or a storage-event source is
  * missing.
  *
- * Semantics mirror BroadcastChannel: writes are not echoed to the sender
- * (per spec, the writing tab receives no `storage` event) and every message
- * is JSON-serializable. The payload is written under a dedicated key and
- * removed on close.
+ * Semantics *approximate* BroadcastChannel, with one deliberate divergence:
+ * writes are not echoed to the sender (per spec the writing tab receives no
+ * `storage` event), and `postMessage` also never dispatches to the channel's own
+ * listener list — so two channels created in the *same* document do not see each
+ * other, which a real BroadcastChannel does. Cross-tab coordination is the only
+ * thing this fallback exists for, and the divergence is pinned by
+ * tests/storage-channel.test.ts's "does not deliver to a sibling channel in the
+ * same document". Every message must be JSON-serializable. The payload is
+ * written under a dedicated key and removed on close.
  *
  * Security note: unlike BroadcastChannel messages (memory only), these
  * payloads transit through localStorage and therefore persist — at least

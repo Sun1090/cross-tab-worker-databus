@@ -972,7 +972,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     await this.replayManager.clearAll();
   }
 
-  /** Clear replay history for one exact topic, including durable storage. */
+  /** Clear replay history for one exact topic and, when the persistence adapter
+   * implements `clearTopic`, its durable history too — an adapter without that
+   * optional method leaves the persisted rows in place, exactly as `clearReplay`
+   * does. */
   async clearReplayTopic(topic: string): Promise<void> {
     await this.replayManager.clearTopic(topic);
   }
