@@ -7695,6 +7695,75 @@ corroborates the 26-spec collection.)
   including the previously unrunnable `verify:published` gate (Release run
   35660663344, every named step green).
 
+## Phase 142 / The bench gate that can excuse its own failure
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/bench-baseline-caveat`, off `main` at
+  `bc701d0`. Documentation-only.
+- **Status:** open PR.
+- **What the 0.21.14 freeze exposed.** `pnpm bench:compare` reported a regression on `publish/dedicated`
+  (77.3 ms against a ~38 ms ceiling), the machine was loaded (`uptime` 7.7 / 11.18 / 15.1), and four re-runs
+  later the gate said OK. That green was manufactured by the re-runs themselves: `findBaseline()` takes the
+  median **and** the maximum of the last five reports in the rolling archive, and every `pnpm bench:browser`
+  run appends to that same archive — so samples taken while investigating a contention failure become the
+  baseline that excuses it. Measured directly: the two suspect runs were `publish/dedicated` 77.3 / 67.7 ms
+  and `publish/shared` 67.7 / 66.8 ms against fast-mode medians of 38.3 / 34.3; after they were appended, the
+  baseline median for `publish/dedicated` read 70.6 ms, and five further re-runs all reported OK. Moving those
+  six samples aside and taking one clean run at load 7.7 put **every** metric up together (92.5 / 99.2 / 43.4 /
+  21.0 percent) — the contention signature, not a regression in one leg.
+- **Why the bimodal fix did not cover this.** `0.21.14`'s shipped note describes the ceiling leg (added so a
+  median sitting in the slow mode cannot excuse a fast-mode regression). It does not help when the slow samples
+  are *being written by the investigator*: the ceiling rises with them.
+- **What shipped.** Step 4 of both release checklists now reads: check `uptime` before re-running, record a
+  suspect failure as deferred with its load instead of chasing a green, keep off-mode samples out of the
+  archive, and never regenerate `docs/benchmarks.md` from them.
+- **Changed files:** `docs/release-checklist.md`, `docs/zh/release-checklist.md`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- **Verification:** bilingual parity guard `tests/documentation.test.ts` (17/17); a `git diff --numstat` check
+  confirming the English and Chinese edits add 4 lines each and delete nothing. No code changed, so no
+  rebuild was needed.
+- **Risk / rollback:** documentation only; `git revert`.
+- **Open, not silently deferred:** the archive under `reports/bench-history/` still holds those six slow-mode
+  samples, and the next `bench:compare` will read them. The structural fix would be to let `bench:compare`
+  exclude contention samples (e.g. a host-load stamp recorded per report), which is a gate-behavior change and
+  has not been attempted here.
+- **Next:** land it, then an idle-host `bench:browser` sample plus a `pnpm bench:trend` refresh so the shipped
+  tables are drawn from the fast mode.
+- **Update date:** 2026-09-24.
+
+## Phase 143 / The second addressee guard, pinned where its own staleness test cannot reach
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/route-released-addressee-pin`, off `main`
+  at `bc701d0`. Test-only; `src/` untouched, so patch material.
+- **Status:** locally green, PR open.
+- **Why this leg and not another.** `0.21.6`'s prose says both point-to-point handlers enforce the
+  `targetWorkerId` invariant, and Phase 141 pinned the `CONTROL` one. The `ROUTE_RELEASED` sibling looked
+  already covered, because its staleness test reads the durable route: a non-target that does not own the topic
+  is turned away by `isStaleRouteRelease` before the guard matters. That is exactly why no existing test —
+  including the forged-`topicKey` case — can reach the line: every frame they send names a worker the route
+  disagrees with.
+- **The separating construction.** Write a route under `topicKey` that names **this** runtime as owner, with
+  `handoffFromWorkerId` equal to the frame's sender, a matching `generation`, and no `confirmedAt` — the exact
+  shape of a handoff waiting for its ACK — then post that ACK addressed to a third worker. Every staleness term
+  passes; only the addressee check stands. Measured: deleting the one line left **358 tests** across
+  `cluster`/`stability`/`data-bus`/`centrifuge` green and failed this test alone. The coordination fuzz cannot
+  reach it at all — `forgeSubscribe()` is the only frame that harness posts, so no seed sends a `ROUTE_RELEASED`
+  to anyone but the worker the route names.
+- **An assertion that measured nothing, caught before it shipped.** The first draft asserted
+  `b.runtime.isAssigned(topic)` was false. `isAssigned` falls through to
+  `readRoute(topicKey)?.workerId === this.workerId`, and the scenario's own route record names `worker-b`, so
+  it read `true` with the guard in place and the test failed on an unmutated tree. Replaced with the
+  `assignedTopics` map — the state the handler writes — and the reason is written into the test so the
+  substitution is not "simplified" back later.
+- **Changed files:** `tests/cluster.test.ts`, `CHANGELOG.md`, `docs/progress.md`.
+- **Verification:** `npx tsc --noEmit` 0; `npx eslint tests/cluster.test.ts --max-warnings 0` 0;
+  `pnpm test:coverage` 37 files / **900** tests, thresholds met, exit 0; the mutant diff was printed and
+  checked to remove only the guard, and `git diff --quiet src/` confirmed the tree restored.
+- **Risk / rollback:** a test only; `git revert`.
+- **Next:** the transport-churn loop this investigation surfaced as a side effect (Phase 144 candidate, task
+  #71) — one tab's teardown drives a peer into thousands of transport subscribe/unsubscribe pairs with no
+  route write behind them, which is what has been failing `verify` on unrelated PRs.
+- **Update date:** 2026-09-24.
+
 ## Recovery entry
 
 If interrupted: working tree state, current commit, and any in-flight test
