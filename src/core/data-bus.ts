@@ -529,10 +529,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     void opening.then(
       () => {
         if (this.startPromise !== opening) return;
-        // Emit the coordination snapshot only after the transport has opened
-        // and the just-issued subscriptions have flushed, so the routes list
-        // (and the role/assignment picture) is populated rather than always
-        // empty — the synchronous pre-open snapshot would see no routes.
+        // The coordination snapshot rides the success arm: a failed opening
+        // describes a bus that never became usable, and the rejection arm above
+        // emits nothing. It is not here to wait for storage flushes — see
+        // emitCoordinationTrace() for the measurement that retired that reason.
         this.emitCoordinationTrace();
         this.startPromise = null;
       },
@@ -715,12 +715,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `before` resolves by construction, so no `.catch` is chained onto it: it is
     // either `Promise.resolve()` from reopenTransport() or `this.pendingStop` from
     // start(), and every non-null assignment of that field is a chain ending in a
-    // terminal `.catch(error => this.reportError(error))`. That handler resolves
-    // because `reportError` cannot throw: its one coercion goes through
-    // `describeFailure()`, which is total over any value a transport may reject
-    // with. Revert that and this promise rejects, the `.then()` below is skipped,
-    // and `transport.start()` is never reached — so keep the totality and this
-    // premise together. (See performStop(), which awaits the same promise.)
+    // terminal `.catch(error => this.reportError(error))`. That handler resolves for
+    // any value a transport can reject with, because reportError's only coercion goes
+    // through `describeFailure()`, which is total. It is not unconditional: a throwing
+    // error subscriber plus a throwing `console.warn` escapes it — the same double
+    // failure `stop()`'s `stopPromise` comment documents and
+    // `tests/data-bus.test.ts`'s "settles stop() when the teardown failure cannot be
+    // reported either" pins. Under that pair this promise rejects, the `.then()` below
+    // is skipped and `transport.start()` is never reached, so the coercion's totality
+    // and this premise have to stay together.
     return before
       .then(() => {
         // stop(), suspendTransport(), or a newer reopen may have arrived while
@@ -886,13 +889,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // Unreachable by construction, and deliberately *not* hunted for a test.
     // Reaching it needs `started && !transportReady && !suspended`, with
     // `startPromise` null and `lastError` null. `transportReady = false` is
-    // written in exactly four places: `openTransport`'s entry (an opening owns
+    // written in exactly five places: `openTransport`'s entry (an opening owns
     // the gate, so the check above returns it), its failure path (which calls
     // `recordError` before it clears that gate, so the line above rejects with
     // the real reason), `performStop`'s finally (which also clears `started`,
     // so `ensureStarted` above has already either installed a fresh opening or
     // thrown for want of an `initialConfig`), and `reopenTransport` (which
-    // assigns its opening synchronously a few lines earlier). Every other read
+    // assigns its opening synchronously a few lines earlier), and
+    // `suspendTransport()` (which sets `suspended = true` just before clearing the
+    // flag, so it is the `!suspended` term above that excludes it). Every other read
     // of the flag is true.
     //
     // It is kept rather than turned into an assertion because it is the last
@@ -938,11 +943,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     const wasUnused = handlers.size === 0;
     handlers.add(handler);
     this.topicHandlers.set(topic, handlers);
-    // This 0→1 transition is the SINGLE entry point into the cluster
-    // subscription. The cluster's subscribedTopics is a Set, so repeated
-    // installs of the same topic after a drop cannot double-subscribe:
-    // wasUnused is the only gate, and cluster.subscribe() is idempotent by
-    // construction. The matching n→0 gate is in the unsubscribe path below.
+    // This 0→1 transition is the only entry into the cluster subscription *from
+    // this method*. The other caller of `cluster.subscribe()` is `start()`'s replay
+    // loop, which re-subscribes every key already in `topicHandlers` when a fresh
+    // opening settles — so a topic can reach the cluster once per opening. That is
+    // safe because the cluster's `subscribedTopics` is a Set and `subscribe()` is
+    // idempotent by construction, which is what makes `wasUnused` the only gate
+    // here: repeated installs of the same topic after a drop cannot
+    // double-subscribe. The matching n→0 gate is in the unsubscribe path below.
     if (wasUnused) this.cluster.subscribe(topic);
     if (options?.replay) {
       this.replayManager.deliverReplay(topic, options.replay, handler, () =>
@@ -1535,9 +1543,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   }
 
   /** Emit the coordination trace snapshot from the current cluster state.
-   * Called after a transport opens (start and recovery), when the role and
-   * route picture has settled — the synchronous pre-open snapshot would see no
-   * routes because their writes are still coalesced in the batch writer. */
+   * Called once per successful `start()`: `reopenTransport()`'s settle arms do not
+   * emit, so a recovery produces no second snapshot. It runs after the opening
+   * resolves — and not because a pre-open read would see no routes, which is the
+   * wrong mechanism and was the shipped claim until it was measured: a snapshot
+   * taken with the opening still unresolved already listed the route, its
+   * confirmation and both tabs' worker records, because
+   * `BatchingStorageWriter` serves pending writes on read (`storage-batch.ts:79-82`
+   * for `getItem`, `:143-155` for the `keys()` union that `readAllByPrefix` uses). */
   private emitCoordinationTrace(): void {
     const snapshot = this.cluster.getSnapshot();
     this.trace.event({
@@ -1703,8 +1716,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `pendingStop` or a fresh resolved promise, and `pendingStop` has two non-null
     // assignments (`createStopPromise()` and `suspendTransport()`'s `stopping`), each
     // chain ending in a terminal `.catch(error => this.reportError(error))` that
-    // resolves because `reportError` is total over any rejection reason
-    // (`describeFailure()`).
+    // resolves for any rejection reason, because reportError's only coercion goes
+    // through `describeFailure()`, which is total. The one escape is the double
+    // failure `stop()`'s `stopPromise` comment documents and
+    // `tests/data-bus.test.ts`'s "settles stop() when the teardown failure cannot be
+    // reported either" pins: a throwing error subscriber plus a throwing
+    // `console.warn`.
     //
     // It is kept anyway, which is a different verdict from 0.21.2 and 0.21.3's two
     // deletions, and the reason is the shape of the failure rather than its
@@ -1873,7 +1890,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /**
    * Ensure the DataBus is started, throwing if no initialConfig was provided.
-   * Called automatically by subscribe/publish/ready when autoStart is true.
+   * subscribe/publish/ready call this *unconditionally*: the gate is the
+   * `hasInitialConfig` check below, not the `autoStart` option. `autoStart`
+   * participates in exactly one place, the constructor's
+   * `if (autoStart ?? this.hasInitialConfig)`, where it overrides the default rather
+   * than enabling a later path — so `autoStart: true` with no `initialConfig` throws
+   * from the constructor. `docs/configuration.md`'s "`true` when `initialConfig` is
+   * provided" row describes that single site.
    */
   private ensureStarted(): void {
     if (this.started) return;

@@ -103,7 +103,10 @@ export interface WorkerClusterOptions {
   /** TTL after which a silent worker is pruned (default 10000). */
   workerTtlMs?: number;
   /** Maximum entries kept in the publish route-owner cache (default 256).
-   * When the cap is reached, the oldest (FIFO) entry is evicted. */
+   * When the cap is reached an entry is dropped, but not the first-seen one:
+   * `touchRouteOwnerCache` re-inserts a key it is shown again, so the Map's
+   * iteration order tracks the last *touch* rather than the original insertion.
+   * Recency-ordered, not FIFO. */
   routeOwnerCacheMax?: number;
   /** Optional adaptive owner weighting. When set, this worker samples its own
    * fan-out traffic and publishes it with every heartbeat so peers can steer
@@ -179,8 +182,9 @@ export class WorkerClusterRuntime {
   // Topics this tab has subscribed to (local interest, plaintext).
   private readonly subscribedTopics = new Set<string>();
   // Topics assigned to this Worker as owner (topicKey → topic). Authoritative:
-  // membership drives isAssigned() and load. Grows only via CONTROL/SUBSCRIBE
-  // (or local self-subscribe), never via the reverse cache.
+  // membership drives isAssigned() and load. Grown by exactly three writers —
+  // CONTROL/SUBSCRIBE, ROUTE_RELEASED (completing a handoff this worker accepted),
+  // and local self-subscribe — and never by the reverse cache.
   private readonly assignedTopics = new Map<string, string>();
   private readonly routeOwnerCache = new Map<string, { workerId: string; generation: number }>();
   private readonly routeOwnerCacheMax: number;
@@ -711,9 +715,12 @@ export class WorkerClusterRuntime {
       windowMs,
       messageCount: this.throughputWindow.messageCount,
       byteCount: this.throughputWindow.byteCount,
-      // How much later the heartbeat landed than its nominal interval. This
-      // window is anchored at the previous writeRecord (one heartbeat tick),
-      // so a starved event loop stretches windowMs past the interval and the
+      // How much later the last record write landed relative to a nominal
+      // heartbeat interval. The window is anchored at the previous writeRecord,
+      // which the heartbeat tick causes but activation, a status change, a
+      // visibility change and a load update also cause — so a worker writing on
+      // any of those shorter paths yields a small window and a clamped zero.
+      // A starved event loop stretches the window past the interval, and the
       // positive excess is the scheduling-overrun signal.
       overrunMs: Math.max(0, windowMs - this.heartbeatIntervalMs),
       sampledAt: now
@@ -729,10 +736,15 @@ export class WorkerClusterRuntime {
     // that re-deriving here is preferable to evicting a cached entry that the
     // storage-less readRoute path may need (see rememberTopic eviction guard).
     const topicKey = createOpaqueKey(topic);
-    // Prefer the in-memory assignment map: it is updated synchronously on
-    // SUBSCRIBE/UNSUBSCRIBE, whereas readRoute() may observe a route that has
-    // not yet been flushed through the BatchingStorageWriter, causing a message
-    // destined for this worker to be dropped during the write window.
+    // Prefer the in-memory map: it is the one authority with no durable counterpart.
+    // handleControlMessage accepts a CONTROL/SUBSCRIBE whose route cannot be read,
+    // and confirmRoute then stamps nothing, so readRoute() answers null for a topic
+    // whose transport subscription this worker holds — tests/cluster.test.ts's
+    // "accepts a CONTROL/SUBSCRIBE that has no durable route to check" asserts the
+    // assignment while no `:route:` key exists in storage at all. This is *not*
+    // about coalesced writes: BatchingStorageWriter.getItem serves the pending
+    // value first (storage-batch.ts:79-82), so a route written this tick already
+    // reads back.
     if (this.assignedTopics.has(topicKey)) return true;
     // Wildcard assignments: this worker owns the transport subscription for a
     // pattern (e.g. "chat.*"), so publications arriving under a matching
@@ -944,11 +956,13 @@ export class WorkerClusterRuntime {
     if (message.action !== CONTROL_ACTION.PUBLISH) this.updateLoad();
   }
 
-  /**
-   * When this worker is the previous owner in a graceful handoff and the new
-   * owner asks us to unsubscribe, release the old transport subscription and
-   * ACK the handoff with ROUTE_RELEASED. Returns true when the message was a
-   * handoff release (the generic CONTROL dispatch must not run as well).
+  /** Drop this worker's ownership of the topic, then — only when this worker is
+   * the previous owner in a graceful handoff and the new owner is asking us to
+   * unsubscribe — release the old transport subscription and ACK the handoff with
+   * ROUTE_RELEASED. The ownership delete runs for *every* CONTROL/UNSUBSCRIBE,
+   * before the handoff test; the handoff legs below do not gate it. Returns true
+   * when the message was a handoff release (the generic CONTROL dispatch must not
+   * run as well).
    */
   private releaseHandoffOnUnsubscribe(
     message: Extract<WorkerClusterMessage, { type: typeof CLUSTER_MESSAGE_TYPE.CONTROL }>

@@ -7151,6 +7151,95 @@ corroborates the 26-spec collection.)
 - **Next task:** the remaining half of this audit's surface — internal comments in JS-emitting modules, which ship in the bundles and were not covered by a `.d.ts`-scoped read. Task #61 stays open behind it: it is the one gap the existing median-of-5 mitigation does not close (`compare` has no within-report spread to consult), not a new discovery — see the correction above.
 - **Updated:** 2026-09-23.
 
+## Phase 133 / The third shipped surface closed: 10 body-comment claims, and the two copies the queue missed
+
+- **Milestone / version:** post-`0.21.12`, unreleased (accumulating; comment-and-docs only, so no CHANGELOG section until a freeze).
+- **Status:** branch `docs/body-comment-audit`, PR open against `main`.
+- **Completed work.** Phase 132 widened the shipped-prose surface from the declarations to
+  `dist/**/*.js` / `.cjs` and left the internal body comments as the remaining scope. This pass took
+  the 10 candidates that audit queued (11 claims — one entry carried two legs), **re-verified every
+  one against `src/` by hand, and all 10 held** — the first sweep of this shape with no demotions,
+  which is worth stating precisely because 0.21.11 and 0.21.12 each dropped several.
+  - **The one that mattered.** `data-bus.ts:719` proved a chained `.catch` resolves by asserting
+    "`reportError` cannot throw". `describeFailure()` *is* total, but `reportError`'s only protection
+    against a throwing subscriber is a `console.warn`, so a throwing subscriber **plus** a throwing
+    `console.warn` escapes it — which the same file documents at `:1243-1252` and
+    `tests/data-bus.test.ts`'s "settles stop() when the teardown failure cannot be reported either"
+    pins, and which AGENTS.md already recorded. Three enumeration proofs rested on that sentence
+    (`:715-723`, `:1298-1313`, `:1700-1707`); all three now state the dependency next to the
+    enumeration and name the double failure that breaks it, rather than claiming totality.
+  - **Wrong mechanism, right conclusion — twice.** `cluster.ts`'s `isAssigned` and
+    `data-bus.ts`'s coordination-trace call site both explained themselves with the same fiction:
+    that a route write "has not yet been flushed through the `BatchingStorageWriter`" and so is
+    invisible to a reader in the same task. It is not: `getItem` returns the pending value
+    (`storage-batch.ts:79-82`) and `keys()` — what `readAllByPrefix` walks — is the union of
+    persisted keys and pending writes minus pending deletes (`:143-155`). The real reason
+    `readRoute()` can answer null for a topic this worker owns is that `handleControlMessage`
+    accepts a `CONTROL/SUBSCRIBE` with no readable route and `confirmRoute` then stamps nothing
+    (`:1333`), and that state is *already* pinned by `tests/cluster.test.ts`'s "accepts a
+    CONTROL/SUBSCRIBE that has no durable route to check" — the corrected comment cites it.
+  - **The absolutes.** `transportReady = false` is written in five places, not four
+    (`suspendTransport()` was the missing one; the `!suspended` term is what excludes it) — counted
+    by grep and each site mapped to its method. `assignedTopics` grows via three writers, not two
+    (`handleRouteReleasedMessage:1011`). `routeOwnerCacheMax` eviction is recency-ordered, not FIFO
+    (`touchRouteOwnerCache` delete-then-set, called from `resolvePublishTarget:641`). The `wasUnused`
+    `0→1` transition is the only entry into the cluster subscription *from that method*; `start()`'s
+    replay loop (`:524`) is the second caller. `ensureStarted` is called unconditionally by
+    subscribe/publish/ready — the gate is `hasInitialConfig`, and `autoStart` participates at exactly
+    one site. The throughput window is anchored at the previous `writeRecord`, which four shorter
+    paths besides the heartbeat also cause. `releaseHandoffOnUnsubscribe`'s ownership delete runs for
+    every `CONTROL/UNSUBSCRIBE`, before the handoff test that the doc framed the whole method around.
+  - **Two copies the queue did not hold, found by following the claim instead of the list.** The
+    retired coalescing fiction was *also* in `start()`'s own call-site comment (`:532`), and the
+    coordination event's "emitted after each transport open" was still standing in
+    `docs/api.md:299` and `docs/zh/api.md:299` — both languages now say once per successful
+    `start()`, which is what a file-wide grep of `emitCoordinationTrace` shows (one call site, the
+    success arm; the rejection arm emits nothing). Fixing the declaration and leaving the two
+    restatements would have re-created the 0.21.10 pattern: one claim, several copies, one corrected.
+- **On the measurement that retired the coalescing claim.** The claim is about a counterfactual ("a
+  snapshot taken there would see no routes"), so the probe took the read at the earlier point: two
+  buses on one `MemoryStorage` + `ChannelHub`, `busB` already ready and owning, then
+  `busA.subscribe()` → snapshot → `ready()` → snapshot. Both reads were **identical** — same route,
+  `confirmed=true`, both worker records. The control that makes that evidence rather than a
+  coincidence is which write was under test: `busA` *became* the owner in that run, so the route its
+  snapshot listed was its own `writeRoute` still sitting in the pending table (the flush is a
+  microtask and nothing was awaited between the write and the read). Had the topic stayed
+  `busB`'s, the probe would have read a flushed record and proved nothing about coalescing — which is
+  the trap in this shape of measurement: a two-tab setup quietly satisfies one tab's premise before
+  the other's read, so check that the read you took actually goes down the path you are disputing.
+  The scratch file was deleted after the numbers were recorded; the claim it retired is a comment,
+  not a behaviour, and no assertion depends on it now.
+- **Changed files:** `src/core/cluster.ts` (4 comments), `src/core/data-bus.ts` (7 comments),
+  `docs/api.md`, `docs/zh/api.md`, `AGENTS.md`, `docs/progress.md`.
+- **Verification:** all green — `pnpm check` 0, `pnpm lint` 0, `pnpm test:coverage` 0 (floors 98/96/
+  98/99 held; `src/core` 98.87 / 96.46 / 98.98 / 99.67, `cluster.ts` still 100 % lines),
+  `pnpm verify:compat` 0, `pnpm verify:types` 0 (`6 entries, 90 importable names, surface closed and
+  nothing dropped since v0.21.12`), `pnpm verify:pack` 0, `pnpm test:e2e` **37 passed** in 47.5 s,
+  `pnpm bench` 0, `pnpm bench:browser` 0 twice, `pnpm bench:compare` 0 (worst metric
+  `publish/dedicated/perMessageMs` +20.3 %, under the 50 % gate), `git diff --check` 0.
+  **Mechanical proof it is documentation-only:** `git diff -U0 src/` with comment lines filtered
+  leaves **zero** lines — every changed line in `src/` is a comment, including its `+`/`-` partner.
+  The bundles still change bytes (esbuild carries comments into `dist/**/*.js`), which is expected
+  since Phase 132 established that fact.
+- **Blockers:** none. Standing: wildcard-pattern replay pruning (#194) is the user's product
+  decision; TypeScript 7 remains blocked upstream (`typescript-eslint` 8.70.1 peers
+  `typescript >=4.8.4 <6.1.0`).
+- **Risks / rollback:** no executable line changed, so the consumer-visible diff is the text of the
+  declarations and bundles. One risk is worth naming: a corrected "why" comment can be *less*
+  actionable than a wrong one — the old `isAssigned` text pointed at a mechanism a reader could act
+  on (flush earlier), and the new one points at a state a reader must recognize instead (an accepted
+  frame with no durable route). The mitigations are that both corrections cite the shipped test or
+  file:line that shows the state exists. Rollback is `git revert` of the merge.
+- **Next task:** the audit queue for this surface is empty; what remains of it is the same read
+  applied to the modules no pass covered yet (`src/centrifuge*.ts`, `src/workers/`,
+  `src/utils/replay-persistence.ts`). Two candidates from this pass were **inspected and kept**:
+  `centrifuge-protocol.ts:11`'s "can never drift apart" is true of the source constants it names, and
+  `version.ts:5`'s "can never drift from the release" checks out — `build.mjs` defines
+  `__SDK_VERSION__` from `package.json` at all three bundle sites and `vitest.config.ts:28` matches.
+  Task #61 (record a report's within-run spread so `bench:compare` can tell a mode-shift from a
+  regression) is next behind it.
+- **Updated:** 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
