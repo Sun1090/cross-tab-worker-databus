@@ -7376,6 +7376,62 @@ corroborates the 26-spec collection.)
 - **Next task:** with `src/**` prose closed, the remaining un-swept shipped text is `scripts/**` and `examples/**`. Task #61 is now complete; the open behavior question Phase 134 recorded (Centrifuge's internal `error` listener, un-guarded after `unsubscribe()`) stays a recorded question until someone builds the interleaving against the real package.
 - **Updated:** 2026-09-24.
 
+## Phase 136 / 0.21.13 prepared — the release whose own bench gate fired on it
+
+- **Milestone / version:** `0.21.13`, prepared on branch `release/0.21.13` from `main` at
+  `e28554b` (the merge of PR #226). Patch release: no behavior, wire-format, storage-layout or
+  cluster-protocol change.
+- **Status:** pre-tag verification complete and green; release commit pushed, PR opened.
+- **What this release contains.** Three passes that had accumulated without a freeze:
+  - **Phase 133 (PR #224, `aec8f29`)** — 10 shipped body-comment claims in `src/core/data-bus.ts`
+    and `src/core/cluster.ts`, including the "`reportError` cannot throw" premise three enumeration
+    proofs rested on.
+  - **Phase 134 (PR #225, `db8faf6`)** — 23 more across the remaining 13 JS-emitting modules, the
+    first set of claims that had to be checked against an installed dependency rather than against
+    `src/` (`centrifuge@5.7.4`'s single client credential hook; the `error` listener
+    `removeAllListeners` deletes).
+  - **Phase 135 (PR #226, `e28554b`)** — the only executable change: `bench:compare` now gates on
+    the baseline *range* as well as its median, with the excused metrics printed.
+- **The gate earned its keep on its own release.** The pre-tag `bench:compare --fail-above-pct 50`
+  measured `databus/dedup1000Ms` at **+99.3 %** over its median and did not fail, printing
+  `within the 29.2 ms observed since the baseline was taken` — and that release touches `src/` only
+  in comments, which is exactly the shape that failed twice at +107 % and +121 % in Phase 132 under
+  the old single-leg rule. The companion metric told the other half of the story in the same run:
+  `traceAndPublish1000Ms` at +44.2 % *did* exceed its own baseline max (5.2 → 7.5 against 7) and
+  still passed on the percentage leg, so both legs were exercised on real data within one run
+  rather than only in tests. Neither number is evidence about the library: the tree they describe
+  has no executable change in it.
+- **Changed files (this commit):** `package.json` (0.21.12 → 0.21.13), `CHANGELOG.md` (one
+  `## [0.21.13]` section, two subsections — `Documentation` for the 33 corrections, `Tests` for the
+  gate), `docs/roadmap.md` + `docs/zh/roadmap.md` (delivered-scope entries, coverage and test count
+  stated in both languages), `docs/progress.md`.
+- **Verification (all green on the final tree):** `pnpm check` 0, `pnpm lint` 0,
+  `pnpm test:coverage` 0 — 37 files / **897** tests, **99.01 / 96.90 / 99.26 / 99.69**, byte-for-byte
+  the same four numbers as Phases 132–135 because the released `src/` diff is comments only;
+  `pnpm verify:compat` 0 (`0.21.13 preserves public exports and type metadata from v0.21.12`),
+  `pnpm verify:types` 0 (`6 entries, 90 importable names, surface closed`), `pnpm verify:pack` 0
+  (tarball now `cross-tab-worker-databus-0.21.13.tgz`), `pnpm test:e2e` **37 passed** in 30.1 s,
+  `pnpm bench` 0, `pnpm bench:browser` 0 twice, `pnpm bench:compare --fail-above-pct 50` 0,
+  `RELEASE_TAG=v0.21.13 node scripts/verify-release-version.mjs` 0
+  (`v0.21.13 matches package.json and has non-empty release notes`),
+  `npm pack --dry-run --json` → 109 files / 1047 kB (no `docs/progress.md`),
+  `pnpm audit --registry=https://registry.npmjs.org` → no known vulnerabilities, `git diff --check` 0.
+- **Migration / rollback:** no migration — no storage key, protocol field, or public signature
+  changed, so a consumer upgrading from 0.21.12 needs no code change and mixed-version peers stay
+  compatible; `verify:compat` and `verify:types` both diff against `v0.21.12` and passed. Rollback
+  for a consumer is `npm i cross-tab-worker-databus@0.21.12`; for the repository, the tag is
+  immutable once pushed, so a defect found post-publish ships as 0.21.14 rather than a moved tag.
+- **Blockers:** none. Standing: #194 (wildcard-pattern replay pruning) is the user's product
+  decision; TypeScript 7 is blocked upstream by `typescript-eslint`'s peer range.
+- **Risks:** the one substantive risk is the one Phase 135 states out loud — the ceiling leg makes a
+  *sustained* regression invisible while it stays inside the observed range. This release is the
+  demonstration case in both directions, so the trade is now documented with a real +99.3 % example
+  rather than a hypothetical.
+- **Next task:** after the tag publishes, the remaining verification-queue items are the open
+  Centrifuge `error`-guard question (Phase 134) and the shipped-text of `examples/**` /
+  `scripts/**`, which no `package.json` `files` entry publishes and so is maintainer-facing only.
+- **Updated:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
