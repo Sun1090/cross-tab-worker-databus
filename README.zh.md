@@ -34,7 +34,9 @@
 - Transport 重连自动恢复当前 owner 的 Topic
 - Tab 异常退出后通过心跳 TTL 自动迁移
 - BroadcastChannel 或 localStorage 不可用时自动降级为本地模式
-- 持久层不存储连接地址、原始 Topic 文本和消息内容
+- 可选的 durable 回放持久化（`replay.persistence`），支持 `appendBatch` 批量写入（IndexedDB 事务合并；清理策略 `count` / `age` / `both`）
+- BroadcastChannel 不可用时，可选的 localStorage storage-event 协调降级通道（`channelFallback: 'storage-event'`）
+- localStorage 中的协调记录只保存不透明 key——不含连接地址、原始 Topic 文本、凭证或消息内容。两个需要显式开启的选项会写入真实内容，且被作为取舍记录在文档中而非可以忽略的例外：`replay.persistence` 把已发布的 payload 写进 IndexedDB，其对象仓以明文 Topic 为 key；`channelFallback: 'storage-event'` 则把它承载的每一帧协调消息——含 Topic 明文与 publication payload——写进 localStorage，直到该 channel 关闭
 
 完整能力清单见 [能力矩阵](./docs/zh/capabilities.md)。
 
