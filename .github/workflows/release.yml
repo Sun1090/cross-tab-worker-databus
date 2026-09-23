@@ -69,6 +69,11 @@ jobs:
         # type entry is a breaking change shipped as a patch.
         run: pnpm verify:compat
 
+      - name: Public type surface
+        # Blocking, for the same reason as above: a dropped type-only export
+        # changes no runtime key, so this is the only check that can see it.
+        run: pnpm verify:types
+
       - name: Packed consumer smoke
         # Verifies the actual tarball before publish, so a broken
         # `files`/`exports` mapping cannot reach the registry.
