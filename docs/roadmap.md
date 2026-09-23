@@ -1,6 +1,32 @@
 # Roadmap
 
-0.21.9 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.10 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.10 delivered scope
+
+- `heartbeatIntervalMs: Infinity` — the documented way to switch the SharedWorker PING
+  heartbeat off — was being read by the reaper as a malformed number. It fell through the
+  same `Number.isFinite` guard as `NaN`, `0` and negatives and took the default 10 s, so
+  the port was given a 30 s session timeout on the strength of being the one port that would
+  never send another message: the option whose stated purpose is "the reaper is not needed"
+  guaranteed a reap 30 s after connecting. `Infinity` now exempts that port from reaping,
+  while the three values the transport constructor rejects (and which therefore cannot come
+  from this library at all) keep the fallback. Pinned by one test that kills three mutants at
+  three different assertions, plus an assertion that the `INIT` actually carries the value —
+  the two halves of this defect were each covered by a green test, which is how it survived.
+- The shipped reaper documentation stopped promising things the code does not do, in both
+  languages: no `PortReaper.dispose()` shutdown hook runs "when the SharedWorker shuts down"
+  (nothing calls it — a `MessagePort` has no close event, so there is no such signal to hang a
+  hook on), and what disabling the heartbeat costs is stated next to what it disables (a tab
+  configured that way and then crashed keeps its session and its WebSocket).
+- A test that passed while breaking the gate: an IndexedDB replay assertion attached its
+  rejection handler after an await that a real 40 ms timer could overtake, so on a loaded
+  runner `pnpm test:coverage` exited 1 with `Unhandled Rejection` and every test green. The
+  handlers are created next to their promises now, measured in both directions by forcing the
+  round trip to 200 ms.
+- No wire-format, storage-layout or cluster-protocol change. The behaviour change is confined
+  to shared mode configured with `heartbeatIntervalMs: Infinity`, which could not work as
+  documented before.
 
 ## 0.21.9 delivered scope
 
