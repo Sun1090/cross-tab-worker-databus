@@ -45,7 +45,7 @@ export type {
   WebSocketLike
 } from './websocket';
 export { selectWorkerBackend } from './worker-mode';
-export type { WorkerBackend, WorkerMode } from './worker-mode';
+export type { WorkerAvailability, WorkerBackend, WorkerMode } from './worker-mode';
 export {
   DEFAULT_MAX_ACTIVE_WORKERS,
   approximatePayloadBytes,
@@ -62,6 +62,7 @@ export type {
   DataBusMessage,
   DataBusPublication,
   DataBusPublicationEnvelope,
+  DataBusPublicationItem,
   DataBusPublicationMetadata,
   DataBusPublishOptions,
   DataBusMessageHandler,

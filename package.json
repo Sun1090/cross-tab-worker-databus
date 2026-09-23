@@ -103,6 +103,7 @@
     "bench:trend": "node scripts/bench-trend.mjs",
     "verify:pack": "node scripts/verify-packed-consumer.mjs",
     "verify:compat": "node scripts/verify-version-compat.mjs",
+    "verify:types": "node scripts/verify-public-types.mjs",
     "verify:published": "node scripts/verify-published-consumer.mjs",
     "test:e2e": "pnpm build && pnpm build:examples && playwright test",
     "typecheck": "tsc --noEmit",

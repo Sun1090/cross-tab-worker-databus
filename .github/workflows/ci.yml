@@ -42,6 +42,12 @@ jobs:
         # Catches an accidentally removed/renamed subpath export or type entry
         # on the PR that introduces it, rather than at release time.
         run: pnpm verify:compat
+      - name: Public type surface
+        # A type-only export emits no runtime key, so neither the
+        # `Object.keys()` freeze in tests/dual-format.test.ts nor the
+        # package.json field comparison above can see one dropped from the
+        # barrel — or a public signature naming a type no entry exports.
+        run: pnpm verify:types
       - name: Packed consumer smoke
         # Packs the tarball and imports every public subpath as both ESM and
         # CJS, so a broken `files`/`exports` mapping fails here, not on npm.
