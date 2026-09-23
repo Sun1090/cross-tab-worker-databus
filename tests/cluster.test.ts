@@ -4,7 +4,7 @@ import { approximatePayloadBytes } from '../src/core/routing';
 import type { WorkerControlAction, WorkerRecord } from '../src/core/types';
 import type { WorkerClusterMessage } from '../src/core/types';
 import { createOpaqueKey } from '../src/core/hash';
-import { CLUSTER_MESSAGE_TYPE, DEFAULT_STORAGE_PREFIX } from '../src/utils/constants';
+import { CLUSTER_MESSAGE_TYPE, CONTROL_ACTION, DEFAULT_STORAGE_PREFIX } from '../src/utils/constants';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -1976,6 +1976,69 @@ describe('WorkerClusterRuntime resilience', () => {
       })
     ).not.toThrow();
     expect(controlB).toHaveBeenCalledWith('FUTURE-ACTION', 'topic-a', undefined);
+  });
+
+  it('drops a CONTROL frame addressed to another worker instead of acting on it', async () => {
+    // `handleMessage` dispatches on `type` alone and the cluster channel is
+    // broadcast, so every peer sees every CONTROL: the addressee check at the top
+    // of `handleControlMessage` is the only thing that keeps a non-target from
+    // acting on it. Nothing asserted that. Measured by deleting the guard: 369
+    // tests across `cluster`/`stability`/`data-bus`/`centrifuge`/`worker-mode`
+    // stayed green, while the three-tab fuzz churned 16+ minutes of CPU against a
+    // ~1-minute baseline. The fuzz exercises the leg and cannot assert it — its
+    // invariants are end-state checks, and a slower convergence still passes.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlA = vi.fn();
+    const controlB = vi.fn();
+    const a = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: controlA
+    });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    a.runtime.start();
+    b.runtime.start();
+    await Promise.resolve();
+
+    // Legitimate in every other respect: a known action, and a `topicKey` that is
+    // genuinely `createOpaqueKey(topic)`, so the pairing guard passes too. Only the
+    // addressee is wrong — nothing here names `worker-a`.
+    const topic = 'topic-remote';
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('resilience')}`);
+    channel.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'worker-c',
+      targetWorkerId: 'worker-b',
+      action: CONTROL_ACTION.SUBSCRIBE,
+      topic,
+      topicKey: createOpaqueKey(topic)
+    } as WorkerClusterMessage);
+    channel.close();
+    await Promise.resolve();
+
+    // The non-target reaches neither the dispatch nor the reverse cache. Both sit
+    // downstream of the guard, and caching a plaintext this worker was never meant
+    // to serve is the same substitution surface the pairing check bounds.
+    expect(controlA).not.toHaveBeenCalled();
+    expect(a.runtime.isAssigned(topic)).toBe(false);
+    expect(a.runtime.getSnapshot().assignedTopics).not.toContain(topic);
+    expect(a.runtime.getSnapshot().knownTopics.some(entry => entry.topic === topic)).toBe(false);
+    // The addressee does act on it, which is what shows the frame was deliverable
+    // and well-formed rather than rejected for some unrelated reason.
+    expect(controlB).toHaveBeenCalledWith(CONTROL_ACTION.SUBSCRIBE, topic, undefined);
+    expect(b.runtime.getSnapshot().assignedTopics).toContain(topic);
   });
 
   it('cleans up an orphaned route once no subscriber tab remains alive', async () => {

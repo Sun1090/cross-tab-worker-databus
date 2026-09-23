@@ -7637,6 +7637,46 @@ corroborates the 26-spec collection.)
   `v0.21.14`, watch the Release run, then confirm npm `latest`.
 - **Update date:** 2026-09-24.
 
+## Phase 141 / A guard the whole suite never named, and a first test that failed for the wrong reason
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/misrouted-control-pin`, off `main` at
+  `09c6e5c`. Test-only; `src/` is untouched, so it is patch material.
+- **Status:** open PR, locally green.
+- **The standing question this closes.** The 12-arm ledger kept `handleControlMessage`'s first line
+  (`if (message.targetWorkerId !== this.workerId) return;`) as "reachable, consequence unnamed". An earlier
+  attempt to measure it was abandoned when a contaminated mutant run muddied the attribution, so it was
+  re-run cleanly here in a throwaway worktree (`git worktree add --detach /tmp/… origin/main`), never in the
+  release tree.
+- **The measurement.** Deleting the guard leaves **369 tests** across `cluster` / `stability` / `data-bus` /
+  `centrifuge` / `worker-mode` green, while the full suite burned 16+ minutes of CPU in one worker against a
+  ~1-minute baseline and had to be killed. Mechanism: `handleMessage` dispatches on `type` only, and the
+  cluster channel is broadcast, so every point-to-point frame is a non-target for every other tab. The fuzz
+  therefore exercises the leg on nearly every operation and still asserts nothing about it — its invariants
+  are end-state checks, and slower convergence converges.
+- **What shipped.** One test that posts a *well-formed* CONTROL (known action, `topicKey` genuinely
+  `createOpaqueKey(topic)`, so the pairing guard passes) naming the other worker, and asserts the non-target
+  reaches neither the `onControl` dispatch nor the `knownTopics` reverse cache, while the addressee takes the
+  assignment.
+- **The first version was wrong, and the mutant is what said so.** It asserted the non-target's
+  `isAssigned(…)` was false and the addressee's was true. Against the mutant it failed — but at the
+  *addressee's* assertion (`expected false to be true`), i.e. it pinned something other than the guard. A
+  probe printed the actual state under the mutant: neither runtime claimed it. So the test died for a reason
+  the author did not understand, which is not evidence. Rewritten around the non-target's dispatch and cache,
+  it now fails at `expect(controlA).not.toHaveBeenCalled()`, which is the guard's own consequence.
+- **Left open on purpose:** why the addressee stops claiming the topic once the guard is gone is unexplained
+  (the non-target is delivered first, and the addressee's later handling apparently bails — but `confirmRoute`
+  writes nothing without a route, and no route key appears in storage in either case). It does not affect the
+  pin, and guessing at it in a comment would be the exact kind of unmeasured claim this repository keeps
+  having to retract.
+- **Changed files:** `tests/cluster.test.ts`, `CHANGELOG.md`, `docs/progress.md`.
+- **Verification:** `npx tsc --noEmit` 0; `pnpm lint` 0; `pnpm test` 37 files / **899** tests; the new test
+  passes unmutated and fails at the named assertion against the one-line mutant; `git diff --quiet src/`
+  after the experiment (the tree was restored by editing the line back, not by `git checkout`, and verified).
+- **Risk / rollback:** a test only; `git revert`.
+- **Next:** merge, then the browser-bench checklist item (#69). Remaining ledger work is the same shape —
+  legs the fuzz reaches but cannot assert.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
