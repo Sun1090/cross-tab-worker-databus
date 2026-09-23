@@ -42,6 +42,10 @@ src/
     hash.ts                     # createOpaqueKey — 128-bit non-cryptographic hash
     routing.ts                  # Pure functions: owner selection, load balancing
     storage-batch.ts            # BatchingStorageWriter — write coalescing + backoff
+    publication.ts              # parseDataBusPublication — legacy flat, envelope, and canonical shapes
+    replay-persistence.ts       # createIndexedDbReplayPersistence — durable replay store (object store keyed by topic)
+    replay-pruning.ts           # pruneReplayHistory — count/age pruning shared by the ring and the durable store
+    version.ts                  # SDK version injected at bundle time (esbuild define)
     trace.ts                    # DataBusTraceReporter — metrics/latency diagnostics
     types.ts                    # All shared type definitions
   utils/
@@ -55,7 +59,8 @@ src/
   centrifuge-protocol.ts        # Worker ↔ main-thread message protocol
   websocket.ts                  # WebSocketTransport + createWebSocketDataBus (zero-dep backend)
   hooks.ts                      # React hooks adapter (separate entry; React optional peer)
-  worker-mode.ts                # Worker backend selection (auto/dedicated/shared)
+  vue.ts                        # Vue 3 composables adapter (separate entry; Vue optional peer)
+  worker-mode.ts                # selectWorkerBackend capability detection + degradation
   workers/
     centrifuge.worker.ts         # Dedicated Worker entry
     centrifuge.shared.worker.ts  # SharedWorker entry
@@ -275,6 +280,8 @@ Every heartbeat tick: prune stale workers (TTL), orphaned subscribers (no live t
 - A percentage gate on a metric with a multi-modal history needs an **absolute** leg, or the summary statistic becomes the thing that fails. `bench:compare` baselines on the median of the last five reports; a median is stable only while the modes stay mixed, so when several consecutive reports land in the same mode the median itself jumps and a comment-only tree read +121% against one baseline and −56.7% against another. The fix (`findRegressions` now also requires beating the highest baseline sample) has a stated cost — a *sustained* shift that stays inside the observed range is invisible — so the suppressed rows are printed under `within-baseline, not gated` rather than passing silently: an excuse the reader cannot see is indistinguishable from a clean bill. Measured on the live archive at `--fail-above-pct 5`, three of the seven metrics (`publish/dedicated`, `publish/shared`, `publishBatch1000Ms`) were already inside their own five-report range, which is the honest statement of that gate's resolution. Mutation-check both legs: dropping the ceiling condition fails only the new multi-modal case, and hard-coding it to `false` fails four tests including the pre-existing explicit-pair path — that asymmetry is what says the null-ceiling leg is real behavior, not decoration.
 - `docs/benchmarks.md` and `docs/zh/benchmarks.md` are **generated** by `scripts/bench-trend.mjs`'s `buildDocs()` (`pnpm bench:trend`); the prose paragraphs naming the gate live in that function's `en`/`zh` arrays. Editing the markdown loses the next regeneration and leaves the two languages out of step — change the generator, re-run it, and commit the tables it refreshed in the same commit.
 - When a comment proves a promise resolves by pointing at a terminal `.catch(handler)`, the proof is only as good as `handler` being total. Two released versions deleted absorbers on exactly that argument while assuming the handler (`reportError`) could not throw; it could, and the assumption was load-bearing. State the assumption next to the enumeration, and pin the chain's observable end with a test.
+- A prose-audit candidate is a claim, not evidence — including when it arrives as a confident report naming files and line numbers. One such pass quoted two sentences ("the five dispatch events", "the five internal modules") that do not exist in either language of the file it cited, reported `scripts/verify-packed-consumer.mjs` as unable to fail when every check in it `throw`s and `await main()` therefore exits 1, and claimed two names were missing from its consumer script that sit at its lines 96-125. Adjudicate a collected list with a *second* reader whose brief is to assume the first is wrong, and require of each item a verbatim quote found by searching for the phrase (`grep -n "五个 dispatch\|five dispatch"`) rather than a line number — a count claim's sentence may be fabricated, and only the search distinguishes that from a drift. Note the same pass was reliably right about *code-behaviour* claims it read at the cited lines and wrong about *existence* claims about prose it did not quote.
+- When a correction *rewrites* an enumeration, the new list is a fresh claim about a type, not a safe default. Rewriting `docs/configuration.md`'s storage-boundary section removed the false absolute ("Storage does NOT hold publication data") and replaced a three-bullet list of what storage does hold — which the follow-up check found was not exhaustive against `WorkerRecord`: `protocolVersion`, `role`, `registeredAt` and the optional `throughput` sample are all persisted. Enumerate from the interface (`grep -n "" src/core/types.ts` over the record's own block), prefer naming the records over naming their fields, and re-read your own inserted list before believing the correction is finished.
 
 ## Common tasks
 
