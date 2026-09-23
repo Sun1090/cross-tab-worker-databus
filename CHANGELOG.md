@@ -7,6 +7,11 @@
 - `handleRouteReleasedMessage`'s addressee check is now pinned on the one input where nothing else can reject it. Its staleness test compares the frame against the *durable route*, so a non-target that does not own the topic is already turned away by that — which is why the existing forged-`topicKey` case never reached this line. The pin's frame is addressed to a third worker while the route genuinely names this runtime, with a matching `generation` and `handoffFromWorkerId`, so every staleness term passes and only `targetWorkerId` stands. Measured by deleting it: 358 tests across `cluster`/`stability`/`data-bus`/`centrifuge` stayed green, and the failure was attributed to the new case alone. `tests/coordination-invariants.test.ts` cannot reach it at all — `forgeSubscribe()` is the only frame that harness sends, so no seed ever posts a `ROUTE_RELEASED` to the wrong worker.
 - One assertion inside that pin was wrong before it shipped and is recorded so it is not re-introduced: `isAssigned()` reads true from the route record the scenario itself writes, because `isAssigned` falls through to `readRoute(topicKey)?.workerId === this.workerId`. It asserted nothing about the frame. The `assignedTopics` map is what the handler actually writes, and that is what the test now checks.
 
+### Documentation
+
+- Both release checklists now record that `pnpm bench:compare` can be closed by the act of investigating it. Its baseline — the median *and* the maximum leg — is drawn from the same rolling archive every `pnpm bench:browser` run appends to, so re-runs taken to "check the spread" become the baseline that excuses the failure. Measured while preparing 0.21.14: two runs at host load 7.7–15.1 failed the ceiling on `publish/dedicated` (77.3 ms against a ~38 ms fast mode), five further re-runs reported OK with the baseline median slid to 70.6 ms, and one clean run after removing those samples showed every metric up together — the contention signature, not a regression. The instruction is now: read `uptime` before re-running, record a suspect failure as deferred with its load, keep off-mode samples out of the archive, and do not regenerate `docs/benchmarks.md` from them.
+
+
 ## [0.21.14] - 2026-09-24
 
 ### Documentation
