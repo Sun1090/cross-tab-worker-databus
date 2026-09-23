@@ -38,7 +38,7 @@ By default each tab holds its own Dedicated Worker; when configured with `worker
 - Opt-in coordination fallback over localStorage storage events when BroadcastChannel is unavailable
 - After a tab exits abnormally, automatic migration happens via heartbeat TTL
 - Automatically degrades to local mode when BroadcastChannel or localStorage is unavailable
-- The persistence layer does not store connection addresses, raw Topic text, or message content
+- The coordination records in localStorage hold opaque keys only — no connection addresses, raw Topic text, credentials, or message content. Two opt-ins persist real content and are documented as trade-offs, not exceptions you can ignore: `replay.persistence` writes published payloads to IndexedDB in a store keyed by the plaintext Topic name, and `channelFallback: 'storage-event'` writes every coordination frame it carries — Topic names, and payloads on publications — into localStorage until that channel closes
 
 See the [Capabilities Matrix](./docs/capabilities.md) for the full list of implemented, unimplemented, and planned capabilities.
 
@@ -221,7 +221,7 @@ Only if you use the built-in Centrifuge backend (`cross-tab-worker-databus/centr
 
 ```bash
 pnpm install
-pnpm check          # typecheck + unit tests + build
+pnpm check          # typecheck + build + unit tests + the perf gates (run separately from `pnpm test`, and timing-sensitive)
 pnpm test:e2e       # Playwright multi-tab browser tests (requires Google Chrome)
 pnpm pack --pack-destination /tmp
 ```

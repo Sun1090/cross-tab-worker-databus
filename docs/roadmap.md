@@ -1,7 +1,32 @@
 # Roadmap
 
-0.21.11 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.12 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
+## 0.21.12 delivered scope
+
+- The prose sweep finished where it started: the README. `README.md` and `README.zh.md` promised
+  "the persistence layer does not store connection addresses, raw Topic text, or message content"
+  two bullets under the line advertising the durable replay persistence that does precisely that —
+  its IndexedDB store is created with `keyPath: 'topic'` and its rows carry the publication payloads,
+  and the factory is a public export. The claim is now scoped to the coordination records it is true
+  of, and both opt-ins that persist real content are named beside it. The Chinese list also gained
+  the two feature bullets it never had, so the promise no longer stands without its disclosure.
+- `docs/release-checklist.md`, which ships in the tarball, held three traps. The published-consumer
+  gate was said to run "with the same budget as a manual run" — the workflow passes 48 × 7500 ms as
+  its own env while the script defaults to 6 × 5000 ms, so a hand-run repeat hits `ETARGET` after 30
+  seconds on a tag whose CI run was green. Measured on `v0.21.11`: 39 retries of 48 in a successful
+  run, and the offline repeat passed first try. Both budgets are now stated, with the command that
+  reproduces the CI one. CI was described as running on "every push and pull request" although both
+  triggers are filtered to `branches: [main]`, and `bench:trend` was missing from the local-only list
+  despite rewriting `docs/benchmarks.md` from the local archive.
+- The `ci.yml` comment naming the coverage floors still said 96/92/96/97 after 0.21.7 raised them to
+  98/96/98/99; the config, the shipped checklist and `AGENTS.md` already agreed, so only the comment
+  had drifted. Corrected, and `AGENTS.md` now records how the sweep concluded: an audit of "the option
+  surface" covers the tables, while the paragraph under the same heading and the README's summary
+  bullets are separate claims — and the sentence shape worth hunting first is an absolute about
+  storage, because one opt-in is enough to break it.
+- No behaviour, wire-format, storage-layout or cluster-protocol change, and no `src/` or `tests/`
+  file was touched. Coverage stays at 99.01 / 96.90 / 99.26 / 99.69 over **895** tests.
 ## 0.21.11 delivered scope
 
 - A prose audit of the four docs files no earlier sweep had covered — `architecture.md`,
