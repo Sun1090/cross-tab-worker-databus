@@ -2244,6 +2244,91 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
   });
 
+  it('drops a ROUTE_RELEASED addressed to another worker even when its route authorizes this one', async () => {
+    // The sibling of `handleControlMessage`'s addressee guard, and the one that
+    // is not dominated by anything below it. `isStaleRouteRelease` compares the
+    // *durable route* against the frame, so it rejects a non-target that does
+    // not own the topic — which is exactly why the forged-`topicKey` test above
+    // could not stand in for this one: here the route genuinely names `worker-b`,
+    // the release genuinely comes from the recorded previous owner, and the
+    // generation matches, so every staleness term passes. Only the addressee
+    // check keeps `worker-b` from completing an ACK meant for `worker-c`.
+    // Measured: deleting that one line left 357 tests across
+    // `cluster`/`stability`/`data-bus`/`centrifuge` green. `tests/coordination-invariants.test.ts`
+    // cannot cover it either — its forgery vocabulary is `CONTROL/SUBSCRIBE`
+    // (`forgeSubscribe()` is the only frame the harness forges), so no seed ever
+    // sends a `ROUTE_RELEASED` to the wrong worker.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const controlB = vi.fn();
+    const a = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({
+      storage,
+      hub,
+      now: () => now,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      onControl: controlB
+    });
+    let bChannelName = '';
+    b.env.environment.createChannel = name => {
+      bChannelName = name;
+      return hub.create(name);
+    };
+
+    a.runtime.start();
+    a.runtime.subscribe('misrouted-ack');
+    await Promise.resolve();
+    b.runtime.start();
+    await Promise.resolve();
+
+    // A pending handoff of `misrouted-ack` to worker-b: no `confirmedAt`, so the
+    // ACK is still wanted, and `handoffFromWorkerId` names the sender.
+    const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+    const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+    const topicKey = route.topicKey as string;
+    delete route.confirmedAt;
+    storage.setItem(
+      routeEntry[0],
+      JSON.stringify({
+        ...route,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        generation: 2,
+        handoffFromWorkerId: 'worker-a',
+        updatedAt: now
+      })
+    );
+
+    // Legitimate in every field the handler checks against storage — the
+    // key/topic pair hashes, the generation and previous owner agree — and
+    // addressed to a third worker. `worker-c` does not exist in this cluster,
+    // which is what makes the drop observable here: whoever acts on it is acting
+    // on a frame the protocol never sent their way.
+    hub.create(bChannelName).postMessage({
+      type: CLUSTER_MESSAGE_TYPE.ROUTE_RELEASED,
+      sourceWorkerId: 'worker-a',
+      targetWorkerId: 'worker-c',
+      topic: 'misrouted-ack',
+      topicKey,
+      generation: 2
+    });
+    await Promise.resolve();
+
+    expect(controlB).not.toHaveBeenCalled();
+    // `assignedTopics` (the in-memory map) rather than `isAssigned()`: the route
+    // written above already names `worker-b`, and `isAssigned` falls through to
+    // `readRoute(topicKey)?.workerId === this.workerId`, so it reads true here
+    // whether or not the frame was acted on. The map is the state the handler
+    // writes, so it is the one that can distinguish the two.
+    expect(b.runtime.getSnapshot().assignedTopics).not.toContain('misrouted-ack');
+    // No durable ownership either: `confirmRoute` stamps the route that authorizes
+    // the next round, so writing it from a mis-addressed ACK would take shared
+    // state with the frame, not just local state.
+    expect(b.runtime.getSnapshot().routes.find(entry => entry.topicKey === topicKey)?.confirmedAt).toBeUndefined();
+  });
+
   it('ignores a stale CONTROL/SUBSCRIBE while a handoff is awaiting ROUTE_RELEASED', async () => {
     // Regression: a delayed CONTROL/SUBSCRIBE from an earlier assignment round
     // must not authorize a pending handoff before its ROUTE_RELEASED ACK. The
