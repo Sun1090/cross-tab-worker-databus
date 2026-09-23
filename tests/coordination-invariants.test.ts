@@ -434,6 +434,15 @@ describe('cross-tab coordination invariants', () => {
             ops.push('flush');
           }
           await flushMicrotasks();
+          // The budget is what stops a non-converging loop, so a seed it cut never
+          // quiesced: its end state is an artifact of the guard, and asserting on it
+          // would report the harness as a product failure. Checked at every
+          // await boundary because the loop can start in the steps and run through
+          // the settle — a between-seeds test would notice only after the damage.
+          if (hub.deliveriesOverBudget()) {
+            aborted = true;
+            break;
+          }
         }
 
         // Bring every tab back so there is one well-defined end state: three
@@ -450,6 +459,7 @@ describe('cross-tab coordination invariants', () => {
           aborted = true;
           capTripped = true;
         }
+        if (hub.deliveriesOverBudget()) aborted = true;
 
         // `aborted` gates the whole end-state comparison: an interleaving cut
         // short has not been given its twelve settle rounds, and the invariants
