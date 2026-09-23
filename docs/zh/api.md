@@ -361,7 +361,7 @@ const transport = new CentrifugeWorkerTransport({
 
 - `workerMode`：`'dedicated'`（默认）、`'shared'` 或 `'auto'`；`auto` 的降级链路为 SharedWorker → Dedicated Worker → 本地模式
 - `transferable`：`boolean`，默认 `false`；开启后 ArrayBuffer payload 使用 Transferable 传输，对象消息 API 不变
-- `heartbeatIntervalMs`：`number`，默认 `10000`；SharedWorker PING 心跳间隔（毫秒）。传 `Infinity` 完全禁用心跳。详见 [配置](./configuration.md#sharedworker-会话回收)
+- `heartbeatIntervalMs`：`number`，默认 `10000`；SharedWorker PING 心跳间隔（毫秒）。传 `Infinity` 完全禁用心跳，该端口也因此豁免于回收。详见 [配置](./configuration.md#sharedworker-会话回收)
 - `workerFactory`：自定义 Dedicated Worker 加载方式
 - `sharedWorkerFactory`：自定义 SharedWorker 加载方式
 

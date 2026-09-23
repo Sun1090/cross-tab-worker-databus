@@ -155,7 +155,7 @@ const bus = createCentrifugeDataBus({
 | `clusterKey` | `string` | `connection.url` | 手动隔离逻辑集群 |
 | `workerMode` | `'dedicated' \| 'shared' \| 'auto'` | `'dedicated'` | Worker transport 运行模式；`auto` 按 SharedWorker → Dedicated Worker → 本地模式降级，显式 `dedicated` 按 Dedicated Worker → SharedWorker → 本地模式降级 |
 | `transferable` | `boolean` | `false` | 开启后 `publish(topic, ArrayBuffer)` 使用 Transferable 传输，接收侧 ArrayBuffer publication 也走转移路径 |
-| `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING 心跳间隔（见下方 SharedWorker 会话回收）；传 `Infinity` 完全禁用心跳。与 Core 集群心跳（默认 3000 ms，通过 localStorage 跟踪 worker 存活）相互独立 |
+| `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING 心跳间隔（见下方 SharedWorker 会话回收）；传 `Infinity` 完全禁用心跳，该端口也因此豁免于回收。与 Core 集群心跳（默认 3000 ms，通过 localStorage 跟踪 worker 存活）相互独立 |
 | `workerFactory` | `() => Worker` | 内置 Worker | 测试或自定义 Worker 加载方式 |
 | `sharedWorkerFactory` | `() => SharedWorker` | 内置 SharedWorker | 测试或自定义 SharedWorker 加载方式 |
 | `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token（`getToken` / `getChannelToken`），由该 provider 从应用上下文提供。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
@@ -203,13 +203,13 @@ storage 事件只在其他 document 中派发。因此同一 document 内共享�
 
 `MessagePort` 没有 `close` 事件，因此 SharedWorker 无法在 Tab 崩溃或关闭时获知（除非收到 `STOP` 消息）。为避免泄漏已死 Tab 的 `CentrifugeSession`（及其 WebSocket），transport 定期向 SharedWorker 发送 **PING 心跳**，SharedWorker 运行一个**回收器**来关闭超过静默超时的端口会话。
 
-- **心跳间隔**：`heartbeatIntervalMs`（默认 `10000` ms）。主线程按此间隔发送 `PING`。传 `Infinity` 完全禁用心跳——仅在确保 SharedWorker 会随 Tab 一起销毁时使用。
-- **会话超时**：`3 × heartbeatIntervalMs`（默认 `30000` ms）。超过超时未收到消息的端口会被回收：其会话停止，WebSocket 关闭。这与 Core 集群心跳（默认 `3000` ms，通过 localStorage 跟踪 worker 存活）相互独立——见下方说明。
+- **心跳间隔**：`heartbeatIntervalMs`（默认 `10000` ms）。主线程按此间隔发送 `PING`。传 `Infinity` 即完全禁用心跳：transport 不再发送任何 `PING`，并在 `INIT` 里带上同一个 `Infinity`，因此**该端口被豁免于回收**——它永远不会被判定为静默。仅在确实不需要 SharedWorker 回收器时使用（例如 Tab 总会自行 `stop()`，每个端口都经由 `STOP` 离开）。代价同样值得说明：这样配置的 Tab 如果*崩溃*，它的 `CentrifugeSession` 与 WebSocket 会原地保留，因为本会察觉的那颗心跳已经被关掉了。
+- **会话超时**：`3 × heartbeatIntervalMs`（默认 `30000` ms）。超过超时未收到消息的端口会被回收：其会话停止，WebSocket 关闭。`INIT` 中携带 `heartbeatIntervalMs: Infinity` 的端口没有超时，永不被回收。这与 Core 集群心跳（默认 `3000` ms，通过 localStorage 跟踪 worker 存活）相互独立——见下方说明。
 - **自适应频率**：回收器以所有活动端口中最小的心跳间隔运行，使短心跳端口的会话能被及时回收。当最后一个端口断开时，回收器定时器清除，避免长时间存在的 SharedWorker 在连接爆发间隙运行永久的空循环。
 - **关闭端口前先通知 Tab**：被回收的端口会先收到最后一条 `SESSION_REAPED` 消息，然后才被关闭、其会话才被停止。顺序正是关键所在——`MessagePort` 没有 close 事件，而向一个对端已关闭的端口发送消息会“成功”却什么都不送达，这是被饿死的 Tab 唯一能得知真相的途径。此前，一个只是被长时间阻塞、并没有消失的 Tab（一个很长的同步任务，或后台 Tab 受到的定时器节流）会保留自己的集群角色与 topic 路由，而它发出的每条发布都消失在已关闭的端口里，`getHealthSummary()` 仍在报告 `healthy` / `connected`。收到该消息后，transport 会丢弃这个 backend，并通过 `onError` 与 `error` 状态报告失败，正常恢复路径随后在新端口上重建会话。真实浏览器实测：34 秒阻塞之后，Tab 自行重建了订阅——无需用户操作、无需生命周期事件——观察时这条替代连接建立尚不到一秒。
 - **先关闭端口再停止会话**：回收端口时，先关闭端口，再停止会话。关闭端口会丢弃会话的 `disconnected` 状态通知（使其不会到达可能仍在运行但缓慢的主线程），并保证已关闭的端口永远无法传递后续消息，从而在回收器追踪之外复活僵尸会话。
-- **失败隔离**：回收与 `dispose()` 都用 try-catch 包裹 `target.close()`/`target.stop()`，单个异常端口不会中断本轮回收，也不会让后续死 Tab 无人回收。
-- **关闭清理**：SharedWorker 关闭时，`PortReaper.dispose()` 停止定时器并关闭/停止**所有**仍被追踪的会话，确保没有任何 `CentrifugeSession` 或 WebSocket 比 reaper 活得更久。这补充了按端口回收——后者只覆盖 reaper 运行期间静默的端口。
+- **失败隔离**：回收用 try-catch 包裹 `target.notify()`/`close()`/`stop()`，`dispose()` 则包裹 `close()`/`stop()`，单个异常端口不会中断本轮回收，也不会让后续死 Tab 无人回收。抛出的那一步之后的步骤确实会被跳过——但只跳过**这一个**端口的。
+- **`dispose()` 没有 Worker 侧调用者**：它会清除回收定时器并关闭/停止**所有**仍被追踪的会话，单元测试也覆盖了它，但发布出去的 SharedWorker 从不调用它——`MessagePort` 没有 close 事件，因此根本不存在"SharedWorker 正在关闭"这种可以挂靠的信号。每个端口都通过自己的 `STOP` 处理或回收器离开追踪，而最后一个被追踪的端口消失后，回收器的定时器随即清除。
 
 这是从崩溃（未发送 `STOP`）的 Tab 中恢复会话的机制；而它发出的那条通知，正是没有崩溃、只是被饿死的 Tab 能够察觉并重连的原因。降低 `heartbeatIntervalMs` 可更快回收死会话，代价是端口上更频繁的 PING 消息——另外请注意：如果它的值低于页面最长任务耗时的约三分之一，活着的 Tab 也会被开始回收，而每一次回收都要靠重建会话来恢复。
 

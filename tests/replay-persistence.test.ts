@@ -632,14 +632,26 @@ describe('createIndexedDbReplayPersistence', () => {
     const second = persistence.load();
     const third = persistence.load();
 
-    await expectRejectedSettling(first, 'transaction aborted');
-    await expectRejectedSettling(second, 'transaction aborted');
+    // Attach every handler before awaiting anything. The 40 ms abort is dispatched
+    // by a real timer, while `third`'s assertion used to sit *after* a healthy reopen
+    // round trip — so on a loaded runner that round trip could take longer than 40 ms,
+    // the rejection landed with no handler attached yet, and the run reported
+    // `Unhandled Rejection: Error: transaction aborted` with **all** tests passing and
+    // `pnpm test:coverage` exiting 1. Reproduced and settled in isolation: a rejection
+    // that fires before its assertion is attached fails the run, the same timing with
+    // the handler attached up front exits 0.
+    const firstRejected = expectRejectedSettling(first, 'transaction aborted');
+    const secondRejected = expectRejectedSettling(second, 'transaction aborted');
+    const thirdRejected = expectRejectedSettling(third, 'transaction aborted');
+
+    await firstRejected;
+    await secondRejected;
 
     scheduled.disable();
     await persistence.append(message('a', 9));
     expect(scheduled.openCalls).toBe(2);
 
-    await expectRejectedSettling(third, 'transaction aborted');
+    await thirdRejected;
 
     expect(scheduled.openCalls).toBe(2);
     expect((await persistence.load()).map(item => item.data.value)).toEqual([9]);
