@@ -14,7 +14,8 @@ pnpm add cross-tab-worker-databus
 - `cross-tab-worker-databus/centrifuge`：内置 Centrifuge Worker transport
 - `cross-tab-worker-databus/centrifuge.worker`：Dedicated Worker 构建产物，默认由内置 factory 加载，通常无需直接引用
 - `cross-tab-worker-databus/centrifuge.shared.worker`：SharedWorker 构建产物，默认由内置 factory 加载，通常无需直接引用
-- `cross-tab-worker-databus/hooks`：可选的 React hooks 适配层（`useCrossTabDataBus`、`useCrossTabSubscription`、`useCrossTabStatus`）；React（>= 18）为可选 peer 依赖
+- `cross-tab-worker-databus/hooks`：可选的 React hooks 适配层（`useCrossTabDataBus`、`useCrossTabSubscription`、`useCrossTabStatus`、`useCrossTabHealth`）；React（>= 18）为可选 peer 依赖
+- `cross-tab-worker-databus/vue`：可选的 Vue 组合式 API，四个名字相同（`useCrossTabDataBus`、`useCrossTabSubscription`、`useCrossTabStatus`、`useCrossTabHealth`）；Vue（>= 3.3）为可选 peer 依赖
 - `cross-tab-worker-databus` 同时导出零依赖的原生 `WebSocketTransport` / `createWebSocketDataBus`，适用于本身使用 WebSocket 的服务器
 
 `cross-tab-worker-databus/centrifuge` 入口依赖可选 peer dependency `centrifuge`（^5.5.3）。使用内置 Centrifuge transport 时请一并安装：`pnpm add centrifuge`。
@@ -46,7 +47,7 @@ export const dataBus = createCentrifugeDataBus<ResourceEvent>({
 
 `clusterKey` 默认由连接地址派生。它只用于集群隔离，进入 localStorage 和 BroadcastChannel 通道名称前会转换为不透明 key。请注意，通过 BroadcastChannel 协调通道发送的 Topic 名称和事件类型以明文传输；仅 localStorage 元数据通过哈希进行混淆。
 
-默认使用 Dedicated Worker，每个 Tab 一个 Worker。希望同源 Tab 复用同一个连接时，设置 `workerMode: 'shared'` 或 `'auto'`：
+默认使用 Dedicated Worker，每个 Tab 一个 Worker。`workerMode: 'shared'`（或先尝试 shared 的 `'auto'`）会把同源 Tab 放进**同一个** SharedWorker 进程——但不会合并它们的连接：每个连接的 port 都有自己的 `CentrifugeSession`，因此也有自己的 WebSocket，这正是关闭或刷新一个 Tab 不影响其余 Tab 的原因——N 个 Tab 仍是 N 条服务端连接、N 个 channel 订阅。shared 模式省下的是 Worker 进程，不是 socket：
 
 ```ts
 export const dataBus = createCentrifugeDataBus<ResourceEvent>({
@@ -144,7 +145,7 @@ pnpm examples
 
 打开 `http://localhost:4173/examples/demo/`，在多个浏览器标签页中同时打开即可观察跨 Tab 数据流转。页面支持：
 
-- 默认连接公共 Centrifugo 演示地址 `wss://faye.centrifugal.dev/connection/websocket`
+- 默认连接演示页自带的本地 Centrifugo 端点（`<scheme>://<host>/centrifuge/demo/connection/websocket`，页面加载时即写入地址框）；公共地址 `wss://faye.centrifugal.dev/connection/websocket` 只是可选预设之一，不是默认值
 - 在页面内修改 WSS 地址、`workerMode`、Topic 和 `transferable` 配置
 - 切换到"本地广播"模式，不依赖外部服务器，仅用 BroadcastChannel 演示多标签协同
 - 数据流动画、事件流、分发延迟指标和集群 Worker 路由状态

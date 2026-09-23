@@ -15,10 +15,20 @@ idempotent — the DataBus may call them repeatedly and replays them on reconnec
 
 ```ts
 interface DataBusTransport<TConfig = unknown, TData = unknown> {
+  /** Optional identity/backend labels surfaced through diagnostics. */
+  readonly diagnosticsName?: string;
+  readonly diagnosticsBackend?: string;
   start(config: TConfig, handlers: DataBusTransportHandlers<TData>): MaybePromise<void>;
   subscribe(topic: string): MaybePromise<void>;
   unsubscribe(topic: string): MaybePromise<void>;
-  publish(topic: string, data: unknown): MaybePromise<void>;
+  /** `options` carries the caller's `{ messageId, timestamp }`; a backend that
+   * drops it silently strips dedup identity and producer timestamps from peers. */
+  publish(topic: string, data: unknown, options?: DataBusPublishOptions): MaybePromise<void>;
+  /** Optional: one frame for a burst. Without it the DataBus loops `publish`.
+   * Each item is `{ data, messageId?, timestamp? }` — the same metadata `publish`
+   * takes, per entry. (That entry type is internal: name it inline, or widen the
+   * `ReadonlyArray` to whatever your backend accepts.) */
+  publishBatch?(topic: string, items: ReadonlyArray<{ data: unknown; messageId?: string; timestamp?: number }>): MaybePromise<void>;
   stop(): MaybePromise<void>;
 }
 
@@ -32,8 +42,12 @@ interface DataBusTransportHandlers<TData = unknown> {
 `start()` receives the user-supplied connection config (untyped `TConfig` — the
 backend owns its shape) and the three callbacks. Call `onStatus` whenever the
 connection state changes; call `onMessage` for each inbound publication; call
-`onError` for non-fatal errors (the DataBus applies a recovery cooldown so a
-flapping connection does not retry-loop).
+`onError` for non-fatal errors. Only `onStatus('error')` starts auto-recovery —
+the DataBus paces that reopen with a recovery cooldown and bounds it with
+`recovery.maxAttempts`, so a flapping connection does not retry-loop. `onError`
+records the failure for `getHealthSummary().lastFailure` and notifies subscribers,
+and nothing else: a backend that reports a dead socket through `onError` alone
+is never reopened.
 
 `start()` MUST settle its returned promise only once the backend is connected,
 and reject it when the attempt fails. The DataBus uses that settlement as its
@@ -65,8 +79,11 @@ transport only owns the I/O path: connect, subscribe, publish, disconnect.
 
 Mirror the Centrifuge backend's `centrifuge-protocol.ts`: a discriminated union
 of messages the main thread sends to the Worker (`INIT` / `SUBSCRIBE` /
-`UNSUBSCRIBE` / `PUBLISH` / `PUBLISH_BIN` / `PING` / `STOP`) and a union the
-Worker posts back (`STATUS` / `MESSAGE` / `MESSAGE_BIN` / `ERROR`). Keep it
+`UNSUBSCRIBE` / `PUBLISH` / `PUBLISH_BIN` / `PING` / `STOP`, plus
+`TOKEN_RESPONSE` / `TOKEN_ERROR` answering a credential request) and a union the
+Worker posts back (`STATUS` / `MESSAGE` / `MESSAGE_BIN` / `ERROR`, plus
+`TOKEN_REQUEST` for the credential bridge and `SESSION_REAPED` when a SharedWorker
+port is reclaimed). Keep it
 structured-cloneable (no functions,
 no class instances — `Error` must be serialised).
 
@@ -92,9 +109,13 @@ reference shape, including:
 
 - **Backend selection**: reuse `selectWorkerBackend` from `worker-mode.ts` so
   your backend degrades consistently with the rest of the SDK.
-- **Generation guard**: bump a monotonic counter when a backend is created;
-  error handlers check it so late errors from a superseded Worker cannot
-  corrupt the fresh session.
+- **Generation guard**: bump a monotonic counter when a backend is created or the
+  transport stops. Only the asynchronous credential bridge compares it, because a
+  provider can settle after the Worker it was answering is gone. Worker error
+  handlers read no such counter in the reference implementation — `stop()` and
+  `onWorkerFailed()` remove those listeners before the generation moves on, so a
+  superseded backend cannot reach the transport at all. If your backend keeps a
+  listener alive across a swap, that is when you need the check yourself.
 - **SharedWorker heartbeat**: if you use a SharedWorker, send periodic PINGs
   so a `PortReaper` can reclaim dead-tab sessions, and handle the
   `SESSION_REAPED` message the reaper posts before it closes a port. That
@@ -153,6 +174,7 @@ const bus = createWebSocketDataBus({
 Wire protocol (JSON text frames):
 
 - client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":"...","data":...,"messageId"?:"...","timestamp"?:123}`
+- client → server (batched): `{"op":"publishBatch","topic":"...","items":[{data,...,"messageId"?,"timestamp"?}]}` — one frame whose entries the server re-fans out as individual publications. Binary payloads ride inside it as byte arrays. A one-item batch is sent as a plain `publish` frame instead, so a server that implements only `publish` still sees the legacy shape; an empty batch is dropped before it reaches the socket. A batch frame on a closed socket is reported through `handlers.onError` and dropped.
 - server → client: the canonical publication is `{"op":"publication","publication":{"topic":"...","data":...,"messageId"?:"...","timestamp"?:123}}`. The legacy flat `{"topic":"...","data":...}` frame remains accepted. Frames without a string topic are ignored; malformed JSON is reported through `handlers.onError` without throwing.
 - A publication that carries its own string `topic` is addressed by **that** value rather than by the channel it arrived on — that is how a server delivering through a wildcard channel (`chat.*`) names the concrete topic. A payload whose top level happens to contain a `topic` string is therefore re-addressed, and dropped when no tab owns the resulting topic. On Centrifuge the channel normally arrives out of band, which is why the rule needs stating here: it is the one transport where "the topic was already in the frame" is not otherwise visible.
 
