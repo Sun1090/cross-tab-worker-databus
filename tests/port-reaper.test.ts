@@ -316,7 +316,12 @@ describe('PortReaper', () => {
     sets.length = 0; // reset after the initial register
 
     // Bad values should fall back to the default (10s heartbeat → 30s timeout).
-    for (const bad of [0, -1, NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    // `Number.POSITIVE_INFINITY` is deliberately not in this list: it is the one
+    // non-finite value the public API accepts and documents (see
+    // 'never reaps a port whose heartbeat was disabled with Infinity'), so it is not
+    // a "bad value" at all. `-Infinity` is — `assertHeartbeatInterval` rejects it, so
+    // it can only arrive from a main thread that is not this library.
+    for (const bad of [0, -1, NaN, Number.NEGATIVE_INFINITY]) {
       reaper.setTimeout(port as unknown as MessagePort, bad);
     }
     // schedule() is idempotent when the interval does not change, so no new set.
@@ -476,8 +481,14 @@ describe('PortReaper untracked-port and shutdown guards', () => {
     vi.useFakeTimers();
     try {
       const { register } = makeReaper();
-      // A malformed INIT payload must not silence the reaper (Infinity) nor
-      // degenerate it into a busy loop (0 / negative).
+      // These three cannot reach the reaper from the public API — `assertHeartbeatInterval`
+      // rejects every one of them at the transport constructor — so they can only arrive in a
+      // malformed INIT from a foreign main thread. None may silence the reaper (0 / negative
+      // would also degenerate its cadence into a busy loop).
+      //
+      // `Infinity` is deliberately absent from this list: it is the one non-finite value the
+      // public API accepts and documents, and it means the opposite of malformed here. See
+      // 'never reaps a port whose heartbeat was disabled with Infinity'.
       const nan = register('nan', Number.NaN);
       const zero = register('zero', 0);
       const negative = register('neg', -5_000);
@@ -495,6 +506,45 @@ describe('PortReaper untracked-port and shutdown guards', () => {
       expect(nan.port.closed).toBe(true);
       expect(zero.port.closed).toBe(true);
       expect(negative.port.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never reaps a port whose heartbeat was disabled with Infinity', () => {
+    // The two halves of one documented option, which only meet across the Worker
+    // boundary. `heartbeatIntervalMs: Infinity` passes `assertHeartbeatInterval`, and
+    // `startHeartbeat()` answers it by sending **no PING at all** — pinned by
+    // 'disables PING entirely when heartbeatIntervalMs is Infinity'. So the INIT that
+    // carries it is the main thread saying "I will never prove liveness on this port
+    // again", and `docs/configuration.md` offers that as the way to run shared mode
+    // without a reaper. Treating it as a malformed number instead fell back to the
+    // default 10s, i.e. a 30s session timeout, which guaranteed the exact outcome the
+    // option exists to avoid: an idle tab reclaimed half a minute after connecting,
+    // with no heartbeat left to bring it back.
+    vi.useFakeTimers();
+    try {
+      const { reaper, register } = makeReaper();
+      const exempt = register('no-heartbeat', Infinity);
+      // A second tab on the same SharedWorker keeps an ordinary heartbeat, so the
+      // exemption must be per-port and must not silence the reaper for the cluster.
+      const normal = register('normal-heartbeat', 10_000);
+
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(exempt.port.closed).toBe(false);
+      expect(exempt.session.stopped).toBe(0);
+      expect(exempt.session.notified).toBe(0);
+      expect(normal.port.closed).toBe(true);
+      expect(normal.session.stopped).toBe(1);
+
+      // "Never reaped" is not "no longer tracked". Dropping the exempt port from the
+      // reaper's maps would also take it out of `dispose()`, which is the one path
+      // that still has to close it — otherwise the exemption would leak a session and
+      // its WebSocket for the life of the SharedWorker.
+      reaper.dispose();
+      expect(exempt.port.closed).toBe(true);
+      expect(exempt.session.stopped).toBe(1);
+      expect(exempt.session.notified).toBe(0);
     } finally {
       vi.useRealTimers();
     }

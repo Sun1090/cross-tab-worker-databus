@@ -515,6 +515,16 @@ describe('createCentrifugeDataBus', () => {
     // No PINGs should ever be sent, even after advancing time.
     await vi.advanceTimersByTimeAsync(60_000);
     expect(shared.port.messages.filter(m => m.type === 'PING')).toEqual([]);
+    // And the Worker is *told* why: the INIT must carry the Infinity, because that
+    // is the only signal `PortReaper` gets that this port will never prove liveness.
+    // An INIT that dropped it (or normalised it to the default) would leave the port
+    // on the 30s default timeout with no heartbeat to answer it — the defect
+    // 'never reaps a port whose heartbeat was disabled with Infinity' pins from the
+    // other side.
+    const init = shared.port.messages.find(m => m.type === 'INIT') as
+      | (CentrifugeWorkerInput & { type: 'INIT' })
+      | undefined;
+    expect(init?.heartbeatIntervalMs).toBe(Infinity);
     await bus.stop();
   });
 

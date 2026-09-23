@@ -72,14 +72,22 @@ export class PortReaper {
   }
 
   /** Override a port's session timeout from its INIT heartbeat config.
-   * A non-finite or non-positive value falls back to the default so a bad
-   * payload cannot degenerate the reaper into a busy loop or silence it.
-   * No-op for untracked ports (e.g. setTimeout arrives after remove/STOP). */
+   * `Infinity` is the documented way to disable the PING heartbeat, and it means
+   * this port can never be judged silent: `startHeartbeat()` sends nothing at all
+   * once configured that way, so a timeout would be a death sentence with no
+   * possible appeal. A non-finite-or-non-positive *other* value falls back to the
+   * default so a bad payload cannot degenerate the reaper into a busy loop or
+   * silence it — those three (NaN, 0, negative) are rejected by
+   * `assertHeartbeatInterval` at the transport constructor and so can only arrive
+   * from a main thread that is not this library. No-op for untracked ports (e.g.
+   * setTimeout arrives after remove/STOP). */
   setTimeout(port: MessagePort, heartbeatIntervalMs: number): void {
     if (!this.targets.has(port)) return;
-    const safe = Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
-      ? heartbeatIntervalMs
-      : DEFAULT_HEARTBEAT_INTERVAL_MS;
+    const safe = heartbeatIntervalMs === Infinity
+      ? Infinity
+      : Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
+        ? heartbeatIntervalMs
+        : DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.sessionTimeoutMs.set(port, safe * DEFAULT_SESSION_TIMEOUT_MULTIPLIER);
     this.schedule();
   }

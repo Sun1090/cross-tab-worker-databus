@@ -362,7 +362,7 @@ Available options:
 
 - `workerMode`: `'dedicated'` (default), `'shared'`, or `'auto'`; the `auto` degradation chain is SharedWorker -> Dedicated Worker -> local mode
 - `transferable`: `boolean`, default `false`; when enabled, ArrayBuffer payloads use Transferable transport, while the object message API remains unchanged
-- `heartbeatIntervalMs`: `number`, default `10000`; SharedWorker PING heartbeat interval in ms. `Infinity` disables heartbeats. Must be a positive number or `Infinity` — `0`, a negative number, or `NaN` throws a `TypeError` in the transport constructor. See [configuration](./configuration.md#sharedworker-session-reaper) for details
+- `heartbeatIntervalMs`: `number`, default `10000`; SharedWorker PING heartbeat interval in ms. `Infinity` disables heartbeats and exempts that port from reaping. Must be a positive number or `Infinity` — `0`, a negative number, or `NaN` throws a `TypeError` in the transport constructor. See [configuration](./configuration.md#sharedworker-session-reaper) for details
 - `workerFactory`: custom Dedicated Worker loading method
 - `sharedWorkerFactory`: custom SharedWorker loading method
 
