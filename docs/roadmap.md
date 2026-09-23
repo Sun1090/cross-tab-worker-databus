@@ -1,6 +1,36 @@
 # Roadmap
 
-0.21.12 was released on September 23, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.13 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.13 delivered scope
+
+- The prose audit reached the last published surface it had not read: comments *inside function
+  bodies* in `src/**`. They ship because esbuild preserves them into `dist/**/*.js` and
+  `dist/cjs/*.cjs`, both listed in `package.json` `files`, so the 0.21.11/0.21.12 sweep (docs +
+  READMEs) and the declaration-JSDoc sweep had each left this half of the published text unread.
+  Thirty-three claims were corrected after each was re-read against the code it describes, and a
+  dozen more candidates were cleared on inspection and recorded with the reason.
+- Two of those corrections change how a maintainer reads the code, not just its prose. A proof that
+  a chained `.catch` resolves rested on "`reportError` cannot throw", which the same file contradicts
+  500 lines lower and a shipped test pins; and three comments credited themselves with preventing
+  something the adjacent code already handles — most consequentially `isAssigned`, whose real reason
+  for preferring the in-memory map is a `CONTROL/SUBSCRIBE` accepted with no durable route, the state
+  `tests/cluster.test.ts` already pins.
+- Claims about a *dependency* now name it. Against `centrifuge@5.7.4` there is one client-level
+  credential hook and no `getChannelToken` in the package at all, so that request kind has never
+  fired outside a test fake; and `CentrifugeSession.unsubscribe()` removes the emitter's own no-op
+  `error` guard under a comment claiming internals were preserved. The second is recorded as an open
+  question with the interleaving it would take to call it a defect — the test double cannot exhibit
+  the guard, so no existing test can see it either way.
+- `pnpm bench:compare --fail-above-pct 50` gained the leg its median baseline could not supply: a
+  value must now also exceed the highest sample in its own baseline window, because a median over a
+  bimodal metric is stable only while the modes stay mixed. What that excuses is printed rather than
+  passed silently, and the cost is written down beside it — a sustained shift inside the observed
+  range is now invisible to the gate. Both legs were attributed by mutation: removing the new one
+  fails exactly one test, suppressing everything fails four including the pre-existing pair path.
+- No behavior, wire-format, storage-layout or cluster-protocol change. The only executable edit in
+  the release is inside `scripts/`, which the package does not publish; coverage stays at
+  99.01 / 96.90 / 99.26 / 99.69 over **897** tests.
 
 ## 0.21.12 delivered scope
 
