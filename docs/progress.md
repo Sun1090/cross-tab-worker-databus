@@ -6940,6 +6940,65 @@ corroborates the 26-spec collection.)
     that: a reaper that killed the survivor mid-handover would show up as a fresh socket id.
 - Updated: 2026-09-23.
 
+## Phase 127 / 0.21.9 shipped — the first release in this run of passes that changes behaviour
+
+- Version: `0.21.9`, published. Tag `v0.21.9` (annotated tag object `dabb3249`) at
+  `65445fa9f2ed259c6a8862ade3b7fbafbf0b6a55`, the squash of PR #213, whose CI run `35799762848` and
+  CodeQL run `35799762892` were both green on that commit before merge.
+- What the release carries: the shared-worker fix (#210) — `PortReaper` now posts `SESSION_REAPED` on
+  the port *before* closing it, and the transport turns that into the same backend loss a Worker crash
+  produces, so a starved shared tab reports `error` and rebuilds instead of owning its topic with zero
+  server-side subscribers forever; the shared-mode owner-migration E2E (#209); and the removal of the
+  browser gate headless Chromium cannot reproduce, with the claims it had produced corrected (#212).
+  `CHANGELOG.md` gained a `### Fixed` section for the first time in this sequence of passes.
+- Freeze evidence, all measured on the release commit: `pnpm check` (typecheck, build, 37 files / **890**
+  tests, 5 perf gates), `pnpm test:coverage` at 99.01 / **96.90** / 99.26 / 99.69, `pnpm lint` and
+  `git diff --check` clean, `pnpm test:e2e` **37 passed in 30.9 s**, `pnpm bench` (28 benchmarks),
+  `pnpm verify:pack` (ESM + CJS, root and every subpath, from the 0.21.9 tarball), `pnpm verify:compat`
+  (`0.21.9 preserves public exports and type metadata from v0.21.8`),
+  `pnpm audit --registry=https://registry.npmjs.org` (no known vulnerabilities), and
+  `RELEASE_TAG=v0.21.9 node scripts/verify-release-version.mjs`.
+- `pnpm bench:compare --fail-above-pct 50` **passed** (`dedup1000Ms −6.0%`,
+  `traceAndPublish1000Ms +11.3%`, nothing above the ceiling) — but only after one documented
+  adjudication, in `2101f08`'s message: the first two runs tripped on exactly the two metrics the trend
+  file's own note is about, at +100.8% and +98.6%. Rather than call that noise, 13 samples of *this*
+  tree were collected and read 10.7 / 12 / 13 / 13.7 / 14 / 14.8 / 15.6 / 16.6 / 22.5 and
+  24.3 / 26.4 / 29.4 ms with `wildcardDispatch1000Ms` within ±10% throughout — the fast/slow two-mode
+  swing Phase 56 recorded during the 0.20.94 cut, on a machine whose 1-minute load average measured 22
+  then 114. The only hot-path addition in this release is one extra type test in `handleOutput`, which
+  the dedup metric never reaches.
+- Publish: Release workflow run `35799784203` on the tag, 15 steps, all green. `Publish to npm` logged
+  `+ cross-tab-worker-databus@0.21.9` (shasum `927d12718cca33e834108368241730c8c75bf51b`) at
+  23:57:57Z and the GitHub release opened at
+  https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.21.9.
+- Post-publish smoke: the blocking `Verify published npm consumers` step retried 40 times and propagated
+  on **attempt 41 of 48** — `[npm] verified published cross-tab-worker-databus@0.21.9 ESM/CJS consumers`
+  at 00:03:06Z, about 5m09s after the publish — and the job recorded `published-consumer-check: success`
+  and completed in 6m26s. `npm view` against `registry.npmjs.org` reports `version = 0.21.9`,
+  `dist-tags = { latest: '0.21.9' }`, and an offline repeat with `pnpm verify:published` exits 0 on its
+  **first** attempt. As in 0.21.8: the `not available yet` lines in that step are propagation retries the
+  step is built to absorb, not failures.
+- Repository hygiene after the release: `main` is the only branch locally and remotely. The three topic
+  branches were deleted when their PRs merged (#209, #210, #212) and when #211 closed as superseded; the
+  local leftover `chore/release-0.21.9` was checked before deletion and its only commit (`7db656b`) is
+  precisely the changelog/spec version that #212 removed, so nothing was lost. No force-push, no merge
+  commit, no tag moved.
+- Changed files: `docs/progress.md`.
+- Risk / rollback: this record changes no code, so its own rollback is `git revert`. A defect found in
+  0.21.9 later rolls back by reverting `65445fa` and publishing `0.21.10`, since a published version
+  cannot be re-published and its tag must not move; the protocol addition is additive in both directions
+  (an older main thread ignores the new message type, pinned by `ignores a Worker output type it does not
+  handle`), so a rollback needs no coordinated client upgrade.
+- Next: measure the consequence of this fix instead of reasoning about it. A tab that is *throttled*
+  rather than dead is the case the announcement exists for, and the reclaim is now followed by a rebuild
+  — but Chrome's background clamp is ≥1 minute while the session timeout is 3×10 s, so the clamp itself
+  exceeds the timeout and every throttled tick is eligible to reap a live session. What that costs (one
+  fresh WebSocket plus re-subscribe per minute per hidden tab, and one `error` status each time) is
+  unmeasured, and Playwright passes `--disable-background-timer-throttling` in its default Chromium
+  switches, so a probe needs `ignoreDefaultArgs`. Decide from the number: the alternative to churn is the
+  bug 0.21.9 just fixed, and "raise the timeout above the clamp" trades dead-port release latency for it.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
