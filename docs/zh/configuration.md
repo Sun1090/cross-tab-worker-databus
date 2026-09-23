@@ -249,21 +249,25 @@ Worker 模式下配置通过 `Worker` / `SharedWorker` 的 `postMessage` 发送�
 
 ## storage 数据边界
 
-storage 只保存：
+本库亲自写入的协调记录（`worker:*`、`route:*`、`subscriber:*` 以及 tab-id 键）只保存：
 
 - Worker ID、Tab ID、状态、可见性、负载和心跳
 - Topic 的不透明 key、owner Worker 和更新时间
 - Topic subscriber 的 Tab ID
 
-storage 不保存：
+这些记录里永远不会出现：
 
 - 连接地址原文
 - Topic 原文
 - 连接凭证
 - publication 数据
-- `publish` 数据
 
-注意：BroadcastChannel 协调消息以明文传输 Topic 名称、事件类型和 publication payload（仅存在于内存中）。只有 localStorage 元数据通过 `createOpaqueKey()` 哈希处理。
+这是对**这些键**的约束，不是对浏览器存储整体的约束。有两个开关会把 Topic 明文和 payload 写进去：
+
+- `channelFallback: 'storage-event'` 把每一帧协调消息整体写到 `cross-tab-worker-databus:channel:*` 之下，而一条 `CONTROL/PUBLISH` 帧同时携带它的 Topic 名称与 payload——因此这些数据会留在 `localStorage` 直到该 channel 关闭，若 tab 先退出则无限期保留。
+- `replay.persistence`（如 `createIndexedDbReplayPersistence`）把回放历史存在 IndexedDB 的一个 object store 里，该 store 以 Topic 明文为 key，payload 就在其中的行里。
+
+注意：BroadcastChannel 协调消息以明文传输 Topic 名称、事件类型和 publication payload（仅存在于内存中，除非承载它们的是上面那条降级通道）。只有 localStorage 元数据通过 `createOpaqueKey()` 哈希处理。
 
 ## 安全与信任模型
 
@@ -275,7 +279,7 @@ storage 不保存：
 - `clusterKey` 通过 `createOpaqueKey`(非密码学 128-bit 哈希)派生 storage 前缀与 BroadcastChannel 名称。实践中 `clusterKey` 总是连接 URL 或开发者控制的命名空间,两个不同 `clusterKey` 间的哈希碰撞(~2⁻⁶⁴ 生日界限)不是实际问题。
 - 缓解措施:页面内不要加载不受信任的第三方脚本;在独立源上承载协调逻辑;将源的 `localStorage` 与 BroadcastChannel 命名空间视为公开区域。CSP 无法限制同源脚本对 BroadcastChannel 或 localStorage 的访问。
 
-transport 平面(如 Centrifuge WebSocket)有自己的安全模型——token、TLS 和服务端权限——不受上述影响。集群只决定哪个 Tab 持有 transport 订阅,从不把 payload 写入 `localStorage`(payload 经 BroadcastChannel 内存传输或由服务端直发)。
+transport 平面(如 Centrifuge WebSocket)有自己的安全模型——token、TLS 和服务端权限——不受上述影响。集群只决定哪个 Tab 持有 transport 订阅;payload 随后由该 owner 经 BroadcastChannel 送达其他 Tab,或直接由服务端送达持有订阅的那个 Tab。唯一的例外就是上面那条 `channelFallback: 'storage-event'` 降级路径:那里的通道本身就是 `localStorage`,同样的帧——连 payload 一起——会被写进去。
 
 ## 集群隔离建议
 

@@ -47,7 +47,7 @@ export const dataBus = createCentrifugeDataBus<ResourceEvent>({
 
 `clusterKey` is derived from the connection URL by default. It is only used for cluster isolation and is converted to an opaque key before entering localStorage and as the BroadcastChannel channel name. Note that topic names and event types sent over the BroadcastChannel coordination channel are transmitted in plaintext; only localStorage metadata is obfuscated via hashing.
 
-By default, a Dedicated Worker is used, one Worker per Tab. `workerMode: 'shared'` (or `'auto'`, which tries shared first) puts same-origin Tabs into **one** SharedWorker process — but it does not merge their connections. Each connecting port gets its own `CentrifugeSession` and so its own WebSocket, which is why closing or refreshing one tab leaves the others subscribed: N tabs still mean N server-side connections and N channel subscriptions. Shared mode saves the Worker process, not the socket:
+By default, a Dedicated Worker is used, one Worker per Tab. `workerMode: 'shared'` (or `'auto'`, which tries shared first) puts same-origin Tabs into **one** SharedWorker process — but it does not merge their connections. Each connecting port gets its own `CentrifugeSession` and so its own WebSocket, which is why closing or refreshing one tab leaves the others subscribed: N tabs still mean N server-side connections. The channels are not multiplied the same way, because a transport subscribes only the Topics its own worker owns, so a given Topic's channel appears on one tab's socket rather than on all N. Shared mode saves the Worker process, not the socket:
 
 ```ts
 export const dataBus = createCentrifugeDataBus<ResourceEvent>({

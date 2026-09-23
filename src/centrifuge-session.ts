@@ -172,10 +172,21 @@ export class CentrifugeSession<TData = unknown> {
     // an `error` emit with no listener (`:162`). This call removes that guard,
     // and the `.on('error', …)` two statements below replaces it for as long as
     // this session holds the subscription. `unsubscribe()` removes both and adds
-    // nothing back, which is the open question at this boundary: every
-    // `emit('error')` site in `BaseSubscription` that was checked is behind a
-    // `_isSubscribing()`/`_isSubscribed()` guard, so no post-unsubscribe throw
-    // has been produced — see docs/progress.md, Phase 134.
+    // nothing back, which is settled rather than open. All twelve `emit('error')`
+    // sites in `BaseSubscription` (`:667-2674`) sit behind a
+    // `_isSubscribing()`/`_isSubscribed()` test except one, the
+    // `badConfiguration` emit in `_getSubscriptionToken`; and after
+    // `_setUnsubscribed` has moved `state` to `Unsubscribed` no path re-enters it
+    // — the resubscribe timer's callback re-tests `_isSubscribing()` before it
+    // does anything, the client's reconnect pass (`_sendSubscribeCommands`)
+    // drives only subscriptions whose state is already `Subscribing`, and
+    // `_refresh()`, the one entry into `_getSubscriptionToken` with no state test
+    // of its own, is reachable only through `_refreshTimeout`, which
+    // `_setUnsubscribed` clears via `_clearSubscribedState()`. So a throw would
+    // need the listeners gone while the object is still live, and
+    // `unsubscribe()` does not leave it live. `MapSubscription` and
+    // `SharedPollSubscription` have their own emit sites but never carry this
+    // session's listeners — `newSubscription` constructs a plain `Subscription`.
     subscription.removeAllListeners('publication');
     subscription.removeAllListeners('error');
     subscription.removeAllListeners('unsubscribed');

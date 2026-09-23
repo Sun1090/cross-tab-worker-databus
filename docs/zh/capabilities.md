@@ -47,7 +47,7 @@
 | SUBSCRIBE 路由绑定 | 协调 | 当持久化 route 指向另一个 Worker 时，入站 `CONTROL/SUBSCRIBE` 会被丢弃；等待 `ROUTE_RELEASED` 的 route 只被匹配的交接 ACK 确认——因此较早分配轮的迟到帧不能创建持久 ownership、订阅 transport 或确认悬挂交接。topic 读不到 route 时该帧是被接受而非丢弃，而这个容忍是有界的：没有 route 可盖章时 `confirmRoute` 什么都不写，下一次 reconcile 会收回这条 assignment。它换来的是存储不可用、或记录已过期时协调仍能工作 |
 | 交接 ACK 有效性 | 协调 | 仅当 route 仍指向接收方、释放方匹配 `handoffFromWorkerId`、且 ACK 代数与存储 route 代数精确相等时才接受 `ROUTE_RELEASED`——其他交接轮次的过期 ACK（如 a↔b 乒乓）会被丢弃 |
 | 回放持久化清理顺序 | 持久性 | 排队中的批量 flush 会按先到清理过滤（`unsubscribe`/`clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 丢弃整个待写批次）；已清或已停止会话的历史不会被进行中的 flush 重新追加 |
-| 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）而不阻塞其他排队键；队列清空或 `clear()` 取消后退避重置 |
+| 存储写入恢复 | 协调 | 合并写以指数退避重试（50 ms → 1.6 s 上限）；结构性失败键在 5 次后丢弃（并 `console.warn`）；本轮 flush 在第一个失败处停止，因此排在它之后的键要等该键的那次重试（四轮退避 50+100+200+400 ms）一起补写——被延后，而非永久阻塞；队列清空或 `clear()` 取消后退避重置 |
 | 传输恢复预算 | 生命周期 | 自动恢复由冷却间隔节流、以 `recovery.maxAttempts` 为界，预算耗尽时报 `exhausted`；成功重开后重置尝试计数与 exhausted，断线传输上的显式 `subscribe` 仍可手动恢复 |
 | 恢复 waiter 生命周期 | 生命周期 | 停靠在 transport recovery gate 上的操作会捕获恢复取消 generation；`stop()` / 页面隐藏会使其失效，因此紧随其后的显式 `start()` 在 replacement transport 重建订阅后，不会再执行过期操作造成重复订阅。相对地，显式 `start()` 取代自动恢复 timer 时会保留门及其停靠操作；若手动重开也失败，后续自动或按需重开仍可成功回放这些操作 |
 | BFCache 挂起 | 生命周期 | 隐藏页面停掉传输并静默取消进行中的持久化重试；pageshow 重开传输并每个周期恰好一次重建订阅 |

@@ -256,21 +256,25 @@ When non-clonable data is passed, `CentrifugeWorkerTransport` will throw a clear
 
 ## Storage Data Boundaries
 
-Storage only holds:
+The coordination records this library writes itself (`worker:*`, `route:*`, `subscriber:*`, and the tab-id key) hold only:
 
 - Worker ID, Tab ID, status, visibility, load, and heartbeat
 - Opaque Topic key, owner Worker, and last update time
 - Topic subscriber's Tab ID
 
-Storage does NOT hold:
+Those records never hold:
 
 - Connection URL plaintext
 - Topic names
 - Connection credentials
 - Publication data
-- Publish data
 
-Note: BroadcastChannel coordination messages carry topic names, event types, and publication payloads in plaintext (in-memory only). Only localStorage metadata is hashed via `createOpaqueKey()`.
+That is a boundary around *those keys*, not around browser storage in general. Two opt-ins put Topic plaintext and payloads into it:
+
+- `channelFallback: 'storage-event'` writes every coordination **frame** whole under `cross-tab-worker-databus:channel:*`, and a `CONTROL/PUBLISH` frame carries its Topic name and payload — so they sit in `localStorage` until the channel is closed, and indefinitely if the tab is killed first.
+- `replay.persistence` (e.g. `createIndexedDbReplayPersistence`) keeps replay history in IndexedDB in an object store keyed by the plaintext Topic, with the payloads in its rows.
+
+Note: BroadcastChannel coordination messages carry topic names, event types, and publication payloads in plaintext (in memory only, unless the fallback above is what is carrying them). Only localStorage metadata is hashed via `createOpaqueKey()`.
 
 ## Security & Trust Model
 
@@ -282,7 +286,7 @@ The coordination plane has **no authentication**. Only use this library on pages
 - `clusterKey` is hashed via `createOpaqueKey` (a non-cryptographic 128-bit hash) to derive the storage prefix and BroadcastChannel name. In practice `clusterKey` is always a connection URL or a developer-controlled namespace, so a hash collision between two different clusterKeys (~2⁻⁶⁴ birthday bound) is not a practical concern.
 - Mitigations: keep the page free of untrusted third-party scripts; load coordination on an isolated origin; treat the origin's `localStorage` and BroadcastChannel namespaces as public. CSP cannot restrict BroadcastChannel or localStorage access from same-origin scripts.
 
-The transport plane (e.g. the Centrifuge WebSocket) has its own security model — tokens, TLS, and server-side permissions — and is unaffected by the above. The cluster only routes which tab owns the transport subscription; it never proxies the payload through `localStorage` (payloads travel via BroadcastChannel in memory or via the server directly).
+The transport plane (e.g. the Centrifuge WebSocket) has its own security model — tokens, TLS, and server-side permissions — and is unaffected by the above. The cluster only decides which tab owns the transport subscription; a payload then reaches a tab from that owner over the BroadcastChannel, or from the server directly for the tab holding the subscription. The one exception is the `channelFallback: 'storage-event'` path above: there the channel *is* `localStorage`, so those same frames — payloads included — are written into it.
 
 ## Cluster Isolation Recommendations
 

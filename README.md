@@ -99,7 +99,7 @@ pnpm build
 pnpm examples
 ```
 
-Then open `http://localhost:4173/examples/demo/` in multiple tabs at the same time to see cross-tab data flowing. The demo page uses the public Centrifugo demo endpoint `wss://faye.centrifugal.dev/connection/websocket` by default; the address, Worker mode, and Topics can all be modified in-page. You can also switch to "local broadcast" mode, which does not depend on an external server and demonstrates multi-tab coordination purely through BroadcastChannel.
+Then open `http://localhost:4173/examples/demo/` in multiple tabs at the same time to see cross-tab data flowing. The demo page seeds its address box with the demo server's own local Centrifugo endpoint (`<scheme>://<host>/centrifuge/demo/connection/websocket`); the public `wss://faye.centrifugal.dev/connection/websocket` is one of the selectable presets, not the default. The address, Worker mode, and Topics can all be modified in-page. You can also switch to "local broadcast" mode, which does not depend on an external server and demonstrates multi-tab coordination purely through BroadcastChannel.
 
 The demo page includes data-flow animations, an event stream, receive/dispatch latency metrics, and cluster Worker routing status.
 

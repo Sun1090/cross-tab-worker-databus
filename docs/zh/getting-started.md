@@ -47,7 +47,7 @@ export const dataBus = createCentrifugeDataBus<ResourceEvent>({
 
 `clusterKey` 默认由连接地址派生。它只用于集群隔离，进入 localStorage 和 BroadcastChannel 通道名称前会转换为不透明 key。请注意，通过 BroadcastChannel 协调通道发送的 Topic 名称和事件类型以明文传输；仅 localStorage 元数据通过哈希进行混淆。
 
-默认使用 Dedicated Worker，每个 Tab 一个 Worker。`workerMode: 'shared'`（或先尝试 shared 的 `'auto'`）会把同源 Tab 放进**同一个** SharedWorker 进程——但不会合并它们的连接：每个连接的 port 都有自己的 `CentrifugeSession`，因此也有自己的 WebSocket，这正是关闭或刷新一个 Tab 不影响其余 Tab 的原因——N 个 Tab 仍是 N 条服务端连接、N 个 channel 订阅。shared 模式省下的是 Worker 进程，不是 socket：
+默认使用 Dedicated Worker，每个 Tab 一个 Worker。`workerMode: 'shared'`（或先尝试 shared 的 `'auto'`）会把同源 Tab 放进**同一个** SharedWorker 进程——但不会合并它们的连接：每个连接的 port 都有自己的 `CentrifugeSession`，因此也有自己的 WebSocket，这正是关闭或刷新一个 Tab 不影响其余 Tab 的原因——N 个 Tab 仍是 N 条服务端连接。channel 却不会按 N 倍增：一个 transport 只订阅自己那个 worker 拥有的 Topic，所以某个 Topic 的 channel 只会出现在其中一个 Tab 的 socket 上，而不是 N 条上都有。shared 模式省下的是 Worker 进程，不是 socket：
 
 ```ts
 export const dataBus = createCentrifugeDataBus<ResourceEvent>({

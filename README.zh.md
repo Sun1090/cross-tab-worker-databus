@@ -95,7 +95,7 @@ pnpm build
 pnpm examples
 ```
 
-然后在多个浏览器标签页中同时打开 `http://localhost:4173/examples/demo/` 即可观察跨 Tab 数据流转。演示页默认使用公共 Centrifugo 演示地址 `wss://faye.centrifugal.dev/connection/websocket`；地址、Worker 模式和 Topic 都可在页面内修改。也可以切换到"本地广播"模式，不依赖外部服务器，仅通过 BroadcastChannel 演示多标签协同。
+然后在多个浏览器标签页中同时打开 `http://localhost:4173/examples/demo/` 即可观察跨 Tab 数据流转。演示页加载时会把演示服务自带的本地 Centrifugo 端点（`<scheme>://<host>/centrifuge/demo/connection/websocket`）写入地址框；公共地址 `wss://faye.centrifugal.dev/connection/websocket` 只是可选预设之一，不是默认值。地址、Worker 模式和 Topic 都可在页面内修改。也可以切换到"本地广播"模式，不依赖外部服务器，仅通过 BroadcastChannel 演示多标签协同。
 
 演示页包含数据流动画、事件流、接收/分发延迟指标和集群 Worker 路由状态。
 

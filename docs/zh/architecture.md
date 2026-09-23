@@ -186,7 +186,7 @@ BroadcastChannel CONTROL
   └─ topic + topicKey + sourceWorkerId + targetWorkerId + action
 ```
 
-因此，`topicKey` 能把路由记录和控制消息对应起来，但不能从 localStorage 反推出原始 `topic`；只有仍存活的 Runtime 才保留 `topicKey → topic` 的内存映射。
+因此，`topicKey` 能把路由记录和控制消息对应起来，但无法由 key 本身反推出原始 `topic`；只有仍存活的 Runtime 才保留 `topicKey → topic` 的内存映射。
 
 ### 内存 Topic key 缓存 (`knownTopics`)
 
@@ -218,7 +218,7 @@ BroadcastChannel CONTROL
 | `subscribe(topic)` | `rememberTopic(topic)` → `set(topicKey, topic)` | 填充反向映射，供无 storage 模式的 `readRoute` 使用 |
 | `publish(topic, data)` | `rememberTopic(topic)` → `set(topicKey, topic)` | 同上 |
 | `unsubscribe(topic)` | 如不在 `assignedTopics` 中则 `delete(topicKey)` | 不再需要；仅当仍持有该 topic 时才保留 |
-| 收到 `CONTROL`（任意动作：SUBSCRIBE / UNSUBSCRIBE / PUBLISH） | `rememberTopic(message.topic)` → `set(topicKey, topic)` | 每条入站控制消息都携带明文 topic，handler 在动作分派前先缓存它 |
+| 收到 `CONTROL`（任意动作：SUBSCRIBE / UNSUBSCRIBE / PUBLISH） | `rememberTopic(message.topic)` → `set(topicKey, topic)` | 入站帧携带明文 topic，但 `rememberTopic` 位于 `targetWorkerId` 与 `topicKey` 配对两道守卫**之后**，被任一守卫丢弃的帧永远不会被缓存 |
 | 收到 `CONTROL/UNSUBSCRIBE` | 不做直接删除 | `rememberTopic` 仍会缓存该 topic；路由不再指向本 worker 后由 `reconcileAssignedTopics` 移除 |
 | `reconcileAssignedTopics` | 如未订阅且未持有则 `delete(topicKey)` | 路由不再指向我们——除非仍是 subscriber 否则清理 |
 | `stop()` | `clear()` | 完全销毁 |
@@ -258,7 +258,7 @@ sequenceDiagram
   RuntimeA->>App: 调用 handler(payload)
 ```
 
-第二个 Tab 订阅同一 Topic 时，只新增自己的 `subscriber:{topicKey}:{tabId}`；只要现有 route 的 owner 仍存活，就不会再次建立一条 transport 订阅。退订时删除当前 Tab 的 subscriber 记录；当没有任何 subscriber 时，owner 才会退订 transport 并清理 route。
+第二个 Tab 订阅同一 Topic 时，只新增自己的 `subscriber:{topicKey}:{tabId}`；只要现有 route 的 owner 仍存活，就不会再次建立一条 transport 订阅。退订时删除当前 Tab 的 subscriber 记录；若它已是最后一条，同一个 Tab 顺带删除 route，并向 route 记录的 worker 发出 `CONTROL/UNSUBSCRIBE`——收到的一方就此放弃 ownership 并释放 transport 订阅。
 
 ### 控制台排查
 
@@ -332,7 +332,7 @@ console.table(__bus.getClusterSnapshot().routes)
 
 | 类型 | 方向 | 用途 |
 |---|---|---|
-| `CONTROL` | 点对点（A → B） | 请求目标 Worker 对某 Topic 执行 `SUBSCRIBE`、`UNSUBSCRIBE` 或 `PUBLISH`。携带 `action`、`topic`、`topicKey`、`targetWorkerId` 和可选 `data`。只有持久化 route 当前指向目标且不在等待 `ROUTE_RELEASED` 时，`SUBSCRIBE` 才会被执行。 |
+| `CONTROL` | 点对点（A → B） | 请求目标 Worker 对某 Topic 执行 `SUBSCRIBE`、`UNSUBSCRIBE` 或 `PUBLISH`。携带 `action`、`topic`、`topicKey`、`targetWorkerId` 和可选 `data`。持久化 route 指向*其他* worker 时 `SUBSCRIBE` 被丢弃；仍在等待 ACK 的交接只接受与它配对的那条 `ROUTE_RELEASED`。route 完全读不到时帧被放行——这样的帧换不到持久所有权（`confirmRoute` 无 route 可写），下一轮 reconcile 会撤回该 assignment。 |
 | `EVENT` | 广播（owner → 所有 Tab） | 把 transport 投递给 owner Worker 的 publication 扇出到所有 Tab。携带 `eventType` 和 `payload`。 |
 | `REGISTRY` | 广播 | 注册表或路由写入后通知所有 Tab 立即 reconcile，而不是等下一轮心跳。 |
 | `ROUTE_RELEASED` | 点对点（旧 owner → 新 owner） | 确认一次优雅迁移；只有 route `generation` 匹配的新 owner 才允许发送 `SUBSCRIBE`（见故障转移）。 |
@@ -506,7 +506,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 集群收敛由两条时间线驱动：
 
 - **心跳 + reconcile 循环**（默认 `3000 ms`，`heartbeatIntervalMs`）。每轮心跳每个 Worker 刷新自己的记录并跑一次 reconcile：清理超过 `workerTtlMs` 的 Worker、所属 Tab 已不活跃的孤儿 subscriber、以及没有 subscriber 且超过 TTL 的孤儿路由；重算自己的 active/standby 角色；重写自己的 subscriber 记录；并对任何还缺 `confirmedAt` 的 route 重发 `CONTROL/SUBSCRIBE`——顺带恢复通道上丢失的控制消息。
-- **`REGISTRY` 通知**。Worker 记录、路由或 subscriber 写入后广播 `REGISTRY`，让所有对端立即 reconcile，而不是等下一轮心跳。
+- **`REGISTRY` 通知**。Worker 记录与路由写入后广播 `REGISTRY`，让所有对端立即 reconcile，而不是等下一轮心跳；只写 subscriber 记录不会广播：`subscribe()` 命中一个仍然存活的 owner 时，写完本 Tab 的 subscriber 记录就直接返回。
 
 心跳写入不广播，因此在发现过期记录之前最多会经过一个完整心跳间隔。检测死 owner 的最坏窗口为 `heartbeatIntervalMs + workerTtlMs`（默认约 13 秒）；相关权衡见 [TTL 消息丢失窗口](./configuration.md#ttl-消息丢失窗口)。
 
@@ -532,7 +532,7 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 以下不变量由回归测试固化（见 `tests/stability.test.ts` 与 `tests/replay-persistence.test.ts`），后续重构必须继续保持：
 
-- **SUBSCRIBE 路由绑定。** 入站 `CONTROL/SUBSCRIBE` 只有在持久化 route 当前指向接收方、且该 route 不是未确认的优雅交接时才会被接受。来自较早分配轮的迟到帧不能加入 ownership、不能订阅 transport，也不能确认 route；等待中的交接只能由精确匹配的 `ROUTE_RELEASED` 授权。ownership 以当前 route 记录为准，而不以控制帧到达顺序为准。
+- **SUBSCRIBE 路由绑定。** 入站 `CONTROL/SUBSCRIBE` 在持久化 route 指向*其他* worker 时被丢弃，未确认的优雅交接也只能由精确匹配的 `ROUTE_RELEASED` 完成。route 完全读不到（过期、损坏，或根本没有 storage）是唯一被放行的例外：`confirmRoute` 没有 route 可写，因此这帧换不到持久所有权，`reconcileAssignedTopics` 会在下一轮撤回该 assignment。两侧都由 `tests/cluster.test.ts` 固化。ownership 以当前 route 记录为准，而不以控制帧到达顺序为准。
 - **Handoff ACK 有效性。** `ROUTE_RELEASED` 只有在 route 仍指向接收方、释放来自记录的 `handoffFromWorkerId`、且 ACK generation 与存储 route 的 generation 精确相等时才被接受。来自其他交接轮次的重复或迟到 ACK（如 a↔b 反复交接）会被丢弃，不能确认当前 route。
 - **Replay 持久化清理顺序。** 排队在当前任务之后的批量持久化 flush 会与竞速的清理操作对账：`unsubscribe` 与 `clearReplayTopic` 丢弃该 topic 的待写条目，`clearReplayBefore` 丢弃早于截止时间的条目，`suspend()`/`stop()` 则丢弃整个待写批次，避免它在新生命周期代际下启动。已清理或属于已停止会话的历史不会被在途 flush 复活。
 - **存储写失败恢复。** 合并写入按指数退避重试（50 ms → 1.6 s 封顶）。结构性失败的关键在 5 次尝试后被丢弃（伴随 `console.warn`），且不会永久阻塞其他排队 key；队列完全清空或 `clear()` 取消重试后，退避延迟重置。

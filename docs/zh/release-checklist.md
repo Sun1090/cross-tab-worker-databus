@@ -30,7 +30,7 @@
 
 ## 打 tag 的发布工作流
 
-推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行**阻塞式**消费者验证，其预算是手动默认值的十二倍——工作流在自己的 env 里设置 `PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`（约 6 分钟上限），而手动运行 `scripts/verify-published-consumer.mjs` 时的默认值是 6 × 5000 ms = 30 秒。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败。若为 registry 传播延迟或基础设施故障，针对不变的 tag 重跑工作流；若为产物缺陷，发布新的 patch 版本。禁止移动或重用已发布 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
+推送版本 tag 会触发 `Release` GitHub Action：先跑 `pnpm check` 与 `pnpm lint`（tag 可能指向从未通过 CI lint 步骤的提交），再跑 `verify:compat`、`verify:types` 与 `verify:pack`，从 `CHANGELOG` 对应章节生成 GitHub release，配置了 `NPM_TOKEN` 时自动发布到 npm，然后运行**阻塞式**消费者验证，其预算是手动默认值的十二倍——工作流在自己的 env 里设置 `PUBLISHED_VERIFY_ATTEMPTS=48`、`PUBLISHED_VERIFY_DELAY_MS=7500`（约 6 分钟上限），而手动运行 `scripts/verify-published-consumer.mjs` 时的默认值是 6 × 5000 ms = 30 秒。已发布包若无法被干净消费者导入，工作流即失败——任何 `verify:published` 失败都应视为发布失败。若为 registry 传播延迟或基础设施故障，针对不变的 tag 重跑工作流；若为产物缺陷，发布新的 patch 版本。禁止移动或重用已发布 tag。未配置 token 时跳过发布步骤，但验证仍会针对 npm 上已有的版本（例如手动发布的）通过。
 
 ## 发布（手动场景）
 
