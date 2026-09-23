@@ -315,8 +315,11 @@ export class ReplayManager<TData = unknown> {
     // suspended. Dropping it prevents the queued microtask from starting under
     // the next lifecycle generation and resurrecting stopped-session history.
     // A cutoff queued behind an in-flight cleanup belongs to the session that
-    // is being suspended. Drop it so the loop cannot issue another transaction
-    // after teardown has started.
+    // is being suspended. The pass at the bottom of this file already stops on
+    // its own — its loop condition reads `generation === this.retryGeneration`,
+    // and `:304` just bumped that — so this drop is for the `finally` handoff,
+    // which would otherwise hand the dead session's cutoff to a *fresh* cleanup
+    // pass armed under the new generation.
     this.retentionCutoff = null;
     this.stop();
   }
@@ -467,23 +470,36 @@ export class ReplayManager<TData = unknown> {
         this.hydrationFailed = false;
       } catch (error) {
         if (generation !== this.retryGeneration) {
-          // The `: new PersistenceRetryCancelledError()` arm is uncovered and
-          // dominated: `withPersistenceRetry`'s own catch converts any failure
-          // that arrived after a generation bump into that error before it can
-          // reach here, so `error` is already one. The wrap stays because this
-          // branch's contract is "report a cancellation", not "report whatever
-          // the backend happened to throw".
+          // The `: new PersistenceRetryCancelledError()` arm reads 0, and it is
+          // *not* dominated in the sense this ledger uses for that word.
+          // `withPersistenceRetry` does convert a failure it catches after a
+          // generation bump (`:565-567`), but its max-attempts path rethrows the
+          // **raw** error (`:568`) while the captured generation still matches,
+          // so an already-queued continuation that calls `suspend()` or
+          // `resetBuffers()` before this rejection resumes enters the branch with
+          // a non-cancelled error. No such interleaving has been built — the gap
+          // is a microtask hop, and the paths that close it are React-unmount-
+          // shaped — which is why the arm has never executed rather than why it
+          // cannot. The wrap stays because this branch's contract is "report a
+          // cancellation", not "report whatever the backend happened to throw".
           this.onPersistenceError(
             error instanceof PersistenceRetryCancelledError ? error : new PersistenceRetryCancelledError()
           );
           return;
         }
-        // A clear/unsubscribe invalidated this snapshot and owns the observable
-        // error. Do not report it as a second, stale hydration failure, and do
-        // not let it set the completion state the replacement session owns —
-        // that latch is what would suppress the newer load. Pinned by
+        // A lifecycle transition superseded this load. `hydrationEpoch` has
+        // exactly two writers — `suspend()` (`:309`, and only while a hydration
+        // is in flight) and `resetBuffers()` (`:327`, from the bus's `beginStop`)
+        // — and the replacement session owns the observable error. Do not report
+        // this one as a second, stale hydration failure, and do not let it set
+        // the completion state the replacement owns — that latch is what would
+        // suppress the newer load. Clear and unsubscribe paths are *not* in this
+        // set: they set the filter flags (`hydrationClearAll`,
+        // `hydrationClearedTopics`, `hydrationClearBefore`), never the epoch, and
+        // they report their own failures at `:225`, `:245` and `:275`. Pinned by
         // tests/replay-manager.test.ts's 'does not let a superseded hydration
-        // failure speak for the replacement session'.
+        // failure speak for the replacement session', which drives it through
+        // `resetBuffers()`.
         if (epoch !== this.hydrationEpoch) return;
         this.onPersistenceError(error);
         this.hydrationComplete = true;

@@ -5,8 +5,10 @@
  *
  * Each connecting tab receives its own MessagePort with an independent
  * CentrifugeSession and its own WebSocket connection. When a tab sends STOP,
- * its port is removed from the session map while the remaining tabs continue
- * to operate.
+ * its port is unregistered from the reaper and closed while the remaining tabs
+ * continue to operate. There is no session map to remove it from: each
+ * connection's session is a closure variable in the connect handler, and the
+ * only per-port indexed state is the reaper's own maps.
  *
  * A periodic reaper (PortReaper) closes sessions for ports that have stopped
  * sending messages (e.g. crashed tabs). The reaper cadence is adaptive: it runs

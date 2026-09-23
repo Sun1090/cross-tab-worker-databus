@@ -34,8 +34,15 @@ interface PendingTokenRequest {
 }
 
 /** Centrifuge client options for token-bridge mode: the structured-clone-safe
- * subset plus the two function-valued hooks that Centrifuge invokes for fresh
- * credentials. Used only inside the session, never across the Worker boundary. */
+ * subset plus the function-valued credential hooks this session installs.
+ * Against the pinned SDK (5.7.4) `getToken` is the only one that is a real
+ * client option (`types.d.ts:126`, and the same hook serves renewal);
+ * `getChannelToken` appears nowhere in the package's types or build, and
+ * subscriptions are created with `newSubscription(topic)` and no per-
+ * subscription options — so that hook is never invoked, and the `'channelToken'`
+ * request kind is produced only by the test fake. It stays because the Worker
+ * protocol carries the kind: an SDK that later names it would need no change on
+ * this side. Used only inside the session, never across the Worker boundary. */
 type CentrifugeBridgedOptions = Omit<CentrifugeWorkerConfig, 'getToken' | 'getChannelToken'> & {
   getToken: () => Promise<string>;
   getChannelToken: (channel: string) => Promise<string>;
@@ -157,9 +164,18 @@ export class CentrifugeSession<TData = unknown> {
     }
     let subscription = this.client.getSubscription(topic);
     if (!subscription) subscription = this.client.newSubscription(topic);
-    // Remove only our own listeners so that any Centrifuge internal listeners
-    // on the subscription object are preserved. Each subscription event carries
-    // a single listener so removeAllListeners(…) is safe here.
+    // Scoped to the three events this method wires, so the client's own `state`
+    // wiring is untouched — but `error` is NOT internal-listener-free: the
+    // Subscription constructor installs its own no-op `error` listener precisely
+    // "to avoid unhandled exception in EventEmitter for non-set error handler"
+    // (centrifuge 5.7.4, build/index.js:762), and the bundled emitter throws on
+    // an `error` emit with no listener (`:162`). This call removes that guard,
+    // and the `.on('error', …)` two statements below replaces it for as long as
+    // this session holds the subscription. `unsubscribe()` removes both and adds
+    // nothing back, which is the open question at this boundary: every
+    // `emit('error')` site in `BaseSubscription` that was checked is behind a
+    // `_isSubscribing()`/`_isSubscribed()` guard, so no post-unsubscribe throw
+    // has been produced — see docs/progress.md, Phase 134.
     subscription.removeAllListeners('publication');
     subscription.removeAllListeners('error');
     subscription.removeAllListeners('unsubscribed');
@@ -220,9 +236,16 @@ export class CentrifugeSession<TData = unknown> {
    * same emptiness before calling, and the subscription-level caller reads the
    * topic out of a key this session only ever populates from a SUBSCRIBE frame.
    * Measured — deleting this line leaves all 37 test files green, and the frame
-   * it withholds could not be delivered anyway, because `topicMatchesPattern`
-   * answers false for an empty topic against both `*` and `prefix.*` (so no
-   * wildcard handler sees it either) and `subscribe('')` throws. Kept as the
+   * it withholds has nowhere to land anyway: the only handler registry is the
+   * DataBus's `topicHandlers`, and every write to it sits behind
+   * `assertPublicTopic` (`data-bus.ts:929`, `:1009`, `:1033`), so no `''` key can
+   * exist — while `topicMatchesPattern` answers false for an empty topic against
+   * both `*` and `prefix.*`, so a wildcard handler cannot see it either. Neither
+   * of those is a reason to delete this guard: it is the only one *at this layer*,
+   * because neither the session nor the transport calls `assertPublicTopic` — a
+   * SUBSCRIBE frame naming `''` creates a real Centrifuge subscription
+   * (`newSubscription` does not validate a channel), so the undeliverable
+   * publication would otherwise be posted back to the main thread. Kept as the
    * boundary statement, not counted as a closed leg. */
   private postPublication(topic: string, data: unknown): void {
     if (!topic) return;

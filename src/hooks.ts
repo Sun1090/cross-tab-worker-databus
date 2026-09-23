@@ -7,8 +7,12 @@
  * never load it.
  *
  * - `useCrossTabDataBus` owns the bus lifecycle: created on mount, stopped on
- *   unmount. It is StrictMode-safe: the double-invoked effect exercises the
- *   same stop/recreate path as BFCache suspend/resume.
+ *   unmount. It is StrictMode-safe: the cleanup calls `instance.stop()`, so the
+ *   double-invoked effect runs a full create → stop → create across *separate*
+ *   instances. That is not the BFCache path and does not stand in for it —
+ *   page-hide takes `onSuspend`, which keeps this same bus, its `topicHandlers`
+ *   and its replay buffers, and is reversed by resume. So suspend/resume
+ *   coverage has to come from a real hide/show, not from this hook.
  * - `useCrossTabSubscription` attaches a message handler with automatic
  *   cleanup; the handler is read through a ref, so you can pass inline
  *   closures without resubscribing on every render.

@@ -33,11 +33,14 @@ export const DEFAULT_SESSION_TIMEOUT_MULTIPLIER = 3;
 export const DEFAULT_SESSION_TIMEOUT_MS =
   DEFAULT_HEARTBEAT_INTERVAL_MS * DEFAULT_SESSION_TIMEOUT_MULTIPLIER;
 
-// Centrifuge Options that reference browser APIs (WebSocket, EventSource, etc.)
-// are unavailable inside a Worker — the worker uses its own WebSocket import.
-// These are stripped from the config sent to the worker so the type system
-// prevents accidentally passing a main-thread-only function (which would fail
-// structured cloning and throw a DataCloneError).
+// These options reference browser APIs (WebSocket, EventSource, fetch, …) that
+// do not exist inside a Worker — the worker imports its own WebSocket. Nothing
+// strips them at runtime: `buildInitInput` forwards `config.options` verbatim,
+// so this exclusion is compile-time only. A value forced through with a cast is
+// caught by the runtime gate that does exist, `assertStructuredCloneable` on the
+// same options, which throws a TypeError from the transport before any backend
+// is created — a function-valued option would otherwise die at the structured-
+// clone boundary with a DataCloneError instead.
 type WorkerUnsafeOption =
   | 'eventsource'
   | 'fetch'

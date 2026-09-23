@@ -6,11 +6,19 @@
  * same cross-tab clustering stack (owner dedup, sticky routes, EVENT fan-out)
  * that the Centrifuge backend uses.
  *
- * Wire protocol (JSON text frames):
+ * Wire protocol — two frame formats, both over text/binary WebSocket messages:
  * - client → server: `{"op":"subscribe"|"unsubscribe"|"publish","topic":...,"data":...}`
  * - client → server (batched): `{"op":"publishBatch","topic":...,"items":[{data,...}]}`
  * - server → client: `{"topic":...,"data":...}` for publications; anything
  *   without a string `topic` field is ignored (forward-compatible).
+ * - binary publications use a *separate* tagged frame, not JSON:
+ *   `0xc7 | uint16 topicLength | topic UTF-8 | raw payload`, written by
+ *   `sendBinaryFrame` when `publish()` receives an `ArrayBuffer` with no
+ *   `messageId`/`timestamp` (with metadata it degrades to a JSON PUBLISH whose
+ *   `data` is a number array, so an id is never lost to the compact shape), and
+ *   parsed by the matching reader. A server that implements only the JSON arm
+ *   above silently drops those — see `scripts/demo-ws-server.mjs`, which
+ *   implements both directions.
  */
 import { CrossTabDataBus } from './core/data-bus';
 import { parseDataBusPublication } from './core/publication';
@@ -222,7 +230,8 @@ export class WebSocketTransport<TData = unknown>
     this.sendFrame({ op: WS_OP.SUBSCRIBE, topic });
   }
 
-  /** Idempotent: unsubscribing an unknown topic is a no-op. */
+  /** Idempotent for local tracking: an unknown topic has nothing to delete, but
+   * the UNSUBSCRIBE frame is still sent, exactly as SUBSCRIBE is re-sent above. */
   unsubscribe(topic: string): MaybePromise<void> {
     this.subscribedTopics.delete(topic);
     this.sendFrame({ op: WS_OP.UNSUBSCRIBE, topic });
@@ -327,8 +336,14 @@ export class WebSocketTransport<TData = unknown>
   }
 
   /** Send one JSON frame. Frames are dropped with an `onError` report when
-   * the socket is not open — subscribe frames are re-sent on open, so the
-   * only real loss is a publish during a disconnect window. */
+   * the socket is not open. A dropped SUBSCRIBE is recovered — `onopen`
+   * re-asserts every topic in `subscribedTopics` — but the other two are not:
+   * a dropped PUBLISH is the documented at-most-once loss, and a dropped
+   * UNSUBSCRIBE is the quieter one, because `unsubscribe()` has already deleted
+   * the topic from that set, so no later re-assert resends it and the server
+   * keeps streaming a channel the app left. Through the DataBus neither of the
+   * two is reachable while closed — `runTransport()` queues both operations
+   * behind recovery — so this reads as a direct-transport-contract note. */
   private sendFrame(payload: { op: string; topic: string; data?: unknown; messageId?: string; timestamp?: number }): void {
     if (this.socket?.readyState !== WS_OPEN) {
       this.handlers?.onError(new Error(`WebSocket is not open; dropped "${payload.op}" frame.`));
@@ -418,7 +433,9 @@ export class WebSocketTransport<TData = unknown>
   }
 }
 
-/** Resolve the platform WebSocket, or null in runtimes without one (SSR/Node). */
+/** Resolve the platform WebSocket. Throws in a runtime without one (SSR/Node);
+ * it has no null arm, and `start()`'s catch is what turns that throw into an
+ * `onStatus('error')` + `onError` report. */
 function defaultWebSocketFactory(url: string, protocols?: string | string[]): WebSocketLike {
   if (typeof WebSocket === 'undefined') {
     throw new Error('WebSocketTransport requires a WebSocket implementation.');
