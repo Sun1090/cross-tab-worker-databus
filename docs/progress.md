@@ -6999,6 +6999,88 @@ corroborates the 26-spec collection.)
   bug 0.21.9 just fixed, and "raise the timeout above the clamp" trades dead-port release latency for it.
 - Updated: 2026-09-23.
 
+## Phase 128 / 0.21.10 shipped — a documented option that guaranteed its own opposite
+
+- Version: `0.21.10`, published. Tag `v0.21.10` (annotated tag object `faabfe7`) at
+  `2468ba348d82e84afd32a27359a14f151ef15cf7`, the squash of PR #216. CI run `35805736891` and CodeQL
+  run `35805736920` were green on that commit, as they had been on the fix commit `157d55a`
+  (CI `35804465326`).
+- What the release carries (PR #215 plus the freeze): `heartbeatIntervalMs: Infinity` — accepted by
+  `assertHeartbeatInterval`, documented as disabling the SharedWorker PING heartbeat "entirely", and
+  genuinely stopping the PINGs — was reaching `PortReaper.setTimeout()` and falling through the same
+  `Number.isFinite` guard as `NaN`, `0` and negatives, taking the default 10 s and therefore a **30 s
+  session timeout on the one port that would never send another message**. The option whose stated
+  purpose is "the reaper is not needed" guaranteed a reap 30 s after connecting. `Infinity` now exempts
+  that port from reaping. Also frozen: two shipped documentation corrections (no
+  `PortReaper.dispose()` shutdown hook exists — `dispose` appears exactly once in
+  `dist/centrifuge.shared.worker.js`, as the method definition, and nowhere as a call; and the cost of
+  disabling the heartbeat is now stated next to what it disables), and one test that was breaking
+  `pnpm test:coverage` while reporting every test passing.
+- How it was found is worth keeping, because it is not a ledger technique. Phase 127's next item was a
+  browser measurement of background throttling; that instrument turned out to be unable to produce a
+  hidden tab at all (headless Chrome keeps `document.visibilityState === 'visible'` behind
+  `bringToFront()`, and a 100 ms in-page interval counted 2405 of 2405 ticks over 240 s, because
+  Playwright passes `--disable-background-timer-throttling` among its default Chromium switches). While
+  writing *that* up, the sentence "Pass `Infinity` to disable heartbeats entirely — use this only when
+  the reaper is not needed" was read against the code that implements it, and the two did not agree. A
+  dead instrument is still a reason to read the documentation next to the code; the finding came from
+  the second act, not the first.
+- Freeze evidence, all measured on the release commit: `pnpm check` (typecheck, build, 37 files /
+  **891** tests, 5 perf gates), `pnpm test:coverage` at 99.01 / **96.90** / 99.26 / 99.69 — the same
+  four numbers as 0.21.9, since the one branch arm this release adds is exercised and
+  `port-reaper.ts` still reports its three pre-existing zero-count arms — `pnpm lint` and
+  `git diff --check` clean, `pnpm test:e2e` **37 passed in 49.5 s** (reap measured at 25 ms in one poll
+  with the survivor identified by channel; `[shared-migrate]` owner handover onto one of 11
+  pre-existing sockets), `pnpm bench` (28 benchmarks), `pnpm verify:pack` from the 0.21.10 tarball,
+  `pnpm verify:compat` (`0.21.10 preserves public exports and type metadata from v0.21.9`),
+  `pnpm audit --registry=https://registry.npmjs.org` (no known vulnerabilities),
+  `npm pack --dry-run --json` (109 files, 995.9 kB packed / 3831.1 kB unpacked, 20 `docs/` files,
+  `docs/progress.md` excluded), and `RELEASE_TAG=v0.21.10 node scripts/verify-release-version.mjs`.
+- `pnpm bench:compare --fail-above-pct 50` **passed on its first attempt**, with every in-page metric
+  *improved* against the 5-report median baseline: `dedup1000Ms −29.5%`, `publishBatch1000Ms −22.9%`,
+  `publish/shared/perMessageMs −37.4%`, `publish/dedicated/perMessageMs −19.9%`,
+  `wildcardDispatch1000Ms −13.6%`, `traceAndPublish1000Ms −14.5%`. No bimodality adjudication was
+  needed this time, which is the point of the median baseline: the same gate that required 13 samples
+  and a written justification during the 0.21.9 cut read unambiguously here.
+- Publish: Release workflow run `35805761053` on the tag — `Publish to npm` logged
+  `+ cross-tab-worker-databus@0.21.10` (shasum `ee8ed1eb5f13b2f29a2d646754c1c28b64c8c6ba`) and the
+  GitHub release opened at https://github.com/Sun1090/cross-tab-worker-databus/releases/tag/v0.21.10.
+- Post-publish verification: the run's blocking `Verify published npm consumers` step retried 39 times
+  and then logged `[npm] verified published cross-tab-worker-databus@0.21.10 ESM/CJS consumers`; the job
+  completed green in 6m38s (01:18:37Z → 01:25:15Z). `npm view` against `registry.npmjs.org` reports
+  `version = 0.21.10` and `dist-tags = { latest: '0.21.10' }`, and an offline repeat of
+  `pnpm verify:published` exits 0 on its first attempt. Third release in a row with the same
+  propagation profile (39, 40, then success on attempt 41), so those `not available yet` lines are the
+  designed retry path in a *passing* run.
+- Checked the same way and found correct, so the next pass does not re-open it: the other two options
+  that accept `Infinity` both honour it on the consumer side. `recovery.maxAttempts` is compared with
+  `attempt > this.recoveryMaxAttempts` (`data-bus.ts:1432`), so `Infinity` means "never exhausted",
+  which is what it is documented to mean; and `connectTimeoutMs` is gated by
+  `if (Number.isFinite(timeoutMs) && timeoutMs > 0)` (`websocket.ts:145`), which is what makes `0` and
+  `Infinity` both mean "wait indefinitely" — the promise `docs/api.md` and `docs/transports.md` make,
+  pinned by `waits indefinitely when the handshake budget is 0 or Infinity`. The `heartbeatIntervalMs`
+  defect was not that a guard rejected `Infinity`; it was that the guard's *other* meaning — "malformed"
+  — was the wrong one for the only non-finite value the public API accepts on purpose.
+- Repository hygiene: `main` is the only branch locally and remotely. `fix/reaper-honors-infinite-heartbeat`,
+  `chore/release-0.21.10` and their tracking refs were removed with their PRs; the local leftover
+  `chore/release-0.21.9` from the previous session was deleted after confirming its one commit is the
+  changelog/spec version PR #212 removed. No force-push, no merge commit, no tag moved.
+- Changed files: `docs/progress.md`.
+- Risk / rollback: this record changes no code, so its own rollback is `git revert`. A defect found in
+  0.21.10 rolls back by reverting `2468ba3` and publishing `0.21.11`; the behaviour change is confined
+  to a configuration that could not work as documented before, so no consumer configuration that works
+  today is affected by the revert either.
+- Next: the background-throttling question Phase 127 raised is still unanswered, and it is now known to
+  need a different instrument — real headful Chrome with `ignoreDefaultArgs` dropping
+  `--disable-background-timer-throttling`, and a precondition read (visibility plus in-page tick count)
+  written into the probe itself. With 0.21.10 shipped, an integrator whose shared-mode tabs are commonly
+  backgrounded has a documented answer (raise `heartbeatIntervalMs` so that `3 ×` it clears the clamp,
+  or disable the heartbeat and accept that a crashed tab's session persists), so the measurement is now
+  about whether to say more — not about whether the library is broken. The open product decision is
+  unchanged (releasing a wildcard pattern and the concrete topics it filled, question #194), and
+  TypeScript 7 is still blocked upstream on `typescript-eslint`'s peer range.
+- Updated: 2026-09-23.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
