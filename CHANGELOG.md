@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Documentation
+- Two comments in `src/workers/port-reaper.ts` described mechanisms the code does not have, and both were corrected against a measurement rather than a re-read. `touch()`'s early return claimed to stop a late PING "resurrecting" a removed port in the reaper's tracking — deleting the guard instead passes the whole suite, because `reap()` iterates `targets`, so the only difference is one stale `lastSeenAt` row per dead port; the comment now says that, and says why the guard is still worth having (it is what keeps the three maps holding exactly the tracked ports, which is the enumeration `reap()`'s `??` fallbacks rest on). And `reap()`'s `Array.from(…)` snapshot claimed to prevent "skipping a subsequent entry or visiting one twice" — `Map` iteration is already deletion-safe, iterating the live map passes every test, and the one case a snapshot changes (a re-entrant `register()` during a teardown) is neutralised by `register()` stamping `lastSeenAt` with the current time. It stays, now labelled defensive rather than load-bearing. No behaviour change; these comments are bundled into `dist/centrifuge.shared.worker.js`, which is why they are recorded rather than edited silently.
+- Recorded so the next pass does not repeat the work: a seeded interleaving harness for this class was written, run, and deleted. Four invariants over register/touch/configure/remove/advance with an injected clock explored 2,000 seeds green in 331 ms (~6,000 seeds/s), then twelve mutants showed it killed none that the 19 existing unit tests do not also kill — nine die to both, `schedule()`'s idempotency guard dies only to the unit tests' `expect(sets).toEqual([])`, and the two survivors are the map-hygiene and snapshot cases above. An interleaving sweep feels like more coverage because it visits more states; the question that decides it is whether any mutant dies to it alone. `AGENTS.md` carries that rule.
+
+
 ## [0.21.10] - 2026-09-23
 
 ### Fixed

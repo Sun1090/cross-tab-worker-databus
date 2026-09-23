@@ -63,9 +63,13 @@ export class PortReaper {
     this.schedule();
   }
 
-  /** Record activity on a port (any incoming message). No-op for untracked
-   * ports — a late PING from a port that was already removed/STOP'd must not
-   * resurrect it in the reaper's tracking maps. */
+  /** Record activity on a port (any incoming message). The early return is what
+   * keeps a late PING from a removed port out of `lastSeenAt`: `reap()` iterates
+   * `targets`, so a row here would be unreachable rather than dangerous — measured,
+   * deleting the guard passes every test in the suite, because the only difference is
+   * one stale map entry per dead port. It stays as the cheap invariant that the three
+   * maps hold exactly the tracked ports, which is what `reap()`'s `??` fallbacks and
+   * this file's tracking contract both lean on. */
   touch(port: MessagePort): void {
     if (!this.targets.has(port)) return;
     this.lastSeenAt.set(port, this.now());
@@ -150,8 +154,13 @@ export class PortReaper {
   }
 
   /** Close sessions whose port has been silent longer than its timeout.
-   * Iterates a snapshot so closing a target (which mutates `targets`) during
-   * the loop cannot skip a subsequent entry or visit one twice. */
+   * Iterates a snapshot. That is defensive rather than load-bearing: `Map`
+   * iteration in JS is deletion-safe, so removing the current entry cannot skip the
+   * next one, and the only case a snapshot changes is a re-entrant `register()` from
+   * inside a target's own teardown — which a fresh port would survive anyway, because
+   * `register()` stamps `lastSeenAt` with the current time and a zero-age port is
+   * never past its timeout. Measured: iterating the live map instead passes every
+   * test, so do not read this line as pinned. */
   private reap(): void {
     const now = this.now();
     let reapedAny = false;
