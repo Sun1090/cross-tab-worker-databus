@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+
+## [0.21.14] - 2026-09-24
+
 ### Documentation
 
 - The published Chinese mirrors were read against `src/` for the first time. `package.json` `files` ships ten `docs/*.md` plus their `docs/zh/` copies and both READMEs, and the 0.21.11/0.21.12 corrections had been applied sentence by sentence to whichever language the pass was reading — so the Chinese paragraphs kept claims the English had already retracted, and the English kept claims only its own tables had corrected.
@@ -23,6 +26,8 @@
 - What the cap cannot reach was measured rather than assumed, and it is a real limit. Forcing the deadline to 12 ms over a full 5,000-seed sweep trips it **zero** times: the slow seeds this harness can reproduce locally are synchronous. In the instrumented run to seed 112,399, six seeds cost over 100 ms, and in each one tab `a`'s `stop()` was essentially the whole cost (`stops=[a=109..132 b=0 c=0]` inside a 111-135 ms seed), i.e. CPU spent before any promise was even awaited — nothing a same-thread deadline can preempt. So this guard bounds queue-yielding waits, the CI wedge's nature is still unattributed, and the claim is limited accordingly: it converts an unbounded *awaiting* step into two seconds of lost depth plus a line naming the seed.
 - Because a guard that can never fire locally would still leave the sweep green, `capped()` is pinned directly and in both directions: a never-settling await must hit a 25 ms cap (and a 0 ms one), a microtask-settling chain must beat even a 0 ms cap, and a 5 ms real timer must beat a 100 ms cap. Three mutants die at three separate assertions — a cap that never expires, one that expires eagerly, and one that reports settled work as expired — which is what distinguishes this pin from the absence of a trip.
 
+
+No behavior, wire-format, storage-layout or cluster-protocol change. `git diff -U0 v0.21.13..HEAD -- src/`, reduced to non-comment lines, is empty (measured: 0 lines), and coverage is identical to 0.21.13 at 99.01 / 96.90 / 99.26 / 99.69 — now over **898** tests, the extra one being the `capped()` pin. `verify:compat` and `verify:types` both diff against `v0.21.13` and pass (6 entries, 90 importable names, surface closed), and `verify:pack` imports every entry from the `0.21.14` tarball. The only executable file in the release is a test, which `package.json` does not publish.
 
 ## [0.21.13] - 2026-09-24
 

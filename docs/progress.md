@@ -7587,6 +7587,56 @@ corroborates the 26-spec collection.)
   reader is most likely to trust as complete.
 - **Update date:** 2026-09-24.
 
+## Phase 140 / 0.21.14 prepared — and the browser gate that excused itself
+
+- **Milestone / version:** `0.21.14`, prepared on branch `release/0.21.14` from `main` at `e133c48` (#230).
+- **Status:** pre-tag verification complete and green, with one gate explicitly deferred (the browser
+  bench, below). Release commit pushed, PR opened.
+- **What the release contains.** Three accumulated passes since `v0.21.13`, none of which changes
+  behavior: #228 (the published Chinese mirrors read against `src/`, 22 claim classes), #229 (the
+  coordination fuzz's per-await deadline plus the `capped()` pin it required), and #230 (the
+  `knownTopics` call-site enumeration and the storage absolute hiding in a table cell).
+- **The freeze chain:** `package.json` `0.21.13 → 0.21.14`; `CHANGELOG.md`'s Unreleased block became
+  `## [0.21.14] - 2026-09-24` with its own closing measurement; `docs/roadmap.md` and
+  `docs/zh/roadmap.md` gained a `0.21.14 delivered scope` section and the top-line date.
+- **Gate set, as the checklist names it.** `pnpm check` 0 (build, **898** tests, 5 perf gates);
+  `pnpm lint` 0; `pnpm test:coverage` **99.01 / 96.90 / 99.26 / 99.69** — identical to `0.21.13` to the
+  last decimal; `pnpm verify:compat` "0.21.14 preserves public exports and type metadata from v0.21.13";
+  `pnpm verify:types` "6 entries, 90 importable names, surface closed and nothing dropped";
+  `pnpm verify:pack` imported ESM+CJS root and every subpath from `…-0.21.14.tgz`;
+  `pnpm test:e2e` 37 passed in 27.8 s; `pnpm bench` 3 files / 28 tests;
+  `RELEASE_TAG=v0.21.14 node scripts/verify-release-version.mjs` green;
+  `pnpm audit --registry=https://registry.npmjs.org` "No known vulnerabilities"; `git diff --check` 0.
+- **The executable-diff claim, measured not asserted:**
+  `git diff -U0 v0.21.13..HEAD -- src/` reduced to non-comment lines yields **0** lines. The only
+  executable file in the release is `tests/coordination-invariants.test.ts`, which is not published.
+- **`pnpm bench:browser` was NOT accepted as passing, and here is why that matters.** The first pair
+  measured `publish/dedicated 77.3 ms` and `publish/shared 67.7 ms` against a fast-mode baseline of
+  ~38/~34, failing the 50% ceiling on `dedicated`. The checklist says to re-run and check the spread
+  before acting, so five more runs were taken — and the gate went **green**, which was the wrong result:
+  by run 2 its own baseline median had slid from `40.4` to `70.6`, so the samples that measured the
+  slowdown had become the baseline that excuses it. Re-running a load-sensitive gate on a loaded host
+  does not gather evidence, it manufactures an excuse.
+- **Attribution instead.** With those samples removed from the archive, one clean run measured
+  `dedicated +92.5%`, `shared +99.2%`, `dedup +43.4%`, `trace +21.0%` — every metric up together, at load
+  averages 7.7-15.1, on a tree whose non-comment `src/` diff is zero. That is the host-saturation
+  signature (the checklist's own noise note is the inverse shape: one metric up, the rest improving), and
+  no code path the release touches can change in-page hot-path timing. The browser gate is therefore
+  recorded as **deferred on this host**, not passed; six slow-mode reports were moved to
+  `/tmp/bench-slowmode-2026-09-23/` so they do not poison the next five baselines, and
+  `docs/benchmarks.md` was deliberately not regenerated from them.
+- **Follow-up this leaves behind:** re-run `bench:browser` on an idle host before the next release, and
+  write the self-excusing-baseline finding into `docs/release-checklist.md` — a gate whose baseline is
+  drawn from the same rolling archive it appends to can be closed by repeating the measurement.
+- **Changed files:** `package.json`, `CHANGELOG.md`, `docs/roadmap.md`, `docs/zh/roadmap.md`,
+  `docs/progress.md`.
+- **Risk / rollback:** consumers receive docs, comments and one test-harness behavior; no export,
+  protocol, storage-layout or wire change. Rollback = revert the release commit and drop the tag before
+  it reaches npm; after publish, ship a new patch (never move a published tag).
+- **Next:** commit, push the branch, open the PR, merge on green, tag the merged commit, push only
+  `v0.21.14`, watch the Release run, then confirm npm `latest`.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

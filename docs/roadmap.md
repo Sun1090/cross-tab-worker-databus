@@ -1,6 +1,35 @@
 # Roadmap
 
-0.21.13 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.14 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.14 delivered scope
+
+- The published Chinese mirrors were read against `src/` for the first time. `package.json` `files`
+  ships ten `docs/*.md` plus their `docs/zh/` copies and both READMEs, and earlier passes had applied
+  their corrections sentence by sentence to whichever language they were reading — so the Chinese
+  paragraphs kept claims English had already retracted, and English kept claims only its own tables had
+  corrected. Twenty-two claim classes came out of that reading, in both directions.
+- The coordination fuzz can now bound a single seed. A `verify` run reported
+  `stopped at 1046/5000 seeds after 158476ms (slowest seed 151850ms)` and then the 120s per-test
+  ceiling: 1,045 seeds summed to ~6.6 ms each while one interleaving ate 96% of the sweep, and the
+  between-seeds fuse could not reach inside it. Each awaiting step now races a 2s deadline and a seed
+  that trips it is counted, named by its operation list, and left unasserted rather than judged on a
+  state that never quiesced.
+- What that guard cannot do was measured instead of assumed. Forcing the deadline to 12 ms over a full
+  5,000-seed sweep trips it zero times, because every locally reproducible slow seed is *synchronous*
+  cost inside the first tab's `stop()` — nothing a same-thread deadline can preempt. So the mechanism is
+  pinned directly in both directions, and three mutants die at three separate assertions: a cap that
+  never expires, one that expires eagerly, and one that reports settled work as expired.
+- The `knownTopics` section of `docs/architecture.md` enumerated three of the six in-process call sites
+  that populate the cache; `publishBatch` and `activate()` appeared nowhere in it, in either language.
+- The storage absolute this cycle retracted elsewhere turned out to be hiding in a **table cell**: the
+  identifier table's `topic` row said "No; kept in Runtime memory and control messages" while the row
+  later in the same table says each storage-event frame, topic plaintext included, is written to
+  `localStorage`. Four passes had been through that file, including one that corrected the contradicting
+  row. `configuration.md`'s boundary list had also filed the tab-id key with the `localStorage` records;
+  it is written to `sessionStorage`.
+- No behavior, wire-format, storage-layout or cluster-protocol change. The only executable edit is in
+  `tests/`, which the package does not publish; the shipped diff in `src/` is comments only.
 
 ## 0.21.13 delivered scope
 
