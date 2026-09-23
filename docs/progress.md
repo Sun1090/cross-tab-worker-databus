@@ -7590,8 +7590,10 @@ corroborates the 26-spec collection.)
 ## Phase 140 / 0.21.14 prepared — and the browser gate that excused itself
 
 - **Milestone / version:** `0.21.14`, prepared on branch `release/0.21.14` from `main` at `e133c48` (#230).
-- **Status:** pre-tag verification complete and green, with one gate explicitly deferred (the browser
-  bench, below). Release commit pushed, PR opened.
+- **Status:** **published.** PR #231 merged (squash) into `main` as `09c6e5c`; annotated tag `v0.21.14`
+  on exactly that commit; the `Release` run `35918849662` finished with all 20 steps `success` and none
+  skipped (including the blocking `Verify published npm consumers`), and `registry.npmjs.org` reports
+  `dist-tags.latest = 0.21.14`.
 - **What the release contains.** Three accumulated passes since `v0.21.13`, none of which changes
   behavior: #228 (the published Chinese mirrors read against `src/`, 22 claim classes), #229 (the
   coordination fuzz's per-await deadline plus the `capped()` pin it required), and #230 (the
@@ -7635,6 +7637,41 @@ corroborates the 26-spec collection.)
   it reaches npm; after publish, ship a new patch (never move a published tag).
 - **Next:** commit, push the branch, open the PR, merge on green, tag the merged commit, push only
   `v0.21.14`, watch the Release run, then confirm npm `latest`.
+- **Update date:** 2026-09-24.
+
+## Phase 142 / The bench gate that could be closed by investigating it
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/bench-baseline-caveat`, off `main` at
+  `09c6e5c`. Documentation only, in both languages; no `src/`, no script change.
+- **Status:** open PR, locally green.
+- **What happened.** While preparing `0.21.14` the browser bench failed its 50% ceiling
+  (`publish/dedicated 77.3 ms`, `publish/shared 67.7 ms`, against a ~38/~34 ms fast mode). The checklist's
+  own instruction is "re-run and check the spread", so five more runs were taken — and the gate went green.
+  That was not a recovery: by the second re-run `bench:compare`'s baseline median had moved from `40.4` to
+  `70.6`, because its baseline (both the median leg and the maximum leg) is drawn from the same rolling
+  archive that every `bench:browser` run appends to. The samples taken to investigate the failure became the
+  baseline that excused it.
+- **The measurement that settled what it actually was.** With those samples moved out of the archive, one
+  clean run at host load 7.7–15.1 showed every metric rising together — `dedicated +92.5%`, `shared +99.2%`,
+  `dedup +43.4%`, `trace +21.0%`. That is the contention shape, the inverse of the single-metric-up /
+  rest-improving noise signature the checklist already documents, and the release tree's non-comment `src/`
+  diff was 0 lines, so no hot path had changed. The release recorded the gate as deferred with those
+  numbers rather than as passed.
+- **Change.** Step 4 of `docs/release-checklist.md` and `docs/zh/release-checklist.md` now states the
+  self-excusing mechanism and the procedure: read `uptime` before re-running, record a suspect failure as
+  deferred with its load, keep off-mode samples out of the archive, and never regenerate
+  `docs/benchmarks.md` from them.
+- **Changed files:** `docs/release-checklist.md`, `docs/zh/release-checklist.md`, `CHANGELOG.md`,
+  `docs/progress.md`.
+- **Verification:** `npx tsc --noEmit` 0; `pnpm lint` 0; `npx vitest run tests/documentation.test.ts`
+  17 passed; `git diff --check` 0. Note this branch does **not** carry a fresh `bench:browser` sample: the
+  host is still loaded, and re-running into a green result is the exact behavior being documented.
+- **Risk / rollback:** published prose (`docs/release-checklist.md` is in `package.json` `files`);
+  `git revert`.
+- **Next:** merge; then take an idle-host `bench:browser` sample and refresh `bench:trend` before the next
+  freeze. Task #69 also asks whether `bench-compare.mjs` should refuse to baseline against reports whose
+  whole-report skew marks them as contention samples — deliberately left as a question, since a filter that
+  drops samples is a bigger design decision than a checklist sentence.
 - **Update date:** 2026-09-24.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)

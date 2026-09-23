@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Documentation
+
+- Both release checklists now record that `pnpm bench:compare` can be closed by the act of investigating it. Its baseline — the median *and* the maximum leg — is drawn from the same rolling archive every `pnpm bench:browser` run appends to, so re-runs taken to "check the spread" become the baseline that excuses the failure. Measured while preparing 0.21.14: two runs at host load 7.7–15.1 failed the ceiling on `publish/dedicated` (77.3 ms against a ~38 ms fast mode), five further re-runs reported OK with the baseline median slid to 70.6 ms, and one clean run after removing those samples showed every metric up together — the contention signature, not a regression. The instruction is now: read `uptime` before re-running, record a suspect failure as deferred with its load, keep off-mode samples out of the archive, and do not regenerate `docs/benchmarks.md` from them.
+
 
 ## [0.21.14] - 2026-09-24
 
