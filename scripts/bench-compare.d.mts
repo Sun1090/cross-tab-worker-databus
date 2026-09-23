@@ -1,5 +1,10 @@
-/** `[metric label, before, after]` for one compared metric. */
-export type BenchMetricRow = [label: string, before: number, after: number];
+/**
+ * One compared metric: `[label, baseline, current, ceiling]`.
+ *
+ * `ceiling` is the highest baseline sample the row's baseline summarises, or
+ * `null` when there is no history to consult (the explicit two-report path).
+ */
+export type BenchMetricRow = [label: string, before: number, after: number, ceiling: number | null];
 
 /** Minimal shape of an archived `bench-results/browser-*.json` report. */
 export interface BenchReportLike {
@@ -25,8 +30,15 @@ export declare function median(values: readonly number[]): number;
  */
 export declare function compareAgainstBaseline(reports: readonly BenchReportLike[]): BenchMetricRow[];
 
-/** Descriptions of metrics that regressed past `failPct` (`null` disables the gate). */
+/**
+ * Descriptions of metrics that regressed past `failPct` *and* past their
+ * baseline ceiling (`null` disables the gate).
+ */
 export declare function findRegressions(rows: BenchMetricRow[], failPct: number | null): string[];
+
+/** The complement of `findRegressions`: rows whose percentage delta exceeds
+ * `failPct` but whose value is still within the range the baseline observed. */
+export declare function findWithinBaseline(rows: BenchMetricRow[], failPct: number | null): string[];
 
 /** The `limit` most recent archived reports in `resultsDir`, oldest first. */
 export declare function latestReports(resultsDir: string, limit?: number): string[];

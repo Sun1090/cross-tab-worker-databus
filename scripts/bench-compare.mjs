@@ -5,7 +5,8 @@
  *
  * Usage: node scripts/bench-compare.mjs [options] [older.json] [newer.json]
  *   --fail-above-pct <N>   exit non-zero when a latency metric regresses by
- *                          more than N% (used as a benchmark gate).
+ *                          more than N% *and* lands beyond the highest value in
+ *                          its baseline window (used as a benchmark gate).
  * With no report paths, compares the newest report in bench-results/ against the
  * per-metric median of the preceding reports; two explicit paths compare those
  * two reports directly.
@@ -64,13 +65,22 @@ function reportMetrics(report) {
   return rows;
 }
 
-/** Per-metric `[label, before, after]` rows present in both reports. */
+/**
+ * A comparison row is `[label, baseline, current, ceiling]`.
+ *
+ * `ceiling` is the largest baseline sample the row's baseline was summarised
+ * from, or `null` when no such history exists (the explicit two-report path).
+ * `findRegressions` needs it to tell "beyond everything recently measured" from
+ * "beyond the summary of it" — the two are not the same on a multi-modal metric.
+ */
+
+/** Rows comparing two reports directly. No history, so no ceiling. */
 export function compareReports(older, newer) {
   const before = new Map(reportMetrics(older));
   const rows = [];
   for (const [label, after] of reportMetrics(newer)) {
     const previous = before.get(label);
-    if (previous !== undefined) rows.push([label, previous, after]);
+    if (previous !== undefined) rows.push([label, previous, after, null]);
   }
   return rows;
 }
@@ -95,6 +105,16 @@ export function median(values) {
  * genuine regression is measured against typical recent runs rather than
  * whatever the last run happened to be.
  *
+ * It does not, on its own, make a multi-modal metric gateable, and that is the
+ * gap the `ceiling` in each row exists to close. A median over five bimodal
+ * samples is stable only while the modes are mixed: when several consecutive
+ * reports land in the same mode the *median itself* jumps, which is how the same
+ * tree read +121% against one baseline and -56.7% against another minutes apart
+ * (both measured on a comment-only branch). `ceiling` is the largest value the
+ * baseline summarises, so `findRegressions` can ask the question the percentage
+ * cannot: is this number beyond everything recently observed, or only beyond the
+ * summary?
+ *
  * A metric with no preceding sample is skipped, matching `compareReports`.
  */
 export function compareAgainstBaseline(reports) {
@@ -113,25 +133,63 @@ export function compareAgainstBaseline(reports) {
   for (const [label, current] of reportMetrics(newest)) {
     const history = samples.get(label);
     if (history === undefined || history.length === 0) continue;
-    rows.push([label, median(history), current]);
+    rows.push([label, median(history), current, Math.max(...history)]);
   }
   return rows;
 }
 
 /**
- * Descriptions of every metric that regressed past `failPct`. Metrics whose
- * baseline is effectively zero are skipped (a percentage change from ~0 is
- * meaningless); `failPct === null` disables the gate entirely.
+ * Descriptions of every metric that regressed past `failPct` **and** past the
+ * largest value its own baseline recorded. Metrics whose baseline is effectively
+ * zero are skipped (a percentage change from ~0 is meaningless); `failPct ===
+ * null` disables the gate entirely.
+ *
+ * The second condition is what keeps the gate honest on a multi-modal metric:
+ * +139% over a median that happens to sit in the other mode is not evidence of a
+ * regression if the new number is still below every sample the baseline came
+ * from. It is also an explicit limit — a *sustained* shift that stays inside the
+ * observed range is invisible to this gate, and the only way to shrink that
+ * blind spot is more history, not a tighter percentage.
  */
 export function findRegressions(rows, failPct) {
   if (failPct === null) return [];
   const regressions = [];
-  for (const [metric, before, after] of rows) {
-    if (before > 0.01 && ((after - before) / before) * 100 > failPct) {
-      regressions.push(`${metric}: +${(((after - before) / before) * 100).toFixed(1)}% > ${failPct}%`);
-    }
+  for (const row of rows) {
+    if (!exceedsPct(row, failPct) || !beyondBaseline(row)) continue;
+    const [metric, before, after] = row;
+    regressions.push(`${metric}: +${(((after - before) / before) * 100).toFixed(1)}% > ${failPct}%`);
   }
   return regressions;
+}
+
+/**
+ * Descriptions of the rows the percentage alone would have failed but the
+ * baseline range excuses — the suppressed set, printed so a reader sees which
+ * metrics currently carry no gateable signal rather than inferring it from the
+ * absence of a failure.
+ */
+export function findWithinBaseline(rows, failPct) {
+  if (failPct === null) return [];
+  const suppressed = [];
+  for (const row of rows) {
+    if (!exceedsPct(row, failPct) || beyondBaseline(row)) continue;
+    const [metric, before, after, ceiling] = row;
+    suppressed.push(
+      `${metric}: +${(((after - before) / before) * 100).toFixed(1)}%, within the ${ceiling} ms observed since the baseline was taken`
+    );
+  }
+  return suppressed;
+}
+
+/** Percentage-delta leg of the gate, shared so both verdicts read one rule. */
+function exceedsPct([, before, after], failPct) {
+  return before > 0.01 && ((after - before) / before) * 100 > failPct;
+}
+
+/** Absolute leg: `ceiling === null` means no history exists to consult, which is
+ * the explicit two-report path, so the percentage is all there is. */
+function beyondBaseline([, , after, ceiling]) {
+  return ceiling === null || after > ceiling;
 }
 
 /** The `limit` most recent archived reports in `resultsDir`, oldest first. */
@@ -167,20 +225,29 @@ if (invokedDirectly) {
     console.log(`newer: ${files[1]}`);
   } else {
     console.log(`newer: ${files.at(-1)}`);
-    console.log(`baseline: median of the preceding ${files.length - 1} report(s) per metric`);
+    console.log(
+      `baseline: median of the preceding ${files.length - 1} report(s) per metric; ` +
+      'the gate also requires beating the highest of those samples'
+    );
   }
   console.log('');
-  for (const [metric, before, after] of rows) {
+  for (const [metric, before, after, ceiling] of rows) {
     const baseline = Number.isInteger(before) ? before : Number(before.toFixed(3));
     const delta = after - before;
     const pct = before === 0 ? 'n/a' : `${((delta / before) * 100).toFixed(1)}%`;
     const marker = delta > 0 ? '+' : '';
+    const range = ceiling === null ? '' : `  [max ${ceiling}]`;
     console.log(
-      `${metric.padEnd(32)} ${String(baseline).padStart(8)} -> ${String(after).padStart(8)}  (${marker}${Number(delta.toFixed(2))} ms, ${pct})`
+      `${metric.padEnd(32)} ${String(baseline).padStart(8)} -> ${String(after).padStart(8)}  (${marker}${Number(delta.toFixed(2))} ms, ${pct})${range}`
     );
   }
 
   if (failPct === null) process.exit(0);
+  const suppressed = findWithinBaseline(rows, failPct);
+  if (suppressed.length > 0) {
+    console.log(`\n[bench] within-baseline, not gated:`);
+    for (const item of suppressed) console.log(`  - ${item}`);
+  }
   const regressions = findRegressions(rows, failPct);
   if (regressions.length > 0) {
     console.error(`\n[bench] FAIL: ${failPct}% regression threshold exceeded`);
