@@ -7465,12 +7465,21 @@ corroborates the 26-spec collection.)
   had drifted; they are now the names of the methods they belong to.
 - **What was *not* changed, and why that is the finding.** Of the candidates this pass collected,
   the largest group was REFUTED on inspection: a "five dispatch events" sentence, a "five internal
-  modules" sentence, a `docs/README.md` scope claim, a Worker-name claim, an object-store-key claim
-  and the packed-consumer gate's supposed inability to fail are all absent or already correct. The
-  pass that produced them had quoted sentences that do not exist in the files. Two controls were
-  therefore added to the method: every candidate is now re-adjudicated by a second reader instructed
-  to assume the first is wrong, and a claim about a *count* is grepped for the phrase before
-  anything is edited.
+  modules" sentence, a `docs/README.md` scope claim, an object-store-key claim, a client-level
+  `publication`-branch claim, and the packed-consumer gate's supposed inability to fail are all
+  absent or already correct — the collecting pass quoted sentences that do not exist in the files.
+  Two controls were therefore added to the method: every candidate is now re-adjudicated by a second
+  reader instructed to assume the first is wrong, and a claim about a *count* is grepped for the
+  phrase before anything is edited.
+- **What the second reader cleared, which is evidence too.** `docs/api.md:299`'s privacy absolutes
+  were re-derived from `src/core/trace.ts` rather than trusted: of the event interfaces there,
+  exactly two carry a topic (`DataBusSubscriptionTraceEvent.topic: string` at `:48-53`,
+  `DataBusReliabilityTraceEvent.topic?: string` at `:80-82`), `coordination` carries
+  `routes: string[]` in `topicKey@workerId` form, and the metrics events carry only a
+  `topics: number` count — so "Topic plaintext appears in exactly two event types" and "none of them
+  carries a message payload, a connection address, or an error body" both hold as written, in both
+  languages. The counter sentence that *was* wrong sat next to them, which is the reason a cleared
+  absolute is worth recording: proximity to a defect is not evidence about the neighbour.
 - **Verification:** `pnpm check` 0 (typecheck, build, 897 tests, 5 perf gates) on both batches;
   `pnpm lint` 0; `npx vitest run tests/documentation.test.ts` 17 passed;
   `git diff -U0 src/` reduced to non-comment lines returns zero lines; `git diff --check` 0;
