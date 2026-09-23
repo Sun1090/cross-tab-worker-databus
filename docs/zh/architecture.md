@@ -39,7 +39,7 @@ graph TB
   end
 ```
 
-默认 `workerMode: 'dedicated'` 时，每个 Tab 使用独立的 transport Worker。配置为 `shared` 或 `auto` 且浏览器支持 SharedWorker 时，同源 Tab 复用同一个 SharedWorker；SharedWorker 内每个连接 port 各自维护独立的 `CentrifugeSession`，一个 Tab 刷新或停止不会影响其他 Tab。`auto` 模式按 **SharedWorker → Dedicated Worker → 主线程 WebSocket** 降级，`dedicated` 模式按 **Dedicated Worker → SharedWorker → 主线程 WebSocket** 降级。`BroadcastChannel` 只负责控制消息和实时 publication 转发；localStorage 只负责最终一致的协调元数据。
+默认 `workerMode: 'dedicated'` 时，每个 Tab 使用独立的 transport Worker。配置为 `shared` 或 `auto` 且浏览器支持 SharedWorker 时，同源 Tab 复用同一个 SharedWorker；SharedWorker 内每个连接 port 各自维护独立的 `CentrifugeSession`，一个 Tab 刷新或停止不会影响其他 Tab。`auto` 模式按 **SharedWorker → Dedicated Worker → Local 模式**降级，`dedicated` 模式按 **Dedicated Worker → SharedWorker → Local 模式**降级。`BroadcastChannel` 只负责控制消息和实时 publication 转发，localStorage 里与集群相关的也只是最终一致的协调元数据——唯一的例外是 `channelFallback: 'storage-event'`：那时通道本身就是 localStorage，帧会经由它传递，详见 [storage 数据边界](./configuration.md#storage-数据边界)。
 
 由于 `MessagePort` 没有 `close` 事件，Tab 崩溃且未发送 `STOP` 时会遗留 session 和 WebSocket。主线程因此每 10 秒发送一次 `PING`，SharedWorker 对超过 30 秒无消息的 port 执行回收，释放对应 session 及其订阅。但“沉默”并不等于“不存在”，因此被回收的端口会在关闭前先收到一条通知：心跳只是被饿死（长同步任务、后台 Tab 受到的定时器节流）的 Tab 由此得知 backend 已失效，会上报该失败并在新端口上重建会话。
 

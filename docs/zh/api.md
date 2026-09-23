@@ -169,9 +169,9 @@ clearReplay(): Promise<void>
 
 清空内存 replay 缓冲，并调用持久化适配器可选的 `clear()`。适合留存策略、退出登录或租户切换；普通 `stop()` 仍会保留 durable history。
 
-`clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。为测试或非墙上时钟宿主，可额外提供 `dedup.now`。完整 `stop()` 会清空已记忆的 ID 窗口，之后 `start()` 会开启新的 dedup 会话。
+`clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计，配置了 `dedup.adaptiveTtl` 时还会多一个当前 `ttlMs`；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。为测试或非墙上时钟宿主，可额外提供 `dedup.now`。完整 `stop()` 会清空已记忆的 ID 窗口，之后 `start()` 会开启新的 dedup 会话。
 
-`clearReplayBefore(timestamp)` 按毫秒时间戳清理带显式 producer timestamp 且早于 cutoff 的记录；实现可选 `clearBefore()` 的持久化适配器会同步执行该清理。没有 producer timestamp 的 legacy 消息会为兼容性保留。transport 未提供时间戳时，系统仍会补充 bus timestamp，但该时间戳不会被当作 producer metadata 用于 retention 清理。
+`clearReplayBefore(timestamp)` 按毫秒时间戳清理带显式 producer timestamp 且早于 cutoff 的记录；实现可选 `clearBefore()` 的持久化适配器由它 `await`，这一路还经过带退避的重试，因此清理不会在同一个任务内同步完成。没有 producer timestamp 的 legacy 消息会为兼容性保留。transport 未提供时间戳时，系统仍会补充 bus timestamp，但该时间戳不会被当作 producer metadata 用于 retention 清理。
 
 启用自动 retention 时，如果持久化清理正在进行，后续清理请求会合并，完成后再应用最新 cutoff。
 
@@ -344,7 +344,7 @@ createCentrifugeDataBus<TData>(options): CrossTabDataBus<CentrifugeDataBusConfig
 - 使用包内 `centrifuge.worker.js`
 - Worker 名称为 `cross-tab-worker-databus`
 
-SharedWorker 模式使用包内 `centrifuge.shared.worker.js`。`workerMode: 'auto'` 时按 SharedWorker → Dedicated Worker → 本地模式降级。完整配置见 [configuration.md](./configuration.md)。
+SharedWorker 模式使用包内 `centrifuge.shared.worker.js`，其 Worker 名称为 `cross-tab-worker-databus-shared`。`workerMode: 'auto'` 时按 SharedWorker → Dedicated Worker → 本地模式降级。完整配置见 [configuration.md](./configuration.md)。
 
 ## `CentrifugeWorkerTransport<TData>`
 
@@ -430,7 +430,7 @@ React（>= 18）是可选 peer 依赖；独立入口保证非 React 消费者不
 
 ### `useCrossTabDataBus(create, deps?)`
 
-创建随组件生命周期存活的 bus：挂载时创建，卸载时停止。StrictMode 安全——effect 双调用走的是与 BFCache 挂起/恢复相同的停止/重建路径。返回当前 bus；首次 effect 之前（SSR / 初始渲染）为 `null`。
+创建随组件生命周期存活的 bus：挂载时创建，卸载时停止。StrictMode 安全——effect 双调用会跨**不同实例**走完 create → `stop()` → create，因此它覆盖的是停止路径，而不是 BFCache 路径：页面隐藏走的是 `onSuspend()`，它保留同一个 bus、它的 `topicHandlers` 与 replay 缓冲，恢复时再反转；挂起/恢复的覆盖只能来自真实的 hide/show。返回当前 bus；首次 effect 之前（SSR / 初始渲染）为 `null`。
 
 每次 effect 返回一个全新 bus（内联工厂即可）；需要重建时通过 `deps` 控制。
 

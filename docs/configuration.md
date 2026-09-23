@@ -165,7 +165,7 @@ Main configuration for `createCentrifugeDataBus<TData>(options)`:
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING heartbeat interval (see SharedWorker Session Reaper below); `Infinity` disables heartbeats entirely and exempts that port from reaping. Distinct from the Core cluster heartbeat (default 3000 ms) which tracks worker liveness via localStorage |
 | `workerFactory` | `() => Worker` | Built-in Worker | For testing or custom Worker loading |
 | `sharedWorkerFactory` | `() => SharedWorker` | Built-in SharedWorker | For testing or custom SharedWorker loading |
-| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | Async credential refresh bridge: the Worker asks the main thread for each fresh token (`getToken` / `getChannelToken`) and this provider supplies it from application context. Required because function-valued Centrifuge options cannot be structured-cloned into the Worker |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | Async credential refresh bridge: the Worker asks the main thread for each fresh token and this provider supplies it from application context. In practice that ask is `getToken`, the only credential hook `centrifuge@5.7.4` exposes — the type carries `getChannelToken` and the Worker protocol carries that request kind so a later SDK needs no change on this side, but nothing asks it today. Required because function-valued Centrifuge options cannot be structured-cloned into the Worker |
 | Other Core config | Corresponding type | Core defaults | `storagePrefix`, heartbeat, TTL, etc. |
 
 ```ts
@@ -256,11 +256,12 @@ When non-clonable data is passed, `CentrifugeWorkerTransport` will throw a clear
 
 ## Storage Data Boundaries
 
-The coordination records this library writes itself (`worker:*`, `route:*`, `subscriber:*`, and the tab-id key) hold only:
+The coordination records this library writes itself — `{clusterHash}:worker:{workerId}`, `{clusterHash}:route:{topicKey}`, `{clusterHash}:subscriber:{topicKey}:{tabId}`, and the tab-id key — hold only:
 
-- Worker ID, Tab ID, status, visibility, load, and heartbeat
-- Opaque Topic key, owner Worker, and last update time
-- Topic subscriber's Tab ID
+- Worker and Tab identity, role, status, visibility, the owned-topic `load` figure, an optional rolling throughput sample, the advertised protocol version, and the heartbeat / first-registration timestamps
+- The opaque Topic key, its owner's Worker and Tab identity, the last-update and generation numbers, and — during a graceful handoff — the previous owner and the owner's confirmation timestamp
+- A subscriber record's Tab ID and its last-update timestamp
+- The tab's own persisted id, which is what lets a reload reclaim its routes
 
 Those records never hold:
 

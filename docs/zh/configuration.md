@@ -158,7 +158,7 @@ const bus = createCentrifugeDataBus({
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING 心跳间隔（见下方 SharedWorker 会话回收）；传 `Infinity` 完全禁用心跳，该端口也因此豁免于回收。与 Core 集群心跳（默认 3000 ms，通过 localStorage 跟踪 worker 存活）相互独立 |
 | `workerFactory` | `() => Worker` | 内置 Worker | 测试或自定义 Worker 加载方式 |
 | `sharedWorkerFactory` | `() => SharedWorker` | 内置 SharedWorker | 测试或自定义 SharedWorker 加载方式 |
-| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token（`getToken` / `getChannelToken`），由该 provider 从应用上下文提供。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token，由该 provider 从应用上下文提供。实践中这一问只发生在 `getToken` 上——它是 `centrifuge@5.7.4` 暴露的唯一凭证钩子；类型里保留着 `getChannelToken`，Worker 协议也保留该请求种类，以便未来的 SDK 无需改动本侧，但今天没有任何代码会问它。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
 | 其他 Core 配置 | 对应类型 | Core 默认值 | `storagePrefix`、心跳、TTL 等 |
 
 ```ts
@@ -249,11 +249,12 @@ Worker 模式下配置通过 `Worker` / `SharedWorker` 的 `postMessage` 发送�
 
 ## storage 数据边界
 
-本库亲自写入的协调记录（`worker:*`、`route:*`、`subscriber:*` 以及 tab-id 键）只保存：
+本库亲自写入的协调记录——`{clusterHash}:worker:{workerId}`、`{clusterHash}:route:{topicKey}`、`{clusterHash}:subscriber:{topicKey}:{tabId}` 以及 tab-id 键——只保存：
 
-- Worker ID、Tab ID、状态、可见性、负载和心跳
-- Topic 的不透明 key、owner Worker 和更新时间
-- Topic subscriber 的 Tab ID
+- Worker 与 Tab 身份、角色、状态、可见性、代表持有 Topic 数量的 `load`、可选的滚动吞吐样本、广播出去的协议版本，以及心跳与首次注册的时间戳
+- Topic 的不透明 key、其 owner 的 Worker 与 Tab 身份、最后更新时间与 generation，以及优雅交接期间的上一任 owner 和 owner 的确认时间
+- subscriber 记录的 Tab ID 与它的最后更新时间
+- Tab 自己的持久化 id——正是它让刷新后的页面能认领回自己的 route
 
 这些记录里永远不会出现：
 

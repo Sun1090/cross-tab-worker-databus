@@ -7381,7 +7381,12 @@ corroborates the 26-spec collection.)
 - **Milestone / version:** `0.21.13`, prepared on branch `release/0.21.13` from `main` at
   `e28554b` (the merge of PR #226). Patch release: no behavior, wire-format, storage-layout or
   cluster-protocol change.
-- **Status:** pre-tag verification complete and green; release commit pushed, PR opened.
+- **Status:** **published.** PR #227 merged (squash) into `main` as `d3b4b36`; the annotated tag
+  `v0.21.13` points at that exact commit; `Release` run `35895388041` finished `completed/success`
+  with its `release` job green, which includes the blocking `verify:published` consumer check.
+  `registry.npmjs.org` now reports both `version` and `dist-tags.latest` as `0.21.13`. The
+  `release/0.21.13` branch was deleted on the remote and locally immediately after the merge, so
+  `git branch -r` is back to `origin/main` alone.
 - **What this release contains.** Three passes that had accumulated without a freeze:
   - **Phase 133 (PR #224, `aec8f29`)** — 10 shipped body-comment claims in `src/core/data-bus.ts`
     and `src/core/cluster.ts`, including the "`reportError` cannot throw" premise three enumeration
@@ -7431,6 +7436,51 @@ corroborates the 26-spec collection.)
   Centrifuge `error`-guard question (Phase 134) and the shipped-text of `examples/**` /
   `scripts/**`, which no `package.json` `files` entry publishes and so is maintainer-facing only.
 - **Updated:** 2026-09-24.
+
+## Phase 137 / The published prose read from the Chinese side, and the last open src question closed
+
+- **Milestone / version:** post-`0.21.13` work on branch `docs/zh-mirror-audit` (commits `3e3e64c`
+  and the follow-up), PR #228. No behavior, wire-format, storage-layout or protocol change; the
+  `src/` diff is comments only, so this is patch-release material.
+- **Status:** open PR #228, locally green; not yet merged or released.
+- **Why this pass existed.** The three earlier sweeps each read one shipped surface —
+  `docs/**` + READMEs (0.21.11/0.21.12), declaration JSDoc (#223), `src` body comments
+  (#224/#225) — and the docs sweep corrected sentences in whichever language it was reading at the
+  moment. The `docs/zh/` mirrors are in `package.json` `files`, so a Chinese paragraph that kept a
+  retracted claim was still shipping. Reading them against `src/` also surfaced claims the English
+  files had never checked, most of them in the tables rather than the prose.
+- **What was corrected** (22 items: 20 prose classes across 20 sites in `docs/**` + both READMEs,
+  two in `src/` comments — each verified at the code site first; see `CHANGELOG.md` Unreleased for
+  the per-item evidence): the `configuration.md` storage-boundary section and its payload-proxy sentence in both languages, `architecture.md`'s five coordination
+  claims and its localStorage absolute in both, `getting-started.md`'s "N channel subscriptions" in
+  both, `capabilities.md`'s storage-retry row in Chinese, `transports.md`'s generation-guard bullet
+  in both, `api.md`'s StrictMode claim in both plus `getDedupStats()` and `clearBefore()` in
+  Chinese, the credential-bridge wording in both READMEs and both configuration tables, and the
+  `release-checklist.md` Release-job list in both.
+- **The src half.** `src/centrifuge-session.ts`'s one open question — `unsubscribe()` deletes
+  Centrifuge 5.7.4's own no-op `error` listener under an emitter that throws on an unhandled
+  `error` — is closed by a programmatic enumeration of all twelve `emit('error')` sites in
+  `BaseSubscription` plus the three re-entry routes, recorded in the comment instead of answered
+  with a defensive re-attach. `src/centrifuge.ts`'s module comment carried two line numbers that
+  had drifted; they are now the names of the methods they belong to.
+- **What was *not* changed, and why that is the finding.** Of the candidates this pass collected,
+  the largest group was REFUTED on inspection: a "five dispatch events" sentence, a "five internal
+  modules" sentence, a `docs/README.md` scope claim, a Worker-name claim, an object-store-key claim
+  and the packed-consumer gate's supposed inability to fail are all absent or already correct. The
+  pass that produced them had quoted sentences that do not exist in the files. Two controls were
+  therefore added to the method: every candidate is now re-adjudicated by a second reader instructed
+  to assume the first is wrong, and a claim about a *count* is grepped for the phrase before
+  anything is edited.
+- **Verification:** `pnpm check` 0 (typecheck, build, 897 tests, 5 perf gates) on both batches;
+  `pnpm lint` 0; `npx vitest run tests/documentation.test.ts` 17 passed;
+  `git diff -U0 src/` reduced to non-comment lines returns zero lines; `git diff --check` 0;
+  `pnpm audit --registry=https://registry.npmjs.org` clean.
+- **Risks / rollback:** consumers see only prose and comment text (esbuild carries `src` comments
+  into `dist/**/*.js` and `dist/cjs/*.cjs`, both published). Revert the branch's commits.
+- **Next:** merge PR #228 when CI is green, then cut the patch release. Remaining published-surface
+  work is one item — `docs/architecture.md`'s storage-write table is the last file whose rows were
+  written before this pass and could carry the same absolute in a different phrasing.
+- **Update date:** 2026-09-24.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 

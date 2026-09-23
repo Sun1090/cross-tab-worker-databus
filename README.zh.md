@@ -22,7 +22,7 @@
 - 新 Topic 分配给负载最低的候选 Worker
 - 非正常退出后的自动 owner 恢复：交接 ACK 丢失或 owner 崩溃后由 TTL 门禁的重新选举接管（上界为 `heartbeatIntervalMs + workerTtlMs`），每次路由确认 / 迁移 / 恢复都会发出有界的 `reliability` trace 事件
 - 可选自适应 owner 加权（`loadWeighting`）：流量消息/字节速率与心跳调度滞后引导新 route 偏向更空闲、更健康的 Worker；已有 route 保持 sticky，默认仍为纯 Topic 数路由
-- 面向 Centrifuge Worker 的异步凭证刷新桥（`credentialProvider`）：Worker 通过 TOKEN_REQUEST/RESPONSE 交换向主线程请求每个新 `getToken` / `getChannelToken`，函数型选项不跨 structured-clone 边界
+- 面向 Centrifuge Worker 的异步凭证刷新桥（`credentialProvider`）：Worker 通过 TOKEN_REQUEST/RESPONSE 交换向主线程请求每个新 token，函数型选项不跨 structured-clone 边界。在 `centrifuge@5.7.4` 下这一问就是连接级 `getToken`；协议里另有一种 `getChannelToken` 请求，而该 SDK 从不发起
 - 通配符订阅：`chat.*` 与 `*` pattern 在分发侧匹配具体 Topic
 - 传输无关的 publication 元数据（`messageId`、`timestamp`），支持标准 WebSocket/Centrifuge envelope，并兼容旧帧格式
 - 可选的 durable replay retention（`replay.retentionMs`），以及 trace snapshot 中的去重结果指标

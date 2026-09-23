@@ -93,7 +93,7 @@ transport 选择后端（SharedWorker / Dedicated Worker / 本地），向它发
 
 - **后端选举**：复用 `worker-mode.ts` 的 `selectWorkerBackend`，使你的后端与
   SDK 其余部分降级行为一致。
-- **generation 守卫**：创建后端或停止 transport 时递增单调计数器。参考实现里只有异步凭证桥会比较它，因为 provider 可能在它所应答的 Worker 已经消失之后才 settle。Worker 的 error 处理并不读这个计数器——`stop()` 与 `onWorkerFailed()` 在 generation 前移之前就移除了这些监听器，被取代的后端根本到不了这个对象。只有当你的后端会让某个监听器跨过后端替换继续存活时，才需要自己加这层检查。
+- **generation 守卫**：创建 *Worker* 后端或停止 transport 时递增单调计数器——参考实现里进程内的 local 后端安装时并不递增，这正是它的 `isCurrentBackend()` 还要同时比较 Worker/port/`localSession` 身份的原因。参考实现中只有异步凭证桥会比较它，因为 provider 可能在它所应答的 Worker 已经消失之后才 settle。Worker 的 error 处理并不读这个计数器——`stop()` 是先前移 generation、再移除这些监听器，而 `onWorkerFailed()` 根本不碰这个计数器，所以被取代的后端到不了这个对象。只有当你的后端会让某个监听器跨过后端替换继续存活时，才需要自己加这层检查。
 - **SharedWorker 心跳**：若用 SharedWorker，定期发 PING，让 `PortReaper` 能
   回收死 tab 的 session，并处理回收器在关闭端口前发出的 `SESSION_REAPED`
   消息。对被饿死但仍存活的 tab 来说，那是唯一能收到的信号（`MessagePort` 没有

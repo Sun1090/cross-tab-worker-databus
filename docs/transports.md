@@ -110,12 +110,14 @@ reference shape, including:
 
 - **Backend selection**: reuse `selectWorkerBackend` from `worker-mode.ts` so
   your backend degrades consistently with the rest of the SDK.
-- **Generation guard**: bump a monotonic counter when a backend is created or the
-  transport stops. Only the asynchronous credential bridge compares it, because a
-  provider can settle after the Worker it was answering is gone. Worker error
-  handlers read no such counter in the reference implementation — `stop()` and
-  `onWorkerFailed()` remove those listeners before the generation moves on, so a
-  superseded backend cannot reach the transport at all. If your backend keeps a
+- **Generation guard**: bump a monotonic counter when a *Worker* backend is created
+  or the transport stops — the reference implementation's in-process local backend is
+  installed without a bump, which is why its `isCurrentBackend()` compares
+  Worker/port/`localSession` identity as well. Only the asynchronous credential bridge
+  compares it, because a provider can settle after the Worker it was answering is gone. Worker
+  error handlers read no such counter in the reference implementation — `stop()` moves the
+  generation on *before* it removes those listeners, and `onWorkerFailed()` never touches the
+  counter at all, so a superseded backend cannot reach the transport. If your backend keeps a
   listener alive across a swap, that is when you need the check yourself.
 - **SharedWorker heartbeat**: if you use a SharedWorker, send periodic PINGs
   so a `PortReaper` can reclaim dead-tab sessions, and handle the

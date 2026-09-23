@@ -113,11 +113,13 @@ export class CentrifugeWorkerTransport<TData = unknown>
   // `isCurrentBackend()` compares worker/port/localSession identity as well.
   // Only the asynchronous credential bridge reads the counter: a provider may
   // settle after the backend it was answering is gone. Worker error events need
-  // no such check, but not for the reason this note used to give — `stop()`
-  // bumps at `:189` and removes the listeners at `:193-194`, so the generation
-  // moves on *before* the removal, not after. The containment is that both
-  // happen in one synchronous task, together with `handlers = null`, and no
-  // message or error event can be delivered to this object mid-task.
+  // no such check, but not for the reason this note used to give — the top of
+  // `stop()` bumps the counter and only then removes the listeners, so the
+  // generation moves on *before* the removal, not after, while `onWorkerFailed()`
+  // removes them without touching the counter at all. The containment in both
+  // cases is that they happen in one synchronous task, together with
+  // `handlers = null`, and no message or error event can be delivered to this
+  // object mid-task.
   private generation = 0;
 
   get diagnosticsBackend(): string {
