@@ -8,9 +8,12 @@
  * on the lifecycle transitions, and `getStats()`/`reset()` on the diagnostics
  * surface.
  *
- * Deduplication is opt-in: an instance is only created when the DataBus was
- * configured with `dedup` options, so the zero-overhead default (no map, no
- * timer) is preserved.
+ * Deduplication is opt-in, but the manager itself is always constructed: the
+ * DataBus passes `enabled: dedup !== undefined`, and `enabled: false` makes it a
+ * no-op that records nothing (`isDuplicate` returns early) and schedules nothing
+ * (`start` returns before touching the timer). So the zero-overhead default is
+ * "no state, no timer", not "no instance" — one empty Map is still allocated by
+ * the field initialiser.
  */
 import type { DataBusTraceReporter } from './trace';
 import { RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';

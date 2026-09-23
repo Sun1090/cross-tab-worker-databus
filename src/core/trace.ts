@@ -23,7 +23,9 @@ import {
 
 /** Trace reporting mode: record only events, only metrics, or both. */
 /** Selects which trace categories the reporter emits.
- * - `events` — lifecycle/status/subscription/coordination/error events only.
+ * - `events` — every non-metrics category: lifecycle, status, subscription,
+ *   coordination, error **and reliability** events. The gate is
+ *   `mode !== 'metrics'`, so `metrics` is the only category this mode excludes.
  * - `metrics` — periodic `message_metrics` snapshots only.
  * - `all` — both event streams and metrics snapshots. */
 export type DataBusTraceMode = (typeof TRACE_MODE)[keyof typeof TRACE_MODE];
@@ -51,8 +53,10 @@ export interface DataBusSubscriptionTraceEvent {
   timestamp: number;
 }
 
-/** Emitted after each transport open (initial start and recovery) to record
- * the coordinated cluster state, including the settled route list. */
+/** Emitted once per successful `start()`, after the transport has opened and
+ * the just-issued subscriptions have flushed, so the route list is populated
+ * rather than empty. A recovery reopen does not emit another one. Reports the
+ * coordinated cluster state, including the settled route list. */
 export interface DataBusCoordinationTraceEvent {
   type: typeof TRACE_EVENT_TYPE.COORDINATION;
   coordinated: boolean;
@@ -148,7 +152,9 @@ type DataBusTraceEventInput = DataBusTraceEvent extends infer TEvent
 /** Configuration for {@link DataBusTraceReporter}. `sink` receives every
  * emitted event (filtered by `mode`); all other fields are optional. */
 export interface DataBusTraceOptions {
-  /** When `false`, the reporter is inert (no events emitted). Default `true`. */
+  /** Tracing is opt-in: when `false` the reporter is inert, and the default is
+   * `false` — so `trace: { sink }` alone emits nothing and `enabled: true` is
+   * required. Pinned by `tests/data-bus.test.ts`'s `no-trace` case. */
   enabled?: boolean;
   /** Which event categories to emit. Default `all`. */
   mode?: DataBusTraceMode;

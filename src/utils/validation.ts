@@ -1,8 +1,12 @@
 /**
  * 参数校验工具 —— CrossTabDataBus 构造选项与持久化配置的入口校验。
  *
- * 所有 `throw new TypeError(...)` 校验集中在此，DataBus 构造器与
+ * 绝大多数 `throw new TypeError(...)` 校验集中在此，DataBus 构造器与
  * IndexedDbReplayPersistence 共用同一组断言，错误消息与原有语义保持一致。
+ * 唯一的例外是 `replay-manager.ts` 里 `clearBefore(timestamp)` 的
+ * `Number.isFinite` 检查：它贴在自己的公共方法上，不在这里。新增校验时若
+ * 想继续集中，请把这类只服务单个公共方法入口的检查也搬进来，否则请像它
+ * 一样在这里留一句指向。
  *
  * 语义约定：可选字段只在**显式提供**时校验（undefined 由调用方落到默认值，
  * 默认值始终合法）；必填字段总是校验。

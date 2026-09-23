@@ -11,10 +11,13 @@
  *
  * - **新增或修改字符串字面量时，先到这里查找/增补，不要在业务文件里直接写
  *   魔法字符串。** 扫描残留字面量：`rg "'(['a-z]+)'" src/`。
- * - **只用于类型位置的常量**（如 `PERSISTENCE_OPERATION`）在调用方用
- *   `import type`；**在运行时比较/构造中使用的**（如 `WORKER_STATUS.ERROR`、
- *   `TRACE_EVENT_TYPE.LIFECYCLE`）必须用值导入，否则会报 "cannot be used as
- *   a value because it was imported using 'import type'"。
+ * - **只用于类型位置的常量**（即只出现在 `typeof X[keyof typeof X]` 这类派生里、
+ *   从不参与运行时比较的）在调用方用 `import type`；**在运行时比较/构造中使用的**
+ *   （如 `WORKER_STATUS.ERROR`、`TRACE_EVENT_TYPE.LIFECYCLE`、
+ *   `PERSISTENCE_OPERATION.APPEND`）必须用值导入，否则会报 "cannot be used as
+ *   a value because it was imported using 'import type'"。`PERSISTENCE_OPERATION`
+ *   属于后者而不是类型侧的例子：`replay-manager.ts` 以值导入它，并把它的成员作为
+ *   `withPersistenceRetry` 的第一个实参传进去。
  * - **值派生类型**：`export type WorkerStatus = (typeof WORKER_STATUS)[keyof
  *   typeof WORKER_STATUS]`。这样新增枚举分支时类型自动收窄，编译器会指出
  *   每个遗漏的 switch 分支。

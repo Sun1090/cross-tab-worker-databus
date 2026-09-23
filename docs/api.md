@@ -377,7 +377,7 @@ createStorageEventChannel(options: {
 }): ClusterChannel | null
 ```
 
-Creates a `ClusterChannel` backed by localStorage `storage` events — the coordination fallback for environments without BroadcastChannel. Returns `null` when storage or a storage-event source is unavailable. Delivery semantics mirror BroadcastChannel (no echo to the sender, JSON-serializable messages, closed channels refuse further posts); the payload envelope carries a per-channel sender nonce **and** a monotonic sequence, which is what keeps consecutive identical messages deliverable — including two tabs whose first frame would otherwise store the same `seq=1` value and be silently suppressed. Opt in via `createBrowserEnvironment({ channelFallback: 'storage-event' })`; see the security note in [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
+Creates a `ClusterChannel` backed by localStorage `storage` events — the coordination fallback for environments without BroadcastChannel. Returns `null` when storage or a storage-event source is unavailable. Delivery semantics follow BroadcastChannel where cross-tab coordination needs them — no echo to the sending tab, JSON-serializable messages, closed channels refuse further posts — with one deliberate divergence: `postMessage` also never dispatches to the channel's own listeners, so two channels created in the **same** document do not see each other, which a real BroadcastChannel does. Only cross-tab delivery matters to this fallback, and the divergence is pinned by the sibling-channel case in `tests/storage-channel.test.ts`; the payload envelope carries a per-channel sender nonce **and** a monotonic sequence, which is what keeps consecutive identical messages deliverable — including two tabs whose first frame would otherwise store the same `seq=1` value and be silently suppressed. Opt in via `createBrowserEnvironment({ channelFallback: 'storage-event' })`; see the security note in [configuration.md](./configuration.md#coordination-channel-fallback-broadcastchannel-unavailable).
 
 ## WebSocket Transport Backend
 
@@ -513,7 +513,7 @@ The score is always finite. A Worker with no throughput sample, an unset (all-ze
 
 ### `approximatePayloadBytes(payload)`
 
-Cheap, allocation-free estimate of a payload's wire size, used for the byte side of an adaptive load sample. It only runs when adaptive routing is enabled, so approximate sizes are fine — the goal is a stable cross-Worker comparison, not an exact byte count.
+Cheap estimate of a payload's wire size, used for the byte side of an adaptive load sample and — because `getDiagnostics().replay` reports a `bytes` figure computed on demand — to size the retained replay buffers, so it is not gated on adaptive routing. It is not allocation-free either: an object node materialises `Object.values`. Approximate sizes are fine either way; the goal is a stable cross-Worker comparison, not an exact byte count.
 
 Sizes: `null`/`undefined` and symbols/functions `0`, booleans `4`, numbers and bigints `8`, strings their length, `ArrayBuffer`s and typed-array views their `byteLength`, arrays an 8-byte header plus their elements, and plain objects the sum of their values.
 
