@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { compareAgainstBaseline, compareReports, findRegressions, median, parseArgs } from '../scripts/bench-compare.mjs';
-import type { BenchReportLike } from '../scripts/bench-compare.mjs';
+import {
+  compareAgainstBaseline,
+  compareReports,
+  findRegressions,
+  findWithinBaseline,
+  median,
+  parseArgs
+} from '../scripts/bench-compare.mjs';
+import type { BenchMetricRow, BenchReportLike } from '../scripts/bench-compare.mjs';
 
 /**
  * `pnpm bench:compare --fail-above-pct 50` is a documented release gate (both
@@ -65,10 +72,10 @@ const newer: BenchReportLike = {
 describe('bench-compare regression gate', () => {
   it('pairs metrics present in both reports', () => {
     expect(compareReports(older, newer)).toEqual([
-      ['publish/dedicated/perMessageMs', 10, 12],
-      ['publish/shared/perMessageMs', 20, 18],
-      ['databus/dedup1000Ms', 8, 9],
-      ['databus/firstPacketMs', 0, 0]
+      ['publish/dedicated/perMessageMs', 10, 12, null],
+      ['publish/shared/perMessageMs', 20, 18, null],
+      ['databus/dedup1000Ms', 8, 9, null],
+      ['databus/firstPacketMs', 0, 0, null]
     ]);
   });
 
@@ -86,7 +93,7 @@ describe('bench-compare regression gate', () => {
   it('ignores metrics whose baseline is effectively zero', () => {
     // firstPacketMs goes 0 -> 0; a percentage change from ~0 is meaningless and
     // must not blow up into a false regression.
-    const rows: Array<[string, number, number]> = [['databus/firstPacketMs', 0, 5]];
+    const rows: BenchMetricRow[] = [['databus/firstPacketMs', 0, 5, 0]];
     expect(findRegressions(rows, 1)).toEqual([]);
   });
 
@@ -115,8 +122,8 @@ describe('bench-compare median baseline', () => {
     const archive = [timed(12.7), timed(25.6), timed(10.1), timed(25.3), timed(25.5), timed(13, 13)];
     const rows = compareAgainstBaseline(archive);
     expect(rows).toEqual([
-      ['publish/dedicated/perMessageMs', 10, 13],
-      ['databus/dedup1000Ms', 25.3, 13]
+      ['publish/dedicated/perMessageMs', 10, 13, 10],
+      ['databus/dedup1000Ms', 25.3, 13, 25.6]
     ]);
     expect(findRegressions(rows, 50)).toEqual([]);
   });
@@ -127,8 +134,8 @@ describe('bench-compare median baseline', () => {
     const archive = [timed(10), timed(11), timed(10), timed(12), timed(21), timed(22, 22)];
     const rows = compareAgainstBaseline(archive);
     expect(rows).toEqual([
-      ['publish/dedicated/perMessageMs', 10, 22],
-      ['databus/dedup1000Ms', 11, 22]
+      ['publish/dedicated/perMessageMs', 10, 22, 10],
+      ['databus/dedup1000Ms', 11, 22, 21]
     ]);
     expect(findRegressions(rows, 50)).toEqual([
       'publish/dedicated/perMessageMs: +120.0% > 50%',
@@ -142,8 +149,8 @@ describe('bench-compare median baseline', () => {
     const archive = [timed(1), timed(1), timed(30), timed(31), timed(30), timed(32), timed(30)];
     const rows = compareAgainstBaseline(archive);
     expect(rows).toEqual([
-      ['publish/dedicated/perMessageMs', 10, 10],
-      ['databus/dedup1000Ms', 30, 30]
+      ['publish/dedicated/perMessageMs', 10, 10, 10],
+      ['databus/dedup1000Ms', 30, 30, 32]
     ]);
     expect(findRegressions(rows, 50)).toEqual([]);
   });
@@ -154,8 +161,52 @@ describe('bench-compare median baseline', () => {
   });
 
   it('degenerates to the previous report for a two-report archive', () => {
-    // With one preceding report the median is that report, so the gate keeps
-    // working before the archive fills up.
-    expect(compareAgainstBaseline([older, newer])).toEqual(compareReports(older, newer));
+    // With one preceding report the median is that report. The ceiling leg is
+    // then identical to the percentage leg's own comparison point — the new
+    // number must beat the only sample there is — so the gate keeps working
+    // before the archive fills up.
+    expect(compareAgainstBaseline([older, newer])).toEqual([
+      ['publish/dedicated/perMessageMs', 10, 12, 10],
+      ['publish/shared/perMessageMs', 20, 18, 20],
+      ['databus/dedup1000Ms', 8, 9, 8],
+      ['databus/firstPacketMs', 0, 0, 0]
+    ]);
+    expect(findRegressions(compareAgainstBaseline([older, newer]), 10)).toEqual(
+      findRegressions(compareReports(older, newer), 10)
+    );
+  });
+
+  it('does not gate a multi-modal metric whose swing exceeds the threshold', () => {
+    // The gap the median baseline leaves open, measured on a comment-only branch
+    // that read +121% and -56.7% minutes apart. History spans both modes, so the
+    // median can sit in either one; a fast-median baseline plus a slow-mode newest
+    // is a large percentage with no new information in it.
+    const archive = [timed(11.0), timed(11.5), timed(11.6), timed(22.4), timed(26.8), timed(25.5, 10)];
+    const rows = compareAgainstBaseline(archive);
+    const dedup = rows.find(([label]) => label === 'databus/dedup1000Ms') as BenchMetricRow;
+    expect(dedup).toEqual(['databus/dedup1000Ms', 11.6, 25.5, 26.8]);
+    // +120% over the median — and still the third-fastest reading in the window.
+    expect(findRegressions([dedup], 50)).toEqual([]);
+    expect(findWithinBaseline([dedup], 50)).toEqual([
+      'databus/dedup1000Ms: +119.8%, within the 26.8 ms observed since the baseline was taken'
+    ]);
+    // The same value beyond every sample in the window *is* evidence.
+    expect(findRegressions([['databus/dedup1000Ms', 11.6, 27.8, 26.8]], 50)).toEqual([
+      'databus/dedup1000Ms: +139.7% > 50%'
+    ]);
+    // A stable metric keeps full resolution: its ceiling is one sample, so the
+    // percentage leg alone decides, exactly as before.
+    expect(findRegressions([['databus/publishBatch1000Ms', 3.7, 5.6, 3.9]], 40)).toEqual([
+      'databus/publishBatch1000Ms: +51.4% > 40%'
+    ]);
+  });
+
+  it('reports nothing as suppressed when the gate is off or no metric moved', () => {
+    const rows = compareAgainstBaseline([timed(10), timed(10), timed(10)]);
+    expect(findWithinBaseline(rows, 50)).toEqual([]);
+    expect(findWithinBaseline(compareReports(older, newer), null)).toEqual([]);
+    // A two-report pair has no ceiling to hide behind, so a large swing is never
+    // suppressed — the leg cannot invent history that was not passed in.
+    expect(findWithinBaseline(compareReports(older, newer), 10)).toEqual([]);
   });
 });
