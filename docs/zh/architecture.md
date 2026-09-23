@@ -166,7 +166,7 @@ interface WorkerRoute {
 
 | 对象 | 含义 | 主要用途 | 是否写入协调存储 |
 |---|---|---|---|
-| `topic` | 业务使用的原始 Topic 字符串 | 调用 transport 的 `subscribe`、`unsubscribe` 和 `publish` | 否；仅在 Runtime 内存和 BroadcastChannel 控制消息中出现 |
+| `topic` | 业务使用的原始 Topic 字符串 | 调用 transport 的 `subscribe`、`unsubscribe`、`publish` 和 `publishBatch` | 不进入任何协调记录——只出现在 Runtime 内存与控制消息中。同一张表里的 storage-event 通道那一行是唯一的例外：由它承载帧时，每条 `CONTROL` 点名的明文都会随帧一起落盘 |
 | `topicKey` | `createOpaqueKey(topic)` 生成的稳定不透明 key | 关联 route 与 subscriber 记录 | 是 |
 | `tabId` | 一个浏览器 Tab 的稳定身份 | 标识哪个 Tab 订阅了某个 `topicKey` | 是，体现在 subscriber key 中 |
 | `workerId` | 当前 Runtime/Worker 实例身份 | 标识哪个 Worker 负责实际 transport 订阅 | 是，体现在 worker/route 记录中 |
@@ -190,7 +190,7 @@ BroadcastChannel CONTROL
 
 ### 内存 Topic key 缓存 (`knownTopics`)
 
-每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它由 `rememberTopic()` 填充：`subscribe`、`publish`、`unsubscribe` 都会调用它，入站 `CONTROL` 消息则只有在跨过 `handleControlMessage` 顶部两道守卫之后才走到这一步——点名其他 worker 的帧，与配对不相符的帧，都会在读到明文之前就被丢弃，因此两者都无法撑大这张表。合法调用仍然可以（同源脚本能通过页面上自己的 bus 触达这些 API），约束它们的正是下面的上限。
+每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它在每一个 `rememberTopic()` 调用点被写入：`subscribe`、`publish`、`publishBatch`、`unsubscribe`（在 `releaseSubscription` 内部）、启动/恢复时为队列里每个 topic 各调用一次的 `activate()`，以及每轮的 `reconcileSubscriptions()`。入站 `CONTROL` 消息则只有在跨过 `handleControlMessage` 顶部两道守卫之后才走到这一步——点名其他 worker 的帧，与配对不相符的帧，都会在读到明文之前就被丢弃，因此两者都无法撑大这张表。合法调用仍然可以（同源脚本能通过页面上自己的 bus 触达这些 API），约束它们的正是下面的上限。
 
 该缓存存在两个原因：
 
@@ -217,7 +217,10 @@ BroadcastChannel CONTROL
 |---|---|---|
 | `subscribe(topic)` | `rememberTopic(topic)` → `set(topicKey, topic)` | 填充反向映射，供无 storage 模式的 `readRoute` 使用 |
 | `publish(topic, data)` | `rememberTopic(topic)` → `set(topicKey, topic)` | 同上 |
-| `unsubscribe(topic)` | 如不在 `assignedTopics` 中则 `delete(topicKey)` | 不再需要；仅当仍持有该 topic 时才保留 |
+| `publishBatch(topic, items)` | `rememberTopic(topic)` → `set(topicKey, topic)` | 同上；一个批次只解析一个 key，不是每条 item 一个（只含一条的批次直接转由 `publish` 处理） |
+| `activate()`（启动 / 恢复） | 对 `subscribedTopics` 里每个 topic 调用 `rememberTopic(topic)` → `set(topicKey, topic)` | 反向映射必须在该循环的两个分支任一执行之前就已存在：无 storage 路径要发 `CONTROL/SUBSCRIBE`，另一支要写 subscriber 记录 |
+| `reconcileSubscriptions()`（每轮） | 对 `subscribedTopics` 里每个 topic 调用 `rememberTopic(topic)` → `set(topicKey, topic)` | 每轮心跳重申一次映射；见上文原因 2 |
+| `unsubscribe(topic)` | 先 `rememberTopic(topic)`（在 `releaseSubscription` 内），如不在 `assignedTopics` 中再 `delete(topicKey)` | key 在归属检查之前推导；仅当仍持有该 topic 时才保留 |
 | 收到 `CONTROL`（任意动作：SUBSCRIBE / UNSUBSCRIBE / PUBLISH） | `rememberTopic(message.topic)` → `set(topicKey, topic)` | 入站帧携带明文 topic，但 `rememberTopic` 位于 `targetWorkerId` 与 `topicKey` 配对两道守卫**之后**，被任一守卫丢弃的帧永远不会被缓存 |
 | 收到 `CONTROL/UNSUBSCRIBE` | 不做直接删除 | `rememberTopic` 仍会缓存该 topic；路由不再指向本 worker 后由 `reconcileAssignedTopics` 移除 |
 | `reconcileAssignedTopics` | 如未订阅且未持有则 `delete(topicKey)` | 路由不再指向我们——除非仍是 subscriber 否则清理 |

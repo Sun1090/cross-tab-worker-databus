@@ -197,7 +197,7 @@ These identifiers represent different layers:
 
 | Object | Meaning | Main use | Persisted in coordination storage |
 |---|---|---|---|
-| `topic` | Original application Topic string | Passed to transport `subscribe`, `unsubscribe`, and `publish` | No; kept in Runtime memory and control messages |
+| `topic` | Original application Topic string | Passed to transport `subscribe`, `unsubscribe`, `publish`, and `publishBatch` | Not in any coordination record — it lives in Runtime memory and in control messages. The storage-event row below is the exception: when that fallback carries the frames, the plaintext each `CONTROL` names is written with them |
 | `topicKey` | Stable opaque key from `createOpaqueKey(topic)` | Joins route and subscriber records | Yes |
 | `tabId` | Stable identity of a browser Tab | Identifies which Tab subscribes to a `topicKey` | Yes, in subscriber keys |
 | `workerId` | Identity of the current Runtime/Worker instance | Identifies the Worker that owns the transport subscription | Yes, in worker/route records |
@@ -219,7 +219,7 @@ BroadcastChannel CONTROL
 
 ### In-memory topic key cache (`knownTopics`)
 
-Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives both frame guards at the top of `handleControlMessage` — a frame naming another worker, or one whose pair disagrees, is dropped before its plaintext is ever read, so neither can grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
+Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated wherever `rememberTopic()` is called, and its call sites are: `subscribe`, `publish`, `publishBatch`, `unsubscribe` (inside `releaseSubscription`), `activate()` for topics that were queued before the cluster started, and `reconcileSubscriptions()` on each cycle. Plus inbound `CONTROL` messages — where the cache only grows for a frame that survives both guards at the top of `handleControlMessage`: one naming another worker, or one whose `topicKey`/`topic` pair disagrees, is dropped before its plaintext is ever read, so neither can reach `rememberTopic`. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
 
 The cache exists for two reasons:
 
@@ -247,7 +247,10 @@ Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds 
 |---|---|---|
 | `subscribe(topic)` | `rememberTopic(topic)` → `set(topicKey, topic)` | Populate the reverse mapping; needed for storage-less `readRoute` |
 | `publish(topic, data)` | `rememberTopic(topic)` → `set(topicKey, topic)` | Populate; same reason |
-| `unsubscribe(topic)` | `delete(topicKey)` if not in `assignedTopics` | No longer needed; only keep it if we still own the topic |
+| `publishBatch(topic, items)` | `rememberTopic(topic)` → `set(topicKey, topic)` | Populate; same reason — a batch resolves one key, not one per item |
+| `activate()` (start / resume) | `rememberTopic(topic)` → `set(topicKey, topic)`, once per topic already in `subscribedTopics` | The reverse mapping has to exist before either branch of that loop runs: the storage-less path sends `CONTROL/SUBSCRIBE`, the other writes the subscriber record |
+| `reconcileSubscriptions()` (each cycle) | `rememberTopic(topic)` → `set(topicKey, topic)`, once per `subscribedTopics` entry | Re-affirms the mapping on every heartbeat; see reason 2 above |
+| `unsubscribe(topic)` | `rememberTopic(topic)` (inside `releaseSubscription`), then `delete(topicKey)` if not in `assignedTopics` | The key is derived before the ownership check, and the entry is kept only if we still own the topic |
 | `CONTROL` received (any action: SUBSCRIBE / UNSUBSCRIBE / PUBLISH) | `rememberTopic(message.topic)` → `set(topicKey, topic)` | Inbound frames carry the plaintext topic — but `rememberTopic` runs *after* the `targetWorkerId` and `topicKey` pairing guards, so a frame either guard drops is never cached |
 | `CONTROL/UNSUBSCRIBE` received | no direct deletion | `rememberTopic` still caches the topic; the entry is later removed by `reconcileAssignedTopics` once the route no longer points to this worker |
 | `reconcileAssignedTopics` | `delete(topicKey)` if not subscribed and not owned | Route no longer points to us — clean up unless we're still a subscriber |
