@@ -190,7 +190,7 @@ BroadcastChannel CONTROL
 
 ### 内存 Topic key 缓存 (`knownTopics`)
 
-每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它由 `rememberTopic()` 填充：`subscribe`、`publish`、`unsubscribe` 都会调用它，入站 `CONTROL` 消息则只在通过 `topicKey` 配对校验后才走到这一步——一对不相符的帧在读到明文之前就被丢弃，因此无效配对无法撑大这张表。合法调用仍然可以（同源脚本能通过页面上自己的 bus 触达这些 API），约束它们的正是下面的上限。
+每个 Runtime 维护一个 `Map<topicKey, topic>` 称为 `knownTopics`，作为不透明 key 到原始 topic 的反向查找缓存。它由 `rememberTopic()` 填充：`subscribe`、`publish`、`unsubscribe` 都会调用它，入站 `CONTROL` 消息则只有在跨过 `handleControlMessage` 顶部两道守卫之后才走到这一步——点名其他 worker 的帧，与配对不相符的帧，都会在读到明文之前就被丢弃，因此两者都无法撑大这张表。合法调用仍然可以（同源脚本能通过页面上自己的 bus 触达这些 API），约束它们的正是下面的上限。
 
 该缓存存在两个原因：
 

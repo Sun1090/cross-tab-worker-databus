@@ -219,7 +219,7 @@ BroadcastChannel CONTROL
 
 ### In-memory topic key cache (`knownTopics`)
 
-Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives the `topicKey` pairing check — a frame dropped for disagreeing about that pair is dropped before its plaintext is ever read, so invalid pairs cannot grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
+Each Runtime maintains a `Map<topicKey, topic>` called `knownTopics` that serves as the reverse-lookup cache from opaque key to plaintext topic. It is populated by `rememberTopic()`, which is called on every `subscribe`, `publish`, and `unsubscribe`, and on every inbound `CONTROL` message that survives both frame guards at the top of `handleControlMessage` — a frame naming another worker, or one whose pair disagrees, is dropped before its plaintext is ever read, so neither can grow this map. Legitimate calls still can, through any API a same-origin script may reach on the page's own bus, which is what the cap below bounds.
 
 The cache exists for two reasons:
 
