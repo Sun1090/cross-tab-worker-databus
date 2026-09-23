@@ -7491,6 +7491,59 @@ corroborates the 26-spec collection.)
   written before this pass and could carry the same absolute in a different phrasing.
 - **Update date:** 2026-09-24.
 
+## Phase 138 / One seed ate 96% of the sweep's wall clock, and the guard that turned out not to reach it
+
+- **Milestone / version:** post-`0.21.13`, unreleased. Branch `test/fuzz-seed-deadline`, off `main` at
+  `f7d8ecf`. No `src/`, no export, protocol, storage-layout or wire change — harness and docs only, so
+  it is patch-release material.
+- **Status:** open PR, locally green; not yet merged or released.
+- **Trigger.** A `verify` run reported
+  `[coordination-invariants] stopped at 1046/5000 seeds after 158476ms (slowest seed 151850ms)` and then
+  `Error: Test timed out in 120000ms`. Reading the pair rather than dividing it: 1,045 seeds sum to
+  ~6.6 ms each and **one** interleaving cost 151,850 ms, i.e. 96% of the sweep, so the per-test ceiling
+  fired 113 s inside a single seed. Vitest marks the test failed and the loop keeps running, which is
+  why the truncation line is in that log *after* the failure it describes. No invariant was violated and
+  the same head passed on rerun, so the wedge is contention-amplified, not deterministic.
+- **Change.** The tick advance, the twelve-round settle and the teardown each race a 2 s deadline
+  (`SEED_AWAIT_CAP_MS`) taken from a `setTimeout`/`clearTimeout` captured in the `describe` scope before
+  any fake timers exist. A seed whose cap trips is counted (`cutShort`) and its end-state assertions are
+  skipped — an interleaving cut short never reached quiescence, so asserting on it manufactures a false
+  failure. `[CUT] seed=N ms=… ops=…` names the seed and its operation list, which is what makes the next
+  occurrence replayable; `completed` now counts only asserted seeds, and the summary line prints on
+  `completed < MAX_SEEDS || cutShort > 0`, since a sweep can reach full depth and still be losing seeds.
+- **The finding that changed the claim.** Forcing the deadline to 12 ms and running the whole 5,000-seed
+  sweep trips the cap **zero** times. The locally reproducible slow seeds are not waits at all: in the
+  instrumented run to seed 112,399 six seeds exceeded 100 ms and every one of them was synchronous CPU
+  inside the first tab's `stop()` (`stops=[a=109..132 b=0 c=0]` within a 111-135 ms seed, `timers=[]`) —
+  spent before a promise exists, so nothing on the same thread can preempt it. The guard therefore
+  bounds queue-yielding waits (a timer-queue blowup in `advanceTimersByTimeAsync` is that shape) and
+  **cannot** be shown to fire from the sweep; whether the CI wedge was queue-yielding stays open.
+- **So the mechanism is pinned instead, both directions.** New test: a never-settling await must hit a
+  25 ms cap *and* a 0 ms one, a microtask-settling chain must beat even a 0 ms cap, and a 5 ms real timer
+  must beat a 100 ms cap. Three mutants die at three separate assertions — never expires (fails the
+  25 ms leg), expires eagerly (fails the elapsed leg), reports settled work as expired (fails the
+  microtask leg). That writing was itself corrected by the pin: the version first committed asserted
+  `capped(neverSettling, 0) === true`, which failed on the first run — a zero-delay cap always beats a
+  promise that never settles; what it loses to is a microtask chain.
+- **Two counters, not one.** The first draft logged `[CUT]` when `seedMs > SEED_AWAIT_CAP_MS`. At the
+  12 ms setting that fired 19 times per sweep while the guard fired 0 — a *slow seed* and a *cap trip*
+  are different facts, and conflating them had already produced a CHANGELOG line claiming "at 12 ms it
+  cuts exactly the known outliers", which was the marker firing, not the guard. Both the code and the
+  prose now key on the trip.
+- **Changed files:** `tests/coordination-invariants.test.ts`, `CHANGELOG.md`, `AGENTS.md` (three
+  bullets: the post-timeout log ordering, the await-boundary limit with its measurements and the
+  both-directions pin, and the do-not-divide-a-total rule), `docs/progress.md`.
+- **Verification:** `npx tsc --noEmit` 0; `pnpm lint` 0; `npx vitest run tests/coordination-invariants.test.ts`
+  3 passed with 5,000/5,000 seeds and no `[CUT]` line at the shipped cap; `pnpm check` 0 (typecheck,
+  build, 898 tests, 5 perf gates); `npx vitest run tests/documentation.test.ts` 17 passed; the three
+  `capped()` mutants above each run red; `git diff --check` 0.
+- **Risks / rollback:** test harness and docs only; `git revert`, no artifact consequence. The only
+  behavioral change to a green run is that a seed can now be skipped instead of asserted, which costs
+  depth and cannot hide a violation in a seed that ran.
+- **Next:** merge when CI is green, then cut `0.21.14`. The wedge itself stays unattributed — what is
+  now in place is the instrumentation that names it if it recurs.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
