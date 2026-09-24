@@ -170,9 +170,12 @@ export class CentrifugeSession<TData = unknown> {
     // "to avoid unhandled exception in EventEmitter for non-set error handler"
     // (centrifuge 5.7.4, build/index.js:762), and the bundled emitter throws on
     // an `error` emit with no listener (`:162`). This call removes that guard,
-    // and the `.on('error', …)` two statements below replaces it for as long as
-    // this session holds the subscription. `unsubscribe()` removes both and adds
-    // nothing back, which is settled rather than open. All twelve `emit('error')`
+    // and the `subscription.on('error', …)` re-installation below puts one back for
+    // as long as this session holds the subscription — four statements later (the
+    // `unsubscribed` removal, the `subscriptions` set, the `publication` wiring), all
+    // of them inside this same synchronous task, so no emit can land in between.
+    // `unsubscribe()` removes both — this handler and the constructor's no-op — and
+    // adds nothing back, which is settled rather than open. All twelve `emit('error')`
     // sites in `BaseSubscription` (`:667-2674`) sit behind a
     // `_isSubscribing()`/`_isSubscribed()` test except one, the
     // `badConfiguration` emit in `_getSubscriptionToken`; and after
@@ -249,7 +252,8 @@ export class CentrifugeSession<TData = unknown> {
    * Measured — deleting this line leaves all 37 test files green, and the frame
    * it withholds has nowhere to land anyway: the only handler registry is the
    * DataBus's `topicHandlers`, and every write to it sits behind
-   * `assertPublicTopic` (`data-bus.ts:929`, `:1009`, `:1033`), so no `''` key can
+   * `assertPublicTopic` (at the head of `data-bus.ts`'s `subscribe()`, `publish()`
+   * and `publishBatch()`), so no `''` key can
    * exist — while `topicMatchesPattern` answers false for an empty topic against
    * both `*` and `prefix.*`, so a wildcard handler cannot see it either. Neither
    * of those is a reason to delete this guard: it is the only one *at this layer*,

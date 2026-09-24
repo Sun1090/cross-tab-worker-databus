@@ -200,7 +200,8 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     void pending.catch(() => {
       // The fall-through — a rejection that arrives with the cache already
       // pointing somewhere else — has zero counts, and no writer fits in its
-      // window: this catch is attached two statements after `dbPromise = pending`,
+      // window: this catch is attached by the statement immediately after
+      // `dbPromise = pending`, with nothing but comments between them,
       // so it is the first reaction that rejection can run, and nothing can register
       // a reaction on `pending` earlier — `invalidate()` is reached only with a
       // connection from a *resolved* open, and its chained read takes the
