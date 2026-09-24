@@ -2,9 +2,29 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const script = resolve('scripts/verify-version-compat.mjs');
+
+// Every case here builds a throwaway git repository and runs the gate as a child
+// process: `checkExports` issues `git init`, `git add`, `git commit`, `git tag` and
+// one `node` spawn, so a test's cost is five process starts plus temp-tree I/O
+// rather than the object comparison it asserts on. That makes the global 15 s
+// `testTimeout` (vitest.config.ts) load-dependent for this file alone, measured
+// three ways on an 8-core host at load average 400+:
+//   - `pnpm test:coverage`, nothing else of mine running: one case timed out
+//     (`Error: Test timed out in 15000ms`), 940 of 941 passed.
+//   - this file alone in its worker, while a `pnpm bench` of mine competed: two
+//     cases timed out and the survivors reported 3-19 s each. **Those per-case
+//     numbers are confounded** by that concurrency and are the slowest reading of
+//     the three.
+//   - this file alone, contention gone, same load average: 18 passed in 23.7 s
+//     total, i.e. ~1.3 s per case and nothing near the ceiling.
+// So the flake is real (the first bullet reproduces it without any help from this
+// session) but intermittent, and which case crosses 15 s moved between runs — the
+// signature of scheduling rather than of a hang. The ceiling is widened for this
+// file only, so every in-process test keeps relying on the global.
+vi.setConfig({ testTimeout: 60_000 });
 
 function checkExports(
   baselineExports: unknown,

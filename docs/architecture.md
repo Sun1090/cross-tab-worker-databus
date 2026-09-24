@@ -229,6 +229,8 @@ The cache exists for two reasons:
 
 **Cap and eviction.** The cache is capped at `MAX_KNOWN_TOPICS = 500` entries. This limit prevents a misbehaving or malicious peer from exhausting memory by referencing arbitrary topics in control messages — every `CONTROL` message the handler processes calls `rememberTopic`, which would otherwise grow the map unboundedly.
 
+One map of the same shape is **not** capped, and it is worth naming here so this paragraph is not read as covering all of them: `wildcardPublishCache` maps a concrete topic to the local wildcard pattern that matched it, or to `null` for "scanned, nothing matched". It gains an entry on every distinct topic this worker publishes, and is cleared only by the lifecycle teardowns (`pause()` and `stop()`). Measured: 1,200 `publish()` calls on distinct topic names leave `knownTopics` at 500 and that map holding 1,200. Capping it is not a matter of picking a number, because both value shapes decide something at runtime — an evicted pattern would re-run the first local dispatch the entry exists to prevent, and an evicted `null` re-scans, which fans out locally instead of routing by owner if a wildcard was assigned in the meantime. So the fix needs an eviction rule first. Until one is chosen, the growth is the honest cost of the memo.
+
 Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds the cap, the oldest entry (first key in Map iteration) is removed:
 
 - An entry is **never evicted** if the current worker still owns it (`assignedTopics.has(oldest)` guard), because the storage-less `readRoute` path depends on it.

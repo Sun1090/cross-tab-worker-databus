@@ -212,6 +212,18 @@ export class WorkerClusterRuntime {
       this.routeOwnerCache.delete(oldest);
     }
   }
+  // Concrete topic → the local wildcard pattern that matched it, or `null` for
+  // "scanned, nothing matched". UNLIKE the reverse cache below, this map has no cap:
+  // it grows one entry per distinct topic this worker publishes, and is cleared only
+  // on the two lifecycle teardowns whose `routeOwnerCache.clear()` sits beside each
+  // `wildcardPublishCache.clear()`. Measured: 1,200 `publish()` calls on distinct
+  // topic names leave `knownTopics` at its 500-entry cap and this map holding 1,200.
+  // A cap is not free here, because both halves decide something. Evicting a pattern
+  // re-runs the first local dispatch the entry exists to prevent. Evicting a `null`
+  // re-scans, and if a wildcard was assigned in the meantime that publication
+  // dispatches locally instead of routing by owner — the fan-out a first publication
+  // gets. So bounding this map needs a rule about which of the two may be forgotten,
+  // not a number; until one is chosen the growth is the honest cost of the memo.
   private readonly wildcardPublishCache = new Map<string, string | null>();
   // Reverse mapping: opaque topicKey → plaintext topic. A bounded cache with
   // FIFO eviction — NOT authoritative. It can hold a topicKey that is also in
