@@ -418,12 +418,20 @@ export class DataBusTraceReporter {
     // Only emit when there was activity in this window — an all-zero metrics
     // snapshot adds noise without information. All four operands are activity in
     // that sentence's sense, and each was measured on its own: deleting any one of
-    // them reddens the suite. The first two already were (three cases for
-    // `received`, two for `dispatched`); the dedup pair was not, and the reason is
+    // them reddens the suite. The first two already were, and their kill sets are
+    // worth naming rather than counting — deleting `received` reddens
+    // 'isolates event and metrics modes while all mode emits both categories',
+    // 'suppresses metrics recording in events mode and events in metrics mode' and
+    // 'starts a fresh metrics window after pause and resume, and stop prevents later
+    // flushes'; deleting `dispatched` reddens 'does not emit latency samples for
+    // dispatches without a local receive' and 'does not pair latency for dispatches
+    // without a local receive'. The dedup pair was not pinned at all, and the reason is
     // the shape of the test that covers them — 'includes dedup outcomes in metrics
     // windows' raises both counters in one window, so either surviving operand still
     // emits and neither deletion was observable. Two single-counter cases now pin
-    // each half.
+    // each half, one test each: 'emits a metrics window whose only activity is an
+    // accepted dedup' and 'emits a metrics window whose only activity is a suppressed
+    // dedup'.
     //
     // What the two dedup legs have in common is the reporter; what they do not is
     // reachability through the bus. `DedupManager.isDuplicate` has exactly one
