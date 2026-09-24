@@ -479,6 +479,8 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 - `hasLocalSubscriber(topic)`
 - `getSnapshot()`
 
+`stop()` 在本运行时同步调入消费者代码的任意位置都有效——无论是 `handlers.onControl`、`onResume`、`onSuspend` 回调，还是环境适配器的 `createChannel`。在这些位置到来的停止请求会放弃剩余的激活步骤：心跳定时器不会被挂载，那个窗口里构造出的 channel 会被关闭而不是挂上，也不会再有任何东西重新登记这个 Worker，于是一个已停止的运行时既不会以活跃 owner 的身份被对等端看见，也不会响应发给它的控制帧。`stop()` 仍然是幂等的：完成之后再调用不会产生任何改变。
+
 ## 工具函数
 
 ### `createOpaqueKey(value)`

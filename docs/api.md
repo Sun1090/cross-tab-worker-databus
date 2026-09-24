@@ -480,6 +480,8 @@ Main methods:
 - `hasLocalSubscriber(topic)`
 - `getSnapshot()`
 
+`stop()` is effective from inside any consumer code this runtime calls synchronously — a `handlers.onControl`, `onResume` or `onSuspend` callback, or the environment adapter's `createChannel`. A teardown arriving there abandons the rest of activation: the heartbeat interval is never armed, a channel constructed during that window is closed rather than attached, and nothing re-registers the worker, so a stopped runtime is not visible to its peers as a live owner and does not act on a control frame addressed to it. `stop()` stays idempotent: a call after one has completed changes nothing.
+
 ## Utility Functions
 
 ### `createOpaqueKey(value)`
