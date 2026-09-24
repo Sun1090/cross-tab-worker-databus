@@ -2144,28 +2144,34 @@ describe('WorkerClusterRuntime resilience', () => {
     a.runtime.start();
     await Promise.resolve();
     const forged = hub.create(channelNames[0]!);
+    // Every frame below is deliberately outside `WorkerClusterMessage` — that is the
+    // whole scenario — so posting it needs a widening the channel's own signature
+    // forbids. Keep it on the post rather than on a frame: `Object.create(null)` is
+    // `any`, so the union would accept it silently and the cast's absence would be the
+    // only thing distinguishing a forged frame from a legal one.
+    const postForged = (forged.postMessage as (message: unknown) => void).bind(forged);
     expect(a.runtime.getUnknownMessageStats()).toEqual({ count: 0, lastType: null });
 
     // The two shapes a real poster can deliver: a recognized-looking frame whose
     // `type` is not a string, and a bare primitive, which is truthy so it passes
     // the null-frame guard and simply has no `type` at all.
-    forged.postMessage({ type: 42, sourceWorkerId: 'forged-peer' });
+    postForged({ type: 42, sourceWorkerId: 'forged-peer' });
     expect(a.runtime.getUnknownMessageStats(), 'a numeric type is not a string').toEqual({ count: 1, lastType: null });
-    forged.postMessage('junk' as unknown as WorkerClusterMessage);
+    postForged('junk');
     expect(a.runtime.getUnknownMessageStats(), 'a posted primitive must not throw out of the listener').toEqual({
       count: 2, lastType: null
     });
 
     // The value whose stringification would throw, so the normalization cannot be
     // replaced by a coercion at the read site.
-    forged.postMessage({ type: Object.create(null), sourceWorkerId: 'forged-peer' });
+    postForged({ type: Object.create(null), sourceWorkerId: 'forged-peer' });
     expect(a.runtime.getUnknownMessageStats(), 'a prototype-less object has no String()').toEqual({
       count: 3, lastType: null
     });
 
     // And the arm that does have a value to report: an older or future SDK's frame
     // type, named exactly as it arrived.
-    forged.postMessage({ type: 'FUTURE_MESSAGE', sourceWorkerId: 'forged-peer' });
+    postForged({ type: 'FUTURE_MESSAGE', sourceWorkerId: 'forged-peer' });
     expect(a.runtime.getUnknownMessageStats(), 'a string type is reported verbatim').toEqual({
       count: 4, lastType: 'FUTURE_MESSAGE'
     });
