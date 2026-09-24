@@ -4404,6 +4404,102 @@ describe('CrossTabDataBus wildcard subscriptions', () => {
 
     await bus.stop();
   });
+
+  it('delivers a publication to the handlers that existed when its delivery began', async () => {
+    // A handler that registers a fresh closure for its own topic on every
+    // invocation used to grow the fan-out it was being iterated through: the
+    // handler lists are `Set`s, and `Set` iteration visits entries appended after
+    // the cursor. Measured before the snapshot in `dispatch()`, one publication ran
+    // 500 handlers here — the test's own ceiling, not a bound the library imposed —
+    // and the next one delivered to 999, because those registrations persist. An
+    // assertion that fails as `expected 500 to be 1` is the legible form of that;
+    // without the ceiling the same test would simply never finish.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const { bus, transport } = makeBus('owner', storage, hub);
+    const CEILING = 500;
+    let addedDuringDelivery = 0;
+    const makeHandler = (): (() => void) => () => {
+      if (addedDuringDelivery < CEILING) {
+        addedDuringDelivery += 1;
+        bus.subscribe('grow', makeHandler());
+      }
+    };
+    bus.subscribe('grow', makeHandler());
+    await bus.ready();
+
+    transport.emit('grow', 1);
+    expect(addedDuringDelivery, 'one publication must invoke one handler').toBe(1);
+    // The handler the first delivery registered is live for the next one, so this
+    // is where the growth the fix stops is still visible — by one, per message.
+    addedDuringDelivery = 0;
+    transport.emit('grow', 2);
+    expect(addedDuringDelivery).toBe(2);
+
+    await bus.stop();
+  });
+
+  it('keeps a handler in a delivery that another handler already started', async () => {
+    // The other half of the snapshot: `Set` iteration also skips entries deleted
+    // before the cursor, so an `unsubscribe()` issued by an earlier handler used to
+    // remove a later one from the publication already in flight (measured: the pair
+    // delivered `['first']`). The contract is now one-sided in the predictable
+    // direction — the delivery set is fixed when delivery begins — so a late
+    // unsubscribe takes effect on the next publication instead of mid-message.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const { bus, transport } = makeBus('owner', storage, hub);
+    const seen: string[] = [];
+    let dropSecond: () => void = () => {};
+    bus.subscribe('pair', () => {
+      seen.push('first');
+      dropSecond();
+    });
+    const second = bus.subscribe('pair', () => seen.push('second'));
+    dropSecond = second;
+    await bus.ready();
+
+    transport.emit('pair', 1);
+    expect(seen, 'a handler must not be cut out of a delivery in flight').toEqual(['first', 'second']);
+
+    seen.length = 0;
+    transport.emit('pair', 2);
+    expect(seen, 'the same unsubscribe must hold from the next publication on').toEqual(['first']);
+
+    await bus.stop();
+  });
+
+  it('does not deliver a publication to a wildcard subscription made during it', async () => {
+    // `dispatch()` also iterates `topicHandlers` for matching patterns, so a
+    // pattern registered by a handler in the same delivery used to be reached for
+    // the very message that caused it. Both passes are collected before the first
+    // handler runs, which is why this needs the collection loop to precede the
+    // invocations rather than only snapshotting the exact-topic list.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const { bus, transport } = makeBus('owner', storage, hub);
+    const seen: string[] = [];
+    let dropPattern: () => void = () => {};
+    let armed = false;
+    bus.subscribe('chat.room.1', () => {
+      seen.push('exact');
+      if (!armed) {
+        armed = true;
+        dropPattern = bus.subscribe('chat.*', () => seen.push('pattern'));
+      }
+    });
+    await bus.ready();
+
+    transport.emit('chat.room.1', 1);
+    expect(seen, 'the pattern created by this delivery must not receive it').toEqual(['exact']);
+
+    seen.length = 0;
+    transport.emit('chat.room.1', 2);
+    expect(seen).toEqual(['exact', 'pattern']);
+    dropPattern();
+
+    await bus.stop();
+  });
 });
 
 describe('CrossTabDataBus replay (bounded local history)', () => {
