@@ -1,3 +1,28 @@
+## [0.21.28] - 2026-09-25
+
+Four shipped sentences re-read against the code, and three measurements taken again rather than carried forward. Two of the four were wrong; one was right but unreadable, and one was right in its conclusion and wrong in the count it quoted to support it.
+
+### Fixed
+
+- **`reopenTransport()`'s early-return arm does not hold "the only handler this opening ever gets".** The note also claimed it "is not dominated by anything: it is the handler". Five sites call this method, and three of them (`startDemandRecovery()`, `updateStatus()`'s recovery-timer arm, `runTransport()`) chain their own `opening.then(f, g)` onto the promise this returns — the *same* object, so their `g` is already a handler of `opening` by Promise semantics and this `.catch` decides nothing on those paths. `start()` returns it to its own caller. Only `resumeTransport()`'s `void` call is the case the absorb exists for, and the note now says exactly that. It also records the symmetric mutation: deleting **this** line leaves all 37 test files green with zero unhandled-rejection reports, and so does deleting the `.catch` at the top of the method, because no test constructs a rejection on the `void` path. What separates the two absorbs is the caller list, not a test — an enumeration, not a pin.
+- **`ClusterEnvironment.now` was documented as having a monotonic alternative it does not have.** The field said "the injected clock is the only monotonic one in the picture". There is no monotonic clock in the picture: `createBrowserEnvironment` binds the field straight to `Date.now`, and `performance.now()`/`hrtime` are read nowhere in `src/`. Nor is the injected clock monotonic by contract — it is a bare `() => number`, and a whole-suite census of every clock the tests inject found one that steps **backwards** on purpose (`tests/trace.test.ts`'s "keeps counting a measurable dispatch whose clock ran backwards"). What the sentence was reaching for is a property of the consumers, so it is now stated as one: `cluster.ts` is the field's only reader in `src/`, seven of its ten reads only stamp a record, and the three that subtract each fail their comparison on a backwards jump, so a record stamped before one reads as not-yet-expired until the clock climbs back past its stamp.
+- **The `runTransport()` guard's census rows were never decodable.** The note quoted `1000`, `0000`, `0100`, `1001` and `1010` without saying what the four bits are, so no reader could check any of them. The encoding is now stated (the four premises in source order), the row set was re-derived with a first-sight `console.log` over one whole-suite run — **same five rows** — and the `1001` row's stack is now named rather than paraphrased: `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()`.
+- **`ReapTarget`'s ordering note said a port is a chance.** "A port that is about to be closed is the only chance its owner gets to learn why" restated `reap()`'s measured reasoning and lost the grammar on the way. It now names the three steps, the order, why `notify` must go first, and what the shared `try`/`catch` costs — a target that throws in `notify` also skips `close` and `stop` for itself.
+
+### Tests
+
+- **None added or changed.** `pnpm check` 0 (936 tests, 37 files, 5/5 perf gates), `pnpm lint` 0, `pnpm test:coverage` 0 with **46** zero-count branch arms of **1963** and aggregate 99.02 / 97.65 / 99.27 / 99.69 — the same distribution as `0.21.27`, which is the control that says this diff contains no code. `git diff -U0 src/` with comment lines filtered returns nothing.
+- **Two operand mutants re-run, and one count had rotted.** Deleting `droppedAfterConnect` fails exactly the two named tests, as the note claimed. Deleting `transportReady` fails **nine** (6 in `data-bus.test.ts`, 3 in `centrifuge.test.ts`), where the note said eight — and because the eight were never named, the newcomer cannot be identified. The comment now gives both numbers as "run the mutant" rather than as limits.
+
+### Documentation
+
+- **`AGENTS.md` grew from these two findings**: a row/flag vector is worth nothing until the comment says what its positions mean, and a kill count quoted without the list behind it cannot be re-attributed when it drifts.
+- **Nothing consumer-facing moved**, so no `docs/` page was rewritten. All four corrections sit in maintainer-facing comments about internal methods. Two of them are class-member/interface JSDoc (`ClusterEnvironment.now`, `ReapTarget`), so they do reach the published `.d.ts`; the other two are statement-slot comments inside method bodies, which reach the package only through the published `.js.map` embedded sources — the split this repository measured in `0.21.27`.
+
+### Compatibility
+
+Comment-only. No export, frame, option, default or storage key moved; `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.27`.
+
 ## [0.21.27] - 2026-09-25
 
 Three shipped sentences about lifecycle windows were re-checked against the code and the runner: one held and is now backed by a measurement, one was false about *why* the code is safe, and one quoted a number that had already rotted.
