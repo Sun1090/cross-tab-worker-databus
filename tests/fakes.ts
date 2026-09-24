@@ -216,6 +216,10 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
   readonly subscribed = new Set<string>();
   readonly subscribeCalls: string[] = [];
   readonly unsubscribeCalls: string[] = [];
+  /** `subscribeCalls` and `unsubscribeCalls` cannot express ordering, and the
+   * deferred-flush contracts are about ordering: one entry per channel call, in
+   * the sequence the transport received them. */
+  readonly channelCalls: string[] = [];
   readonly publishCalls: Array<{ topic: string; data: unknown; options?: { messageId?: string; timestamp?: number } }> = [];
   readonly publishBatchCalls: Array<{
     topic: string;
@@ -271,11 +275,13 @@ export class FakeTransport<TData = unknown> implements DataBusTransport<object, 
 
   subscribe(topic: string): void {
     this.subscribeCalls.push(topic);
+    this.channelCalls.push(`sub:${topic}`);
     this.subscribed.add(topic);
   }
 
   unsubscribe(topic: string): void {
     this.unsubscribeCalls.push(topic);
+    this.channelCalls.push(`uns:${topic}`);
     this.subscribed.delete(topic);
   }
 
