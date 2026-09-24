@@ -300,6 +300,59 @@ describe('cross-tab coordination invariants', () => {
     sender.close();
   });
 
+  it('delivers on a later microtask once a hub opts into browser ordering', async () => {
+    // The hub's synchronous default lets a runtime react to its own post inside one
+    // call stack, which no browser produces: `BroadcastChannel` delivers in a later
+    // task. Enabling the option on the sweep's hub is what surfaced the stranded
+    // transport subscription fixed in 0.21.16 — measured on the pre-fix code, the
+    // async sweep fails six seeds and the synchronous sweep passes — so the
+    // fidelity has a proven difference behind it rather than a plausibility. Which
+    // half is pinned was measured: forcing the option to a no-op kills the assertion
+    // below, while removing the sweep's own opt-in leaves all five cases green on the
+    // fixed code — the option stands because of what it caught, not as a new kill.
+    // The first assertion is the one that guards the *default*: making async
+    // delivery the hub's behavior reddens 17 cases (15 post-and-assert tests plus
+    // this file's two hub pins), so a future simplification cannot pass unnoticed.
+    const frame = { type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: 'worker-x' } as WorkerClusterMessage;
+
+    const syncHub = new ChannelHub();
+    const syncSender = syncHub.create('sync-bus');
+    const syncReceiver = syncHub.create('sync-bus');
+    let syncSeen = 0;
+    syncReceiver.addEventListener('message', () => {
+      syncSeen += 1;
+    });
+    syncSender.postMessage(frame);
+    expect(syncSeen, 'the default hub must keep delivering in the posting stack').toBe(1);
+
+    const hub = new ChannelHub();
+    hub.setAsyncDelivery(true);
+    const sender = hub.create('async-bus');
+    const receiver = hub.create('async-bus');
+    const departed = hub.create('async-bus');
+    let seen = 0;
+    let departedSeen = 0;
+    receiver.addEventListener('message', () => {
+      seen += 1;
+    });
+    departed.addEventListener('message', () => {
+      departedSeen += 1;
+    });
+
+    sender.postMessage(frame);
+    expect(seen, 'an opted-in hub must not deliver inside the posting stack').toBe(0);
+    // The sender closing before the delivery does not cancel the frame, which is
+    // what `forgeSubscribe()` depends on: it posts from a channel it closes at once.
+    sender.close();
+    departed.close();
+    await flushMicrotasks();
+    expect(seen, 'the frame reaches a peer that is still open').toBe(1);
+    expect(departedSeen, 'a peer that closed before delivery receives nothing').toBe(0);
+
+    sender.close();
+    receiver.close();
+  });
+
   it('budgets on a clock that fake timers can neither advance nor stop', () => {
     // Both directions have to be pinned, and only one of them was. Advancing 60
     // simulated seconds must not cost 60 measured ones (the clock must not run
@@ -360,6 +413,11 @@ describe('cross-tab coordination invariants', () => {
       const storage = new MemoryStorage();
       const hub = new ChannelHub();
       hub.setDeliveryBudget(DELIVERY_BUDGET);
+      // Browser fidelity: `BroadcastChannel` delivers in a later task, so no
+      // runtime ever reacts to its own post inside the same stack. Deliberately
+      // opt-in — the synchronous default is what 15 tests in `cluster`, `data-bus`
+      // and `stability` post-and-assert against.
+      hub.setAsyncDelivery(true);
       const clock = { now: 1_000 };
       const tabs = [
         createTab('a', storage, hub, clock),

@@ -92,7 +92,7 @@ subscribe(
 - 同一 Topic 的多个 handler 使用引用计数。
 - 当前 Tab 第一个 handler 会登记集群订阅。
 - 最后一个 handler 释放后，当前 Tab 才退出该 Topic。
-- transport 尚未 ready 时订阅自动排队；transport 恢复待定时同样如此：订阅会挂在恢复门之后，等重开成功才下发，而不会写入刚刚上报 `error` 的连接。
+- transport 尚未 ready 时订阅自动排队；transport 恢复待定时同样如此：订阅会挂在恢复门之后，等重开成功才下发，而不会写入刚刚上报 `error` 的连接。下发的是那一刻**仍然被需要**的订阅：排队期间已被释放的 subscribe 不会发出，排队期间又被重新订阅的释放同样不会发出。
 - 显式 `stop()` 尚未 settle 时发起的订阅不会登记：`subscribe()` 通过 `onError` 上报并返回 no-op 释放函数。调用方应等待 `stop()` settle，再调用 `start()` 后重新订阅。
 - 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。
 - Topic 必须非空：`subscribe()`、`publish()`、`publishBatch()` 传入 `''` 时会抛出 `TypeError`，且在任何其他副作用之前（不会请求 start，也不会登记 handler）。没有任何 transport 能寻址空 channel，因此对它的订阅永远收不到消息，向它的发布也会被无声丢弃。`''` 自 0.20.96 起每个实例告警一次，自 0.21.0 起直接拒绝——遵循 1.0 前的弃用策略；该守卫与选项校验断言放在一起，空 topic 与非法 `replay.maxPerTopic` 以同样方式失败。`publishBatch('', [])` 同样抛错：非法参数先于空数组 no-op 检查。

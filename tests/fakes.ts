@@ -52,6 +52,18 @@ export class ChannelHub {
   private budget: number | null = null;
   private posted = 0;
   private budgetExceeded = false;
+  private asyncDelivery = false;
+
+  /** A real `BroadcastChannel` delivers in a *later task*, so a runtime that posts
+   * a frame and then reads coordination state in the same stack never sees the
+   * effect of its own post. The hub's default stays synchronous because 15 tests in
+   * `cluster`, `data-bus` and `stability` post a frame and assert without awaiting
+   * — measured, not estimated: flipping this default to async reddens exactly 17
+   * cases, those 15 plus the two hub-infrastructure pins in
+   * `tests/coordination-invariants.test.ts`. */
+  setAsyncDelivery(enabled: boolean): void {
+    this.asyncDelivery = enabled;
+  }
 
   /** Cap how many messages the hub will deliver, dropping the rest. A
    * coordination loop that never converges otherwise costs unbounded CPU in the
@@ -101,9 +113,24 @@ export class ChannelHub {
       this.shouldDropNextControl = false;
       return;
     }
-    for (const target of this.channels.get(source.name) ?? []) {
-      if (target !== source) target.deliver(message);
+    if (!this.asyncDelivery) {
+      for (const target of this.channels.get(source.name) ?? []) {
+        if (target !== source) target.deliver(message);
+      }
+      return;
     }
+    // The member set is read inside the microtask, not when the frame was posted, so
+    // a peer that closes before delivery is not addressed at all. Recorded as
+    // defensive rather than as pinned: substituting a set snapshotted at post time
+    // keeps the whole file green, because `FakeChannel.close()` clears its listeners
+    // and so makes the two forms indistinguishable through this fake. It is kept
+    // because it is the browser's rule, and because the sweep's `forgeSubscribe()`
+    // closes its own channel in the same stack that posts.
+    queueMicrotask(() => {
+      for (const target of this.channels.get(source.name) ?? []) {
+        if (target !== source) target.deliver(message);
+      }
+    });
   }
 
   close(channel: FakeChannel): void {
