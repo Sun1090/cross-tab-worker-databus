@@ -327,6 +327,28 @@ export class WorkerClusterRuntime {
       this.channel = null;
     }
     if (!this.channel) this.storage = null;
+    // Activation is not atomic. `createChannel` above is consumer-supplied
+    // adapter code and the storage-less self-SUBSCRIBE below calls
+    // `handlers.onControl`, both on this stack with `started` already true and
+    // `heartbeatHandle` still null — so a `stop()` or a pagehide landing in
+    // either has already run `pause()` and cleared the state this method is
+    // building. Measured without the two checks below, a teardown inside
+    // `createChannel` left the runtime holding that freshly built channel with
+    // `suspended === false` and `getSnapshot().coordinated === true`, back in
+    // `storage` as a live worker record (so no peer ever TTL-prunes it), and
+    // still accepting assignments: a `CONTROL/SUBSCRIBE` frame addressed to it
+    // after the stop added its topic to `assignedTopics`. `pause()` could not
+    // clean any of that up because it ran before the channel existed.
+    if (!this.started) {
+      const channel = this.channel;
+      this.channel = null;
+      // Close rather than drop: an open BroadcastChannel with no listener still
+      // holds a port and its incoming queue. Nothing was ever sent on this one,
+      // so there is no queued `ROUTE_RELEASED` for a close to discard — unlike
+      // the deferred close in `pause()`, which protects a real handoff.
+      channel?.close();
+      return;
+    }
     this.channel?.addEventListener('message', this.handleMessage);
     const now = this.environment.now();
     this.currentRecord = {
@@ -345,6 +367,14 @@ export class WorkerClusterRuntime {
       if (!this.storage) this.sendControl(this.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
       else this.writeSubscriber(topicKey);
     }
+    // The second half of the window opened above: `handlers.onControl` in that
+    // loop runs on this stack, so the teardown can arrive here too, after the
+    // worker record was written. Arming the heartbeat at that point leaks a
+    // timer no later `stop()` can clear — `pause()` nulls `heartbeatHandle`
+    // before this assignment — and on a storage-backed runtime every leaked
+    // tick re-registers the worker record `pause()` just removed, which keeps a
+    // departed tab live to its peers forever.
+    if (!this.started) return;
     this.reconcile();
     // Periodic heartbeat + reconciliation.
     this.heartbeatHandle = this.environment.setInterval(() => {

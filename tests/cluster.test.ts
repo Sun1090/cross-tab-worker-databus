@@ -35,6 +35,116 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('abandons activation when the channel adapter tears the runtime down mid-start', async () => {
+    // `createChannel` is consumer adapter code and it is called from inside
+    // `activate()` with `started` already true, so it is one of the two
+    // synchronous extension points in that method — the other is the
+    // storage-less `handlers.onControl` below. A teardown arriving in this
+    // window has already run `pause()` *before* the channel existed, so
+    // `pause()` could not close it, and the rest of activation would then
+    // attach a message listener to it, write the worker record `pause()` had
+    // just removed, and arm a heartbeat that no later `stop()` can clear.
+    // Measured with the two liveness checks in `activate()` deleted: the
+    // stopped runtime read `coordinated: true`, its record was back in storage
+    // at the first tick (so no peer would ever TTL-prune the tab), and a
+    // `CONTROL/SUBSCRIBE` frame addressed to it after the stop added a topic to
+    // `assignedTopics` — a phantom owner with nothing behind it.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'activate-reentry' });
+    const createChannel = env.environment.createChannel.bind(env.environment);
+    let runtime: WorkerClusterRuntime | undefined;
+    let reentered = false;
+    env.environment.createChannel = name => {
+      const channel = createChannel(name);
+      if (reentered) {
+        reentered = false;
+        runtime?.stop();
+      }
+      return channel;
+    };
+    const onControl = vi.fn();
+    runtime = new WorkerClusterRuntime({
+      clusterKey: 'activate-reentry',
+      environment: env.environment,
+      tabId: 'tab-activate-reentry',
+      workerId: 'worker-activate-reentry',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    reentered = true;
+    runtime.subscribe('owned-topic');
+    runtime.start();
+    await Promise.resolve();
+
+    // Nothing survives the abandoned activation: no registration, no channel.
+    expect(storage.entries(), 'a stopped runtime must not be registered').toEqual([]);
+    expect(runtime.getSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+    expect(onControl).not.toHaveBeenCalled();
+
+    // The heartbeat must not have been armed: a tick would re-register the
+    // runtime, so move the clock and pump every interval in this environment.
+    env.environment.now = () => 9_000;
+    env.runIntervals();
+    await Promise.resolve();
+    expect(storage.entries(), 'no interval may outlive the abandoned activation').toEqual([]);
+    expect(runtime.getSnapshot().currentWorker.heartbeatAt).toBe(1_000);
+
+    // And the channel it built after the teardown must not be a live listener:
+    // post an assignment addressed at this worker on the cluster channel a peer
+    // would use. Before the fix this landed in `assignedTopics`.
+    const forger = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('activate-reentry')}`);
+    forger.postMessage({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'worker-peer',
+      targetWorkerId: 'worker-activate-reentry',
+      action: CONTROL_ACTION.SUBSCRIBE,
+      topic: 'injected',
+      topicKey: createOpaqueKey('injected')
+    } satisfies WorkerClusterMessage);
+    forger.close();
+    await Promise.resolve();
+    expect(onControl, 'a stopped runtime must not act on a control frame').not.toHaveBeenCalled();
+    expect(runtime.getSnapshot().assignedTopics).toEqual([]);
+  });
+
+  it('abandons the heartbeat when a handler stops the runtime during the storage-less re-subscribe', async () => {
+    // The other extension point, and the one an application reaches without
+    // replacing an adapter: with storage unavailable, `activate()` re-sends
+    // SUBSCRIBE for topics subscribed before start, and a self-addressed
+    // control message calls `handlers.onControl` on this same stack.
+    const brokenStorage = new (class extends MemoryStorage {
+      override setItem(): void {
+        throw new Error('QuotaExceededError');
+      }
+    })();
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage: brokenStorage, now: () => now, randomId: 'activate-stop-from-handler' });
+    let runtime: WorkerClusterRuntime | undefined;
+    const onControl = vi.fn((action: WorkerControlAction, topic: string) => {
+      if (action === CONTROL_ACTION.SUBSCRIBE && topic === 'owned-topic') runtime?.stop();
+    });
+    runtime = new WorkerClusterRuntime({
+      clusterKey: 'activate-stop-from-handler',
+      environment: env.environment,
+      tabId: 'tab-handler-stop',
+      workerId: 'worker-handler-stop',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    runtime.subscribe('owned-topic');
+    expect(onControl, 'the handler must be reached during activation, not after it').not.toHaveBeenCalled();
+
+    runtime.start();
+    expect(onControl).toHaveBeenCalledWith(CONTROL_ACTION.SUBSCRIBE, 'owned-topic', undefined);
+    expect(runtime.getSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+    // The assignment the loop made before calling the handler is gone: `stop()`
+    // ran inside it, and `pause()` clears `assignedTopics` after the handoff.
+    expect(runtime.getSnapshot().assignedTopics).toEqual([]);
+
+    now = 9_000;
+    env.runIntervals();
+    expect(runtime.getSnapshot().currentWorker.heartbeatAt, 'no heartbeat may outlive the abandoned activation').toBe(1_000);
+  });
+
   it('drops a control frame whose topicKey disagrees with its topic', async () => {
     // `topicKey` is a pure function of `topic`, so every frame the library sends
     // has the two agreeing. A cluster channel is a BroadcastChannel, which any
