@@ -704,8 +704,14 @@ export class WorkerClusterRuntime {
     const topicKey = this.rememberTopic(topic);
     // The owning Worker already has a synchronous assignment map. Reuse it
     // for the hot local-publish path instead of scanning worker and route
-    // records on every message. Wildcard assignments also own matching
-    // concrete topics, so they can use the same fast path.
+    // records on every message. Which assignments this lookup answers for is the
+    // whole question, because `assignedTopics` is keyed by the plaintext it was
+    // given: a worker holding `chat.*` has the *pattern's* key here, so a
+    // publication for `chat.room.1` misses this `has()` and falls through to
+    // `resolvePublishTarget()` below — which does return this worker, once, when
+    // no live route names anyone else. The sentence this replaced claimed
+    // wildcard holders "use the same fast path", which had been true only of the
+    // memo that used to sit in that fall-through; see the note under it.
     if (this.assignedTopics.has(topicKey)) {
       return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
     }
