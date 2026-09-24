@@ -92,6 +92,7 @@ subscribe(
 - 同一 Topic 的多个 handler 使用引用计数。
 - 当前 Tab 第一个 handler 会登记集群订阅。
 - 最后一个 handler 释放后，当前 Tab 才退出该 Topic。
+- 一条发布只会投递给它的分发开始时已登记的 handler：在 handler 里调用 `subscribe()` 收不到正在分发的这条消息，在 handler 里调用 `unsubscribe()` 仍然会收到——具体 topic 的列表与匹配上的 pattern 都会在第一个 handler 运行之前收集完毕，因此 handler 无法改变一条已在途消息的分发集合。
 - transport 尚未 ready 时订阅自动排队；transport 恢复待定时同样如此：订阅会挂在恢复门之后，等重开成功才下发，而不会写入刚刚上报 `error` 的连接。下发的是那一刻**仍然被需要**的订阅：排队期间已被释放的 subscribe 不会发出，排队期间又被重新订阅的释放同样不会发出。
 - 显式 `stop()` 尚未 settle 时发起的订阅不会登记：`subscribe()` 通过 `onError` 上报并返回 no-op 释放函数。调用方应等待 `stop()` settle，再调用 `start()` 后重新订阅。
 - 通配符订阅：以 `.*` 结尾的 Topic（如 `chat.*`）匹配任意后缀，`*` 匹配全部。pattern 以字面量参与路由、归属与传输订阅；携带匹配的具体 topic（或 pattern 本身）的发布都会投递给通配 handler。匹配规则见下方 `topicMatchesPattern`。

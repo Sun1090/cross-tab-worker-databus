@@ -8587,6 +8587,22 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Update date:** 2026-09-25
 
 
+## Phase 184 / a fan-out that did not terminate: subscriber mutation during dispatch
+
+- **Milestone / version:** `0.21.25` prepared on `fix/dispatch-snapshot` (off `65a7eca`), one `fix(data-bus)` commit plus this release bookkeeping.
+- **Where it came from.** Phase 183 closed with a negative result: `data-bus.ts`'s lifecycle methods already re-test their own liveness on the far side of every consumer call, because the bus has a `lifecycleEpoch` and `WorkerClusterRuntime` had nothing equivalent. The one thing that probe did surface was unasserted behavior one layer down — a `bus.stop()` from inside a subscriber handler let the current message finish fanning out. Following that thread into `dispatch()` found the real defect, which was not about `stop()` at all.
+- **The defect.** `dispatch()` iterated the live per-topic `Set` (and the live `topicHandlers` Map for wildcard patterns). `Set` iteration visits entries appended after the cursor and skips entries deleted before it, so a handler that registered *another* handler for its own topic was served the message that caused the registration. That is not merely surprising, it does not terminate: measured on the unmodified tree, one publication invoked **500** handlers (the probe's ceiling, not a bound the library imposes) and the next one delivered to **999**, because the registrations persist across messages. The mirror case also held: an `unsubscribe()` from an earlier handler removed a later one from a delivery already in flight (the pair delivered `['first']`).
+- **Why no earlier pass found it.** The first probe used a named function, and re-subscribing the same reference is a no-op by `Set` identity — it measured `invocations: 1` and read as "not a problem". Rewriting it to register a distinct closure per invocation produced the 500/999 numbers. The lesson is about probes, not about this file: a probe that returns the safe answer on its first shape has tested that shape, not the question.
+- **Fix.** Both passes are collected before the first handler runs, so a publication is delivered to the subscribers that existed when its delivery began, and a late `unsubscribe()` takes effect on the next publication instead of mid-message.
+- **Verification.** `pnpm test` 936 passed (933 before, unchanged by the fix); `pnpm typecheck` 0; `pnpm test:perf` 5/5; `pnpm test:coverage` 0 with **46** zero-count arms of **1963** and aggregate 99.02 / 97.65 / 99.27 / 99.69 — no movement, because both arms of every branch added here were already exercised. Each new test's failure message is the measurement: `expected 500 to be 1`, `expected [ 'first' ] to deeply equal [ 'first', 'second' ]`, `expected [ 'exact', 'pattern' ] to deeply equal [ 'exact' ]` — all three confirmed against the reverted `dispatch()` before the fix was kept, and the runaway case is written with an explicit ceiling so a regression reports a count rather than hanging the runner.
+- **Hot path sized directly.** None of the five `tests/perf-gate.test.ts` gates covers dispatch, so the snapshot was measured with a best-of-seven / 200k-iteration script: **9-23 ns per dispatch** for 1-20 handlers and **+15 ns** for a matching wildcard pattern with two handlers, against shipped per-message figures in the tens of microseconds.
+- **Docs.** One bullet added to `docs/api.md` and the same one to `docs/zh/api.md` (list-item parity is gated by `tests/documentation.test.ts`), stating the delivery-set contract in the `subscribe()` list.
+- **Risk / rollback:** revert `b17531b`. The observable delta is confined to registering or releasing a handler from inside a handler for the same topic — the shape that grew without bound.
+- **`pnpm bench:browser`:** to be taken or deferred at the pre-tag gate with its load numbers recorded; the host has been loaded for the last fourteen cycles.
+- **Next:** the 21 zero-count arms in the files Phase 182's method has not reached yet (`replay-persistence.ts` 6, `replay-manager.ts` 5, `trace.ts` 3, `workers/port-reaper.ts` 3, `websocket.ts` 2, `centrifuge-session.ts` 1, `centrifuge.ts` 1). And the probe lesson above is worth a rule: when a probe's first shape measures safe, re-write it with distinct identities before believing it.
+- **Update date:** 2026-09-25
+
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

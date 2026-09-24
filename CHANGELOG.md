@@ -1,3 +1,25 @@
+## [0.21.25] - 2026-09-25
+
+A publication's fan-out set is now fixed when its delivery begins, which closes a shape that did not terminate: a handler that registers a fresh closure for its own topic made the message that triggered the registration keep delivering to the handlers it created.
+
+### Fixed
+
+- **`dispatch()` collects before it invokes.** Handler lists are held in a `Set` per topic, and `Set` iteration visits entries appended after the cursor while skipping entries deleted before it, so both directions of mutation were observable inside one delivery: a handler that subscribed another one for the same topic received the message that caused the subscription, and a handler that unsubscribed a later one cut it out of a delivery already in flight (measured: a two-handler topic delivered `['first']`). The first half does not terminate and did not need a hostile application to reach — the ordinary "re-arm this one-shot handler on every message" pattern, which registers a *new* closure each time, ran **500 handlers for a single publication** (that number is the probe's own ceiling, not a bound the library imposed) and the next publication delivered to **999**, because the registrations persist. Re-subscribing the *same* function reference is a no-op by `Set` identity, which is why the shape survived every prior pass over this file: the first probe written for it used a named function and measured one invocation.
+- **What the contract is now.** Both passes — the exact-topic handlers and the handlers of every matching wildcard pattern — are collected before the first handler runs, so a message is delivered to the subscribers that existed when its delivery began, and a late `unsubscribe()` takes effect on the next publication instead of mid-message.
+
+### Tests
+
+- **Three cases, and each one's failure message is the measurement.** `delivers a publication to the handlers that existed when its delivery began` fails as `expected 500 to be 1` against the previous code, `keeps a handler in a delivery that another handler already started` as `expected [ 'first' ] to deeply equal [ 'first', 'second' ]`, and `does not deliver a publication to a wildcard subscription made during it` as `expected [ 'exact', 'pattern' ] to deeply equal [ 'exact' ]`. The first is written with an explicit ceiling so a regression reports a count rather than hanging the runner. All three pass against the fix, and the 933 tests that already existed are unchanged by it — no prior test depended on mutating the fan-out mid-delivery.
+- **The hot path was sized, not assumed.** The five `tests/perf-gate.test.ts` gates cover hashing, owner selection and pattern matching, not dispatch, so the snapshot was measured directly: best-of-seven over 200k iterations, **9-23 ns per dispatch** for 1-20 handlers and **+15 ns** for a matching wildcard pattern holding two handlers, against a shipped per-message budget in the tens of microseconds. Coverage did not move — 46 zero-count branch arms of 1963, aggregate 99.02 / 97.65 / 99.27 / 99.69 — because both arms of every branch added here were already exercised. Tests 933 → 936.
+
+### Documentation
+
+- **`docs/api.md` and its Chinese mirror each gained one bullet** stating the delivery-set contract in the `subscribe()` list, so the rule is visible where a consumer reads it rather than only in the source.
+
+### Compatibility
+
+Delivery to a handler registered *during* a dispatch, and cancellation of a handler unsubscribed *during* one, both change: those handlers no longer see the in-flight message, and that handler does. A consumer relying on either needed the pattern this fix stops (a self-growing fan-out), and no shipped default, frame, storage key, export or option moved. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.24`.
+
 ## [0.21.24] - 2026-09-25
 
 Two lifecycle defects that the coverage ledger handed over as a by-product: a cluster runtime stopped during its own activation rebuilt everything its teardown had removed, and a `stop()` issued from one of its callbacks was dropped on the floor. A verdict now sits at every zero-count site the ledger had left bare.
