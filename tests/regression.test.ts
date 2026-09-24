@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveTargetVersion } from '../scripts/verify-published-consumer.mjs';
 import { createOpaqueKey } from '../src/core/hash';
 import { hasActiveOwner, selectLeastLoadedWorker } from '../src/core/routing';
 import type { WorkerRecord } from '../src/core/types';
@@ -198,5 +199,48 @@ describe('source hygiene', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('published-consumer gate: which version it verifies', () => {
+  // The gate's target is a registry read when `PUBLISHED_VERSION` is unset, and that read
+  // can be served from npm's local packument cache: observed on 2026-09-25 returning the
+  // just-superseded release on two consecutive reads minutes after a publish, while the
+  // same command asked for `dist-tags` named the new one. A gate that downloads and
+  // imports the *previous* artifact exits 0, so the disagreement has to be caught here
+  // rather than printed in a line nothing forces anyone to read.
+  it('takes an explicit version without consulting the registry, even an old one', () => {
+    let reads = 0;
+    const target = resolveTargetVersion('0.21.20', () => {
+      reads += 1;
+      return '0.21.29';
+    }, '0.21.30');
+    // Repeating the gate against a past release is legitimate, so the explicit value
+    // wins even though it matches neither the registry nor the tree.
+    expect(target).toBe('0.21.20');
+    expect(reads, 'an explicit version must not cost a registry read').toBe(0);
+  });
+
+  it('strips a leading v and surrounding whitespace from either source', () => {
+    expect(resolveTargetVersion('v0.21.30', () => 'unreached', '0.21.30')).toBe('0.21.30');
+    expect(resolveTargetVersion(undefined, () => ' v0.21.30 \n', '0.21.30')).toBe('0.21.30');
+  });
+
+  it('accepts an inferred version that agrees with the tree', () => {
+    expect(resolveTargetVersion(undefined, () => '0.21.29', '0.21.29')).toBe('0.21.29');
+  });
+
+  it('refuses an inferred version that disagrees with the tree, naming the remedy', () => {
+    // The observed stale-cache case verbatim: registry says 0.21.28, tree is 0.21.29.
+    const stale = () => resolveTargetVersion(undefined, () => '0.21.28', '0.21.29');
+    expect(stale).toThrow(/verify an artifact other than the one this tree publishes/);
+    expect(stale).toThrow(/PUBLISHED_VERSION=0\.21\.29/);
+  });
+
+  it('refuses an empty registry read rather than packing the floating tag', () => {
+    // `npm view <pkg> version` on a package the registry does not know prints nothing.
+    // Falling through would build `pkg@`, which npm resolves as `latest` — a different
+    // version from the one this script decided to verify.
+    expect(() => resolveTargetVersion(undefined, () => '  \n', '0.21.29')).toThrow(/returned no version/);
   });
 });
