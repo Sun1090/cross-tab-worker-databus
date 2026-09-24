@@ -36,12 +36,16 @@ import { PRUNE_STRATEGY } from './constants';
 // The `typeof value !== 'number'` operand cannot decide in any of the three. Both
 // `Number.isSafeInteger` and `Number.isFinite` answer false for a non-number without
 // coercing, so every value that trips this test trips the next one too, with the same
-// message. Measured rather than argued: a 23-value vector (numeric strings, `''`,
-// booleans, `null`, `undefined`, a prototype-less object, an array, a symbol, a
-// `BigInt`, a function, a boxed `Number`, `NaN`, `±Infinity`, `0`, `-0`, `1.5`, a value
-// past `MAX_SAFE_INTEGER`, `MAX_VALUE`) produced a byte-identical
-// accept/reject-and-message vector for all three guards as written and for each of the
-// three `typeof` tests deleted — so no test can pin this operand, and it is not a gap.
+// message. Measured rather than argued, on a vector named in full so its count is not
+// load-bearing: `'0'`, `'3000'`, `''`, `true`, `false`, `null`, `undefined`,
+// `Object.create(null)`, `[]`, a `Symbol`, `10n`, an arrow function, `new Number(5)`,
+// `NaN`, `+Infinity`, `-Infinity`, `0`, `-0`, `1.5`, `MAX_SAFE_INTEGER + 1`, `MAX_VALUE`,
+// `-1`, `'x'`, `{}`, and `3000` — the last one because a differential in which nothing is
+// accepted proves nothing. Each guard as written, and with only its `typeof` operand
+// deleted, answered identically on all 25: same accept/reject, same message. So no test
+// can pin this operand and it is not a gap. The deletion in its direct form agrees, and
+// was run against the whole suite: taking any one of the three operands out, and taking
+// all three out together, leaves every test green.
 //
 // It stays, because of one specific and very easy edit: writing the familiar global
 // `isFinite(value)` instead of `Number.isFinite(value)`, which coerces - so
