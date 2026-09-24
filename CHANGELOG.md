@@ -15,6 +15,10 @@
 - The option is pinned directly, on both sides: the default hub must still deliver inside the posting stack, an opted-in hub must deliver nothing until a microtask, a peer that closes before delivery receives nothing, and a sender that closes does not cancel its own frame — which is what the sweep's `forgeSubscribe()` depends on. Which half is load-bearing was measured: forcing the option to a no-op kills the second assertion, while removing the sweep's own opt-in leaves all five cases green on the fixed code. So the fidelity is justified by the six seeds it caught, not by a standing kill, and the pin's comment says so — while the *first* assertion is what makes the 17-case default flip impossible to land quietly.
 - One mechanism in there is recorded as defensive rather than as covered: reading the channel's member set inside the microtask instead of snapshotting it when the frame is posted is **indistinguishable through this fake**, because `FakeChannel.close()` clears the channel's listeners. That mutant was written, run, and survived the whole file; the comment at the site carries the measurement so the next reader does not mistake the assertion for a pin on the mechanism.
 
+### Documentation
+
+- `docs/architecture.md` and its Chinese mirror described both subscription chains in the wrong order and omitted the deferral altogether. The published text read `→ transport.subscribe(topic) → transportSubscribedTopics.add(topic)`; the code adds to the set **first** and then hands the call to `runTransport()`, which may park it. Both chains now put the set write before the call, and a new bullet in the disconnect/reconnect section states the rule #241 implements: a parked operation is re-checked against that set before it runs, and the alternative — what shipped until now — is a subscribe flushing after its own unsubscribe, leaving the connection holding a topic that none of the four tracked sets owns. `docs/*.md` is in `package.json` `files`, so this is consumer-visible text and ships with the patch.
+
 ## [0.21.15] - 2026-09-24
 
 ### Tests

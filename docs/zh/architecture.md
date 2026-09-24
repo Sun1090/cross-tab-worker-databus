@@ -416,7 +416,7 @@ sequenceDiagram
         → 无 route: 选择最低负载 Worker，写 route，sendControl(SUBSCRIBE)
           → owner 收到 CONTROL/SUBSCRIBE
             → assignedTopics.set(topicKey, topic)
-            → transport.subscribe(topic) → transportSubscribedTopics.add(topic)
+            → transportSubscribedTopics.add(topic) → transport.subscribe(topic)
 ```
 
 **退订传递链：**
@@ -429,13 +429,14 @@ sequenceDiagram
         → 无其他 subscriber: 删除 route，sendControl(UNSUBSCRIBE)
           → owner 收到 CONTROL/UNSUBSCRIBE
             → assignedTopics.delete(topicKey)
-            → transport.unsubscribe(topic) → transportSubscribedTopics.delete(topic)
+            → transportSubscribedTopics.delete(topic) → transport.unsubscribe(topic)
 ```
 
 **断开/重连行为：**
 
 - transport 断开时：`transportSubscribedTopics` **立即清空**。其他三个集合（`topicHandlers`、`subscribedTopics`、`assignedTopics`）保持不变。
 - transport 重连时：`CrossTabDataBus` 遍历 `assignedTopics`，对每个 topic 重新调用 `transport.subscribe(topic)`，重新填充 `transportSubscribedTopics`。
+- 这两个 transport 调用都可能**被延后**：transport 未就绪时，操作会排在 opening（或进行中的恢复尝试）之后，而不是写到已关闭的连接上。由于 `transportSubscribedTopics` 是在发起调用时更新、而非在调用真正落地时更新，延后的操作在执行前会先依据该集合重新核对——期间 topic 已被释放的订阅会被丢弃，期间又被重新订阅的释放同样会被丢弃。缺少这层核对时，一个停靠的 subscribe 可能在其自身的 unsubscribe 之后才 flush，使 transport 持有一个上面四个集合都不再拥有的 topic。
 - 这就是业务订阅意图在 transport 故障后仍能保持的原因：应用层无需在重连后重新订阅。
 
 ## 消息流程

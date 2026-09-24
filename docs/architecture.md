@@ -472,7 +472,7 @@ Application: subscribe(topic, handler)
         → if no route: selectLeastLoadedWorker, writeRoute, sendControl(SUBSCRIBE)
           → owner receives CONTROL/SUBSCRIBE
             → assignedTopics.set(topicKey, topic)
-            → transport.subscribe(topic) → transportSubscribedTopics.add(topic)
+            → transportSubscribedTopics.add(topic) → transport.subscribe(topic)
 ```
 
 **Unsubscribe propagation chain:**
@@ -485,13 +485,14 @@ Application: unsubscribe(topic, handler) (last handler)
         → if no subscribers left: delete route, sendControl(UNSUBSCRIBE)
           → owner receives CONTROL/UNSUBSCRIBE
             → assignedTopics.delete(topicKey)
-            → transport.unsubscribe(topic) → transportSubscribedTopics.delete(topic)
+            → transportSubscribedTopics.delete(topic) → transport.unsubscribe(topic)
 ```
 
 **Disconnect / reconnect behavior:**
 
 - On transport disconnect: `transportSubscribedTopics` is **cleared** immediately. The other three sets (`topicHandlers`, `subscribedTopics`, `assignedTopics`) survive unchanged.
 - On transport reconnect: `CrossTabDataBus` iterates `assignedTopics` and re-calls `transport.subscribe(topic)` for each one, repopulating `transportSubscribedTopics`.
+- Either transport call can be **deferred**: when the transport is not ready, the operation waits behind the opening (or behind a pending recovery attempt) instead of being written to a closed connection. Because `transportSubscribedTopics` is updated at the moment of the call rather than when it lands, a deferred operation is re-checked against that set before it runs — a subscribe whose topic was released in the meantime is dropped, and so is a release whose topic was re-subscribed in the meantime. Without the re-check, a parked subscribe can flush after its own unsubscribe and leave the transport holding a topic that none of the four sets above owns.
 - This is how business subscription intent survives transport failures: the application never needs to re-subscribe after a reconnect.
 
 ## Message Flow
