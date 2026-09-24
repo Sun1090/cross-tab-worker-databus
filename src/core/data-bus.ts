@@ -1823,9 +1823,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * callers can queue operations behind it.
    */
   private reopenTransport(recoveryAttempt?: number): Promise<void> {
-    // The two disjuncts have different standings, and neither has ever fired
-    // (0 of 5041 calls in the coverage run), so they are recorded rather than
-    // assumed. `stopping` is redundant by construction: every caller re-checks it
+    // The two disjuncts have different standings, and neither has ever fired: a full
+    // `pnpm test:coverage` run puts this method over five thousand calls while both
+    // arms read 0. Do not trust a constant here — the 5041 this note has carried
+    // since `b0354e4` read 5046 when it was last checked, and a stale count is the
+    // kind of number that reads like a re-derivation. Take it from
+    // `coverage/coverage-final.json`'s function count for `reopenTransport` when it
+    // matters. So: recorded rather than assumed.
+    // `stopping` is redundant by construction: every caller re-checks it
     // or cancels the path first — resumeSuspendedResources() on both arms,
     // startDemandRecovery()'s status gate, runTransport()'s demand reopen, and
     // beginStop(), which cancels the recovery timer synchronously.
