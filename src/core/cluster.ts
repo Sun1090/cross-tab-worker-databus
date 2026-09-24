@@ -212,19 +212,6 @@ export class WorkerClusterRuntime {
       this.routeOwnerCache.delete(oldest);
     }
   }
-  // Concrete topic → the local wildcard pattern that matched it, or `null` for
-  // "scanned, nothing matched". UNLIKE the reverse cache below, this map has no cap:
-  // it grows one entry per distinct topic this worker publishes, and is cleared only
-  // on the two lifecycle teardowns whose `routeOwnerCache.clear()` sits beside each
-  // `wildcardPublishCache.clear()`. Measured: 1,200 `publish()` calls on distinct
-  // topic names leave `knownTopics` at its 500-entry cap and this map holding 1,200.
-  // A cap is not free here, because both halves decide something. Evicting a pattern
-  // re-runs the first local dispatch the entry exists to prevent. Evicting a `null`
-  // re-scans, and if a wildcard was assigned in the meantime that publication
-  // dispatches locally instead of routing by owner — the fan-out a first publication
-  // gets. So bounding this map needs a rule about which of the two may be forgotten,
-  // not a number; until one is chosen the growth is the honest cost of the memo.
-  private readonly wildcardPublishCache = new Map<string, string | null>();
   // Reverse mapping: opaque topicKey → plaintext topic. A bounded cache with
   // FIFO eviction — NOT authoritative. It can hold a topicKey that is also in
   // assignedTopics (the owned guard prevents evicting those), because it is
@@ -339,7 +326,6 @@ export class WorkerClusterRuntime {
     this.subscribedTopics.clear();
     this.assignedTopics.clear();
     this.routeOwnerCache.clear();
-    this.wildcardPublishCache.clear();
     this.knownTopics.clear();
     this.suspended = false;
   }
@@ -502,7 +488,6 @@ export class WorkerClusterRuntime {
     this.handoffAssignedTopics();
     this.assignedTopics.clear();
     this.routeOwnerCache.clear();
-    this.wildcardPublishCache.clear();
     this.removeStorage(this.workerStorageKey(this.workerId));
     // Persist the final routes and worker removal before asking peers to
     // reconcile. A pagehide CONTROL message may be lost; REGISTRY must still
@@ -724,25 +709,23 @@ export class WorkerClusterRuntime {
     if (this.assignedTopics.has(topicKey)) {
       return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
     }
-    // A local wildcard owns matching concrete topics. The scan result is
-    // memoised per concrete topic: `undefined` means "not scanned yet", a
-    // pattern string means "this local wildcard matched", and `null` means
-    // "scanned, no local wildcard matched". The cached positive value is a
-    // scan-skip marker only — it is deliberately NOT re-checked against
-    // `assignedTopics`, because that map is keyed by the opaque topic key, so
-    // a plaintext pattern could never match a key (the check was unreachable).
-    // Only the first (scanning) call may dispatch locally; later calls route
-    // through `resolvePublishTarget`, which honours a concrete remote owner.
-    const cachedPattern = this.wildcardPublishCache.get(topic);
-    if (cachedPattern === undefined) {
-      for (const pattern of this.assignedTopics.values()) {
-        if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
-          this.wildcardPublishCache.set(topic, pattern);
-          return this.sendControl(this.workerId, CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
-        }
-      }
-      this.wildcardPublishCache.set(topic, null);
-    }
+    // No per-topic wildcard memo here, and that is a correctness decision rather
+    // than a removed optimization. The block this replaces scanned
+    // `assignedTopics` on the *first* publication to a topic and, on a match,
+    // dispatched locally without consulting the durable route; every later
+    // publication went through `resolvePublishTarget`. Measured with one runtime
+    // holding `chat.*` while a peer concretely owns `chat.room.1` (route record
+    // naming the peer, both runtimes reporting `isAssigned` true): three
+    // publications from the wildcard holder produced `atA=1 atB=0`, then
+    // `atA=1 atB=1`, then `atA=1 atB=2`. The first was never delivered to the
+    // owner it addressed, and delivery is at-most-once, so it is gone for good.
+    // That is the 0.20.58 bug seen from the other side: there a cached `null`
+    // short-circuited the owner lookup, here a cache *miss* did, so no eviction
+    // rule could have bounded the growth without also fixing the ordering.
+    // Wildcard ownership is still honoured — with no live concrete route
+    // `resolvePublishTarget()` answers with this worker, and the receiving
+    // ownership gate matches the pattern — it is just consulted once, on the same
+    // path every other publication takes.
     return this.sendControl(this.resolvePublishTarget(topic, topicKey), CONTROL_ACTION.PUBLISH, topic, topicKey, data, metadata);
   }
 
@@ -773,17 +756,9 @@ export class WorkerClusterRuntime {
       this.dispatchLocalPublishBatch(topic, topicKey, items);
       return true;
     }
-    const cachedPattern = this.wildcardPublishCache.get(topic);
-    if (cachedPattern === undefined) {
-      for (const pattern of this.assignedTopics.values()) {
-        if (pattern !== topic && topicMatchesPattern(pattern, topic)) {
-          this.wildcardPublishCache.set(topic, pattern);
-          this.dispatchLocalPublishBatch(topic, topicKey, items);
-          return true;
-        }
-      }
-      this.wildcardPublishCache.set(topic, null);
-    }
+    // Same rule as `publish()`, and the single-item delegation above reaches that
+    // method for a one-element batch: no first-publication wildcard scan, because
+    // a match there dispatched locally past a live concrete route owner.
     const target = this.resolvePublishTarget(topic, topicKey);
     if (target === this.workerId) {
       this.dispatchLocalPublishBatch(topic, topicKey, items);

@@ -3875,27 +3875,32 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
     return { runtime, onControl, env, storage, hub, advance: (ms: number) => { now += ms; } };
   }
 
-  it('reuses the wildcard publish cache on the second publish to the same topic', async () => {
+  it('delivers both publishes to a wildcard-covered topic', async () => {
     const { runtime, onControl } = makeRuntime('wild');
     runtime.start();
     runtime.subscribe('chat.*');
     await Promise.resolve();
     expect(runtime.isAssigned('chat.room.1')).toBe(true);
 
-    // First publish computes and caches the matching pattern...
+    // A count of two, which is what this asserts and no more: the removed memo
+    // produced the same two deliveries here, because a single runtime always wins
+    // its own election. What separated the old first call from the later ones was
+    // *which* target each addressed, and that is what the two FIRST-publish cases
+    // below pin — with a second runtime holding the concrete route.
     runtime.publish('chat.room.1', { n: 1 });
-    // ...the second must take the cache-hit branch and route identically.
     runtime.publish('chat.room.1', { n: 2 });
     const publishes = onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'chat.room.1');
     expect(publishes).toHaveLength(2);
     runtime.stop();
   });
 
-  it('a negative wildcard cache entry does not short-circuit a remote-owner publish', async () => {
-    // Regression for the 0.20.58 correctness bug: a `null` wildcardPublishCache
-    // entry means "no local wildcard subscription", NOT "owned locally". If
-    // null short-circuits, a topic owned by another worker is dispatched
-    // locally and never reaches its real owner.
+  it('forwards a publish whose topic matches no local wildcard to the remote owner', async () => {
+    // The 0.20.58 regression, kept for its behaviour rather than its mechanism:
+    // back then a `null` memo entry short-circuited the route lookup, so a topic
+    // owned by another worker was dispatched locally. The whole memo is gone now,
+    // so the condition it could not be trusted with no longer exists to test —
+    // which is exactly why this case stays: it is the behaviour the memo was
+    // supposed to make cheap, and it must survive without it.
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
     const a = makeRuntime('remote-a', storage, hub);
@@ -3903,7 +3908,8 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
     a.runtime.start();
     b.runtime.start();
 
-    // A holds an unrelated wildcard subscription, so its wildcard cache is live.
+    // A holds a wildcard subscription that does NOT match this topic, so it is the
+    // sender with a live `assignedTopics` scan and no claim on the route.
     a.runtime.subscribe('chat.*');
     // B owns 'metrics.cpu' outright.
     b.runtime.subscribe('metrics.cpu');
@@ -3929,7 +3935,90 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
     b.runtime.stop();
   });
 
-  it('routes publishBatch through the wildcard cache on repeat calls', async () => {
+  it('forwards a topic\'s FIRST publish to its concrete remote owner, not to a matching local wildcard', async () => {
+    // The mirror of the case above, and the reason the per-topic wildcard memo is
+    // gone. The replaced code scanned `assignedTopics` only when a topic had no
+    // memo entry yet and, on a pattern match, dispatched locally without ever
+    // consulting the durable route; every later publish for that topic did consult
+    // it. So a wildcard holder lost exactly one publication per topic to itself.
+    // Measured before the fix, with this setup: publish 1 -> atA=1 atB=0; publish 2
+    // -> atA=1 atB=1; publish 3 -> atA=1 atB=2. Delivery is at-most-once, so the
+    // first is gone for good — this is not a latency assertion.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a = makeRuntime('first-wild-a', storage, hub);
+    const b = makeRuntime('first-wild-b', storage, hub);
+    a.runtime.start();
+    b.runtime.start();
+
+    a.runtime.subscribe('chat.*');       // A owns the pattern...
+    b.runtime.subscribe('chat.room.1');  // ...B owns this concrete topic outright
+    for (let round = 0; round < 6; round += 1) {
+      await Promise.resolve();
+      a.env.runIntervals();
+      b.env.runIntervals();
+    }
+    // Both report the topic as assigned, which is the whole difficulty: the
+    // wildcard legitimately covers it and the concrete owner legitimately owns it.
+    expect(a.runtime.isAssigned('chat.room.1')).toBe(true);
+    expect(b.runtime.isAssigned('chat.room.1')).toBe(true);
+
+    const tally = (mock: ReturnType<typeof vi.fn>) =>
+      mock.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'chat.room.1').length;
+
+    // Asserted one publication at a time so a regression names which one was lost
+    // rather than reporting a count that is short by one.
+    a.runtime.publish('chat.room.1', { n: 1 });
+    await Promise.resolve();
+    expect(tally(b.onControl), 'first publish must reach the concrete owner').toBe(1);
+    expect(tally(a.onControl), 'first publish must not be handled by the sender').toBe(0);
+
+    a.runtime.publish('chat.room.1', { n: 2 });
+    await Promise.resolve();
+    expect(tally(b.onControl), 'second publish must reach the concrete owner').toBe(2);
+    expect(tally(a.onControl)).toBe(0);
+
+    a.runtime.stop();
+    b.runtime.stop();
+  });
+
+  it('forwards a batch\'s FIRST publish to the concrete remote owner as well', async () => {
+    // `publishBatch()` carried a textually identical copy of the memo block, so the
+    // same loss applied to it — with the extra trap that a one-item batch delegates
+    // to `publish()` and so never reached that code at all. Two items, first call.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a = makeRuntime('first-batch-a', storage, hub);
+    const b = makeRuntime('first-batch-b', storage, hub);
+    a.runtime.start();
+    b.runtime.start();
+
+    a.runtime.subscribe('chat.*');
+    b.runtime.subscribe('chat.room.2');
+    for (let round = 0; round < 6; round += 1) {
+      await Promise.resolve();
+      a.env.runIntervals();
+      b.env.runIntervals();
+    }
+
+    const items = [{ data: 1 }, { data: 2 }];
+    const batchesTo = (mock: ReturnType<typeof vi.fn>) =>
+      mock.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'chat.room.2').length;
+
+    expect(a.runtime.publishBatch('chat.room.2', items)).toBe(true);
+    await Promise.resolve();
+    const received = b.onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'chat.room.2');
+    // A received batch is presented to the handler one call per item (the frame
+    // carries `items`; the cluster unpacks it), so two items means two calls.
+    expect(received.map(call => call[2]), 'the first batch must be delivered to the concrete owner')
+      .toEqual([1, 2]);
+    expect(batchesTo(a.onControl), 'the first batch must not be handled by the sender').toBe(0);
+
+    a.runtime.stop();
+    b.runtime.stop();
+  });
+
+  it('delivers both publishes of a repeat batch on a wildcard-covered topic', async () => {
     const { runtime, onControl } = makeRuntime('batch');
     runtime.start();
     runtime.subscribe('feed.*');
@@ -3937,7 +4026,7 @@ describe('WorkerClusterRuntime publish routing cache and lifecycle guards', () =
 
     const items = [{ data: 1 }, { data: 2 }, { data: 3 }];
     expect(runtime.publishBatch('feed.eu', items)).toBe(true);
-    // Second call hits the cached pattern branch.
+    // A one-item batch delegates to `publish()`; two items reach this path.
     expect(runtime.publishBatch('feed.eu', items)).toBe(true);
     const delivered = onControl.mock.calls.filter(call => call[0] === 'PUBLISH' && call[1] === 'feed.eu');
     expect(delivered).toHaveLength(6);
