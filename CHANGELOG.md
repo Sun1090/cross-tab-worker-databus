@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.21.15] - 2026-09-24
+
 ### Tests
 
 - `handleControlMessage`'s addressee check is now pinned. `handleMessage` dispatches on `type` alone and the cluster channel is broadcast, so that first line is the only thing keeping a runtime from acting on a CONTROL frame addressed to someone else — and nothing asserted it. Measured by deleting it: 369 tests across `cluster`/`stability`/`data-bus`/`centrifuge`/`worker-mode` stayed green while the three-tab coordination fuzz churned 16+ minutes of CPU against a ~1-minute baseline. The fuzz reaches the leg constantly (every point-to-point frame is a non-target for the other tabs) and cannot assert it, because its invariants are end-state checks and a slower convergence still passes.

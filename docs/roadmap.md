@@ -1,6 +1,39 @@
 # Roadmap
 
-0.21.14 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.15 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.15 delivered scope
+
+- Both point-to-frame addressee guards are now pinned by name. `handleMessage` dispatches on `type` alone and
+  the cluster channel is broadcast, so `targetWorkerId !== this.workerId` is the only thing keeping a runtime
+  from acting on a frame meant for someone else; measured by deleting each line in turn, 369 and then 358
+  tests stayed green, and the coordination fuzz cannot assert either one because its invariants are end-state
+  checks and a slower convergence still passes.
+- The `ROUTE_RELEASED` pin needed a construction its staleness test could not refuse: a durable route that
+  genuinely names this runtime, with a matching `generation` and `handoffFromWorkerId`, and the ACK addressed
+  to a third worker. That is also why the older forged-`topicKey` case never reached the line.
+- The coordination fuzz gained a third limit, placed where neither half of a loop owns it. Its two existing
+  bounds were both made of time, and the failure that had been turning `verify` red spent its time in
+  microtasks, where no same-thread deadline can reach it; `ChannelHub` now stops delivering past 50,000
+  posts in one seed, with the threshold taken from a measured distribution (p50 = 28, p99 = 90, max = 16,763)
+  rather than from the size of the wedge, and a cut seed is printed by name and excluded from the depth floor.
+- What that loop actually is was then measured instead of inferred, and it is the harness rather than the
+  library: 11,542 accepts against 11,538 `confirmRoute` skips and 6 writes reaching storage, because the
+  owner's confirmation sits in its own batching writer while a peer reads the flushed record — and the cycle
+  cannot yield to a microtask because the test hub delivers every frame on the caller's stack. Deferring
+  delivery by one microtask removes the storm outright. The earlier note in this file that called it an open
+  product defect is corrected here, and the six injected-frame seeds that correction leaves behind are named
+  as the next question rather than resolved.
+- `docs/release-checklist.md`, in both languages, now records that `pnpm bench:compare` can be closed by the
+  act of investigating it: its baseline is drawn from the same rolling archive every `bench:browser` run
+  appends to, so the instruction is to read the host load first and record a suspect failure as deferred
+  instead of chasing a green.
+- `docs/progress.md` has a structural gate. Two PRs for one phase had left two `## Phase 142` blocks, with one
+  of them pushed below the anchor every entry is appended at; `tests/documentation.test.ts` now requires each
+  phase number to be new, later than the previous entry, and above the standing sections.
+
+No behavior, wire-format, storage-layout or cluster-protocol change: `src/` is untouched in this version, and
+the release is owed to `docs/release-checklist.md` and `CHANGELOG.md`, both of which ship in the package.
 
 ## 0.21.14 delivered scope
 
