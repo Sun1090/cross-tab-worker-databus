@@ -1305,6 +1305,52 @@ describe('CrossTabDataBus', () => {
     vi.useRealTimers();
   });
 
+  it('sends no unsubscribe to a transport while the bus is stopping', async () => {
+    // `WorkerClusterRuntime.stop()` releases local subscriptions and then hands off
+    // the topics it owned, and the handoff posts an UNSUBSCRIBE through the same
+    // control seam a live unsubscribe uses - which is how `runTransport` comes to be
+    // evaluated with `stopping` already set (`!this.stopping` is also why the
+    // demand-reopen leg under it cannot decide anything, since the reopen it would
+    // fall through to re-checks the flag itself).
+    //
+    // Two tabs are required, not one: `handoffAssignedTopics()` looks up the
+    // remaining subscribers for the route and, finding none, just removes the route
+    // without posting anything. Only a peer that will take the topic over turns the
+    // handoff into a control frame.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const envA = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'unsub-a' });
+    const envB = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'unsub-b' });
+    const transportA = new FakeTransport<number>();
+    const busA = new CrossTabDataBus({
+      clusterKey: 'stopping-unsub',
+      environment: envA.environment,
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      transport: transportA
+    });
+    const busB = new CrossTabDataBus({
+      clusterKey: 'stopping-unsub',
+      environment: envB.environment,
+      tabId: 'tab-b',
+      workerId: 'worker-b',
+      transport: new FakeTransport<number>()
+    });
+    await busA.start({});
+    await busB.start({});
+    busA.subscribe('t', vi.fn());
+    busB.subscribe('t', vi.fn());
+    await busA.ready();
+    await busB.ready();
+    expect(busA.getClusterSnapshot().assignedTopics).toContain('t');
+    expect(transportA.subscribeCalls).toContain('t');
+    expect(transportA.unsubscribeCalls).toEqual([]);
+
+    await busA.stop();
+    expect(transportA.unsubscribeCalls, 'a stopping transport must not be sent an UNSUBSCRIBE').toEqual([]);
+    await busB.stop();
+  });
+
   it('lets an explicit operation drive an immediate reopen after a failed auto attempt', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'demand-recovery' });

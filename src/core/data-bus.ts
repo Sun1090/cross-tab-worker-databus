@@ -1982,6 +1982,34 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // previous behaviour: its `disconnected` status is "not connected yet".
     const droppedAfterConnect =
       this.transportHasConnected && this.status === WORKER_STATUS.DISCONNECTED;
+    // Four operands, measured one deletion at a time against the whole suite and
+    // then classified with the flag-vector census described in `stop()`'s note.
+    // Observed at this line: the fast path `1000`, plus `0000`, `0100`, `1001` and
+    // `1010`. `transportReady` dies to at least eight named cases (the probe prints
+    // eight) and `droppedAfterConnect` to two (`parks every operation behind a
+    // demanded reopen instead of writing to
+    // the closed connection`, `reopens a cleanly disconnected transport when an
+    // explicit operation demands it`). `!this.stopping` was live and unnamed until
+    // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
+    // premise is the `1001` row, and the only thing in the suite that reaches it is
+    // `WorkerClusterRuntime.stop()`'s handoff posting an UNSUBSCRIBE after
+    // `beginStop()` raised the flag - which needs a peer that will take the topic,
+    // because with no remaining subscriber the handoff drops the route instead.
+    //
+    // `this.status !== WORKER_STATUS.ERROR` is the survivor, and the census says no
+    // test ever evaluates this guard with the transport ready *and* the status
+    // errored. That is not the same claim as "unreachable", and it is worth being
+    // precise about which one is established: the branch a few lines above pre-empts
+    // every *armed* error with the recovery gate, and three routes were built to get
+    // past it - an error inside the cooldown following an explicit `start()`, the
+    // exhausted budget after a failed automatic attempt, and the same after a
+    // demand-driven reopen. Each re-armed instead, because `start()`'s manual path
+    // runs `resetFailureState()` and a successful reopen clears the attempt counter,
+    // so both routes back into an error end with a gate standing. So this operand is
+    // held against that pre-empting branch being relaxed or reordered, which is the
+    // only way found to make the leg reachable - and if it ever is, the failure is
+    // the quiet one this file keeps meeting: a publication handed to a socket that
+    // reported `error` and can only lose it.
     if (this.transportReady && this.status !== WORKER_STATUS.ERROR && !droppedAfterConnect && !this.stopping) {
       try {
         void Promise.resolve(operation()).catch(error => this.reportError(error));
@@ -1994,6 +2022,34 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // operation is not silently dropped. This covers the case where a resume
     // or recovery attempt failed, leaving transportReady=false, startPromise=null.
     let ready = this.startPromise;
+    // All four of these operands survive deletion against the whole suite, and all
+    // four are closed by the callee rather than by this line. `reopenTransport()`
+    // opens with `if (this.stopping || this.activeConfig === undefined) return
+    // Promise.resolve()` and follows it with the in-flight check that returns
+    // `this.startPromise`, so `!this.stopping`, `this.activeConfig !== undefined`
+    // and `!ready` each restate a test the function being called performs first, and
+    // calling it anyway assigns `ready` the same promise. The census confirms the
+    // consequence-free half directly: the rows where an opening is already in flight
+    // (`1101`) and where the bus is stopping (`0111`) both occur in the existing
+    // suite, and deleting either leg still ends with the operation parked on that
+    // same promise.
+    //
+    // One premise has to be stated with that argument rather than assumed: the
+    // callee's reuse check is `startPromise && startPromise !== pendingStop`, and on
+    // the resume path those two fields are deliberately the same promise, where it
+    // chains a fresh open instead of returning the stop gate. This guard is only
+    // reached with `suspended` false, so that pairing is not what the rows above
+    // measured - which is the reason the leg is kept rather than deleted as
+    // redundant.
+    //
+    // `this.started` is the one operand whose premise (`0001`, nothing in flight, not
+    // stopping, config present, not started) the census never saw and no route
+    // produced: `publish`/`subscribe` both run `ensureStarted()`, which either
+    // restarts the bus (and sets the flag first) or throws, and the internal callers
+    // are `subscribeTransport`/`unsubscribeTransport`, whose only status-driven fan-out
+    // is the reconnect arm. So it is held against a future caller that reaches an
+    // operation without that gate, and against `openTransport()`'s failure path, the
+    // one place `started` goes false while a config survives.
     if (!ready && this.started && !this.stopping && this.activeConfig !== undefined) {
       ready = this.reopenTransport();
     }
