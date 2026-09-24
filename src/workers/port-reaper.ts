@@ -138,6 +138,17 @@ export class PortReaper {
    * each spawning redundant timers when the cadence hasn't changed. */
   private schedule(): void {
     if (this.sessionTimeoutMs.size === 0) {
+      // Zero counts on the guard's false arm: reaching this line with `handle`
+      // already null needs a `schedule()` call made while all three maps are empty,
+      // and every caller is gated on a tracked port — `remove()` and `setTimeout()`
+      // behind `targets.has(port)`, `register()` having just added one, and the reap
+      // pass only after it reaped something. The two statements that null `handle`
+      // are this branch itself, which requires the empty map it implies, and
+      // `dispose()`, which clears all three maps and therefore takes every caller's
+      // guard with it. `dispose()` also has no Worker-side caller at all — recorded
+      // in configuration.md — so in the shipped SharedWorker this arm is
+      // unreachable rather than merely unreached. It stays as the file's statement
+      // that a null handle is never handed to `clearTimer`.
       if (this.handle !== null) this.clearTimer(this.handle);
       this.handle = null;
       return;

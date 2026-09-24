@@ -123,6 +123,70 @@ describe('DataBusTraceReporter', () => {
     expect(metrics.dispatchAvgMs).toBe(0);
   });
 
+  it('records no latency sample when the injected clock answers a dispatch read with a non-finite value', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const events: DataBusTraceEvent[] = [];
+      let clock = 1_000;
+      const reporter = new DataBusTraceReporter({
+        enabled: true,
+        metricsIntervalMs: 1_000,
+        now: () => clock,
+        sink: collect(events)
+      });
+      reporter.recordReceived('a');
+      clock = 1_050;
+      reporter.recordDispatched('a');
+      reporter.recordReceived('b');
+      clock = bad;
+      reporter.recordDispatched('b');
+      clock = 1_050;
+      reporter.flush();
+      const metrics = events.find(e => e.type === 'message_metrics') as DataBusMetricsTraceEvent;
+      // The dispatch itself is still counted — only the sample is dropped, on the
+      // same terms as a dispatch with no matching receive.
+      expect(metrics.received, `clock reading ${String(bad)}`).toBe(2);
+      expect(metrics.dispatched, `clock reading ${String(bad)}`).toBe(2);
+      // And the surviving sample keeps the report internally consistent: one
+      // sample of 50 ms is bucket index 1, whose midpoint is 75, so every
+      // percentile must read 75 rather than the ceiling a lost rank returns.
+      expect(metrics.dispatchSamples, `clock reading ${String(bad)}`).toBe(1);
+      expect(metrics.dispatchAvgMs, `clock reading ${String(bad)}`).toBe(50);
+      expect(metrics.dispatchP50Ms, `clock reading ${String(bad)}`).toBe(75);
+      expect(metrics.dispatchP95Ms, `clock reading ${String(bad)}`).toBe(75);
+      expect(metrics.dispatchMaxMs, `clock reading ${String(bad)}`).toBe(75);
+      // A JSON sink turns a NaN average into `null`, so the field disappearing is
+      // the observable form of the corruption this prevents.
+      expect(JSON.parse(JSON.stringify(metrics)).dispatchAvgMs, `clock reading ${String(bad)}`).toBe(50);
+    }
+  });
+
+  it('keeps counting a measurable dispatch whose clock ran backwards', () => {
+    const events: DataBusTraceEvent[] = [];
+    let clock = 1_000;
+    const reporter = new DataBusTraceReporter({
+      enabled: true,
+      metricsIntervalMs: 1_000,
+      now: () => clock,
+      sink: collect(events)
+    });
+    reporter.recordReceived('a');
+    clock = 1_050;
+    reporter.recordDispatched('a');
+    reporter.recordReceived('b');
+    clock = 900;
+    reporter.recordDispatched('b');
+    clock = 1_050;
+    reporter.flush();
+    const metrics = events.find(e => e.type === 'message_metrics') as DataBusMetricsTraceEvent;
+    // The clamp records it as 0 ms, so both samples land in reachable buckets and
+    // the average (50/2) sits between the two midpoints the histogram reports.
+    expect(metrics.dispatchSamples).toBe(2);
+    expect(metrics.dispatchAvgMs).toBe(25);
+    expect(metrics.dispatchP50Ms).toBe(25);
+    expect(metrics.dispatchP95Ms).toBe(75);
+    expect(metrics.dispatchMaxMs).toBe(75);
+  });
+
   it('caps the pending receive queue per topic', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events), metricsIntervalMs: 1_000 });
