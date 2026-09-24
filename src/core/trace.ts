@@ -393,7 +393,7 @@ export class DataBusTraceReporter {
    *
    * Do not add a `|| this.stopped` back at a call site. `getMetrics` and `flush`
    * each carried one, and the repetition is what made this term look untestable:
-   * deleting the term left all 37 test files green, because a read of a field the
+   * deleting the term left the whole suite green, because a read of a field the
    * guard consulted one expression earlier can never be the decider. With both
    * repeats gone the same deletion dies twice in `tests/trace.test.ts` — to
    * "starts a fresh metrics window after pause and resume, and stop prevents later

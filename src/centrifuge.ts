@@ -370,7 +370,7 @@ export class CentrifugeWorkerTransport<TData = unknown>
     // `start()` reaches past its own `if (this.backend) return` guard, and
     // `backend` becomes null only through `stop()` and `onWorkerFailed()` — both
     // of which call `clearHeartbeat()` first. Measured: deleting this line leaves
-    // all 37 test files green. It stays because `clearHeartbeat()` can only ever
+    // the whole suite green. It stays because `clearHeartbeat()` can only ever
     // drop the one handle it holds, so a double-arm would leak an interval that
     // nothing can clear afterwards — doubled PINGs at the SharedWorker for the
     // rest of the page, which reads to the reaper as a tab that never goes away.

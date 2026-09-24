@@ -144,7 +144,7 @@ describe('DedupManager — sweep lifecycle', () => {
   it('arms no sweep timer when the manager is disabled, and none without a sweep interval', () => {
     // One configuration per option leg of `start()`'s guard, because the case above
     // exercises only the armed-timer leg. Measured: deleting `!this.enabled` or
-    // `!this.sweepMs` from that guard left all 37 test files green, so the method's
+    // `!this.sweepMs` from that guard left the whole suite green, so the method's
     // own sentence — "No-op when disabled or no sweepMs was configured" — was an
     // assertion about a behavior nothing checked. The two legs are not equally quiet
     // if they go: an unset interval does not mean "no sweep", it means

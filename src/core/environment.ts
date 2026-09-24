@@ -160,11 +160,18 @@ export function createStorageEventChannel(options: {
       // `seq`, so the next test rejects it. `!parsed` *is* first for `null` (since
       // `typeof null === 'object'`), yet deleting it changes nothing observable either
       // — `null.seq` then throws inside this `try`, and the `catch` below returns the
-      // same way. Measured rather than argued: over 23 stored values spanning `null`,
-      // every JSON primitive, arrays, and an envelope with each field absent, null,
-      // boolean, a numeric string or `1e999`, plus unparseable text, the accept/drop
-      // vector is byte-identical for this line as written and for either of those two
-      // deleted.
+      // same way. Measured rather than argued, over a vector a reader can rebuild:
+      // `null`, `true`, `false`, `0`, `3`, `'x'`, `[]`, `[<one message>]`, then the
+      // well-formed envelope with each of `senderId`/`seq`/`message` replaced in turn by
+      // absent, `null`, `true`, `'0'` and `1e999` (fifteen of those), one with
+      // `message: {}`, the intact envelope, and unparseable text. Twenty-six writes but
+      // twenty-three *distinct documents* — `1e999` is `Infinity`, which `JSON.stringify`
+      // emits as `null`, so each of those three rows stores the same bytes as its `null`
+      // twin, and no non-finite `seq` can ever reach the `typeof` test below. All of them
+      // answer the same — delivered or not — under this line as written and under either
+      // of those two deleted. `null` is the only input whose *route* parts, exactly as
+      // above: the guard rejects it, deleting `!parsed` lets `null.seq` throw. The
+      // vectors agree on what reaches the dispatcher, which is all this line can decide.
       //
       // Both stay, because each is load-bearing against a *different* later edit
       // rather than against an input: dropping `!parsed` turns a contained rejection

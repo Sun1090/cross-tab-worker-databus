@@ -200,8 +200,13 @@ export class WorkerClusterRuntime {
   private touchRouteOwnerCache(topicKey: string, value: { workerId: string; generation: number }): void {
     if (this.routeOwnerCache.has(topicKey)) this.routeOwnerCache.delete(topicKey);
     this.routeOwnerCache.set(topicKey, value);
-    // Insertion order is the Map's iteration order and the cache is at least
-    // one entry over the cap here, so the iterator always yields a key to drop.
+    // The delete above re-inserts a known key at the back, so the front of the
+    // Map's iteration order is the least-recently-touched entry. A call adds at
+    // most one net entry, so one eviction is enough to reach the cap — and it is
+    // often none: the size is over the cap only when a *new* key arrives while the
+    // cache already sits at it. Measured at `routeOwnerCacheMax: 2` with two remote
+    // owners, filling to 2 and then re-resolving either one leaves `size` at 2 and
+    // the loop's first iteration breaks without deleting.
     for (const oldest of this.routeOwnerCache.keys()) {
       if (this.routeOwnerCache.size <= this.routeOwnerCacheMax) break;
       this.routeOwnerCache.delete(oldest);
