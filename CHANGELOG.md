@@ -1,3 +1,27 @@
+## [0.21.27] - 2026-09-25
+
+Three shipped sentences about lifecycle windows were re-checked against the code and the runner: one held and is now backed by a measurement, one was false about *why* the code is safe, and one quoted a number that had already rotted.
+
+### Fixed
+
+- **`reconcile()`'s REGISTRY leg was unreachable for a different reason than its comment gave.** The note said the span between `pause()` clearing `started` and `pause()` removing the message listener holds "a boolean assignment and two `heartbeatHandle` writes, with no call that can hand the stack to consumer code". The middle of those three statements is `this.environment.clearInterval(this.heartbeatHandle)` — a call into adapter code, which this same file's `activate()` comment treats as consumer-supplied and untrusted. So the absence of calls was never what closed the window; the `if (!this.started) return` guard at the top of `reconcile()` is. The comment now says that, which also strengthens the case for keeping a guard that the old phrasing made look redundant.
+- **The activation window's provenance is measured rather than argued.** `pause()`'s null-`heartbeatHandle` branch is a covered arm whose *origin* was a claim: that only the two "abandons activation…" tests reach it. Instrumenting the branch and running the whole suite printed exactly two lines and no third — one from the adapter's `createChannel`, one from the storage-less self-SUBSCRIBE's `handlers.onControl` — and the two test names are now quoted at the site, so a third origin is something a future reader can notice rather than something they have to re-derive.
+- **A quoted call count became a lookup.** `reopenTransport()`'s note had carried "0 of 5041 calls" since `b0354e4`; the same function count on this tree reads 5046. The number was only ever there to say *hot method, cold arms*, and that reading survives any drift — which is precisely why a stale figure is dangerous: it looks like evidence. The sentence now names where to take the count from instead of preserving one.
+
+### Tests
+
+- **None added or changed, and the ledger is quoted rather than assumed.** `pnpm check` 0 with **936** tests and 5/5 perf gates, `pnpm lint` 0, `pnpm test:coverage` 0 with **46** zero-count branch arms of **1963** and aggregate 99.02 / 97.65 / 99.27 / 99.69 — unchanged, as it must be for a diff that contains no code. `git diff -U0 src/` with every comment line filtered out returns nothing.
+
+### Documentation
+
+- **`AGENTS.md` gained the decay rule for quoted numbers.** A count in a comment contradicts nothing when it drifts, so either name the lookup that re-derives it or drop the figure; the pair that carries the argument (this leg runs thousands of times, these arms read zero) is the part worth keeping. This is the same failure mode as quoting a sweep total as a per-seed cost — the reader cannot tell a stale measurement from a current one, and a stale one calibrates them.
+- **And the shipped-surface rule got its position half, measured rather than inherited.** The existing note says a src comment ships through the declarations *and* the JS, which is true in aggregate and misleading per sentence: this release's three corrections all sit in **statement slots inside method bodies**, and grepping one built tree shows they reach the published package only through the `.js.map` files' embedded sources (`files: ["dist"]` does publish those). A **class-member JSDoc** — `0.21.26`'s `stop()` note is the control — does appear in `dist/core/replay-manager.d.ts`, in the shared ESM chunk and in both CJS bundles. The control that keeps this from reading as a regression is a comment that predates both releases: `cluster.ts`'s "Order matters: release local subscriptions…" is equally absent from the bundles. So "does this comment ship?" is asked per artifact — what a consumer's editor shows, what a sourcemap step recovers, what a bundle read surfaces — not once for the tree.
+- **Nothing consumer-facing moved**, so no `docs/` page was rewritten: these are maintainer-facing comments about internal methods, corrected in place.
+
+### Compatibility
+
+Comment-only. No export, frame, option, default or storage key moved; `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.26`.
+
 ## [0.21.26] - 2026-09-25
 
 One false sentence about who cancels a persistence retry, corrected everywhere it had been written — found by an audit pass whose own scheduling step was wrong, which is the part worth reading.

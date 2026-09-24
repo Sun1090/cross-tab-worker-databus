@@ -459,8 +459,14 @@ export class WorkerClusterRuntime {
     }
     this.started = false;
     this.suspended = true;
-    // Reached with `heartbeatHandle === null` from the activation window: both
-    // "abandons activation…" tests tear down between `started = true` and the
+    // Reached with `heartbeatHandle === null` from the activation window, and that
+    // provenance is measured rather than argued: instrumenting this branch and
+    // running the whole suite printed exactly two lines and no third, one per
+    // activation seam — the adapter's `createChannel` in
+    // "abandons activation when the channel adapter tears the runtime down
+    // mid-start", and the storage-less self-SUBSCRIBE's `handlers.onControl` in
+    // "abandons the heartbeat when a handler stops the runtime during the
+    // storage-less re-subscribe". Both tear down between `started = true` and the
     // `setInterval` at the end of `activate()`, which is the only way this arm was
     // ever taken (it is zero-count without them). The test protects against
     // nothing observable — measured: calling `clearInterval` unconditionally keeps
@@ -1235,12 +1241,16 @@ export class WorkerClusterRuntime {
     // is now behind the second liveness check, the heartbeat tick can only fire
     // for an interval armed under that same check, `handleVisibilityChange` tests
     // `started` before calling it, and `handleMessage`'s REGISTRY branch is
-    // reached through the message listener that `pause()` removes. That removal
-    // is three statements *after* `pause()` clears `started`, so the ordering
-    // alone would not be enough — what closes the window is that the statements
-    // between them are a boolean assignment and two `heartbeatHandle` writes,
-    // with no call that can hand the stack to consumer code and let a REGISTRY
-    // arrive. The census over the whole suite saw this method entered with
+    // reached through the message listener that `pause()` removes. That removal is
+    // three statements *after* `pause()` clears `started`, so the ordering alone
+    // would not be enough — and the statement list does not close it either. What
+    // sits between is a boolean assignment, a conditional
+    // `this.environment.clearInterval(…)`, and a `heartbeatHandle` write, and the
+    // middle one is a call into adapter code: an adapter that ran anything
+    // synchronous there would deliver a REGISTRY to a listener still attached. That
+    // is the same custom-adapter premise `activate()`'s first liveness check is
+    // written against, so this guard, not the absence of calls, is what closes the
+    // window. The census over the whole suite saw this method entered with
     // `started` true in both of its distinct vectors (`storage` true in one,
     // false in the other). Of the four callers, two re-test `started` locally and
     // the REGISTRY leg is closed as above; the heartbeat tick is the one that

@@ -1,6 +1,13 @@
 # Roadmap
 
-0.21.25 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.27 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.27 delivered scope
+
+- **A reason that was wrong about code that was right.** `reconcile()` opens with `if (!this.started) return;`, and its note explained the REGISTRY leg as closed because nothing between `pause()` clearing `started` and `pause()` removing the message listener "can hand the stack to consumer code". One of the three statements in that span is `environment.clearInterval(…)` — adapter code, which this file's own `activate()` comment treats as consumer-supplied and untrustable. The guard is therefore not redundant decoration behind an impossible window: it is the thing that closes it. The comment now argues for the guard instead of accidentally arguing against it.
+- **A covered arm whose provenance was an argument, now a measurement.** `pause()`'s null-`heartbeatHandle` branch is taken only from the activation window — that is what its comment claimed and what no counter shows, since the arm is covered either way. Instrumenting the branch and running the suite printed exactly two lines and no third: one origin inside the adapter's `createChannel`, one inside the storage-less self-SUBSCRIBE's `handlers.onControl`, which is one per seam and matches the two tests by name. Both names are quoted at the site so a third origin is visible as a difference rather than as a re-derivation.
+- **A number that had rotted without contradicting anything.** The `reopenTransport()` note said its two guard legs had never fired "0 of 5041 calls in the coverage run", a figure written in `b0354e4`. Re-running the same lookup gave 5046. The count only ever supported the claim *hot method, cold arms*, so the sentence now points at the lookup (`coverage/coverage-final.json`'s function count) instead of preserving a stale constant that reads like evidence. `AGENTS.md` carries the general rule.
+- **What did not move.** No code changed: `git diff -U0 src/` with the comment lines filtered returns nothing, the suite is at 936 tests with 5/5 perf gates, the branch-arm ledger is still 46 zero-count arms of 1963 (99.02 / 97.65 / 99.27 / 99.69), and no consumer-facing doc needed a rewrite because every corrected sentence is about an internal method.
 
 ## 0.21.26 delivered scope
 
