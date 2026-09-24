@@ -699,14 +699,17 @@ describe('CrossTabDataBus', () => {
     // Two claims here are measured, and they land on different lines.
     //
     // The order asserted below is NOT this expression's protection. Deleting the read
-    // outright (`const stop = Promise.resolve()`) leaves this file 194/194 green, and
+    // outright (`const stop = Promise.resolve()`) leaves this file green in full — it
+    // passed at its whole current count when this note was last re-run — and
     // so does moving the `pendingStop` installation below the `cluster.stop()` window,
     // because `start()` chains the reopen behind `this.pendingStop` on its own: the
     // `start` → `stop` → `start` order survives both mutations. That makes the
     // fallback leg executing-and-redundant rather than dominated. The same mutation
     // does have a consequence elsewhere — it aborts `tests/lifecycle-invariants.test.ts`
-    // with an out-of-memory after ~40 s, because a restart woken too early re-queues
-    // through `start()`'s `stopping` routing forever — and that is the *gate* operand's
+    // with an out-of-memory after tens of seconds of worker life (the timing is
+    // host-dependent: ~40 s first, 26.8 s on the re-run), because a restart woken too
+    // early re-queues through `start()`'s `stopping` routing forever — and that is the
+    // *gate* operand's
     // job, recorded at `queueStartAfterStop()`.
     //
     // What this case does have teeth on is one line above that leg: routing on the

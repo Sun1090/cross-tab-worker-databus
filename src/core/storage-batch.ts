@@ -102,9 +102,9 @@ export class BatchingStorageWriter implements StorageLike {
     // it: a live Map iterator does reach keys added after its position, so a
     // storage adapter that re-enters setItem would otherwise extend this pass.
     // `scheduleFlush` is not that re-entry — it defers through queueMicrotask /
-    // setTimeout and cannot call flush() synchronously, and `:99` above has
-    // already dropped the gate. Deleting while iterating needs no snapshot
-    // (Map's own iteration is deletion-safe, the same finding recorded for
+    // setTimeout and cannot call flush() synchronously, and `flush()`'s own first
+    // statement has already dropped the gate. Deleting while iterating needs no
+    // snapshot (Map's own iteration is deletion-safe, the same finding recorded for
     // PortReaper.reap). Both forms allocate a result array, so the choice here
     // is about the entry list, not about allocation.
     for (const [key, value] of Array.from(this.pending)) {

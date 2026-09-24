@@ -229,16 +229,20 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
           reject(error);
           return;
         }
-        // One-shot settlement, the same latch in all four `invalidate`+`reject`
-        // closures here. Entering it twice is reachable — one aborting
-        // transaction dispatches `error` and then `abort` — but measured
-        // harmless: `reject` on a settled promise is a no-op, and the extra
-        // `invalidate` cannot see a replaced cache because both signals are
-        // dispatched inside one microtask batch, so their callbacks run before
-        // the serialized queue reopens. Deleting all four latches leaves the
-        // suite green and the connection count unchanged; they stay because that
-        // proof rests on dispatch timing outside this file. The stale-signal case
-        // that is inside this file is pinned by tests/replay-persistence.test.ts's
+        // One-shot settlement. There are four latch *variables* here and five
+        // guarded closures: the four `invalidate`+`reject` ones, plus this block's
+        // `oncomplete`, which shares the same latch as its `fail` — so "delete the
+        // latches" is a five-statement edit, not a four-statement one. Entering a
+        // latch twice is reachable — one aborting transaction dispatches `error`
+        // and then `abort` — but measured harmless: `reject` on a settled promise
+        // is a no-op, and the extra `invalidate` cannot see a replaced cache
+        // because both signals are dispatched inside one microtask batch, so their
+        // callbacks run before the serialized queue reopens. Deleting all five
+        // guards leaves the suite green and the connection count unchanged (that
+        // is the measured form, re-run statement by statement rather than by the
+        // count in this sentence); they stay because that proof rests on dispatch
+        // timing outside this file. The stale-signal case that is inside this file
+        // is pinned by tests/replay-persistence.test.ts's
         // 'keeps the connection a later operation reopened when an older signal
         // lands late'.
         let settled = false;
