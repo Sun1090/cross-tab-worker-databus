@@ -1,3 +1,27 @@
+## [0.21.29] - 2026-09-25
+
+Twelve measurement claims quoted in `src/` comments re-run against the current suite, one at a time. Eight held exactly as written — including five `tsc` error counts and two mutant kill sets — and four did not. The failures were all of one kind: a number that was true when it was measured and had since become false.
+
+### Fixed
+
+- **The IndexedDB settlement note counted four guards where the edit removes five.** Its comment said "the same latch in all four `invalidate`+`reject` closures" and "deleting all four latches leaves the suite green". There are four latch *variables* and five guarded closures, because `load()`'s `transaction.oncomplete` shares its latch with that block's `fail` — so the measured deletion is a five-statement edit. Re-run that way: all five guards out, 37 files green, connection count unchanged.
+- **`CentrifugeSession`'s dependency citations named no installed line, and one of its own counts was off by one.** The sentence said the SDK's no-op `error` listener sits at `build/index.js:762` and that the bundled emitter's throw is at `:162`. Against the pinned `centrifuge@5.7.4` the guard is at 763-764, and in the `5.7.0` copy also present in the store it is at 748 — so the number matched neither, and whether it drifted or was mis-copied cannot be recovered from here. Both citations are now the dependency's own quoted comment text, which survives a reflow. In the same sentence "four statements later" named three; the anchor the sentence sets (the `error` removal) has exactly three statements before the re-installation, and the `BaseSubscription` range became its actual class body (667-2673), inside which the twelve `emit('error')` sites were counted rather than assumed.
+- **A rotted test count and a host-specific timing, in three copies.** The `queueStartAfterStop()` note said its mutation "leaves `tests/data-bus.test.ts` 194/194 green"; the file is at 198, and re-running the mutation (replacing the `stopPromise` chain with `Promise.resolve()`) reproduced both halves — green in full, and `tests/lifecycle-invariants.test.ts` dying with `Ineffective mark-compacts near heap limit` inside `Builtins_RunMicrotasks`. That crash came at **26.8 s** of worker life here rather than the recorded ~40 s, so all three places that told the story — the `src/` comment, the test's own header note, and the `AGENTS.md` bullet that cites it as guidance — now name the crash as the load-bearing half and the interval as host-dependent. The neighbouring four-way absorb measurement quoted `194/194` three times; its green legs now say "green in full" and the failing leg keeps its count with the file size it was taken against, since that one has not been re-run.
+- **Two internal line citations replaced by the statements they meant.** `validation.ts` cited `routing.ts:64-70` for `effectiveWorkerLoad`'s `Number.isFinite` fallback, and `storage-batch.ts` cited `:99` for `flush()`'s gate drop. Both happened to still point roughly right, which is the problem: a correct-but-brittle citation reads as verified.
+
+### Tests
+
+- **None added or changed.** Every result below is a mutant run against the committed tree, each restored and checked byte-identical afterwards. Claims that **held**: `port-reaper`'s `touch()` early return and `reap()`'s non-null `??` fallback (green both ways); `centrifuge-session`'s empty-topic drop (green); `cluster`'s unconditional `clearInterval` and the null-handle tolerance behind it (green, and both adapters really do accept `null`); both dominated terms of the `stop()` entry guard (green each); `cluster`'s nil-owner guard (green, and `tsc` reports exactly the five errors at the three expressions named); `websocket`'s `handshakeCompleted` term (green); `trace`'s `metricsActive` term (fails precisely its two named tests, and `stopped` really is read in exactly two places); `centrifuge`'s double-arm guard (green, with `startHeartbeat()` reached only from `startSharedWorker()` and `clearHeartbeat()` only from `stop()` and `onWorkerFailed()`); and the three election `?? this.currentRecord` fallbacks, whose `tsc` counts came back **3, 2, 7** as quoted, with the suite green when all three go at once.
+- **Gates.** `pnpm check` 0 (936 tests / 37 files, 5/5 perf gates), `pnpm lint` 0, `pnpm test:coverage` 0 with the ledger at **46 zero-count arms of 1963** and aggregate 99.02 / 97.65 / 99.27 / 99.69, `tests/documentation.test.ts` 18/18. `git diff -U0 -- src/` with comment lines filtered returns nothing across all five changed files.
+
+### Documentation
+
+- **`AGENTS.md`: pinning a dependency version is not the same as checking its lines.** The existing rule said a claim about another library must be verified in the installed package and pinned to a version; this release's citation was pinned *and* wrong, matching no copy in the store. So the rule now says to read the number off the installed file at the time of writing, and to prefer the dependency's own comment string as the locator — it is searchable, and a reflow does not invalidate it.
+
+### Compatibility
+
+Comment-only. No export, frame, option, default or storage key moved; `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.28`.
+
 ## [0.21.28] - 2026-09-25
 
 Four shipped sentences re-read against the code, and three measurements taken again rather than carried forward. Two of the four were wrong; one was right but unreadable, and one was right in its conclusion and wrong in the count it quoted to support it.
