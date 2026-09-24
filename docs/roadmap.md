@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.17 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.18 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.18 delivered scope
+
+- **Five legs that no test named, each pinned with its mutation attribution.** A non-string frame `type` normalized to `null` before it reaches `getDiagnostics().protocol.lastUnknownMessageType` (and `getUnknownMessageStats()`, which had no reader at all); a `replay.persistenceRetry` block that names one field and must inherit the documented default for the other; the connect-timer cancel inside `failConnect()`; a `channelToken` credential request that names no channel; and a `Blob` frame whose conversion fails after its connection was replaced. The records say which assertion each mutant reaches and name the three legs that have **no mutant of their own**.
+- **The lesson about partial option objects.** Both defaulting sites read *hot* in coverage — a bus with no policy takes the fallback, a bus with both fields takes the supplied value — and the shape in between, one field given, had never been read. A counter that moves does not mean the configuration space is covered; the pin has to name which default it can see, which is why each of the two defaults needed its own case.
+- **The lesson about async completions.** Two of the five legs are the same shape in different files: a guard that discards a result from a superseded attempt, where the reachability of the guard is owned by a *cancel somewhere else* — and that cancel was the untested line. The connect-timer guard is now documented as unreachable-by-construction, with the construction it depends on pinned by name.
+- **One shipped comment rewritten, and one numeric claim retired.** `src/websocket.ts`'s timeout-callback comment now enumerates why all three of its terms cannot fire rather than explaining only one, and drops its "all 880 tests green" count instead of refreshing a number that rots. Comment text ships: it reaches consumers through the bundles as well as the declarations.
+- **What did not move.** No behavior, public API, protocol frame, default, storage key, or export changed, so mixed-version peers see nothing new. `src/` holds 56 zero-count branch slots of 1960 (down four), and `validation.ts` reports full branch coverage for the first time.
 
 ## 0.21.17 delivered scope
 
