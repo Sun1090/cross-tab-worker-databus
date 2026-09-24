@@ -2018,17 +2018,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.transportHasConnected && this.status === WORKER_STATUS.DISCONNECTED;
     // Four operands, measured one deletion at a time against the whole suite and
     // then classified with the flag-vector census described in `stop()`'s note.
-    // Observed at this line: the fast path `1000`, plus `0000`, `0100`, `1001` and
-    // `1010`. `transportReady` dies to at least eight named cases (the probe prints
+    // The row strings are the four premises in source order — `transportReady`,
+    // `status === ERROR`, `droppedAfterConnect`, `stopping` — so the fast path is
+    // `1000`. Observed at this line: `1000`, plus `0000`, `0100`, `1001` and
+    // `1010`; that set is one first-sight `console.log` per distinct row over a
+    // whole-suite run, so re-derive it rather than trusting the list.
+    // `transportReady` dies to at least eight named cases (the probe prints
     // eight) and `droppedAfterConnect` to two (`parks every operation behind a
     // demanded reopen instead of writing to
     // the closed connection`, `reopens a cleanly disconnected transport when an
     // explicit operation demands it`). `!this.stopping` was live and unnamed until
     // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
     // premise is the `1001` row, and the only thing in the suite that reaches it is
-    // `WorkerClusterRuntime.stop()`'s handoff posting an UNSUBSCRIBE after
-    // `beginStop()` raised the flag - which needs a peer that will take the topic,
-    // because with no remaining subscriber the handoff drops the route instead.
+    // `WorkerClusterRuntime.stop()`'s handoff — measured, the first-sight stack is
+    // `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` — posting an
+    // UNSUBSCRIBE after `beginStop()` raised the flag, which needs a peer that will
+    // take the topic, because with no remaining subscriber the handoff drops the
+    // route instead.
     //
     // `this.status !== WORKER_STATUS.ERROR` is the survivor, and the census says no
     // test ever evaluates this guard with the transport ready *and* the status
