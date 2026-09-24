@@ -1255,6 +1255,53 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // performStop()'s finally, so it is the authoritative "still stopping"
     // signal; a settled gate is stale and must fall through to a fresh stop.
     if (this.stopPromise && this.stopping) return this.stopPromise;
+    // Measured operand by operand (one deletion at a time, whole suite), then
+    // classified by a flag-vector census instead of an input vector, because these
+    // are state rather than caller data: `stop()` was instrumented to record
+    // `(started, startPromise, pendingStop, transportReady)` at every call, the
+    // suite run once, and the seven observed rows compared against the one
+    // assignment each deletion needs to be the decider. The census alone only
+    // ever shows "no test gets there"; each verdict below therefore rests on the
+    // assignment enumeration, with the census as the corroborating half.
+    //
+    // `!this.pendingStop` is the one pinned term: deleting it dies to
+    // `keeps a queued resume owned by the bus when a superseded initial open
+    // fails`, and its decider state is genuinely reached — the row `(0,0,1,0)`
+    // occurs 4 times, which is exactly a failed *initial* open, where the
+    // `createStopPromise()` gate installed on openTransport()'s failure path owns
+    // the teardown while `started` has already been reset.
+    //
+    // The other three cannot decide.
+    //
+    // `!this.started`: its premise does exist — every fresh `start()` holds it from
+    // `this.started = true` until it installs `startPromise` — but that span runs
+    // only `resetFailureState()` (whose last external effect is resolving a
+    // promise), an epoch increment, and `openTransport()`'s synchronous prefix,
+    // which sets `transportReady = false` and returns a chain. No caller code runs
+    // inside it, so `stop()` is never evaluated there. That is the same hazard
+    // `reopenTransport()` names for its own version of this pair - "Install the new
+    // lifecycle before publishing CONNECTING: a status handler can synchronously
+    // call stop()" — and here too `updateStatus(CONNECTING)` sits after the
+    // assignment for that reason. This operand is held against an edit that puts a
+    // caller-visible seam back into that span, not against an input.
+    //
+    // `!this.startPromise`: of the four sites that install a promise here, the two
+    // belonging to an opening leave no call boundary at which the field is the only
+    // non-empty one (`start()`'s install follows `this.started = true` in the same
+    // block, and `reopenTransport()`'s is followed by that assignment on the next
+    // line), while both branches of `suspendTransport()` install the very promise
+    // `pendingStop` also holds. So a non-null gate never arrives without a partner
+    // arriving with it.
+    //
+    // `!this.transportReady`: `transportReady = true` exists exactly once, behind
+    // `if (!isCurrentLifecycle()) return;`, and both `started = false` sites either
+    // bump the epoch first (`beginStop()`, well before the `performStop()` finally
+    // that resets the flag) or belong to the same chain that has already passed that
+    // check and clears `transportReady` within the same block.
+    //
+    // What the census does show is why this return is the common case: 626 of the
+    // 7589 recorded `stop()` calls read `(0,0,0,0)`, because all four fields are
+    // reset in one synchronous block at the end of every teardown.
     if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
       return Promise.resolve();
     }
@@ -1492,6 +1539,38 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
         this.recoveryTimer = setTimeout(() => {
           if (timerToken !== this.recoveryTimerToken) return;
           this.recoveryTimer = null;
+          // The same operand-by-operand probe as `stop()`'s guard, with the same
+          // shape of answer: only the last of these four can be the decider, and it
+          // is pinned — deleting `this.status !== WORKER_STATUS.ERROR` dies to
+          // `lets an explicit operation drive an immediate reopen after a failed
+          // auto attempt`, and the flag-vector census taken at this entry point
+          // shows its premise twice out of forty-nine callback executions
+          // (`stopping:false started:true suspended:false statusIsError:false`),
+          // against forty-seven where the guard is not taken at all.
+          //
+          // The other three cannot decide, and they share one reason, which is the
+          // arming site rather than this line. This `setTimeout` is the only place a
+          // recovery is armed, and it sits inside `updateStatus()`'s
+          // `status === ERROR && this.started && !this.stopping` branch — so no
+          // timer exists that was armed while `stopping` held or while `started` was
+          // false. Neither flag can be raised afterwards without clearing the
+          // timer: `beginStop()` bumps the epoch, raises `stopping` and cancels
+          // within one synchronous block, `suspendTransport()` raises `suspended`
+          // and cancels two lines later, and the second `started = false` site is
+          // openTransport()'s failure path, which resets `started` *before* the
+          // `updateStatus(ERROR)` below it and says so at the site ("an
+          // initial-start failure does not schedule automatic recovery").
+          //
+          // So each is held against a future edit, not against a state.
+          // `this.stopping` and `!this.started` are held against a second arming
+          // site that skips the enclosing condition; `this.suspended` is held
+          // against a status report reaching `updateStatus()` without the
+          // `isCurrentLifecycle()` filter that the transport's `onStatus` closure
+          // applies, or against `suspendTransport()` losing its cancel. Deleting all
+          // three is therefore not one testable change — and the failure each one
+          // guards is the same: an automatic reopen against a lifecycle that has
+          // already moved on, which is also why the open-success continuation
+          // refuses to mark a suspended or stopping transport ready.
           if (this.stopping || !this.started || this.suspended || this.status !== WORKER_STATUS.ERROR) {
             this.releaseRecoveryGate();
             return;
