@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.23 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.24 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.24 delivered scope
+
+- **Two lifecycle defects, both found by tiering the coverage ledger.** `WorkerClusterRuntime.stop()` arriving while the runtime was still activating rebuilt everything the teardown had removed — a live channel with its listener, a worker record no peer would ever prune, a heartbeat interval no later `stop()` could clear, and a stopped tab accepting frames addressed to it — because `activate()` sets `started = true` and only then calls consumer code. And a `stop()` issued from `handlers.onResume` was dropped outright, since `handlePageShow()` clears `suspended` on the statement before that callback and `started` is set only by the `activate()` its generation bump then skips: the next hide/show pair re-fired `onResume` on a runtime the caller had stopped.
+- **The caller enumeration was right and useless.** In the first defect every *caller* of the guarded method respected the invariant; the re-entering code was inside it. That is the shape a ledger of zero-count arms can hand you without pointing at, and it is why the two new tests construct the window from the seams that open it (a channel adapter that stops the runtime, a control handler that stops the runtime) rather than driving it from outside.
+- **The ledger moved for the first time in six phases: 47 → 46 zero-count branch arms** (denominator 1958 → 1963, branches 97.59 → 97.65, tests 930 → 933). One arm became reachable-and-covered through the fix; the rest now carry a verdict written at the site — a caller enumeration for `writeRoute()`'s storage guard, `routeOwnerIsLive()`'s own conjunct for the publish-target fallback, the Map seeding for the two handoff projected-load reads, and the three-flag invariant stated once at `stop()` with the other sites pointing at it.
+- **Measured rather than inherited, everywhere it was cheap.** A flag-vector census over one full suite run produced the reach rows (four distinct `pause()` vectors, one each for `activate()`'s entry and the listener removal, two each for `reconcile()` and `writeRoute()`), a `tsc --noEmit` run per leg produced the type-verdict counts, and re-deleting the handoff owner guard re-measured the five errors its comment had been claiming. The census rows that *do* occur are the control on the rows that do not: every probed flag reads false somewhere, so an absent row means "no test reached it" and not "the probe is blind".
+- **Two dominated terms kept on purpose.** Deleting either of `stop()`'s original flags leaves the suite green, because each is implied by the new `lifecycleListening` term. They stay on an asymmetry: a redundant term in a disjunction costs one boolean test, a missing one drops a teardown silently — which is t
 
 ## 0.21.23 delivered scope
 
