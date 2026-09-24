@@ -311,8 +311,13 @@ describe('cross-tab coordination invariants', () => {
     // below, while removing the sweep's own opt-in leaves all five cases green on the
     // fixed code — the option stands because of what it caught, not as a new kill.
     // The first assertion is the one that guards the *default*: making async
-    // delivery the hub's behavior reddens 17 cases (15 post-and-assert tests plus
-    // this file's two hub pins), so a future simplification cannot pass unnoticed.
+    // delivery the hub's behavior reddens 18 cases (16 post-and-assert tests —
+    // 9 in cluster, 6 in data-bus, 1 in stability — plus this file's two hub
+    // pins), so a future simplification cannot pass unnoticed. That count is a
+    // measurement of this suite on this day, not a property of the design: the
+    // sentence it replaces read "17 (15 plus 2)", and any test that posts a frame
+    // and asserts in the same stack moves it. Re-measure by flipping the field's
+    // initializer rather than trusting the number here.
     const frame = { type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: 'worker-x' } as WorkerClusterMessage;
 
     const syncHub = new ChannelHub();
