@@ -43,6 +43,112 @@ describe('CrossTabDataBus', () => {
     expect(transport.subscribeCalls).toEqual(['topic']);
   });
 
+  it('never delivers a queued subscribe after the unsubscribe that cancelled it', async () => {
+    vi.useFakeTimers();
+    // The subscribe is parked behind a pending open while the release goes out on
+    // the immediate path once that open resolves, so the pair arrives out of order
+    // and a Set-valued transport is left holding a channel no local handler,
+    // cluster assignment or route record owns. How many microtasks separate the
+    // two depends on where the open's promise chain happens to be, so every offset
+    // in the window is asserted rather than only the ones that reproduced here.
+    for (const offset of [0, 1, 2, 3, 4]) {
+      const storage = new MemoryStorage();
+      const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: `stale-sub-${offset}` });
+      let releaseStart!: () => void;
+      const startGate = new Promise<void>(resolve => {
+        releaseStart = resolve;
+      });
+      const transport = new FakeTransport<number>(startGate);
+      const bus = new CrossTabDataBus<object, number>({
+        clusterKey: 'stale-sub',
+        environment: environment.environment,
+        initialConfig: {},
+        transport
+      });
+      bus.onError(() => undefined);
+
+      const release = bus.subscribe('topic', vi.fn());
+      releaseStart();
+      for (let i = 0; i < offset; i += 1) await flushMicrotasks(1);
+      release();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await flushMicrotasks();
+
+      expect(transport.unsubscribeCalls, `offset ${offset}`).toEqual(['topic']);
+      expect(
+        transport.channelCalls.lastIndexOf('sub:topic'),
+        `offset ${offset}: the wire was ${transport.channelCalls.join(' → ')}, so the released channel stayed open`
+      ).toBeLessThan(transport.channelCalls.lastIndexOf('uns:topic'));
+      expect(transport.subscribed.has('topic'), `offset ${offset}`).toBe(false);
+      expect(bus.getClusterSnapshot().assignedTopics, `offset ${offset}`).toEqual([]);
+      await bus.stop();
+    }
+  });
+
+  it('sends no unsubscribe for a topic re-subscribed before the deferred release flushed', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'stale-uns' });
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>(resolve => {
+      releaseStart = resolve;
+    });
+    const transport = new FakeTransport<number>(startGate);
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'stale-uns',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+    bus.onError(() => undefined);
+
+    const release = bus.subscribe('topic', vi.fn());
+    release();
+    bus.subscribe('topic', vi.fn());
+    releaseStart();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushMicrotasks();
+
+    // All three calls deferred together, so the flush cannot strand a channel either
+    // way; what the cancelled release must not do is reach the transport, where it
+    // would sit between the two SUBSCRIBEs and tear down a channel this tab holds.
+    expect(transport.unsubscribeCalls).toEqual([]);
+    expect(transport.subscribeCalls.length).toBeGreaterThan(0);
+    expect(transport.subscribed.has('topic')).toBe(true);
+    await bus.stop();
+  });
+
+  it('applies the same cancellation to an operation parked behind a recovery gate', async () => {
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'gate-stale-uns' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'gate-stale-uns',
+      environment: environment.environment,
+      initialConfig: {},
+      transport,
+      recovery: { cooldownMs: 500 }
+    });
+    bus.onError(() => undefined);
+    bus.subscribe('topic', vi.fn());
+    await bus.ready();
+
+    // A second, independent resume path: `runTransport` checks its guard before
+    // re-entering for each gate waiter, and that check — not the one on the opening
+    // flush — is what drops the cancelled release here.
+    transport.setStatus('error');
+    const release = bus.subscribe('topic-2', vi.fn());
+    release();
+    bus.subscribe('topic-2', vi.fn());
+    await vi.advanceTimersByTimeAsync(500);
+    await flushMicrotasks();
+
+    expect(transport.unsubscribeCalls).toEqual([]);
+    expect(transport.subscribed.has('topic-2')).toBe(true);
+    await bus.stop();
+  });
+
   it('reference-counts local handlers and subscribes the transport once', async () => {
     const storage = new MemoryStorage();
     const environment = createFakeEnvironment({ storage, now: () => 1_000, randomId: 'local' });

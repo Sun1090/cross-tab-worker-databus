@@ -7972,6 +7972,63 @@ corroborates the 26-spec collection.)
   idle-host browser-bench sample.
 - **Update date:** 2026-09-24.
 
+## Phase 148 / A deferred transport subscribe could outlive its own unsubscribe, and the connection kept the channel
+
+- **Milestone / version:** `0.21.16` (pending), branch `fix/orphan-transport-subscription` from `main` at `8f8cf5b`, commit `ce74b2c` plus this record.
+- **Status:** **implemented and locally verified; PR open.**
+- **The defect.** `subscribeTransport()` / `unsubscribeTransport()` mutate `transportSubscribedTopics` and then hand
+  `runTransport()` a *captured call*. When the subscribe parked behind a pending opening and the release reached the
+  transport immediately — the window after the opening resolves but before its own parked continuation runs — the pair
+  arrived out of order and the connection was left holding a channel that no local handler, cluster assignment, or
+  route record owns. Nothing recovers from it: `subscribeTransport`'s dedupe returns early for a topic already in the
+  set, so the set's own lie is what keeps the tab subscribed to a released topic and deaf to one it re-takes.
+- **How it was localized.** Reproduced with one bus and a gated `transport.start()`, no harness change: subscribe while
+  the open is pending, resolve the open, release N microtasks later. At N = 1 and N = 2 the fake's live set ended as
+  `["topic"]` with one entry in each of `subscribeCalls` / `unsubscribeCalls` — an add and a delete that leave a `Set`
+  non-empty is only reachable in unsubscribe-then-subscribe order. N = 0, 3, 4 ended clean, which is why the test loops
+  over the whole window instead of pinning the offsets that failed here, and why it reads `FakeTransport.subscribed`
+  rather than the bus's bookkeeping.
+- **The fix.** `runTransport(operation, stillWanted?)` re-reads the desired state at each place that resumes on a later
+  task — the recovery-gate waiter and the opening flush. The immediate branch carries no check, and the doc comment says
+  why: every path into it evaluated the set in the same task (a caller that just mutated it, or the gate re-entry).
+  Publications pass no predicate.
+- **Mutation battery, per leg.** Reverting the whole change: **3 failed / 188 passed** in `tests/data-bus.test.ts`, all
+  three the new cases — so nothing in the repository pinned this before. Deleting only the recovery-gate check: **1**
+  (the gate case). Deleting only the opening-flush check: **2** (the other two). Inverting both: **20**, including the
+  pre-existing "starts automatically and queues subscriptions until the transport is ready" — the assertion that the
+  guard cannot silently swallow a wanted subscribe. The two checks have disjoint kill sets, so neither subsumes the
+  other.
+- **The weaker leg, stated as weaker.** For the *unsubscribe* direction the end state was already correct in every
+  scenario tried: the measured difference is `sub, uns, sub` on the wire instead of `sub, sub`, i.e. a real transport
+  tearing a channel down and re-establishing it, with a delivery gap in between. The call-site comment and the CHANGELOG
+  both say so, so nobody reads that test as an orphan pin.
+- **Change set:** `src/core/data-bus.ts` (+30/-4: two guards at the call sites, one optional parameter, two checks,
+  three comments); `tests/data-bus.test.ts` (+106: three cases); `tests/fakes.ts` (+6: `FakeTransport.channelCalls`, one
+  entry per channel call in arrival order, because the two per-direction arrays cannot express ordering — which is the
+  thing under test); `CHANGELOG.md` (6 bullets under a new Unreleased `### Fixed`); `AGENTS.md` (two rules: deferred
+  work carries desired state, and a seeded sweep is not a deterministic run).
+- **Verification:** `pnpm typecheck` 0, `pnpm build` 0, `pnpm lint` 0, `pnpm test:coverage` 0 at 99.01 statements /
+  96.91 branches / 99.27 functions / 99.69 lines against the 98/96/98/99 floors, with `data-bus.ts` at
+  98.56 / 97.29 / 98.31 / 99.43 and its three uncovered lines (557, 908, 1754) all pre-existing; zero-count arms were
+  read out of `coverage/coverage-final.json` for the new lines and there are none (gate `if` [1,34], opening flush `if`
+  [870,3701], both `binary-expr` legs non-zero in each). `pnpm test:e2e` **37 passed (29.3 s)**,
+  `pnpm verify:compat` 0, `pnpm verify:types` 0 ("6 entries, 90 importable names"), `pnpm verify:pack` 0,
+  `npx vitest run` 0 (37 files / **905** tests) three times in a row.
+- **One red run, unexplained, recorded rather than filed away.** The first `pnpm check` after the commit failed
+  `tests/coordination-invariants.test.ts` (1 of 4, 9.9 s) and I had piped the command through `grep`/`tail`, so the
+  assertion message was lost. Bounding the rate instead of guessing: 4 standalone sweeps of that file under 16 CPU
+  burners, 6 concurrent sweeps of the same file under that load, and 3 further full-suite runs — **13 green, no
+  recurrence.** The sweep's operation sequence is seeded but its awaited steps interleave with the host's queues, so a
+  load-only failure is possible without a logic change; the new guards *reduce* transport calls, and the invariant that
+  failed under "the holder must hold the transport" would be violated by *more* dropping, not fewer. CI on this PR is the
+  next capture, and this bullet is the record if it stays silent.
+- **Risk / rollback:** behavior change in one method's contract; the patch is additive (an optional parameter), and the
+  public surface gates are unchanged. Rollback is `git revert` of the commit; no storage or wire format moves.
+- **Next:** open the PR, then the 0.21.16 chain (the deferred idle-host `pnpm bench:browser` sample belongs to that
+  release, and its load must be read first). Then task #74: raise the fuzz's `ChannelHub` to opt-in asynchronous
+  delivery, which is the experiment that decides whether this fix also closes the six injected-frame residues.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the

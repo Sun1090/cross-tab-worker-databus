@@ -1566,13 +1566,30 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
   private subscribeTransport(topic: string): boolean {
     if (this.transportSubscribedTopics.has(topic)) return false;
     this.transportSubscribedTopics.add(topic);
-    this.runTransport(() => this.transport.subscribe(topic));
+    // The guard is what makes a deferred subscribe cancelable: the set is the
+    // desired state, and the release path can reach the transport immediately
+    // while this call is still parked behind an opening. Without it the parked
+    // subscribe flushes *after* its own unsubscribe and the connection keeps a
+    // channel nothing owns.
+    this.runTransport(
+      () => this.transport.subscribe(topic),
+      () => this.transportSubscribedTopics.has(topic)
+    );
     return true;
   }
 
   private unsubscribeTransport(topic: string): boolean {
     if (!this.transportSubscribedTopics.delete(topic)) return false;
-    this.runTransport(() => this.transport.unsubscribe(topic));
+    // The same guard in the other direction, with a narrower measured cost: in
+    // the scenarios where it fires the release and the later subscribe defer
+    // together, so the flush still ends on a SUBSCRIBE and no channel is
+    // stranded. What dropping it costs is an UNSUBSCRIBE on the wire between two
+    // SUBSCRIBEs for a channel that stays wanted — which a real transport answers
+    // by tearing the subscription down and re-establishing it.
+    this.runTransport(
+      () => this.transport.unsubscribe(topic),
+      () => !this.transportSubscribedTopics.has(topic)
+    );
     return true;
   }
 
@@ -1801,8 +1818,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * Run a transport operation now if the transport is ready, otherwise queue
    * it behind the start promise. This ensures subscribe/unsubscribe calls made
    * during startup are not lost.
+   *
+   * `stillWanted` expresses the deferred work as the *current* desired state
+   * rather than a captured call, and is checked at each place that resumes on a
+   * later task — the recovery gate and the opening flush. The immediate branch
+   * carries no check because every path into it evaluates the desired state in
+   * the same task: a caller that just mutated `transportSubscribedTopics`, or
+   * the gate re-entry one line above.
    */
-  private runTransport(operation: () => void | Promise<void>): void {
+  private runTransport(operation: () => void | Promise<void>, stillWanted?: () => boolean): void {
     // A hidden tab's transport is intentionally stopped; subscriptions are
     // re-established by the cluster on resume, and publications must not be
     // sent to a stopped transport.
@@ -1825,7 +1849,8 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           this.suspended ||
           cancellationToken !== this.recoveryCancellationToken
         ) return;
-        this.runTransport(operation);
+        if (stillWanted && !stillWanted()) return;
+        this.runTransport(operation, stillWanted);
       });
       return;
     }
@@ -1862,6 +1887,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       .then(
         () => {
           if (!this.started || this.stopping || this.suspended) return;
+          if (stillWanted && !stillWanted()) return;
           return operation();
         },
         // The opening promise reports its own lifecycle failure through
