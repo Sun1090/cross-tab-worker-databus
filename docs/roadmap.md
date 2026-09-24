@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.21 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.22 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.22 delivered scope
+
+- **One method, applied to every multi-term guard the previous scan ranked**: delete a single operand, run the whole suite, and classify which of three answers that mutant gave — pinned, incapable of deciding, or live and unnamed. Nine behaviors are now named that no test had named (three socket-staleness terms in `websocket.ts`, two of `trace.ts`'s four dedup/activity counters, two operands of the `storage-event` envelope, two option legs of `DedupManager.start()`'s sweep gate), and the suite went 923 → 929.
+- **The ledger did not move, and that is the result.** `src/` holds the same **47** zero-count branch arms at the end of six phases as at the start, with only the denominator changing (1962 → 1958, from two dominated operands being deleted). Every operand probed is evaluated on every call, so no coverage total distinguishes "runs" from "decides" — the class is invisible to the arm ledger and visible only to a whole-suite mutant.
+- **A joint assertion was the recurring cause, not an absent test.** `trace.ts`'s activity check looked pinned because one existing case raised *both* dedup counters in the same window, so whichever operand survived still emitted; the storage envelope's `seq` and `message` tests were both tripped by its single malformed write. Splitting the inputs, not adding coverage, is what made each leg die on its own.
+- **Five operands closed as incapable of deciding anything, by differential.** Two in the envelope and all three `typeof value !== 'number'` tests in `validation.ts` were proven rather than argued: a fixed input vector (23 stored payloads; 23 values × 3 validators × 4 variants) produced byte-identical accept/reject-and-message results for the guard as written and for each mutant. The kept `typeof` leg then had its own justification tested both ways — construct the coercing-global swap it exists to catch, and observe that it kills nothing while the leg is present and turns `heartbeatIntervalMs: '3000'` into an accepted option once the leg is gone.
+- **Two dominated operands deleted, and a clean bill plus a thin pin recorded instead of averaged away.** `getMetrics()` and `flush()` each re-read a field the same expression had just computed, which cannot decide anything and was silently absorbing the mutation that would have proved the getter's contract; deleted, with both kill sets in the comment. `ReplayManager.start()`'s four-term gate turned out fully pinned all along — the parity check between two same-shaped managers, which is exactly where `DedupManager`'s gap was. And five of `validation.ts`'s six surviving-leg deaths come from several cases while the sixth comes from one, so the site says so instead of reporting "six of nine".
 
 ## 0.21.21 delivered scope
 
