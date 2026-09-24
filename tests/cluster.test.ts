@@ -53,18 +53,17 @@ describe('WorkerClusterRuntime', () => {
     const hub = new ChannelHub();
     const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'activate-reentry' });
     const createChannel = env.environment.createChannel.bind(env.environment);
-    let runtime: WorkerClusterRuntime | undefined;
     let reentered = false;
     env.environment.createChannel = name => {
       const channel = createChannel(name);
       if (reentered) {
         reentered = false;
-        runtime?.stop();
+        runtime.stop();
       }
       return channel;
     };
     const onControl = vi.fn();
-    runtime = new WorkerClusterRuntime({
+    const runtime = new WorkerClusterRuntime({
       clusterKey: 'activate-reentry',
       environment: env.environment,
       tabId: 'tab-activate-reentry',
@@ -119,11 +118,10 @@ describe('WorkerClusterRuntime', () => {
     })();
     let now = 1_000;
     const env = createFakeEnvironment({ storage: brokenStorage, now: () => now, randomId: 'activate-stop-from-handler' });
-    let runtime: WorkerClusterRuntime | undefined;
     const onControl = vi.fn((action: WorkerControlAction, topic: string) => {
-      if (action === CONTROL_ACTION.SUBSCRIBE && topic === 'owned-topic') runtime?.stop();
+      if (action === CONTROL_ACTION.SUBSCRIBE && topic === 'owned-topic') runtime.stop();
     });
-    runtime = new WorkerClusterRuntime({
+    const runtime = new WorkerClusterRuntime({
       clusterKey: 'activate-stop-from-handler',
       environment: env.environment,
       tabId: 'tab-handler-stop',
@@ -158,10 +156,9 @@ describe('WorkerClusterRuntime', () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
     const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'resume-stop' });
-    let runtime: WorkerClusterRuntime | undefined;
     let stopInResume = false;
     let resumeCount = 0;
-    runtime = new WorkerClusterRuntime({
+    const runtime = new WorkerClusterRuntime({
       clusterKey: 'resume-stop',
       environment: env.environment,
       tabId: 'tab-resume-stop',
@@ -173,7 +170,7 @@ describe('WorkerClusterRuntime', () => {
           resumeCount += 1;
           if (stopInResume) {
             stopInResume = false;
-            runtime?.stop();
+            runtime.stop();
           }
         }
       }

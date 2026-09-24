@@ -294,11 +294,27 @@ export class WorkerClusterRuntime {
     // waiting for a pageshow, and `lifecycleListening` for a runtime that never
     // activated at all. Without the third term a `stop()` issued from inside
     // `handlers.onResume` was dropped on the floor — `handlePageShow()` clears
-    // `suspended` two statements before it calls that callback, and `started`
+    // `suspended` on the statement before it calls that callback, and `started`
     // is only set by the `activate()` the bumped generation then skips — so the
     // listeners stayed attached and the next visibility toggle resurrected the
     // runtime: measured, `onResume` fired a second time after the explicit
     // `stop()` and `getSnapshot().coordinated` went back to true.
+    //
+    // The other two terms are dominated by this one today, and measured so:
+    // deleting `!this.started` alone, or `!this.suspended` alone, leaves the whole
+    // suite green at its full count. The invariant behind that is local to this
+    // class, and this is where it is stated: `started` is written true only in
+    // `activate()`, which is reachable only from `start()` — one statement after
+    // `addLifecycleListeners()` — or from `handlePageShow()`, which is itself one of
+    // those listeners, so the flag can only be false there if the adapter ignores
+    // its own `removePageShowListener` (`createBrowserEnvironment` and the test fake
+    // both detach). `suspended` is written true in three places, all of which either
+    // follow that install or are gated on the flag (`pause()`'s not-started leg
+    // reads it). So either of the other two implies `lifecycleListening`, and the
+    // third term subsumes them. Both are kept because the two shapes fail
+    // differently: a redundant term in a disjunction costs one boolean test, while
+    // a missing one drops a teardown quietly — which is the failure this line has
+    // just had.
     if (!this.started && !this.suspended && !this.lifecycleListening) return;
     this.pause();
     this.flushStorage();
@@ -316,6 +332,16 @@ export class WorkerClusterRuntime {
    * subscribe to topics, and start the heartbeat interval.
    */
   private activate(): void {
+    // Zero-count, and the premise is unconstructible rather than merely
+    // untested: the two callers are `start()`, which returns on this same test
+    // one block above, and `handlePageShow()`, which returns unless `suspended`.
+    // So entering here with `started` true needs `started && suspended` to hold
+    // together, and no write produces that pair. `started` goes true only on the
+    // next line and false only in `pause()`; each of the three `suspended = true`
+    // writes runs with `started` false — `start()`'s hidden-document branch, and
+    // `pause()`'s two legs, the started one setting `started = false` first. A
+    // census over the whole suite saw one distinct entry vector,
+    // `started=0 suspended=0 lifecycleListening=1`.
     if (this.started) return;
     this.started = true;
     // Create the BroadcastChannel for cross-tab messaging. If storage is
@@ -348,7 +374,19 @@ export class WorkerClusterRuntime {
     // `storage` as a live worker record (so no peer ever TTL-prunes it), and
     // still accepting assignments: a `CONTROL/SUBSCRIBE` frame addressed to it
     // after the stop added its topic to `assignedTopics`. `pause()` could not
-    // clean any of that up because it ran before the channel existed.
+    // clean any of that up because it ran before the channel existed. Each of
+    // the two checks and the rollback inside the first one dies to its own
+    // assertion in `cluster.test.ts`: with this check deleted, "abandons
+    // activation when the channel adapter tears the runtime down mid-start"
+    // fails at "a stopped runtime must not be registered"; with only the
+    // `this.channel = null` deleted from it, the same test fails at
+    // `coordinated: false`; with the check below deleted, "abandons the
+    // heartbeat when a handler stops the runtime during the storage-less
+    // re-subscribe" fails at "no heartbeat may outlive the abandoned activation".
+    // The `channel?.close()` is the one half nothing asserts: no listener is ever
+    // attached to that channel, so a leaked port is invisible through the fake
+    // hub. It is real-browser hygiene — an open BroadcastChannel keeps its port
+    // and message queue alive — not a pinned behavior.
     if (!this.started) {
       const channel = this.channel;
       this.channel = null;
@@ -404,11 +442,31 @@ export class WorkerClusterRuntime {
     // before activate() marks the runtime started. Preserve that newer hidden
     // intent so the outer pageshow is cancelled and a later pageshow can retry.
     if (!this.started) {
+      // The false arm of this test is the "already fully stopped" case, and it
+      // has never executed: `lifecycleListening` goes false only in
+      // `removeLifecycleListeners()`, whose one caller is `stop()` — and `stop()`
+      // cannot get past its own guard with the flag false, because the guard's
+      // other two terms each imply the flag (see the note there). The other caller
+      // of `pause()` is `handlePageHide`, which that same removal detaches. A
+      // census over the whole suite saw four distinct `pause()` vectors — `started=0 suspended=0`, `started=0 suspended=1`, and
+      // the two `started=1` ones, an armed heartbeat from the ordinary teardown and
+      // a still-null one produced only by the abandoned-activation tests — with
+      // `lifecycleListening` true in all four. This is the other half of the pair
+      // `stop()`'s guard describes: each refuses the state the other would have to
+      // observe, which is why neither can be deleted on the strength of the other.
       if (this.lifecycleListening) this.suspended = true;
       return;
     }
     this.started = false;
     this.suspended = true;
+    // Reached with `heartbeatHandle === null` from the activation window: both
+    // "abandons activation…" tests tear down between `started = true` and the
+    // `setInterval` at the end of `activate()`, which is the only way this arm was
+    // ever taken (it is zero-count without them). The test protects against
+    // nothing observable — measured: calling `clearInterval` unconditionally keeps
+    // the whole suite green, and a null handle throws in neither adapter — so what
+    // is load-bearing here is the `null` assignment on the next line, which is how
+    // an armed handle stays distinguishable from a never-armed one.
     if (this.heartbeatHandle !== null) this.environment.clearInterval(this.heartbeatHandle);
     this.heartbeatHandle = null;
     this.channel?.removeEventListener('message', this.handleMessage);
@@ -541,6 +599,20 @@ export class WorkerClusterRuntime {
     // projected load locally so a batch of topics is distributed across the
     // remaining workers instead of every route choosing the same initial
     // minimum.
+    //
+    // Seeding the map from `activeWorkers` is also what makes the two `??` reads
+    // below it zero-count, and it is the only difference from their textual
+    // twins in `reconcileSubscriptions()`, which are covered: that method's
+    // `recoveryProjectedLoads` starts empty, so its first election misses. Here
+    // every key of `activeWorkers` is a key of this Map by the semantics of the
+    // constructor, the `.map()` below iterates that same array, and `owner` is
+    // one of its elements (its `workerId` copied verbatim by the spread), so
+    // neither `.get()` can miss. Both legs were measured by deleting just one
+    // `??` and running `tsc --noEmit`: one error each — the mapped array stops
+    // satisfying `readonly WorkerRecord[]` on the read, and the `.set()` reports
+    // `Object is possibly 'undefined'` — so the compiler holds the type of all
+    // four of these reads (its twins here measure one error each too) while this
+    // line is what holds their reach.
     const projectedLoads = new Map(activeWorkers.map(worker => [worker.workerId, worker.load]));
 
     for (const [topicKey, topic] of this.assignedTopics) {
@@ -577,8 +649,11 @@ export class WorkerClusterRuntime {
       // `writeRoute(…, owner, …)`, one on `sendRouteReleased(owner.workerId, …)`. So
       // this is the narrowing the three calls below rest on, not a branch behavior
       // could take — the same shape as the three `?? this.currentRecord` fallbacks
-      // (this method's own election and the two in `reconcileSubscriptions()`), which
-      // is why it is recorded here rather than pinned by a test.
+      // (`subscribe()`'s election and the two in `reconcileSubscriptions()`,
+      // enumerated at the first of those), which is why it is recorded here rather
+      // than pinned by a test. This method's own election just above has no such
+      // fallback: the guard on the line below *is* its handling of a nil owner,
+      // which is also why deleting that guard costs five errors rather than none.
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
       // This `?? 0` is the odd one out among the three fallbacks in this block.
@@ -714,6 +789,16 @@ export class WorkerClusterRuntime {
     const cached = this.routeOwnerCache.get(topicKey);
     const cachedLive = cached && route && route.generation === cached.generation && route.workerId === cached.workerId && workers.some(worker => worker.workerId === cached.workerId);
     if (cachedLive) this.routeOwnerCacheHits += 1; else this.routeOwnerCacheMisses += 1;
+    // The `?? this.workerId` below has never been taken, and `routeOwnerIsLive()`
+    // is where that is decided rather than here: its body is
+    // `Boolean(route && workers.some(…))`, so the middle arm is reached only with a
+    // non-null `route`. The `?.` and the fallback are what that method's own doc
+    // signs up to — "Intentionally returns a plain boolean (not a type guard)" —
+    // since a plain boolean leaves `route` nullable on both sides of the test, and
+    // a narrowing signature would remove the need for this fallback as well.
+    // Measured by deleting just this `??`: one `tsc --noEmit` error, `string |
+    // undefined` not assignable to `string`, so like `writeRoute()`'s storage guard
+    // it is the type holding the leg, not a test.
     const target = cachedLive
       ? cached.workerId
       : this.routeOwnerIsLive(route, workers)
@@ -921,6 +1006,23 @@ export class WorkerClusterRuntime {
   }
 
   private removeLifecycleListeners(): void {
+    // Zero-count, and it is the mirror of `pause()`'s `lifecycleListening` test:
+    // this method has one caller, `stop()`, which reaches it only past the
+    // three-flag guard whose invariant is stated there — and once this line has
+    // run, `stop()` clears `suspended` at its tail, so a second `stop()` sees all
+    // three flags false and returns before getting here. The five statements
+    // between the flag write below and that clearance are `Set`/`Map` `.clear()`
+    // calls with no extension point, so the intermediate
+    // `!lifecycleListening && suspended` state cannot be observed by consumer
+    // code. The census recorded one distinct entry vector for this method across
+    // the whole suite: `lifecycleListening=1 started=0 suspended=1`, i.e. always
+    // the first removal after a pause. It stays because it is the re-entry form of
+    // an idempotent teardown: a second call would hand the same three bound
+    // handlers to `removePageHideListener` and friends again, and while the
+    // shipped browser adapter shrugs that off (`removeEventListener` for a
+    // listener that is not registered is a no-op) `ClusterEnvironment` is a
+    // consumer-implemented port, so the guarantee comes from this line rather than
+    // from what a custom adapter happens to do.
     if (!this.lifecycleListening) return;
     this.lifecycleListening = false;
     this.environment.removePageHideListener(this.handlePageHide);
@@ -1128,6 +1230,24 @@ export class WorkerClusterRuntime {
 
   /** Full reconciliation cycle: workers, subscriptions, and assigned topics. */
   private reconcile(): void {
+    // Zero-count, and the window that could reach it closed with the checks in
+    // `activate()`. Four callers, each gated: the call at the end of `activate()`
+    // is now behind the second liveness check, the heartbeat tick can only fire
+    // for an interval armed under that same check, `handleVisibilityChange` tests
+    // `started` before calling it, and `handleMessage`'s REGISTRY branch is
+    // reached through the message listener that `pause()` removes. That removal
+    // is three statements *after* `pause()` clears `started`, so the ordering
+    // alone would not be enough — what closes the window is that the statements
+    // between them are a boolean assignment and two `heartbeatHandle` writes,
+    // with no call that can hand the stack to consumer code and let a REGISTRY
+    // arrive. The census over the whole suite saw this method entered with
+    // `started` true in both of its distinct vectors (`storage` true in one,
+    // false in the other). Of the four callers, two re-test `started` locally and
+    // the REGISTRY leg is closed as above; the heartbeat tick is the one that
+    // relies on this line, and what it actually depends on is `pause()` clearing
+    // the interval that armed it. Keep the guard: it is the only statement of the
+    // invariant in the method that needs it, so a fifth caller cannot arrive
+    // ungated.
     if (!this.started) return;
     const workers = this.reconcileWorkers();
     // Runs before the subscription pass so a route released here is re-elected by
@@ -1462,6 +1582,26 @@ export class WorkerClusterRuntime {
     handoffFromWorkerId?: string,
     generation = 1
   ): void {
+    // Degraded mode has one guard per accessor: three readers synthesize a value
+    // (`readWorkers` returns just this worker, `readRoute` a `buildLocalRoute()`,
+    // `readSubscriberTabIds` just this tab), and six writer/pass methods bail out
+    // early — this one, `confirmRoute`, `writeSubscriber`, `cleanupOrphanedRoutes`,
+    // `cleanupOrphanedSubscribers` and `reconcileStrandedSelfRoutes`. Of those six
+    // early returns only this one is zero-count, and the census agrees with the
+    // caller list: two distinct entry vectors across the suite, `storage` non-null
+    // in both (one with `started` false, which is `handoffAssignedTopics()`
+    // running after `pause()` cleared it). Why no caller can bring it a null
+    // `storage`: `subscribe()` takes its own `!this.storage` leg before reaching
+    // this call, `handoffAssignedTopics()` returns on `!this.storage` before its
+    // loop, and `reconcileSubscriptions()`'s two calls both sit behind
+    // `readRoute()` having returned a record — which in degraded mode is
+    // `buildLocalRoute()`, self-owned and with no `handoffFromWorkerId`, so the
+    // live-owner test rules out the first and the handoff test the second. The
+    // contrast with `writeSubscriber`, whose identical guard *is* covered, is one
+    // line: `reconcileSubscriptions()` calls that one unconditionally. Deleting
+    // this line is a compile error (measured: one, `StorageLike | null` is not
+    // assignable to the `writeJson` parameter), so a future caller cannot drop the
+    // guard quietly — the type, not a test, is what holds it.
     if (!this.storage) return;
     writeJson(this.storage, this.routeStorageKey(topicKey), this.buildRouteRecord(topicKey, owner, handoffFromWorkerId, generation));
   }
