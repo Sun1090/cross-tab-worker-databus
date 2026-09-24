@@ -335,7 +335,8 @@ export class DataBusTraceReporter {
    * Record that a message was dispatched on `topic`. Pops the oldest receive
    * timestamp (FIFO) and increments the latency histogram. Dispatches without
    * a matching receive (e.g. broadcast fan-out from another tab) still count
-   * as dispatched but do not produce a latency sample.
+   * as dispatched but do not produce a latency sample, and neither does a
+   * dispatch whose delay cannot be computed at all.
    */
   recordDispatched(topic: string): void {
     if (!this.metricsActive) return;
@@ -345,12 +346,33 @@ export class DataBusTraceReporter {
     const receivedTimestamp = queue?.shift();
     if (queue && queue.length === 0) this.receivedAt.delete(topic);
     if (receivedTimestamp === undefined) return;
+    const delayMs = this.now() - receivedTimestamp;
+    // A non-finite reading of the public `trace.now()` clock is not an extreme
+    // latency but the absence of one, and recording it corrupts the whole window
+    // instead of widening it: the sample count rises while the bucket write lands
+    // on the key `"NaN"`, which no percentile walk reaches. Measured on the pre-fix
+    // reporter with one good sample and one NaN one — `dispatchAvgMs` becomes NaN,
+    // which a JSON sink renders as `null` so the field vanishes, and both the p95
+    // and the max pin at the histogram ceiling because the rank exceeds the sum of
+    // every reachable bucket, while p50 still prints a plausible number. A
+    // *negative* delay is the other case: the pair is real and only its order is
+    // wrong, which is what the clamp below answers, and the same window measures
+    // an average and a max that agree with its histogram.
+    if (!Number.isFinite(delayMs)) return;
     this.latencySamples += 1;
-    const delayMs = Math.max(0, this.now() - receivedTimestamp);
-    // Map the raw delay to a 50ms-wide bucket, capped at the last bucket.
-    const bucketIndex = Math.min(LATENCY_BUCKET_COUNT - 1, Math.floor(delayMs / LATENCY_BUCKET_SIZE_MS));
+    const measuredMs = Math.max(0, delayMs);
+    // `?? 0` is not a behavior guard and cannot be removed: `noUncheckedIndexedAccess`
+    // types an index read as `number | undefined`, so the assignment needs the
+    // fallback to compile at all (deleting it is TS2532, not a passing edit). The
+    // arm it protects is the one the two lines above exclude — the clamp leaves a
+    // finite non-negative delay, so `Math.floor` is a non-negative integer and
+    // `Math.min` caps it at the last bucket, and the array is dense from
+    // `.fill(0)` at the declaration and in `resetMetrics()` with this as its only
+    // element write. So this leg is uncloseable in both directions: no input can
+    // reach it, and no edit can delete it.
+    const bucketIndex = Math.min(LATENCY_BUCKET_COUNT - 1, Math.floor(measuredMs / LATENCY_BUCKET_SIZE_MS));
     this.latencyBuckets[bucketIndex] = (this.latencyBuckets[bucketIndex] ?? 0) + 1;
-    this.latencySumMs += delayMs;
+    this.latencySumMs += measuredMs;
   }
 
   /** Record deduplication outcomes for the next metrics window. */
@@ -468,6 +490,12 @@ function percentileMs(buckets: readonly number[], sampleCount: number, percentil
   const rank = Math.max(1, Math.ceil(percentile * sampleCount));
   let seen = 0;
   for (let index = 0; index < buckets.length; index += 1) {
+    // Same shape as the histogram write above, and the same reason it has zero
+    // counts: `noUncheckedIndexedAccess` demands the fallback to compile. Unlike
+    // there, nothing here excludes the hole — `buckets` is a parameter, and
+    // `readonly number[]` is satisfied by `new Array(3)` — so this arm is a
+    // statement about the argument rather than a leg a test could be pointed at.
+    // Every call site passes the reporter's own dense array.
     seen += buckets[index] ?? 0;
     if (seen >= rank) return (index + 0.5) * LATENCY_BUCKET_SIZE_MS;
   }
