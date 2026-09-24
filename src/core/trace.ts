@@ -416,8 +416,28 @@ export class DataBusTraceReporter {
   private flushNow(): void {
     const timestamp = this.now();
     // Only emit when there was activity in this window — an all-zero metrics
-    // snapshot adds noise without information. The interval still advances
-    // intervalStartedAt so the next window's duration is measured correctly.
+    // snapshot adds noise without information. All four operands are activity in
+    // that sentence's sense, and each was measured on its own: deleting any one of
+    // them reddens the suite. The first two already were (three cases for
+    // `received`, two for `dispatched`); the dedup pair was not, and the reason is
+    // the shape of the test that covers them — 'includes dedup outcomes in metrics
+    // windows' raises both counters in one window, so either surviving operand still
+    // emits and neither deletion was observable. Two single-counter cases now pin
+    // each half.
+    //
+    // What the two dedup legs have in common is the reporter; what they do not is
+    // reachability through the bus. `DedupManager.isDuplicate` has exactly one
+    // caller, `handleTransportMessage`, and it runs one statement *before*
+    // `trace.recordReceived`: a suppression returns there without recording a
+    // receive, so a bus window holding only suppressions is a real state (duplicate
+    // publications on an otherwise idle topic). An acceptance falls through to that
+    // `recordReceived` within the same synchronous block, and no timer can interleave
+    // between two statements of one task — so an acceptance with nothing received and
+    // nothing dispatched happens only when the reporter is called directly.
+    //
+    // The interval still advances `intervalStartedAt` on the silent path, so the next
+    // window's duration is measured from this flush rather than from the last one that
+    // emitted.
     if (this.received > 0 || this.dispatched > 0 || this.dedupAccepted > 0 || this.dedupSuppressed > 0) {
       const samples = this.latencySamples;
       this.emit({

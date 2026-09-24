@@ -105,6 +105,29 @@ describe('DataBusTraceReporter', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('emits a metrics window whose only activity is an accepted dedup', () => {
+    // One counter at a time, because the case above raises both: with the pair,
+    // deleting either operand of `flushNow`'s activity guard still emits, and each
+    // deletion measured green across the whole suite.
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, mode: 'metrics', sink: collect(events), metricsIntervalMs: 1_000 });
+    reporter.recordDedupAccepted();
+    reporter.flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'message_metrics', received: 0, dispatched: 0, dedupAccepted: 1 });
+    reporter.stop();
+  });
+
+  it('emits a metrics window whose only activity is a suppressed dedup', () => {
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, mode: 'metrics', sink: collect(events), metricsIntervalMs: 1_000 });
+    reporter.recordDedupSuppressed();
+    reporter.flush();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'message_metrics', received: 0, dispatched: 0, dedupSuppressed: 1 });
+    reporter.stop();
+  });
+
   it('uses an injected clock for event timestamps', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({ enabled: true, now: () => 1234, sink: collect(events) });
