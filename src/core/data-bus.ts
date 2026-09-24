@@ -1925,7 +1925,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       // `resumeTransport()` calls with `void`, which is the path this exists for.
       // Without it, a rejected reopen on that path — a superseded lifecycle whose
       // transport then failed to start — lands as an unhandled rejection. Measured,
-      // and the measurement is symmetric: deleting this line leaves all 37 test files
+      // and the measurement is symmetric: deleting this line leaves the whole suite
       // green with zero unhandled-rejection reports, and so does deleting the `.catch`
       // at the top of this method. No test constructs the void path's rejection, so
       // what separates the two absorbs is the caller list above plus the terminal

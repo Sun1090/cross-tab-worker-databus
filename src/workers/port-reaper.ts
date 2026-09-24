@@ -195,7 +195,7 @@ export class PortReaper {
       // which writes all three maps, and loses one only in `remove()` and in the
       // loop below, and in the whole-map `clear()`s of dispose(): a port in
       // `targets` is therefore in the other two as well. Measured — replacing the
-      // first fallback with a non-null assertion leaves all 37 test files green.
+      // first fallback with a non-null assertion leaves the whole suite green.
       // It stays because of what a half-registered port would cost: `lastSeen` 0
       // reads as silent-since-epoch, so the next tick closes a session that was
       // never late, which is a worse failure than the undefined it stands in for.

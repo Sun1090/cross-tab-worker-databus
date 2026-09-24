@@ -256,7 +256,7 @@ export class CentrifugeSession<TData = unknown> {
    * That drop is uncovered and dominated: the connection-level caller tests the
    * same emptiness before calling, and the subscription-level caller reads the
    * topic out of a key this session only ever populates from a SUBSCRIBE frame.
-   * Measured — deleting this line leaves all 37 test files green, and the frame
+   * Measured — deleting this line leaves the whole suite green, and the frame
    * it withholds has nowhere to land anyway: the only handler registry is the
    * DataBus's `topicHandlers`, and every write to it sits behind
    * `assertPublicTopic` (at the head of `data-bus.ts`'s `subscribe()`, `publish()`
