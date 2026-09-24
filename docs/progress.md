@@ -7802,6 +7802,57 @@ corroborates the 26-spec collection.)
   route write behind them, which is what has been failing `verify` on unrelated PRs.
 - **Update date:** 2026-09-24.
 
+## Phase 144 / A time-based guard cannot cut a loop that spends its time in microtasks
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/fuzz-delivery-budget`, off `main` at
+  `f76caca`. Test-only (`tests/fakes.ts`, `tests/coordination-invariants.test.ts`); `src/` untouched.
+- **Status:** locally green, PR open.
+- **Why this one and not another.** Two PRs with markdown-only diffs were turned red by the same failure:
+  `tests/coordination-invariants.test.ts` exceeded its 120 s ceiling and left behind
+  `[coordination-invariants] stopped at 1046/5000 seeds (0 cut short by the 2000ms await cap) after 466864ms —
+  slowest seed 1046 at 463281ms`. The await cap Phase 138 added reported *zero* trips while one seed ate
+  99.2% of the run, which is the exact limit that change's own comment named: a same-thread deadline cannot
+  preempt CPU spent inside a microtask chain. So the sweep had two limits, both made of time, and the failure
+  mode was the one neither could reach.
+- **What shipped.** A third limit, placed where neither half of the loop owns it. `ChannelHub` now takes a
+  delivery budget; past it the hub stops delivering, which breaks a self-sustaining coordination loop at the
+  one object both runtimes post through. The threshold (50,000 posts) comes from a measured distribution over
+  a full sweep — p50 = 28, p99 = 90, p99.9 = 5,429, max = 16,763, 18 seeds over 500 — so it is ~3x the worst
+  interleaving this machine produces and cannot fire on a healthy seed. A cut seed prints
+  `[CHURN] seed=… deliveries=… ops=…`, is **excluded** from the depth floor (its end state was never reached),
+  and the summary prints the churn count even on a completed sweep, which is the case where that number is
+  otherwise invisible.
+- **The guard's teeth are pinned, in both directions.** A budget that can never fire would let the wedge
+  through looking like a working limit, so `cuts channel deliveries at the budget, and cuts nothing under it`
+  is mutation-checked twice: dropping the `return` fails at *"posts past the budget must not be delivered:
+  expected 6 to be 3"*; comparing with `>=` fails at *"a budget must not drop anything under the limit:
+  expected 2 to be 3"* — two different assertions, one per direction.
+- **What this does NOT do: fix anything.** The bound is CI immunity plus a measurement, and the underlying
+  behavior is a real defect. Localizing it was the bulk of the phase:
+  - Under a replay of seed 1046 a single tab issued **2,642 transport `subscribe` and 2,641 `unsubscribe`**
+    calls inside one seed (median seed: 28 channel posts; this one: 16,763), and the reads inside one awaited
+    `stop()` reached **18,379–26,719 `getItem`** calls depending on the run — which is the shape of the cost:
+    CPU spent reading, not time spent waiting.
+  - Its `assignedTopics` entry for one topic appeared and disappeared pass after pass while
+    `storage.setItem`/`removeItem` filtered on `:route:` keys recorded **no** competing writes. So this is not
+    two tabs fighting over durable ownership — the durable record never changes.
+  - The mechanism *stops* short of an explanation on purpose: the re-election at
+    `reconcileSubscriptions()`'s `!route || !liveWorkerIds.has(route.workerId)` branch writes the route, so
+    something must answer that write as stale on the next pass, and the instrumented evidence collected so far
+    does not say what. Guessing in a comment would be the failure mode this repository keeps having to retract,
+    so it is left as the named next question — and the `[CHURN]` count is the number a fix has to drive to
+    zero, which is why a cut seed is printed by name instead of being absorbed.
+- **Verification:** `npx tsc --noEmit` 0; `npx eslint tests/fakes.ts tests/coordination-invariants.test.ts
+  --max-warnings 0` 0; `npx vitest run` 37 files / **901** tests; the fuzz file alone 4 tests / 16.0 s with no
+  `[CHURN]` line (the budget does not fire on this machine at 5,000 seeds); both mutants run individually with
+  the tree verified restored (`git diff --quiet tests/` after each).
+- **Risk / rollback:** test harness only; `git revert`. The one behavioral risk is a healthy future seed that
+  legitimately posts >50,000 messages being excluded from depth — it would be reported by name on the
+  `[CHURN]` line, not hidden.
+- **Next:** take the `[CHURN]` count as the goal of the real fix — start from which read answers stale
+  between `writeRoute` and the next pass, with the durable record pinned as never changing. Then 0.21.15.
+- **Update date:** 2026-09-24.
+
 ## Recovery entry
 
 If interrupted: working tree state, current commit, and any in-flight test
