@@ -7893,11 +7893,19 @@ corroborates the 26-spec collection.)
   replaced by the account above. `AGENTS.md` gains the rule that came out of it — attribute a loop by counting
   its legs, and treat "the fake channel delivered synchronously" as a first-class hypothesis wherever a hub
   and a batching writer share a test.
-- **What is NOT claimed.** Async delivery is not shipped here. Under it the same sweep fails two end-state
-  invariant checks — seeds 100 and 727, both immediately after an injected `a:forge:<topic>` frame, reporting
-  `no subscriber left but owners=[] transportSubscriptions=[a]` — so raising the harness's fidelity is its own
-  change with its own diagnosis, and whether a route-less `CONTROL/SUBSCRIBE` landing after the final sweep can
-  leave a transport subscription held is a product question this phase surfaced and did not settle.
+- **What is NOT claimed.** Async delivery is not shipped here. A second variant of the experiment (drop
+  the message at delivery time unless the *source* is still a hub member, which is what
+  `BroadcastChannel` actually does when a sender closes, so `forgeSubscribe()` has to defer its own close by
+  one microtask or the forged frames stop being delivered and the sweep goes green by losing coverage)
+  removes the storm and then fails six seeds — 100, 727, 1129, 1487, 1756 with
+  `no subscriber left but owners=[] transportSubscriptions=[a]`, and 1853 with `1 subscriber(s) need one
+  owner that holds the transport, got owners=[b] transportSubscriptions=[a b]` — every one of them a seed
+  that opens with `a:forge:<topic>`. Making *every* hub asynchronous is worse still: ~16 tests across
+  `cluster`/`data-bus`/`stability` post a frame and assert without awaiting, so the deferral must be
+  opt-in and scoped to the fuzz. Whether a route-less `CONTROL/SUBSCRIBE` accepted under the documented
+  missing-route tolerance can leave a transport subscription held after the sweep is a product question
+  this phase surfaced and did not settle; that is task #74, and the experiment's edits were reverted
+  (`git checkout -- tests/`, scratch branch deleted).
 - **Also fixed in passing:** two duplications PR #236 left in `tests/coordination-invariants.test.ts` —
   `hub.setDeliveryBudget(DELIVERY_BUDGET)` on consecutive lines, and the same three-line comment twice around
   `const churnedHere`. Net 0 insertions / 4 deletions.
