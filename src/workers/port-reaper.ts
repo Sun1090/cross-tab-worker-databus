@@ -21,9 +21,13 @@ import {
   DEFAULT_SESSION_TIMEOUT_MULTIPLIER
 } from '../centrifuge-protocol';
 
-/** A reaped port: announce the loss, close it (stop message delivery), then stop
- * its session. `notify` runs first and on its own because a port that is about to
- * be closed is the only chance its owner gets to learn why. */
+/** The three teardown steps `reap()` runs on a silent port, in that order:
+ * `notify` posts the loss to the main thread, `close` withdraws the port, `stop`
+ * ends its session. `notify` has to go first because a closed port discards
+ * anything posted after it, so this is its owner's only notice of why the
+ * session ended. The three share one `try`/`catch`: a target that throws in
+ * `notify` also skips `close` and `stop` for itself, which `reap()` accepts
+ * rather than working around. */
 export interface ReapTarget {
   notify(): void;
   close(): void;
