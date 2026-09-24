@@ -360,7 +360,6 @@ describe('cross-tab coordination invariants', () => {
       const storage = new MemoryStorage();
       const hub = new ChannelHub();
       hub.setDeliveryBudget(DELIVERY_BUDGET);
-      hub.setDeliveryBudget(DELIVERY_BUDGET);
       const clock = { now: 1_000 };
       const tabs = [
         createTab('a', storage, hub, clock),
@@ -535,9 +534,6 @@ describe('cross-tab coordination invariants', () => {
         // leaves the last seed unasserted without being a wedge, so it is neither
         // `completed` nor a cut.
         const churnedHere = hub.deliveriesOverBudget();
-        // Only a seed that was actually asserted counts as depth: a budget break
-        // leaves the last seed unasserted without being a wedge, so it is neither
-        // `completed` nor a cut.
         if (!aborted && !churnedHere) completed += 1;
         const seedMs = realNowMs() - seedStartedAt;
         // The budget cut this seed's channel traffic, so its end state was never
