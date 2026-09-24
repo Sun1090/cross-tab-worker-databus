@@ -1,6 +1,33 @@
 # Roadmap
 
-0.21.16 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.17 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.17 delivered scope
+
+- **A confirmed route that named a live Worker holding nothing no longer orphans its Topic.** `pause()` clears
+  `assignedTopics` unconditionally but rewrites only the routes it can hand off, so a handoff whose final storage
+  flush fails leaves the durable record pointing at the departing owner — confirmed, with its old generation. When
+  that worker id registers again, every peer defers to a live confirmed owner that holds nothing, no tab's transport
+  subscribes the channel, and inbound delivery stops everywhere while publishing still looks healthy. The named
+  Worker now repairs it on each reconcile: reclaim when it still has a local handler, release the record otherwise,
+  with the deletion flushed before the `REGISTRY` nudge so the peer that reconciles on it reads repaired state.
+- **Why neither reconcile pass could have noticed, written down at the site.** One walks `subscribedTopics` and the
+  other `assignedTopics`, and the phantom is in neither; `isAssigned()` then answers `true` for it through its
+  durable-route fallback, which is what made the state silent rather than merely slow.
+- **Four gates on a sweep that deletes shared state**, each measured separately: the confirmation must be present (a
+  route still awaiting its ACK is an election in flight), the worker must be the named one, the assignment map is
+  consulted first so the legitimate elected-owner-without-local-handler case is left alone, and `knownTopics` — a map
+  this worker filled itself — is the only source of the plaintext. Mutating them one at a time fails 6, 28, 7 and 1
+  tests respectively, and the reclaim/release/flush/nudge legs each die to exactly one assertion.
+- **One pre-existing test's premise corrected**: its hand-written takeover route carried the previous owner's
+  `confirmedAt`, a state no worker writes and precisely the shape the new pass releases, so its assertion was passing
+  by a mechanism other than the one it named.
+- **The `storage-fail` fuzz interleaving that found this is measured and deliberately not shipped** — it reddens the
+  sweep on the pre-fix code from seed 414 onward, which is four times below the sweep's depth floor, so it is a finder
+  rather than a guard; its knob (`MemoryStorage.failNextWrites`) and the recipe are committed.
+- **A classification, comment-only:** `handoffAssignedTopics()`'s unreachable `if (!owner) continue;` now names the
+  four links that make it unreachable, the test that pins each, and the measured counterfactual — deleting it keeps
+  the suite green and fails the type check five times, so it is a narrowing rather than a branch.
 
 ## 0.21.16 delivered scope
 
