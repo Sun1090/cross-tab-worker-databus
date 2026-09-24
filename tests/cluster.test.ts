@@ -377,6 +377,62 @@ describe('WorkerClusterRuntime', () => {
     );
   });
 
+  it('treats an empty clusterKey as the default cluster, and every other key as isolated', async () => {
+    // The namespace is `createOpaqueKey(options.clusterKey || '__default__')`, so
+    // the falsy key is not its own cluster: it hashes the literal string. That
+    // makes "different clusterKeys operate in isolation" true of hashes and false
+    // of one specific pair, and the pair is the one a caller can reach by leaving
+    // a config field empty. Both halves are pinned because the interesting
+    // failure is silent in either direction — a merge that should not happen, or
+    // an isolation that quietly stops holding.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const make = (clusterKey: string, tab: string) => {
+      const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: tab });
+      return new WorkerClusterRuntime({
+        clusterKey,
+        environment: env.environment,
+        tabId: `tab-${tab}`,
+        workerId: `worker-${tab}`,
+        handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+      });
+    };
+    const empty = make('', 'empty');
+    const named = make('__default__', 'named');
+    const other = make('another-namespace', 'other');
+    empty.start();
+    await Promise.resolve();
+    now += 1;
+    named.start();
+    await Promise.resolve();
+    now += 1;
+    other.start();
+    await Promise.resolve();
+
+    empty.subscribe('alias.topic');
+    await Promise.resolve();
+    now += 1;
+    named.subscribe('alias.topic');
+    await Promise.resolve();
+    // One cluster, so the topic has exactly one owner between them: a peer that
+    // shares the route record defers to the sticky assignment rather than taking
+    // a second ownership of the same channel.
+    const sharedOwners = [empty, named]
+      .filter(runtime => runtime.getSnapshot().assignedTopics.includes('alias.topic'))
+      .map(runtime => (runtime === empty ? 'empty-key' : 'default-name'));
+    expect(sharedOwners).toEqual(['empty-key']);
+    // The control: an unrelated key owns its own copy of the same topic name,
+    // which is what the isolation sentence means, and what would break if the
+    // fallback ever matched more than the empty string.
+    other.subscribe('alias.topic');
+    await Promise.resolve();
+    expect(other.getSnapshot().assignedTopics).toEqual(['alias.topic']);
+    empty.stop();
+    named.stop();
+    other.stop();
+  });
+
   it('keeps existing topic owners and balances only newly introduced topics', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
