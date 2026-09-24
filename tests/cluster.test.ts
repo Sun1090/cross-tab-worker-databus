@@ -145,6 +145,57 @@ describe('WorkerClusterRuntime', () => {
     expect(runtime.getSnapshot().currentWorker.heartbeatAt, 'no heartbeat may outlive the abandoned activation').toBe(1_000);
   });
 
+  it('takes effect when a handler stops the runtime from inside onResume', () => {
+    // `handlePageShow()` clears `suspended` before it calls the consumer's
+    // `onResume`, and `started` is set only by the `activate()` that the
+    // generation bump below then skips — so for the duration of that callback
+    // both of `stop()`'s original entry conditions read false and the stop was
+    // simply dropped. The lifecycle listeners stayed attached, and the next
+    // visibility toggle brought the runtime back: measured with `stop()`'s
+    // third term removed, `onResume` fired a second time after the explicit
+    // stop and `coordinated` returned to true on a runtime the caller had
+    // given up on.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'resume-stop' });
+    let runtime: WorkerClusterRuntime | undefined;
+    let stopInResume = false;
+    let resumeCount = 0;
+    runtime = new WorkerClusterRuntime({
+      clusterKey: 'resume-stop',
+      environment: env.environment,
+      tabId: 'tab-resume-stop',
+      workerId: 'worker-resume-stop',
+      handlers: {
+        onControl: vi.fn(),
+        onEvent: vi.fn(),
+        onResume: () => {
+          resumeCount += 1;
+          if (stopInResume) {
+            stopInResume = false;
+            runtime?.stop();
+          }
+        }
+      }
+    });
+    runtime.start();
+    env.pageHide();
+    expect(resumeCount).toBe(0);
+
+    stopInResume = true;
+    env.pageShow();
+    expect(resumeCount).toBe(1);
+    expect(runtime.getSnapshot()).toMatchObject({ coordinated: false, suspended: false });
+
+    // The listeners must be gone, so a further hide/show pair cannot resurrect
+    // either the callbacks or the coordination state.
+    env.pageHide();
+    env.pageShow();
+    expect(resumeCount, 'a stopped runtime must not fire onResume again').toBe(1);
+    expect(runtime.getSnapshot().coordinated, 'a stopped runtime must not re-activate').toBe(false);
+    runtime.stop();
+  });
+
   it('drops a control frame whose topicKey disagrees with its topic', async () => {
     // `topicKey` is a pure function of `topic`, so every frame the library sends
     // has the two agreeing. A cluster channel is a BroadcastChannel, which any

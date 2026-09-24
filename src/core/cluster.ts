@@ -289,7 +289,17 @@ export class WorkerClusterRuntime {
    */
   stop(): void {
     this.lifecycleGeneration += 1;
-    if (!this.started && !this.suspended) return;
+    // The three flags are exactly "something is still armed": `started` for the
+    // channel/heartbeat pair, `suspended` for a document that is hidden and
+    // waiting for a pageshow, and `lifecycleListening` for a runtime that never
+    // activated at all. Without the third term a `stop()` issued from inside
+    // `handlers.onResume` was dropped on the floor — `handlePageShow()` clears
+    // `suspended` two statements before it calls that callback, and `started`
+    // is only set by the `activate()` the bumped generation then skips — so the
+    // listeners stayed attached and the next visibility toggle resurrected the
+    // runtime: measured, `onResume` fired a second time after the explicit
+    // `stop()` and `getSnapshot().coordinated` went back to true.
+    if (!this.started && !this.suspended && !this.lifecycleListening) return;
     this.pause();
     this.flushStorage();
     this.removeLifecycleListeners();
