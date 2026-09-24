@@ -1,3 +1,26 @@
+## [0.21.18] - 2026-09-24
+
+No behavior, public API, protocol, or storage change. This release carries five test pins that each close a leg no test named, one rewritten source comment that ships through the bundles, and two repository workflow rules.
+
+### Tests
+
+- **A non-string frame `type` is normalized to `null` before it is reported.** `getDiagnostics().protocol.lastUnknownMessageType` is declared `string | null` and is filled from a BroadcastChannel any same-origin script can post into. The `null` side of that normalization had never executed, and `getUnknownMessageStats()` had no reader at all — so the `unknownMessages` count published beside it had none either. Four forged frames now arrive through a channel joined *by name* rather than by calling the handler. The prototype-less-object frame is posted **first** on purpose: the failure it exists to catch is a throw (`String(Object.create(null))` raises `TypeError: Cannot convert object to primitive value`), and in any other order an earlier value mismatch hides it.
+- **A `replay.persistenceRetry` block that names only one field applies the documented default to the other.** Each field is validated only when present and each default is supplied independently, so `{ maxAttempts: 2 }` must still wait the 50 ms backoff and `{ backoffMs: 5 }` must still make exactly one attempt. Previously every partial object the suite built threw at the field it named, so the validator's accept path for a partial policy had never completed. This gap was invisible from the defaulting sites' own counters — both `??` legs read hot, because a bus with no policy takes the right one and a bus with both takes the left; the untested shape was between them.
+- **A failed handshake leaves no connect timer armed.** `failConnect()` cancels the attempt's connect timer before it rejects, and that cancel — not the callback's staleness guard — is what makes the guard unreachable. It had no test. Without it, the dead attempt's own timeout later reports `onStatus('error')` plus an `onError('WebSocket did not open within Nms.')` for a connection the application was already told had failed.
+- **A `channelToken` credential request that names no channel is answered with an empty one.** `channel` is optional on the `TOKEN_REQUEST` wire shape and the session omits it when it is `undefined`, which is reachable from an older worker on the port or from a dependency handing the callback a non-string. The `?? ''` is the only thing keeping `undefined` from crossing into an application `getChannelToken(channel: string)`.
+- **A `Blob` frame whose conversion fails after its connection was replaced is not reported to the replacement.** That catch reports through `this.handlers` — whoever holds the connection at that moment — so the guard comparing the captured socket/handler pair is the only thing between a dead socket's conversion error and the live connection's `onError`, which an application would read as the new connection being broken.
+
+Each case was mutation-checked, and the attribution is recorded in `docs/progress.md` (Phases 155–159): which single assertion fails, which mutant dies at which leg, and the three legs found to have **no mutant of their own**. Four zero-count branch slots closed; `src/` now reads 56 of 1960, and `validation.ts` reports 100% branches for the first time.
+
+### Documentation
+
+- `src/websocket.ts` — the connect-timeout callback's guard comment now names the enumeration that makes **all three** of its terms unreachable (`socket` and the handler set are reassigned only in `start()` and `stop()`; reaching either needs `socketActive` already false, and every path that lowers it has already cancelled the armed timer), says which test holds which leg, and **drops** its "all 880 tests green" count instead of refreshing a number that rots in place. This is shipped text: it reaches consumers through both `dist/` bundles and the declarations.
+- `AGENTS.md` — two rules taken from measurements in this batch. (1) Vitest transpiles `tests/**` with no type checking, so a test that constructs a deliberately illegal value is red only under `pnpm check`; the widen belongs on the post helper, not on each frame, because `Object.create(null)` is `any`. (2) Do not rebase a branch whose PR is already open: the progress log has a single append anchor, so two open PRs touching it leave the older unmergeable, and the repair cannot be pushed without a force-push, which this repository forbids.
+
+### Compatibility
+
+Mixed-version peers are unaffected: no frame, default, storage key, or export moved. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.17`, and the published-consumer gate re-runs on the tag.
+
 ## [0.21.17] - 2026-09-24
 
 ### Fixed
