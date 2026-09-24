@@ -416,6 +416,54 @@ describe('WebSocketTransport', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
+  it('does not report a Blob conversion failure that belongs to a replaced connection', async () => {
+    // The missing third of a pair. 'isolates a conversion failure …' above runs
+    // this catch's guard **true** (a live connection reports), and 'ignores a Blob
+    // frame that resolves after the socket is replaced' runs the sibling guard on
+    // the success path — so the leg where a conversion fails *after* the connection
+    // was replaced had never executed, and the swallow it performs was unasserted.
+    // The reason it matters is one line down: the report goes to `this.handlers`,
+    // whoever holds the connection at that moment, so deleting the guard delivers a
+    // dead socket's conversion error to the replacement connection's `onError` —
+    // which is also the shape a user would read as "the new connection is broken".
+    const sockets: FakeWebSocket[] = [];
+    const transport = new WebSocketTransport({
+      url: 'wss://example.test/ws',
+      webSocketFactory: url => {
+        const socket = new FakeWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+    transport.start(
+      { url: 'wss://example.test/ws' },
+      { onMessage: () => {}, onStatus: () => {}, onError: () => {} }
+    );
+    const first = sockets[0]!;
+    first.open();
+
+    const doomed = new Blob([new Uint8Array([1])]);
+    let rejectFrame!: (error: Error) => void;
+    Object.defineProperty(doomed, 'arrayBuffer', {
+      value: () =>
+        new Promise<ArrayBuffer>((_, reject) => {
+          rejectFrame = reject;
+        })
+    });
+    first.onmessage?.({ data: doomed });
+
+    transport.stop();
+    const onMessage = vi.fn();
+    const onError = vi.fn();
+    transport.start({ url: 'wss://example.test/ws' }, { onMessage, onStatus: () => {}, onError });
+    sockets[1]!.open();
+
+    rejectFrame(new Error('blob conversion failed after replacement'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(onError).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+
   it('rejects a binary publish whose topic exceeds the 16-bit frame prefix', () => {
     const { sockets, transport, onError } = makeTransport();
     const socket = sockets[0]!;
