@@ -56,9 +56,11 @@ export class ChannelHub {
 
   /** A real `BroadcastChannel` delivers in a *later task*, so a runtime that posts
    * a frame and then reads coordination state in the same stack never sees the
-   * effect of its own post. The hub's default is synchronous because a large number
-   * of tests post a frame and assert without awaiting; this opts one hub into the
-   * browser's ordering. */
+   * effect of its own post. The hub's default stays synchronous because 15 tests in
+   * `cluster`, `data-bus` and `stability` post a frame and assert without awaiting
+   * — measured, not estimated: flipping this default to async reddens exactly 17
+   * cases, those 15 plus the two hub-infrastructure pins in
+   * `tests/coordination-invariants.test.ts`. */
   setAsyncDelivery(enabled: boolean): void {
     this.asyncDelivery = enabled;
   }

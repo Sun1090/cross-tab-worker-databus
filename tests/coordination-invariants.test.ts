@@ -310,6 +310,9 @@ describe('cross-tab coordination invariants', () => {
     // half is pinned was measured: forcing the option to a no-op kills the assertion
     // below, while removing the sweep's own opt-in leaves all five cases green on the
     // fixed code — the option stands because of what it caught, not as a new kill.
+    // The first assertion is the one that guards the *default*: making async
+    // delivery the hub's behavior reddens 17 cases (15 post-and-assert tests plus
+    // this file's two hub pins), so a future simplification cannot pass unnoticed.
     const frame = { type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: 'worker-x' } as WorkerClusterMessage;
 
     const syncHub = new ChannelHub();
@@ -412,8 +415,8 @@ describe('cross-tab coordination invariants', () => {
       hub.setDeliveryBudget(DELIVERY_BUDGET);
       // Browser fidelity: `BroadcastChannel` delivers in a later task, so no
       // runtime ever reacts to its own post inside the same stack. Deliberately
-      // opt-in — the synchronous default is what ~16 tests in `cluster`,
-      // `data-bus` and `stability` post-and-assert against.
+      // opt-in — the synchronous default is what 15 tests in `cluster`, `data-bus`
+      // and `stability` post-and-assert against.
       hub.setAsyncDelivery(true);
       const clock = { now: 1_000 };
       const tabs = [
