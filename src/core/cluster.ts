@@ -505,6 +505,28 @@ export class WorkerClusterRuntime {
         undefined,
         this.loadWeighting
       );
+      // This guard has never executed, and what holds it up is a chain rather
+      // than a race: `assertClusterOptions()` runs in the constructor before
+      // `maxActiveWorkers` is read and rejects anything that is not a positive safe
+      // integer, so `selectActiveWorkers()`'s `slice(0, maxActiveWorkers)` keeps at
+      // least one record whenever its input is non-empty — and the input is
+      // non-empty here, because `subscribers` above is filtered by the tabIds of
+      // `remainingWorkers` (`readSubscriberTabIds()` drops every record whose tab is
+      // not among the workers it was handed, and its storage-less `[this.tabId]` leg
+      // cannot run at this call site: this method returns early when `!this.storage`),
+      // while `selectLeastLoadedWorker()` returns undefined only for an empty list.
+      // Each link already has a test of its own: `cluster.test.ts`'s "rejects a
+      // maxActiveWorkers that is not a positive safe integer", `routing.test.ts`'s
+      // "returns an empty array for an empty input" and "selectLeastLoadedWorker
+      // returns undefined for an empty array", and `property.test.ts`'s
+      // never-empty-subset property. Deleting the line leaves the suite green at its
+      // full count (vitest transpiles without type checking) and fails
+      // `tsc --noEmit` five times: three on `projectedLoads.set(owner.workerId,
+      // (projectedLoads.get(owner.workerId) ?? owner.load) + 1)`, one on
+      // `writeRoute(…, owner, …)`, one on `sendRouteReleased(owner.workerId, …)`. So
+      // this is the narrowing the three calls below rest on, not a branch behavior
+      // could take — the same shape as the two `?? this.currentRecord` pairs, which
+      // is why it is recorded here rather than pinned by a test.
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
       const generation = (previous?.generation ?? 0) + 1;
