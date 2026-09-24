@@ -596,9 +596,13 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // converts that one deferral into a microtask busy-wait which starves the
     // macrotask the transport stop needs, and allocates a promise chain per turn
     // until the heap goes. Measured: the mutation leaves `tests/data-bus.test.ts`
-    // 194/194 green and aborts `tests/lifecycle-invariants.test.ts`'s worker with
+    // green in full — re-run for this note at its whole current count — and aborts
+    // `tests/lifecycle-invariants.test.ts`'s worker with
     // `Ineffective mark-compacts near heap limit` inside `Builtins_RunMicrotasks`
-    // after ~40 s of growth. That fuzz is this line's only witness, and it reports a
+    // after tens of seconds of growth. The timing is host-dependent (this reading
+    // put the FATAL at 26.8 s of worker life on a loaded machine; the first one was
+    // ~40 s), so no single number in that sentence is load-bearing — the crash is.
+    // That fuzz is this line's only witness, and it reports a
     // crash rather than an assertion; no assertion can replace it, measured — a test
     // that waits a bounded number of microtasks on a gated teardown and then releases
     // the gate passes with the read deleted, because the loop is invisible to anything
@@ -1874,11 +1878,15 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // It is kept anyway, which is a different verdict from 0.21.2 and 0.21.3's two
     // deletions, and the reason is the shape of the failure rather than its
     // likelihood, measured four ways on `tests/data-bus.test.ts`. Deleting the absorb
-    // alone: 194/194 green, so no ordinary run notices it. Making `pending` reject at
-    // this seam for every reopen in the file, absorb intact: also 194/194, so nothing
+    // alone: the file green in full, so no ordinary run notices it. Making `pending` reject at
+    // this seam for every reopen in the file, absorb intact: likewise green in full, so nothing
     // even observes the violation this block's premise says cannot happen. The same
-    // forcing with the absorb deleted: 51 of 194 fail. And the forcing's extra
-    // `.then` link alone, rejection absent: 194/194, which is what makes the 51 the
+    // forcing with the absorb deleted: **51 tests fail** — the only leg carrying a
+    // count, since a pass needs no denominator. That count was taken when the file
+    // held 194 tests, and it has not been re-run since; the three green legs above
+    // were rewritten to say "green in full" precisely so they stop going stale.
+    // And the forcing's extra
+    // `.then` link alone, rejection absent: green in full, which is what makes the 51 the
     // rejection rather than the added link. A note here previously read "fails exactly
     // one test whether this line is present or deleted"; that reproduces under none of
     // the four, and the corrected set argues the same way more strongly — no assertion
