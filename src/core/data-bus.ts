@@ -2083,7 +2083,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // or recovery attempt failed, leaving transportReady=false, startPromise=null.
     let ready = this.startPromise;
     // All four of these operands survive deletion against the whole suite, and all
-    // four are closed by the callee rather than by this line. `reopenTransport()`
+    // four are closed by the callee rather than by this line. Re-run for this note, and
+    // each of the four deletions also typechecks clean — so unlike the `?? fallback`
+    // legs elsewhere in this file, none of these is held by the compiler either; nothing
+    // but this argument stands between the deletion and the merge. `reopenTransport()`
     // opens with `if (this.stopping || this.activeConfig === undefined) return
     // Promise.resolve()` and follows it with the in-flight check that returns
     // `this.startPromise`, so `!this.stopping`, `this.activeConfig !== undefined`
