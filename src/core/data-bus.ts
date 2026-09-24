@@ -2023,11 +2023,17 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `1000`. Observed at this line: `1000`, plus `0000`, `0100`, `1001` and
     // `1010`; that set is one first-sight `console.log` per distinct row over a
     // whole-suite run, so re-derive it rather than trusting the list.
-    // `transportReady` dies to at least eight named cases (the probe prints
-    // eight) and `droppedAfterConnect` to two (`parks every operation behind a
+    // `transportReady` is the load-bearing one: deleting it fails nine tests in
+    // `data-bus.test.ts` and `centrifuge.test.ts`, every one of them an operation
+    // the test expects to be deferred. `droppedAfterConnect` dies to exactly two
+    // (`parks every operation behind a
     // demanded reopen instead of writing to
     // the closed connection`, `reopens a cleanly disconnected transport when an
-    // explicit operation demands it`). `!this.stopping` was live and unnamed until
+    // explicit operation demands it`). Both counts were re-run for this note, and
+    // the first has already drifted once: it read eight when this sentence was
+    // written, and because the eight were never named the newcomer cannot be
+    // identified. So take either number as "run the mutant", never as a limit.
+    // `!this.stopping` was live and unnamed until
     // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
     // premise is the `1001` row, and the only thing in the suite that reaches it is
     // `WorkerClusterRuntime.stop()`'s handoff — measured, the first-sight stack is
