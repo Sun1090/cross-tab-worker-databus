@@ -1925,23 +1925,40 @@ describe('WorkerClusterRuntime resilience', () => {
     // `reconcileAssignedTopics` walks the assignment map, and it has neither —
     // while B, which does subscribe, defers to a route whose owner is alive.
     const a2 = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    const routeOfTopicA = () => {
+      const entry = storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`));
+      return entry ? (JSON.parse(entry[1]) as { workerId: string; confirmedAt?: number }) : null;
+    };
+    const holders = () => [a2, b].filter(worker => worker.runtime.getSnapshot().assignedTopics.includes('topic-a'));
+
     a2.runtime.start();
-    a2.runtime.subscribe('topic-b');
+    // Synchronously, before any other task can run: the release pass is over and
+    // its deletion is already on disk, so a peer reading storage now sees the
+    // repaired state rather than the record still queued in this worker's writer.
+    expect(routeOfTopicA()).toBeNull();
     await Promise.resolve();
+    await Promise.resolve();
+
+    // B's heartbeat has not run once, so the record below can only exist because
+    // the release nudged it: B reconciled on the REGISTRY frame, found no owner,
+    // and elected one.
+    expect(routeOfTopicA()).not.toBeNull();
     a2.env.runIntervals();
-    await Promise.resolve();
     b.env.runIntervals();
     await Promise.resolve();
     a2.env.runIntervals();
+    b.env.runIntervals();
     await Promise.resolve();
 
-    // The phantom ownership is gone and the remaining subscriber owns the topic.
-    expect(a2.runtime.getSnapshot().assignedTopics).toEqual(['topic-b']);
-    expect(b.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
-    const route = JSON.parse(
-      storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`))![1]!
-    ) as { workerId: string };
-    expect(route.workerId).toBe('worker-b');
+    // The phantom is broken and the ownership is real: exactly one live worker
+    // holds the assignment, and the durable route names that worker and is
+    // confirmed for it. Which one it is follows from the election (both records
+    // report load 0, and an equal-load tie breaks on the worker id) — either
+    // answer is correct, so the assertion names the holder rather than the id.
+    const owners = holders();
+    expect(owners).toHaveLength(1);
+    expect(routeOfTopicA()?.workerId).toBe(owners[0] === a2 ? 'worker-a' : 'worker-b');
+    expect(routeOfTopicA()?.confirmedAt).toBeDefined();
   });
 
   it('leaves a route naming this worker alone while it still holds the assignment', async () => {
@@ -3207,12 +3224,22 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(a.runtime.isAssigned('topic-a')).toBe(true);
 
     // Simulate the route being taken over by another live worker in this
-    // tab's absence (e.g. a peer that won the race after a pause).
+    // tab's absence (e.g. a peer that won the race after a pause). The record is
+    // left unconfirmed on purpose: a *confirmed* route naming worker-b while
+    // worker-b holds no assignment is a phantom, and
+    // `reconcileStrandedSelfRoutes()` releases it, which would have this same
+    // assertion pass by a different route — and hide the sweep it names.
     const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
     const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
     storage.setItem(
       routeEntry[0],
-      JSON.stringify({ ...route, workerId: 'worker-b', tabId: 'tab-b', generation: (route.generation as number) + 1, updatedAt: now })
+      JSON.stringify({
+        topicKey: route.topicKey,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        updatedAt: now,
+        generation: (route.generation as number) + 1
+      })
     );
 
     a.env.runIntervals();

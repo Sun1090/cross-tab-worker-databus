@@ -1217,7 +1217,15 @@ export class WorkerClusterRuntime {
       this.removeStorage(key);
       released = true;
     }
-    if (released) this.notifyRegistry();
+    if (released) {
+      // Flush before nudging, for the reason recorded in `pause()` and in
+      // `handoffAssignedTopics()`: the deletion is queued in this worker's
+      // batching writer, so a peer that reconciles on the nudge would otherwise
+      // read the route that is still on disk, stand down, and wait a heartbeat
+      // for the write to land.
+      this.flushStorage();
+      this.notifyRegistry();
+    }
   }
 
   /** Drop assignments where the route no longer points to this worker. */
