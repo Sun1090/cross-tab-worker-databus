@@ -1601,6 +1601,56 @@ describe('WorkerClusterRuntime publishBatch', () => {
     runtime.stop();
   });
 
+  it('forwards the string form of the third publish() argument as the message id', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'publish-legacy-id',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('feed.legacy');
+    await Promise.resolve();
+    control.mockClear();
+    // `publish(topic, data, messageId)` is a declared overload on the exported
+    // runtime, and the normalization is the only thing that turns it into the
+    // metadata object every downstream reader expects. `CrossTabDataBus.publish`
+    // always passes an object, so nothing reaches this through the bus.
+    expect(runtime.publish('feed.legacy', { v: 1 }, 'legacy-id')).toBe(true);
+    expect(control).toHaveBeenCalledTimes(1);
+    expect(control).toHaveBeenCalledWith('PUBLISH', 'feed.legacy', { v: 1 }, 'legacy-id', undefined);
+    runtime.stop();
+  });
+
+  it('delegates a single-item batch whose item carries partial or no metadata', async () => {
+    const control = vi.fn();
+    const { runtime } = makeBatchRuntime({
+      clusterKey: 'batch-single-partial',
+      tabId: 'tab-a',
+      workerId: 'worker-a',
+      onControl: control
+    });
+    runtime.start();
+    runtime.subscribe('feed.partial');
+    await Promise.resolve();
+    control.mockClear();
+    // No metadata at all: `publish()` must be handed `undefined`, not an empty
+    // object, because the arity of the handler call is what tells a listener
+    // "this publication arrived without an id" from "it arrived with an id of
+    // undefined". `sendControl` takes the three-argument branch only for a falsy
+    // metadata, so an always-built object would pass this test's other two
+    // assertions and fail only this one.
+    expect(runtime.publishBatch('feed.partial', [{ data: 1 }])).toBe(true);
+    expect(control).toHaveBeenLastCalledWith('PUBLISH', 'feed.partial', 1);
+    expect(runtime.publishBatch('feed.partial', [{ data: 2, messageId: 'm2' }])).toBe(true);
+    expect(control).toHaveBeenLastCalledWith('PUBLISH', 'feed.partial', 2, 'm2', undefined);
+    expect(runtime.publishBatch('feed.partial', [{ data: 3, timestamp: 33 }])).toBe(true);
+    expect(control).toHaveBeenLastCalledWith('PUBLISH', 'feed.partial', 3, undefined, 33);
+    expect(control).toHaveBeenCalledTimes(3);
+    runtime.stop();
+  });
+
   it('dispatches every item locally when the topic is assigned to this worker', async () => {
     const control = vi.fn();
     const { runtime } = makeBatchRuntime({
