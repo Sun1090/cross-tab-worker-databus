@@ -1,3 +1,26 @@
+## [0.21.26] - 2026-09-25
+
+One false sentence about who cancels a persistence retry, corrected everywhere it had been written — found by an audit pass whose own scheduling step was wrong, which is the part worth reading.
+
+### Fixed
+
+- **`retryGeneration` has exactly one writer, and it is not `stop()`.** Four comments in `replay-manager.ts` described the cancellation generation as bumped "on suspend/stop". This class defines *both* of those methods, and only `suspend()` increments the field — `stop()` clears the retention-sweep timer and cancels nothing in flight. A maintainer auditing "what supersedes an in-flight retry" who read `stop()` first would have found no bump and had to conclude either that the comment was right and the code was broken, or that the pair meant something else. `ReplayManager` appears nowhere in the barrel, so no consumer can reach the wrong model; the class's own callers can, and `stop()`'s only caller in `src/` is `suspend()`.
+- **The half that was true is now stated at the level it is true at.** `CrossTabDataBus` has no `suspend()` method at all: it reaches the bump from two sites, the cluster's `onSuspend` handler and `beginStop()`. So a hidden *tab* and a stopped *bus* both do cancel their queued durable appends — through `ReplayManager.suspend()` — and that is exactly why the shorthand stayed plausible: the test that covers the behavior is named "cancels a pending persistence retry when the bus stops", and it passes whatever this class's `stop()` does. Nor was the sentence a stale remnant of code that once behaved that way — checked against `0cb8572`, the commit that split this file out, `stop()` has never touched the field; the pair has been false since the day it was written.
+- **One corrected claim about the corrected claims, caught before it shipped.** The pass began with a scan that decided which zero-count branch arms still lacked a verdict at their site by reading the line above each one. It reported 21 unvisited legs on a ledger of 46 in which **every** arm already carries one, because those verdicts run five to fifteen lines and state the measurement that closes the arm. Reading the reported sites with a window is what turned the pass into a one-defect pass instead of a re-do of closed work.
+
+### Tests
+
+- **None added, and that is the honest classification.** Nothing here moves behavior: the diff is comment lines only (`git diff -U0 src/` with every non-comment line filtered out returns nothing), the suite is unchanged at 936 tests, the perf gates at 5/5, and the branch-arm ledger at **46 zero-count arms of 1963** with aggregate 99.02 / 97.65 / 99.27 / 99.69 — byte-identical to `0.21.25`'s. A test asserting that `ReplayManager.stop()` cancels nothing would characterize an internal method with one caller rather than pin a contract, and this repository's rule is to name that difference instead of banking the green.
+
+### Documentation
+
+- **`AGENTS.md` gained the scoping rule.** A scan is a probe, so it needs the control the probe rules already demand: run it on a site you know is answered and check it reports "present" before its output becomes a task list — a scan that cannot distinguish *absent* from *not looked at* schedules rework over closed ground, and that rework looks like progress. The second half of the rule is the pair-shorthand itself: when a comment names two methods as doing the same thing, check each name in the class that owns the thing, because the pair can be accurate about callers and false about callees while every test passes.
+- **The shipped surface for a comment is wider than the declarations.** Verified rather than assumed: the corrected sentences appear in `dist/core/replay-manager.d.ts`, in the ESM chunk `dist/chunk-WKOCDMCH.js`, and in both CJS bundles (`dist/cjs/index.cjs`, `dist/cjs/centrifuge.cjs`) — esbuild preserves comments in the JS, and all of those paths are in `package.json` `files`.
+
+### Compatibility
+
+Comment-only. No export, frame, option, default or storage key moved; `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.25`.
+
 ## [0.21.25] - 2026-09-25
 
 A publication's fan-out set is now fixed when its delivery begins, which closes a shape that did not terminate: a handler that registers a fresh closure for its own topic made the message that triggered the registration keep delivering to the handlers it created.
