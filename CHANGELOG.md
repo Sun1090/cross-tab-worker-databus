@@ -1,3 +1,24 @@
+## [0.21.19] - 2026-09-24
+
+One behavior fix in the trace reporter, two test pins that each close a leg no test named, and the last unclassified uncovered-branch legs outside the two large modules written up at their sites.
+
+### Fixed
+
+- **A non-finite reading of the public `trace.now()` clock no longer blanks a metrics window.** `recordDispatched()` counted every dispatch that had a matching receive as a latency sample, and the `Math.max(0, …)` it used was added for a *backwards* clock — which `Math.max` clamps — while `NaN` passes straight through it, because `Math.max` returns `NaN` for any `NaN` argument. So the sample count rose while the bucket write landed on the non-index property `"NaN"`, which no percentile walk can reach (it iterates `0 … buckets.length - 1`). Measured on the unmodified reporter with one 50 ms sample and one NaN-delay sample: `dispatchSamples: 2`, `dispatchAvgMs: NaN` — which `JSON.stringify` renders as `null`, so the field disappears rather than reading wrong — and `dispatchP95Ms`/`dispatchMaxMs` pinned at the histogram ceiling because the rank exceeds the sum of every reachable bucket, while `dispatchP50Ms` still printed a plausible number. A dispatch whose delay cannot be computed now records **no** latency sample, on the same terms as a dispatch with no matching receive; `received`, `dispatched` and `topics` still count it, and a negative delay is still clamped to 0 because that pair is a real measurement in the wrong order. Both non-finite kinds (`NaN` and `±Infinity`) drop the sample.
+
+### Tests
+
+- **`ReplayManager.clearAll()` and `clearBefore()` on a persistence adapter that does not implement the method.** Both operations put their durable call behind an optional-method check, and `DataBusReplayPersistence` declares both methods optional, so a `load`/`append`-only adapter is legal — while every existing case either injected a full adapter or issued one `clearBefore` per lifecycle, so neither "no durable operation" leg had ever executed. The `clearAll` case asserts the local clear succeeds *without* reporting a persistence error (degrading the check to `this.persistence` turns an operation that had nothing durable to do into a `TypeError` after the retry budget — a caller-visible failure of a success). The `clearBefore` case asserts the **newest** cutoff wins over an earlier one when nothing prunes durably, which is where the filter over `load()`'s result is the only enforcement of a cutoff the caller already asked for.
+
+### Documentation
+
+- **Six uncovered-branch legs now say at the site why they read 0**, so a coverage pass stops re-hunting them: `websocket.ts`'s `connectPromise ?? undefined` (excluded by the field's whole write set — both assignments sit in the same frame as the premise fields the reuse gate reads), `replay-persistence.ts`'s `dbPromise === pending` fall-through (no writer fits between a rejection and the first reaction registered on that promise), `port-reaper.ts`'s null-handle arm (unreachable, not merely unreached: every `schedule()` caller is gated on a tracked port, and the only statement that nulls the handle without emptying the maps is that branch itself), and three `invalidate`+`reject` latches in `clear`/`clearTopic`/`clearBefore` that now point at the enumeration which already covered all four of them but sat only in `load()`.
+- **A third tier in the coverage ledger, in `AGENTS.md`.** With `noUncheckedIndexedAccess` on, an index read is `T | undefined` whether or not a hole is reachable, so a `?? fallback` that satisfies an assignment can neither run nor be deleted. Measured on four legs: `latencyBuckets[i] += 1` and `seen += buckets[index] ?? 0` in `src/core/trace.ts` are `TS2532`, `return this.connectPromise` in `src/websocket.ts` and `export const SDK_VERSION: string = __SDK_VERSION__` in `src/core/version.ts` are `TS2322`. Before hunting an arm, write the bare field and run `pnpm typecheck` — a compiler error means the counter is reporting a type artifact. `src/core/trace.ts` and `src/core/version.ts` carry that statement at the sites.
+
+### Compatibility
+
+Mixed-version peers are unaffected: no frame, default, storage key, or export moved. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.18`. The only consumer-visible difference is the fixed one above — a trace window whose clock misbehaves now reports finite numbers instead of a missing average.
+
 ## [0.21.18] - 2026-09-24
 
 No behavior, public API, protocol, or storage change. This release carries five test pins that each close a leg no test named, one rewritten source comment that ships through the bundles, and two repository workflow rules.
