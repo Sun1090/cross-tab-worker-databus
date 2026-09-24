@@ -20,6 +20,37 @@ import type { LoadWeightingOptions } from '../core/types';
 import { describeFailure } from './error-utils';
 import { PRUNE_STRATEGY } from './constants';
 
+// The three numeric predicates below share one guard shape — a `typeof` test first,
+// then a type-checking `Number.is*` predicate, then the sign — and each operand was
+// deleted on its own and measured against the whole suite. The sign test and the
+// `Number.is*` test are both pinned: six of those nine deletions die to named
+// option-rejection cases in `cluster.test.ts`, `data-bus.test.ts` and
+// `replay-persistence.test.ts`. Those six are not equally pinned, and the weakest one
+// is worth naming so nobody assumes a net here: `assertNonNegativeFiniteNumber`'s
+// predicate leg dies to exactly one test, while each of the other five legs dies to
+// several. That single case still feeds the right value —
+// `rejects a negative or non-finite loadWeighting weight` passes `NaN` and `Infinity`,
+// which only the predicate rejects once the sign test is left behind, and `-1`, which
+// only the sign rejects — so it is thin, not wrong.
+//
+// The `typeof value !== 'number'` operand cannot decide in any of the three. Both
+// `Number.isSafeInteger` and `Number.isFinite` answer false for a non-number without
+// coercing, so every value that trips this test trips the next one too, with the same
+// message. Measured rather than argued: a 23-value vector (numeric strings, `''`,
+// booleans, `null`, `undefined`, a prototype-less object, an array, a symbol, a
+// `BigInt`, a function, a boxed `Number`, `NaN`, `±Infinity`, `0`, `-0`, `1.5`, a value
+// past `MAX_SAFE_INTEGER`, `MAX_VALUE`) produced a byte-identical
+// accept/reject-and-message vector for all three guards as written and for each of the
+// three `typeof` tests deleted — so no test can pin this operand, and it is not a gap.
+//
+// It stays, because it is what one specific and very easy edit would otherwise break.
+// Writing the familiar global `isFinite(value)` instead of `Number.isFinite(value)`
+// coerces, and `eslint.config.js` configures no `no-restricted-globals` rule to catch
+// that substitution. Measured in both halves: with this operand in place, swapping the
+// predicate kills nothing; with both gone,
+// `rejects a non-positive or non-finite heartbeatIntervalMs` reddens, because
+// `heartbeatIntervalMs: '3000'` has become an accepted option. This operand is held
+// against that edit, not against an input.
 /** Assert `value` is a positive safe integer. Throws a TypeError otherwise.
  * The offending value is rendered through `describeFailure` because it is
  * arbitrary caller input: `String(Object.create(null))` throws, which would
@@ -30,14 +61,18 @@ export function assertPositiveSafeInteger(value: unknown, name: string): void {
   }
 }
 
-/** Assert `value` is a positive finite number. Throws a TypeError otherwise. */
+/** Assert `value` is a positive finite number. Throws a TypeError otherwise. The
+ * per-operand verdicts for this guard shape, including why its `typeof` test cannot
+ * decide anything, are recorded above `assertPositiveSafeInteger`. */
 export function assertPositiveFiniteNumber(value: unknown, name: string): void {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     throw new TypeError(`${name} must be a positive finite number.`);
   }
 }
 
-/** Assert `value` is a non-negative finite number. Throws a TypeError otherwise. */
+/** Assert `value` is a non-negative finite number. Throws a TypeError otherwise. Same
+ * guard shape, and the same verdict on its `typeof` operand, as noted above
+ * `assertPositiveSafeInteger`. */
 export function assertNonNegativeFiniteNumber(value: unknown, name: string): void {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new TypeError(`${name} must be a non-negative finite number.`);
