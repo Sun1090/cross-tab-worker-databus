@@ -152,15 +152,29 @@ export class WebSocketTransport<TData = unknown>
         config.connectTimeoutMs ?? this.connection.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
       if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
         this.connectTimer = setTimeout(() => {
-          // The `handshakeCompleted` term cannot be reached today: `onopen`
-          // cancels this timer directly and again through `settleConnect()`, so a
-          // completed attempt has no live timer left to fire. Measured — deleting
-          // only that term leaves all 880 tests green, while deleting it *and*
-          // both cancels makes the transport report a phantom
-          // `onStatus('error')` and abort a socket that had already connected.
-          // The term stays because that is the asymmetric cost, and because
-          // tests/websocket.test.ts's 'never lets the connect timer tear down a
-          // handshake that already completed' now holds the pair.
+          // This early return has never executed in any run of the suite, and the
+          // reason is the same for all three terms: no attempt can leave a timer
+          // armed behind it. Term 3 (`handshakeCompleted`) because `onopen` cancels
+          // here directly and again through `settleConnect()`; terms 1 and 2 because
+          // `this.socket` and `this.handlers` are reassigned only in `start()` and
+          // `stop()`, reaching either assignment in `start()` needs `socketActive`
+          // already false, and every path that lowers `socketActive` clears the
+          // armed timer first — `onclose` and `onerror` through `failConnect()`,
+          // `stop()` through `settleConnect()`, and this callback by nulling the
+          // handle as it fires. So the guard cannot distinguish anything, which is
+          // what its coverage arm records.
+          //
+          // It stays as the transport's statement that a superseded attempt must
+          // never act, because the domination is a property of those cancels rather
+          // than of this condition, and the asymmetry is measured: deleting only the
+          // `handshakeCompleted` term leaves the suite green, deleting only `failConnect()`'s cancel lets a dead attempt's
+          // timeout report a second failure for a connection the application was
+          // already told had failed, and the first pin's own comment records the
+          // third case — deleting the term *and* both cancels makes a healthy socket
+          // report a phantom `onStatus('error')` and get aborted. The two pins name
+          // the legs they hold: tests/websocket.test.ts's 'never lets the connect
+          // timer tear down a handshake that already completed', and 'leaves no
+          // connect timer armed when the handshake fails on a close'.
           if (this.socket !== socket || this.handlers !== handlers || handshakeCompleted) return;
           handshakeFailed = true;
           this.connectTimer = null;
