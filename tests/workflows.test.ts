@@ -84,11 +84,20 @@ describe('workflow files', () => {
   });
 
   it('keeps enough published-consumer retry budget for npm propagation', () => {
-    // The 0.20.89 tag run published successfully and then failed the blocking
-    // `verify:published` gate because `npm pack` still returned ETARGET for the
-    // entire old 24 x 5 s (2 min) budget. Registry lag must not turn a good
-    // release red, so pin a floor on the total wait and on each number being
-    // positive. A genuinely missing package still exhausts the budget.
+    // The ceiling is a sum of two measured lags, not a comfort number. (1) The
+    // registry records the publish *minutes* after `npm publish` returns: the
+    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.30 was
+    // 75-310 s. (2) The packument `npm pack` resolves against is served
+    // `cache-control: public, max-age=300`, so a copy anywhere in the path may be
+    // five minutes stale by design and cannot be read sooner than that. Re-derive
+    // (1) from a tag run: subtract the `Publish to npm` step's completion from
+    // `time[<version>]` in the packument (`gh api
+    // repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs`).
+    //
+    // 0.20.89 exhausted a 2-minute budget and 0.21.30 exhausted a 6-minute one,
+    // both after successful publishes; the 6-minute case failed at 364 s while the
+    // version's tarball was already fetchable. So the floor below is the measured
+    // worst case of both lags added, and the workflow's actual budget sits above it.
     const workflow = readWorkflow('release.yml');
     const attempts = Number(
       /PUBLISHED_VERIFY_ATTEMPTS:\s*(\d+)/.exec(workflow)?.[1]
@@ -98,10 +107,12 @@ describe('workflow files', () => {
     );
     expect(Number.isSafeInteger(attempts) && attempts > 0, 'PUBLISHED_VERIFY_ATTEMPTS must be a positive integer').toBe(true);
     expect(Number.isFinite(delayMs) && delayMs > 0, 'PUBLISHED_VERIFY_DELAY_MS must be a positive number').toBe(true);
+    const packumentCacheLifetimeMs = 300_000;
+    const maxMeasuredAckToRecordMs = 310_000;
     const totalMs = attempts * delayMs;
     expect(
       totalMs,
-      `release.yml: the published-consumer gate only waits ${totalMs / 1000}s; keep at least a 5-minute ceiling so npm CDN lag cannot fail a good release`
-    ).toBeGreaterThanOrEqual(5 * 60 * 1000);
+      `release.yml: the published-consumer gate only waits ${totalMs / 1000}s; it must clear the measured ack->registry-record gap (${maxMeasuredAckToRecordMs / 1000}s) plus one full packument cache lifetime (${packumentCacheLifetimeMs / 1000}s), or a good release fails this blocking step`
+    ).toBeGreaterThanOrEqual(packumentCacheLifetimeMs + maxMeasuredAckToRecordMs);
   });
 });

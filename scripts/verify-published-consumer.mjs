@@ -26,8 +26,8 @@ const stripLeadingV = value => String(value).trim().replace(/^v(?=\d)/i, '');
  * legitimate thing to want, and it is the only way to ask the question.
  *
  * Without it the target comes from `npm view <pkg> version`, and that read can be
- * served from npm's local packument cache. Observed on 2026-09-25, minutes after a
- * publish: two consecutive reads returned the release that had just been
+ * served from npm's local packument cache. Observed minutes after the 0.21.29 publish
+ * (2026-09-24 UTC): two consecutive reads returned the release that had just been
  * superseded, while `npm view <pkg> versions dist-tags --json` against the same
  * registry already reported the new one, and a third read of the original form
  * then agreed. Naming `--registry` explicitly does not defeat the local cache.
