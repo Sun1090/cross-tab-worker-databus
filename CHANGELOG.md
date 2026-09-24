@@ -1,3 +1,22 @@
+## [0.21.21] - 2026-09-24
+
+One branch arm closed by a call that had never been made, three shipped comment claims retracted against the code they describe, and a repository rule about the difference between a guard nobody can pin and a guard nobody has pinned.
+
+### Tests
+
+- **`queueStartAfterStop()`'s no-gate fallback had never run.** `this.stopPromise ?? Promise.resolve()` is reached with `stopPromise` null only by a *failed initial open*, whose teardown belongs to `pendingStop` instead — and nothing reachable through a browser re-enters `start()` inside that window, because the only synchronous application-code seam there is the caller's own `ClusterEnvironment` port. The new case drives that seam (a storage write that calls back into the bus) and closes one of `src/`'s 48 zero-count branch arms; `data-bus.ts` goes 12 → 11, and aggregate branches 97.55 → 97.60. What gives the test teeth is not the expression it was written for: routing `start()` on the gate instead of the flag (`if (this.stopping)` → `if (this.stopPromise)`) reddens it, while the fallback operand itself is provably consequence-free, because `start()` chains the reopen behind `pendingStop` regardless.
+- **A second test was written, measured, and deleted.** A case that queued a restart behind a transport whose `stop()` was held open passed under all four single-leg mutations tried, so it pinned nothing: a bounded number of awaited microtasks cannot observe a wait whose wakeup needs the timer queue. Its zero kill rate is recorded at the site instead, next to the measurement of what the guard actually does — deleting the read turns one deferral into a microtask busy-wait that starves its own wakeup, which the suite reports as an out-of-memory worker abort in the lifecycle fuzz rather than as a failed assertion.
+
+### Documentation
+
+- **Three comment claims re-read against the code, and all three were wrong.** `subscribe()`'s note described the `?? this.currentRecord` fallbacks as "the identical pair" where the file holds three (the third — the stale-handoff re-election — carried no site text at all, so it had been quietly re-hunted by every coverage pass); `reopenTransport()`'s note quoted a mutation result ("fails exactly one test, with the guard present or deleted") that reproduces under none of four experiments now run in its place; and of the eleven `:NNN` citations pointing into this repository's own files, **six were wrong and one imprecise**, including two that had drifted *inside another comment*. Every one now names a symbol or a condition instead of a position, and the numbers that were measured — three, two and seven `tsc` rejections for the three fallbacks, 194/194 and 51-of-194 for the absorb — are what the text carries.
+- **The verification that a prose sweep touched no code.** `npx esbuild --loader=ts` over each changed file at both revisions, then `cmp`: identical emitted JavaScript for all five files. That is a stronger statement than counting which diff lines begin with `//`, and it costs one loop.
+- **Two `AGENTS.md` rules.** A guard whose deletion changes *when* work happens rather than *what* it produces cannot be pinned by a bounded assertion — name the fuzz as the witness at the site instead of adding a test that looks like coverage. And a line-number citation in a comment decays on every edit above it, silently, so cite the symbol; keep a number only where no name exists, and pin it to a dependency version there.
+
+### Compatibility
+
+Mixed-version peers are unaffected: no frame, default, storage key, export or behavior moved, and the only consumer-visible difference is comment text, which reaches them through both the declarations and the bundles. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.20`.
+
 ## [0.21.20] - 2026-09-24
 
 Six uncovered branch arms closed by calls no test had ever made, one shipped sentence corrected, and the coverage ledger given a third tier — the kind a compiler, not a test, owns.
