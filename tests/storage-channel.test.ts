@@ -173,6 +173,27 @@ describe('createStorageEventChannel', () => {
     await Promise.resolve();
     expect(received, 'a valid frame with no seq/message must be ignored').toEqual([]);
 
+    // The envelope's two required fields, rejected **one at a time**. The write
+    // above fails both checks at once, so deleting either condition from the guard
+    // still drops it — measured, all four operands of that guard survived the suite
+    // before these two cases. A `seq` that is a numeric string is rejected on the
+    // same terms as a missing one: the envelope's field is a number, not a value
+    // that can be coerced.
+    writer.setItem('cross-tab-worker-databus:channel:chan', JSON.stringify({ message: { type: 'REGISTRY', sourceWorkerId: 'x' } }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received, 'an envelope with no sequence number must be ignored').toEqual([]);
+
+    writer.setItem('cross-tab-worker-databus:channel:chan', JSON.stringify({ seq: '1', message: { type: 'REGISTRY', sourceWorkerId: 'x' } }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received, 'a string sequence number must not be coerced').toEqual([]);
+
+    writer.setItem('cross-tab-worker-databus:channel:chan', JSON.stringify({ seq: 2 }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(received, 'an envelope with no message must be ignored').toEqual([]);
+
     // The channel is still usable afterwards: containment, not a one-way shut
     // down of the listener.
     a.channel.postMessage({ type: 'REGISTRY', sourceWorkerId: 'worker-a' });
