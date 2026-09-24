@@ -17,6 +17,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
       'no-console': ['error', { allow: ['warn', 'error'] }],
+      'no-restricted-globals': ['error',
+        { name: 'isFinite', message: 'Use Number.isFinite() - the global coerces its argument, so a numeric string passes a finite check.' },
+        { name: 'isNaN', message: 'Use Number.isNaN() - the global coerces its argument.' }],
     },
   },
   {
