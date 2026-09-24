@@ -7975,7 +7975,7 @@ corroborates the 26-spec collection.)
 ## Phase 148 / A deferred transport subscribe could outlive its own unsubscribe, and the connection kept the channel
 
 - **Milestone / version:** `0.21.16` (pending), branch `fix/orphan-transport-subscription` from `main` at `8f8cf5b`, commit `ce74b2c` plus this record.
-- **Status:** **implemented and locally verified; PR open.**
+- **Status:** **merged — PR #241, squashed as `d1fcb91`, shipped in `0.21.16`.**
 - **The defect.** `subscribeTransport()` / `unsubscribeTransport()` mutate `transportSubscribedTopics` and then hand
   `runTransport()` a *captured call*. When the subscribe parked behind a pending opening and the release reached the
   transport immediately — the window after the opening resolves but before its own parked continuation runs — the pair
@@ -8032,7 +8032,7 @@ corroborates the 26-spec collection.)
 ## Phase 149 / The fuzz channel now delivers like a browser, and that closes the defect question 0.21.15 left open
 
 - **Milestone / version:** feeds `0.21.16` (its fix merged as `d1fcb91` / PR #241). Branch `test/async-channel-delivery`, commit `f8ba665` plus this record, rebased onto `origin/main` with `git rebase --onto origin/main <pre-fix-tip>` so the already-squashed commits are not replayed.
-- **Status:** **implemented, all gates green locally, PR open.**
+- **Status:** **merged — PR #242, squashed as `723d582`, shipped in `0.21.16`.**
 - **What changed.** `ChannelHub` gained `setAsyncDelivery(true)`: every post is deferred by one `queueMicrotask`, which is the ordering a real `BroadcastChannel` has. The default stays synchronous — 15 tests in `cluster` / `data-bus` / `stability` post a frame and assert without awaiting — so the option is enabled on the coordination sweep's per-seed hub only. New pin: `delivers on a later microtask once a hub opts into browser ordering`, four assertions (default delivers in the stack; opted-in hub delivers nothing in the stack; a peer that closed before delivery gets nothing; the sender closing does not cancel its own frame, which is what `forgeSubscribe()` depends on).
 - **The superseded estimate, and the experiment that replaced it.** Phase 146 wrote "~16 tests" from an inference about which files *looked* synchronous. Measured by flipping the hub's default to async and running the suite: **17 failures** — 8 in `cluster`, 6 in `data-bus`, 1 in `stability` (the post-and-assert group), plus the two hub-infrastructure pins in this file. Every one of the 15 is a frame that had not been delivered when the assertion ran, i.e. harness shape, not a product defect; and the first assertion of the new pin is precisely what makes that flip impossible to land quietly. The older estimate is left standing in its own released entry, since it was superseded rather than wrong in kind.
 - **The result that justified it, run as a control both ways.** On `origin/main`'s `data-bus.ts` (i.e. before #241) with the async hub, the sweep fails the six seeds 0.21.15 recorded — 100, 727, 1129, 1487, 1756 with `no subscriber left but owners=[] transportSubscriptions=[a]`, and 1853 with `1 subscriber(s) need one owner that holds the transport, got owners=[b] transportSubscriptions=[a b]`. With #241 in, the same async sweep passes all 5,000 seeds. The synchronous hub passes on the *broken* code, which is the whole reason a shipped defect stayed invisible to a harness that exercises the path constantly. So the open product question in that entry is closed, and the CHANGELOG now says so in the release that fixes it.
@@ -8044,6 +8044,54 @@ corroborates the 26-spec collection.)
 - **Branch hygiene:** after the merge, `fix/orphan-transport-subscription` (remote + local), and the two spent local branches `diagnose/churn-frame-attribution` (merged) and `release/0.21.15` (squashed as #239) were deleted and refs pruned; `main` was fast-forwarded to `d1fcb91`. Only `main` and this topic branch remain.
 - **Risk / rollback:** test-harness only, no `src/` change in this commit. The one behavioral surface is the shared `ChannelHub`, and the new pump is reachable only through an explicit opt-in that no other file calls.
 - **Next:** the 0.21.16 release chain for #241's fix (read host load first: the `bench:browser` sample has now been deferred across two releases). Then the remaining ledger: the arms `reference-uncovered-arm-ledger` still lists, and the unexplained single red coordination run recorded in Phase 148 — CI on this PR is that capture.
+- **Update date:** 2026-09-24.
+
+## Phase 150 / 0.21.16 shipped — the patch that makes a deferred transport operation cancelable
+
+- **Milestone / version:** `0.21.16`, prepared on branch `release/0.21.16` from `main` at `723d582`.
+- **Status:** **published.** PR #243 merged (squash) into `main` as `c1bb407`; annotated tag `v0.21.16` peels to
+  exactly that commit; the `Release` run is `35955059490`, whose `Publish to npm` step reports `success`, and
+  `registry.npmjs.org` already answers `dist-tags.latest = 0.21.16` with the version listed. Verified from a clean
+  consumer offline as well: `PUBLISHED_VERSION=0.21.16 pnpm verify:published` exits 0
+  ("verified published cross-tab-worker-databus@0.21.16 ESM/CJS consumers").
+- **What the release contains.** Two PRs since `v0.21.15`: **#241** (`d1fcb91`) — the behavior fix: a transport
+  subscribe/unsubscribe deferred behind an opening or a recovery gate now carries the current desired state and is
+  re-read where it resumes, so it can no longer flush after the release that cancelled it and strand a channel on the
+  connection; and **#242** (`723d582`) — test-harness fidelity plus the shipped-doc corrections that fix invalidated.
+- **Why this is a patch and not a docs release.** `src/core/data-bus.ts` changes observable behavior for any consumer
+  whose application releases a subscription while the transport is opening — previously that could leave the tab
+  permanently subscribed to a released topic and deaf to a re-taken one. Plus `docs/*.md`, both READMEs and
+  `CHANGELOG.md` are in `package.json` `files`, so this version also ships corrected consumer prose.
+- **Verification (all on the release tree):** `pnpm check` 0 (typecheck, build, 37 files / **906** tests, 5/5 perf
+  gates in 793 ms), `pnpm lint` 0, `pnpm bench` 0 (28 benchmarks), `pnpm test:coverage` 0 at 99.01 / 96.91 / 99.27 /
+  99.69 against the 98/96/98/99 floors, `pnpm test:e2e` **37 passed (2.0 m)**, `pnpm verify:compat` 0
+  ("0.21.16 preserves public exports and type metadata from v0.21.15"), `pnpm verify:types` 0
+  ("6 entries, 90 importable names, surface closed"), `pnpm verify:pack` 0, `pnpm audit --registry=…`
+  "No known vulnerabilities found", `git diff --check` 0,
+  `RELEASE_TAG=v0.21.16 node scripts/verify-release-version.mjs` 0, `npm pack --dry-run --json` 109 files / 4.13 MB
+  with `docs/progress.md` absent and both roadmaps present (roadmap parity re-measured: 131 h2 / 287 list items on
+  each side). CI on the release PR: `verify`, `browser`, `analyze`, `CodeQL` all pass.
+- **Deferred for the third consecutive release, with its numbers.** `pnpm bench:browser` / `pnpm bench:compare`.
+  Host load averaged 12.7 early in the window, 40.6 at the start of the gate run, and **237 (1-min) / 155 (5-min)**
+  at its end, with CPU at 74 % idle at the first reading and 35 % at the last. Per step 4 of
+  `docs/release-checklist.md` no sample was taken, so `docs/benchmarks.md` still stops at the last idle-host run.
+  The item is now older than two shipped versions, which is a signal about this machine's availability rather than
+  about the benchmark: the honest follow-up is either a host that stays quiet long enough for two samples, or a
+  recorded decision that the trend doc is refreshed on opportunity rather than per release.
+- **A new defect found by the raised fidelity, recorded and not shipped.** Adding a storage-write-failure op to the
+  coordination sweep reproduced a second, independent orphan: a **confirmed** durable route naming a **live** worker
+  that holds no assignment for the topic leaves the topic permanently ownerless — the real subscriber defers to the
+  phantom owner, and `reconcileAssignedTopics()` walks only `assignedTopics`, so no leg visits the inverse case. Task
+  **#77** carries the dump, the leg enumeration, the four fix constraints, and the two setup facts that blocked the
+  first unit-test attempt (a two-runtime election does not elect the peer you started first; and an assertion written
+  as `.not.toBe('worker-a')` passes vacuously when the record is simply deleted).
+- **Two stale status rows corrected:** Phase 148 said "PR open" and Phase 149 said "implemented, PR open"; both are
+  now recorded as merged — #241 as `d1fcb91`, #242 as `723d582`, each shipped in this version.
+- **Risk / rollback:** the behavior change is confined to `runTransport()`'s deferred paths and is additive (an
+  optional parameter). Rollback is `git revert c1bb407` plus a follow-up patch release; tags are immutable once
+  pushed, and no storage schema or wire format moved.
+- **Next:** #77 (the stranded self-route), on branch `fix/stranded-self-route-orphan` off `main`. Then the
+  `reference-uncovered-arm-ledger` remainder, and the idle-host browser-bench sample.
 - **Update date:** 2026-09-24.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
