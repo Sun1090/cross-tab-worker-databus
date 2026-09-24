@@ -1769,14 +1769,21 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     //
     // It is kept anyway, which is a different verdict from 0.21.2 and 0.21.3's two
     // deletions, and the reason is the shape of the failure rather than its
-    // likelihood. Measured: forcing `pending` to reject fails exactly one test
-    // ("reopens after repeated hide/show cycles…") whether this line is present or
-    // deleted, so no assertion protects the premise. But the two outcomes are not
-    // symmetric — with the absorb the reopen still proceeds, without it the
-    // `.then()` below is skipped and the bus silently stays closed after a
-    // pageshow. A guard whose deletion converts "degraded" into "stuck" is worth
-    // its one uncovered function; `performStop()`'s deleted twin sat inside a
-    // `try`, where the rejection was already caught.
+    // likelihood, measured four ways on `tests/data-bus.test.ts`. Deleting the absorb
+    // alone: 194/194 green, so no ordinary run notices it. Making `pending` reject at
+    // this seam for every reopen in the file, absorb intact: also 194/194, so nothing
+    // even observes the violation this block's premise says cannot happen. The same
+    // forcing with the absorb deleted: 51 of 194 fail. And the forcing's extra
+    // `.then` link alone, rejection absent: 194/194, which is what makes the 51 the
+    // rejection rather than the added link. A note here previously read "fails exactly
+    // one test whether this line is present or deleted"; that reproduces under none of
+    // the four, and the corrected set argues the same way more strongly — no assertion
+    // protects the premise, and deleting the guard is not one diagnosable failure but
+    // the file going down with it. The outcomes are also asymmetric: with the absorb
+    // the reopen still proceeds, without it the `.then()` below is skipped and the bus
+    // silently stays closed after a pageshow. A guard whose deletion converts
+    // "degraded" into "stuck" is worth its one uncovered function; `performStop()`'s
+    // deleted twin sat inside a `try`, where the rejection was already caught.
     const opening = pending
       .catch(() => undefined)
       .then(() => this.openTransport(config, Promise.resolve(), false, lifecycleEpoch));
