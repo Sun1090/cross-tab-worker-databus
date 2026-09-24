@@ -200,6 +200,39 @@ describe('public documentation', () => {
     }
   });
 
+  it('keeps each progress-log phase entry numbered once, in order, and above the standing sections', () => {
+    // Phase entries are appended at a shared anchor, so two branches that each
+    // add a `## Phase N / …` block collide into two blocks with one number —
+    // and the merge can leave one of them *below* the `## Next candidates`
+    // heading the phase log is supposed to sit above. Both happened at once:
+    // closed PR #233 left a second `## Phase 142` after that heading, next to
+    // merged PR #234's copy, and nothing read wrong until
+    // `grep -c "^## Phase 142"` returned 2. The legacy convention in the first
+    // 83 phases writes `## Phase N (in progress …)` plus a `## Phase N result …`
+    // line, which legitimately repeats a number, so this gate covers the
+    // current `## Phase N / Title` form only.
+    const lines = readFileSync(join('docs', 'progress.md'), 'utf8').split('\n');
+    const standing = lines.findIndex(line => /^## Next candidates\b/.test(line));
+    expect(standing, 'docs/progress.md must keep its "## Next candidates" section').toBeGreaterThan(-1);
+    let previousPhase = 0;
+    let previousLine = 0;
+    for (const [index, line] of lines.entries()) {
+      const heading = /^## Phase (\d+) \//.exec(line);
+      if (!heading) continue;
+      const phase = Number(heading[1]);
+      expect(
+        phase > previousPhase,
+        `docs/progress.md:${index + 1} "${line}" repeats or reorders a phase number; the previous entry is at :${previousLine} (Phase ${previousPhase})`
+      ).toBe(true);
+      expect(
+        index < standing,
+        `docs/progress.md:${index + 1} sits below the "## Next candidates" heading at :${standing + 1}; phase entries belong above it, in the log`
+      ).toBe(true);
+      previousPhase = phase;
+      previousLine = index + 1;
+    }
+  });
+
   it('marks every CHANGELOG version heading as an h2', () => {
     // The Release workflow finds a release's notes by matching `## [<version>]`.
     // A version heading at the wrong level (a single `#`) is invisible to that

@@ -7154,7 +7154,7 @@ corroborates the 26-spec collection.)
 ## Phase 133 / The third shipped surface closed: 10 body-comment claims, and the two copies the queue missed
 
 - **Milestone / version:** post-`0.21.12`, unreleased (accumulating; comment-and-docs only, so no CHANGELOG section until a freeze).
-- **Status:** branch `docs/body-comment-audit`, PR open against `main`.
+- **Status:** **merged** — PR #224, squashed as `aec8f29` on `main`, and shipped in `0.21.13`.
 - **Completed work.** Phase 132 widened the shipped-prose surface from the declarations to
   `dist/**/*.js` / `.cjs` and left the internal body comments as the remaining scope. This pass took
   the 10 candidates that audit queued (11 claims — one entry carried two legs), **re-verified every
@@ -7243,7 +7243,7 @@ corroborates the 26-spec collection.)
 ## Phase 134 / The rest of the shipped-comment surface: 23 claims in 13 modules, and the dependency claims among them
 
 - **Milestone / version:** post-`0.21.12`, unreleased (accumulating; comment-only, no CHANGELOG section until a freeze).
-- **Status:** branch `docs/body-comment-audit-pass2`, PR open against `main`.
+- **Status:** **merged** — PR #225, squashed as `db8faf6` on `main`, and shipped in `0.21.13`.
 - **Completed work.** Phase 133 closed `data-bus.ts` and `cluster.ts` and named what was left —
   internal comments in the other JS-emitting modules. Two read-only passes collected 24 candidates
   across 13 files; **23 were confirmed against `src/` (and, for the transport half, against the
@@ -7362,7 +7362,7 @@ corroborates the 26-spec collection.)
 ## Phase 135 / The bench gate gets the second leg its median could not provide
 
 - **Milestone / version:** post-`0.21.12`, unreleased. **This one changes behavior** — in a verification script, not in the library — so it is the first entry in this run of passes that needs a CHANGELOG line at the next freeze.
-- **Status:** branch `perf/bench-noise-band`, PR open against `main`.
+- **Status:** **merged** — PR #226, squashed as `e28554b` on `main`, and shipped in `0.21.13`.
 - **Why this was the task.** Phase 134 recorded the mistake rather than hiding it: a comment-only branch failed `bench:compare --fail-above-pct 50` twice at +107 % and +121 % and "failed" once at −56.7 %, and the prior art at `scripts/bench-compare.mjs:89-96` already documented *why* — `dedup1000Ms` and `traceAndPublish1000Ms` alternate between a fast and a slow mode on identical code, and the median-of-five baseline exists to absorb exactly that. The gap the median does not close: **a median is stable only while the modes stay mixed.** When several consecutive reports land in the same mode, the summary statistic itself jumps, and the percentage has nothing left to compare against. That is what "same tree, +121 % then −56.7 % minutes apart" was.
 - **What changed.** `compareAgainstBaseline` rows gained a fourth element, `ceiling` — the highest sample the baseline summarises — and `findRegressions` now requires **both** legs: the delta must exceed `failPct` *and* the new value must exceed the ceiling. The explicit two-report path passes `ceiling: null`, which means "no history to consult", so that path is unchanged by construction. A new `findWithinBaseline` returns the complement, and the CLI prints it under `within-baseline, not gated` before the verdict, so an excused metric is visible rather than silently passing.
 - **The cost, stated.** A *sustained* regression that stays inside the observed five-report range is now invisible to the gate. That is the deliberate trade: on a multi-modal metric "inside the range recently measured on this machine" carries no evidence, and the alternative — trusting the percentage — produced false failures on branches that provably changed no executable line. The suppression list is the mitigation: it names the metric, its percentage, and the ceiling, so the reader sees the resolution limit instead of inferring health.
@@ -7442,7 +7442,7 @@ corroborates the 26-spec collection.)
 - **Milestone / version:** post-`0.21.13` work on branch `docs/zh-mirror-audit` (commits `3e3e64c`
   and the follow-up), PR #228. No behavior, wire-format, storage-layout or protocol change; the
   `src/` diff is comments only, so this is patch-release material.
-- **Status:** open PR #228, locally green; not yet merged or released.
+- **Status:** **merged** — PR #228, squashed as `f7d8ecf` on `main`, and shipped in `0.21.14`.
 - **Why this pass existed.** The three earlier sweeps each read one shipped surface —
   `docs/**` + READMEs (0.21.11/0.21.12), declaration JSDoc (#223), `src` body comments
   (#224/#225) — and the docs sweep corrected sentences in whichever language it was reading at the
@@ -7496,7 +7496,7 @@ corroborates the 26-spec collection.)
 - **Milestone / version:** post-`0.21.13`, unreleased. Branch `test/fuzz-seed-deadline`, off `main` at
   `f7d8ecf`. No `src/`, no export, protocol, storage-layout or wire change — harness and docs only, so
   it is patch-release material.
-- **Status:** open PR, locally green; not yet merged or released.
+- **Status:** **merged** — PR #229, squashed as `907521d` on `main`, and shipped in `0.21.14`.
 - **Trigger.** A `verify` run reported
   `[coordination-invariants] stopped at 1046/5000 seeds after 158476ms (slowest seed 151850ms)` and then
   `Error: Test timed out in 120000ms`. Reading the pair rather than dividing it: 1,045 seeds sum to
@@ -7548,7 +7548,7 @@ corroborates the 26-spec collection.)
 
 - **Milestone / version:** post-`0.21.13`, unreleased. Branch `docs/knowntopics-enumeration`, off `main`
   at `907521d` (#229). Docs only — four files, both languages, no `src/` change, so it is patch material.
-- **Status:** open PR, locally green; not yet merged or released.
+- **Status:** **merged** — PR #230, squashed as `e133c48` on `main`, and shipped in `0.21.14`.
 - **Why this pass existed.** Phase 137 closed with one item left: `docs/architecture.md`'s tables were the
   last shipped rows written before that pass, and could carry the same absolute in a different phrasing.
   They did.
@@ -7643,7 +7643,7 @@ corroborates the 26-spec collection.)
 
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/misrouted-control-pin`, off `main` at
   `09c6e5c`. Test-only; `src/` is untouched, so it is patch material.
-- **Status:** open PR, locally green.
+- **Status:** **merged** — PR #232, squashed as `bc701d0` on `main`.
 - **The standing question this closes.** The 12-arm ledger kept `handleControlMessage`'s first line
   (`if (message.targetWorkerId !== this.workerId) return;`) as "reachable, consequence unnamed". An earlier
   attempt to measure it was abandoned when a contaminated mutant run muddied the attribution, so it was
@@ -7684,7 +7684,7 @@ corroborates the 26-spec collection.)
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/bench-baseline-caveat-v2` (rebased
   onto `bc701d0` after #232 merged; it supersedes PR #233, whose branch could not be rebased without a
   force-push), off `main`. Documentation only, in both languages; no `src/`, no script change.
-- **Status:** open PR, locally green.
+- **Status:** **merged** — PR #234, squashed as `f76caca` on `main`.
 - **What happened.** While preparing `0.21.14` the browser bench failed its 50% ceiling
   (`publish/dedicated 77.3 ms`, `publish/shared 67.7 ms`, against a ~38/~34 ms fast mode). The checklist's
   own instruction is "re-run and check the spread", so five more runs were taken — and the gate went green.
@@ -7692,6 +7692,9 @@ corroborates the 26-spec collection.)
   `70.6`, because its baseline (both the median leg and the maximum leg) is drawn from the same rolling
   archive that every `bench:browser` run appends to. The samples taken to investigate the failure became the
   baseline that excused it.
+- **Why the bimodal fix did not cover this.** `0.21.14`'s shipped note describes the ceiling leg (added so a
+  median sitting in the slow mode cannot excuse a fast-mode regression). It does not help when the slow samples
+  are *being written by the investigator*: the ceiling rises with them.
 - **The measurement that settled what it actually was.** With those samples moved out of the archive, one
   clean run at host load 7.7–15.1 showed every metric rising together — `dedicated +92.5%`, `shared +99.2%`,
   `dedup +43.4%`, `trace +21.0%`. That is the contention shape, the inverse of the single-metric-up /
@@ -7709,70 +7712,25 @@ corroborates the 26-spec collection.)
   host is still loaded, and re-running into a green result is the exact behavior being documented.
 - **Risk / rollback:** published prose (`docs/release-checklist.md` is in `package.json` `files`);
   `git revert`.
-- **Next:** merge; then take an idle-host `bench:browser` sample and refresh `bench:trend` before the next
+- **Open, not silently deferred.** The archive itself is `bench-results/` (gitignored, per-machine — the
+  earlier draft of this entry named a `reports/bench-history/` path that does not exist in this repository),
+  and the fix is procedural, not structural: a contention sample stays in the baseline until newer reports
+  push it out of the five-report window. Re-read on this machine on 2026-09-24, the five newest
+  `publish/dedicated` samples are 48.9 / 38.5 / 36.6 / 40.4 / 37.2 ms, so the 77.3 / 67.7 pair is gone — which
+  is the window turning over, not the gate getting safer. The structural version would be to let
+  `bench:compare` exclude contention samples (e.g. a host-load stamp recorded per report); that is a
+  gate-behavior change and was not attempted here.
+- **Next:** take an idle-host `bench:browser` sample and refresh `bench:trend` before the next
   freeze. Task #69 also asks whether `bench-compare.mjs` should refuse to baseline against reports whose
   whole-report skew marks them as contention samples — deliberately left as a question, since a filter that
   drops samples is a bigger design decision than a checklist sentence.
-- **Update date:** 2026-09-24.
-
-## Next candidates (project is feature-complete; future work is verification/deepening)
-
-- Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
-  handoff suite to a dedicated workflow if the shared-runner failure rate stays high.
-  -> RESOLVED in phase 6: the storage-event handoff test's budgets stacked past
-  the 60s test timeout; global timeout now 90s + explicit 120s there. Remaining
-  shared-runner slowness shows up as slower passes, not failures.
-- Add a browser benchmark trend doc or CI gate for bench:browser drift.
-  -> DONE in phase 6: pnpm bench:trend generates docs/benchmarks.md (en+zh)
-  from the bench-results archive; bench:compare gate documented in both
-  release checklists. (A CI regression-threshold gate stays deliberately
-  local-only: shared-runner timing noise makes numeric CI gates unreliable.)
-- Release-readiness: run the full release checklist dry (verify:published needs a
-  published version; everything else verified locally).
-  -> DONE for 0.20.96: the checklist ran end to end against the real publish,
-  including the previously unrunnable `verify:published` gate (Release run
-  35660663344, every named step green).
-
-## Phase 142 / The bench gate that can excuse its own failure
-
-- **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/bench-baseline-caveat`, off `main` at
-  `bc701d0`. Documentation-only.
-- **Status:** open PR.
-- **What the 0.21.14 freeze exposed.** `pnpm bench:compare` reported a regression on `publish/dedicated`
-  (77.3 ms against a ~38 ms ceiling), the machine was loaded (`uptime` 7.7 / 11.18 / 15.1), and four re-runs
-  later the gate said OK. That green was manufactured by the re-runs themselves: `findBaseline()` takes the
-  median **and** the maximum of the last five reports in the rolling archive, and every `pnpm bench:browser`
-  run appends to that same archive — so samples taken while investigating a contention failure become the
-  baseline that excuses it. Measured directly: the two suspect runs were `publish/dedicated` 77.3 / 67.7 ms
-  and `publish/shared` 67.7 / 66.8 ms against fast-mode medians of 38.3 / 34.3; after they were appended, the
-  baseline median for `publish/dedicated` read 70.6 ms, and five further re-runs all reported OK. Moving those
-  six samples aside and taking one clean run at load 7.7 put **every** metric up together (92.5 / 99.2 / 43.4 /
-  21.0 percent) — the contention signature, not a regression in one leg.
-- **Why the bimodal fix did not cover this.** `0.21.14`'s shipped note describes the ceiling leg (added so a
-  median sitting in the slow mode cannot excuse a fast-mode regression). It does not help when the slow samples
-  are *being written by the investigator*: the ceiling rises with them.
-- **What shipped.** Step 4 of both release checklists now reads: check `uptime` before re-running, record a
-  suspect failure as deferred with its load instead of chasing a green, keep off-mode samples out of the
-  archive, and never regenerate `docs/benchmarks.md` from them.
-- **Changed files:** `docs/release-checklist.md`, `docs/zh/release-checklist.md`, `CHANGELOG.md`,
-  `docs/progress.md`.
-- **Verification:** bilingual parity guard `tests/documentation.test.ts` (17/17); a `git diff --numstat` check
-  confirming the English and Chinese edits add 4 lines each and delete nothing. No code changed, so no
-  rebuild was needed.
-- **Risk / rollback:** documentation only; `git revert`.
-- **Open, not silently deferred:** the archive under `reports/bench-history/` still holds those six slow-mode
-  samples, and the next `bench:compare` will read them. The structural fix would be to let `bench:compare`
-  exclude contention samples (e.g. a host-load stamp recorded per report), which is a gate-behavior change and
-  has not been attempted here.
-- **Next:** land it, then an idle-host `bench:browser` sample plus a `pnpm bench:trend` refresh so the shipped
-  tables are drawn from the fast mode.
 - **Update date:** 2026-09-24.
 
 ## Phase 143 / The second addressee guard, pinned where its own staleness test cannot reach
 
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/route-released-addressee-pin`, off `main`
   at `bc701d0`. Test-only; `src/` untouched, so patch material.
-- **Status:** locally green, PR open.
+- **Status:** **merged** — PR #235, squashed as `e76df81` on `main`; `verify` and the E2E step both green there.
 - **Why this leg and not another.** `0.21.6`'s prose says both point-to-point handlers enforce the
   `targetWorkerId` invariant, and Phase 141 pinned the `CONTROL` one. The `ROUTE_RELEASED` sibling looked
   already covered, because its staleness test reads the durable route: a non-target that does not own the topic
@@ -7806,7 +7764,10 @@ corroborates the 26-spec collection.)
 
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `test/fuzz-delivery-budget`, off `main` at
   `f76caca`. Test-only (`tests/fakes.ts`, `tests/coordination-invariants.test.ts`); `src/` untouched.
-- **Status:** locally green, PR open.
+- **Status:** **merged** — PR #236, squashed as `3b0e690` on `main`. Its first CI run failed on
+  `tests/documentation.test.ts` because the Unreleased section had been given a second
+  `### Documentation` subheading; the new bullets were folded into the existing one, and the re-run was green
+  (`verify` 37 files / **901** tests, `test:e2e` 37 passed in 1.7 m).
 - **Why this one and not another.** Two PRs with markdown-only diffs were turned red by the same failure:
   `tests/coordination-invariants.test.ts` exceeded its 120 s ceiling and left behind
   `[coordination-invariants] stopped at 1046/5000 seeds (0 cut short by the 2000ms await cap) after 466864ms —
@@ -7852,6 +7813,73 @@ corroborates the 26-spec collection.)
 - **Next:** take the `[CHURN]` count as the goal of the real fix — start from which read answers stale
   between `writeRoute` and the next pass, with the durable record pinned as never changing. Then 0.21.15.
 - **Update date:** 2026-09-24.
+
+## Phase 145 / The log had two Phase 142s, and ten rows still describing merged work as an open PR
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/phase-144-result`, off `main` at
+  `3b0e690`. One structural test plus `docs/progress.md`; no `src/`, and no shipped prose file changed.
+- **Status:** open PR, locally green.
+- **What the log said vs. what had happened.** Ten phase rows still read "open PR" / "PR open against
+  `main`" for work that had already merged: 133/134/135 (PR #224/#225/#226, all shipped in `0.21.13`) and
+  137/138/139 (PR #228/#229/#230, shipped in `0.21.14`), plus 141/142/143/144 from the three most recent
+  passes — none of which the later commits that merged them had touched. Each row now names its PR number,
+  its squash SHA, and the release that carried it — the ancestry checked with `git merge-base --is-ancestor`
+  rather than recalled.
+- **The duplicate, and how it hid.** Closed PR #233 and merged PR #234 were the same change on two branches
+  (the first could not be rebased without a force-push), and each inserted its entry at the same anchor:
+  `## Next candidates`. The merge kept **two `## Phase 142` blocks**, with the anchor's copy left *below*
+  that heading — so the phase log ran 141, 142, [Next candidates], 142, 143, 144, and the second copy was
+  outside the region anyone reads. Folded into one entry: the survivor is #234's, and it gained the single
+  explanation only the dropped copy carried — why `0.21.14`'s bimodal ceiling leg does not help when the slow
+  samples are being written by whoever is investigating the failure, since the ceiling rises with them.
+- **Two claims retired by the fold.** The dropped copy named the bench archive as `reports/bench-history/`;
+  the directory `scripts/bench-compare.mjs:208` and `scripts/bench-trend.mjs:183` actually read is
+  `bench-results/`, and it is gitignored. So its present-tense "the archive still holds those six slow-mode
+  samples, and the next `bench:compare` will read them" was a wrong path plus a per-machine claim about a
+  directory that never ships. Now stated as mechanism plus a dated local re-read: the five newest
+  `publish/dedicated` samples on this machine are 48.9 / 38.5 / 36.6 / 40.4 / 37.2 ms, so the 77.3 / 67.7
+  pair has already aged out of the five-report window — which is the window turning over, not the gate
+  getting safer.
+- **The gate that would have caught it.** `tests/documentation.test.ts` now requires every
+  `## Phase N / Title` heading to number strictly above the previous entry and to sit above
+  `## Next candidates`. Scope is the current convention deliberately: 30 phase numbers repeat in the older
+  part of the log (numbers 2–51, where an entry pairs `## Phase N (in progress …)` with `## Phase N result …`),
+  and the slash form begins at Phase 84 and has never been duplicated. Both legs measured on scratch trees,
+  each failing at its own assertion: a second `## Phase 142` above the anchor trips numbering alone, and a
+  correctly numbered `## Phase 145` below `## Next candidates` trips placement alone. The file was restored
+  from a `/tmp` copy and `cmp`-verified byte-identical after each.
+- **Structural change to the log.** `## Next candidates` moved to the end of the file (before
+  `## Recovery entry`) so the phase entries are contiguous. Nothing else in the repository references that
+  heading (`grep -rn "Next candidates"` over `*.md`/`*.ts`/`*.mjs`/`*.json` outside `docs/progress.md`: no
+  hits), and all three of its items are already marked RESOLVED/DONE.
+- **Changed files:** `tests/documentation.test.ts`, `docs/progress.md`, `CHANGELOG.md`.
+- **Verification:** `npx tsc --noEmit` 0; `npx eslint tests/documentation.test.ts --max-warnings 0` 0;
+  `npx vitest run tests/documentation.test.ts` 18 passed (was 17); `npx vitest run` 37 files / **902** tests,
+  fuzz at 5,000 seeds in 15.2 s with no `[CHURN]` line.
+- **Risk / rollback:** no shipped artifact is touched — `docs/progress.md` is the one `docs/` file excluded
+  from `package.json` `files`, and `tests/documentation.test.ts` asserts that exclusion — so the change is
+  repository hygiene plus a new gate; `git revert`.
+- **Next:** 0.21.15, whose Unreleased section now holds the two addressee pins, the channel delivery budget,
+  the bench-checklist prose and this gate. Then #71, the teardown subscribe storm.
+- **Update date:** 2026-09-24.
+
+## Next candidates (project is feature-complete; future work is verification/deepening)
+
+- Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
+  handoff suite to a dedicated workflow if the shared-runner failure rate stays high.
+  -> RESOLVED in phase 6: the storage-event handoff test's budgets stacked past
+  the 60s test timeout; global timeout now 90s + explicit 120s there. Remaining
+  shared-runner slowness shows up as slower passes, not failures.
+- Add a browser benchmark trend doc or CI gate for bench:browser drift.
+  -> DONE in phase 6: pnpm bench:trend generates docs/benchmarks.md (en+zh)
+  from the bench-results archive; bench:compare gate documented in both
+  release checklists. (A CI regression-threshold gate stays deliberately
+  local-only: shared-runner timing noise makes numeric CI gates unreliable.)
+- Release-readiness: run the full release checklist dry (verify:published needs a
+  published version; everything else verified locally).
+  -> DONE for 0.20.96: the checklist ran end to end against the real publish,
+  including the previously unrunnable `verify:published` gate (Release run
+  35660663344, every named step green).
 
 ## Recovery entry
 
