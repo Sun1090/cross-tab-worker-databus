@@ -1576,8 +1576,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
    * wrong mechanism and was the shipped claim until it was measured: a snapshot
    * taken with the opening still unresolved already listed the route, its
    * confirmation and both tabs' worker records, because
-   * `BatchingStorageWriter` serves pending writes on read (`storage-batch.ts:79-82`
-   * for `getItem`, `:143-155` for the `keys()` union that `readAllByPrefix` uses). */
+   * `BatchingStorageWriter` serves pending writes on read — `getItem` returns the
+   * pending value before touching the store, and the private `keys()` union of
+   * persisted keys, pending writes minus pending deletes is what `readAllByPrefix`
+   * walks. */
   private emitCoordinationTrace(): void {
     const snapshot = this.cluster.getSnapshot();
     this.trace.event({

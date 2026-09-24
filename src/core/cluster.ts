@@ -785,7 +785,7 @@ export class WorkerClusterRuntime {
     // "accepts a CONTROL/SUBSCRIBE that has no durable route to check" asserts the
     // assignment while no `:route:` key exists in storage at all. This is *not*
     // about coalesced writes: BatchingStorageWriter.getItem serves the pending
-    // value first (storage-batch.ts:79-82), so a route written this tick already
+    // value first, so a route written this tick already
     // reads back.
     if (this.assignedTopics.has(topicKey)) return true;
     // Wildcard assignments: this worker owns the transport subscription for a
