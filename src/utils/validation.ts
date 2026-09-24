@@ -43,14 +43,21 @@ import { PRUNE_STRATEGY } from './constants';
 // accept/reject-and-message vector for all three guards as written and for each of the
 // three `typeof` tests deleted — so no test can pin this operand, and it is not a gap.
 //
-// It stays, because it is what one specific and very easy edit would otherwise break.
-// Writing the familiar global `isFinite(value)` instead of `Number.isFinite(value)`
-// coerces, and `eslint.config.js` configures no `no-restricted-globals` rule to catch
-// that substitution. Measured in both halves: with this operand in place, swapping the
-// predicate kills nothing; with both gone,
-// `rejects a non-positive or non-finite heartbeatIntervalMs` reddens, because
-// `heartbeatIntervalMs: '3000'` has become an accepted option. This operand is held
-// against that edit, not against an input.
+// It stays, because of one specific and very easy edit: writing the familiar global
+// `isFinite(value)` instead of `Number.isFinite(value)`, which coerces - so
+// `heartbeatIntervalMs: '3000'` would pass. Measured in both halves: with this operand
+// in place, swapping the predicate kills nothing; with both gone,
+// `rejects a non-positive or non-finite heartbeatIntervalMs` reddens, because that
+// string has become an accepted option.
+//
+// `eslint.config.js` now also configures `no-restricted-globals` for `isFinite` and
+// `isNaN`, added after the measurement above was taken and verified by introducing the
+// swap (eslint reports it at the call). So this leg is defended twice, and the two
+// defences cover different removals: deleting the operand alone changes nothing today,
+// and deleting the rule re-opens the swap without touching this file. The measured
+// counterfactual stays recorded here because it is what justifies not deleting the
+// operand as redundant - a comment that only said "defensive" would not survive the
+// next cleanup pass.
 /** Assert `value` is a positive safe integer. Throws a TypeError otherwise.
  * The offending value is rendered through `describeFailure` because it is
  * arbitrary caller input: `String(Object.create(null))` throws, which would
