@@ -168,15 +168,22 @@ export class CentrifugeSession<TData = unknown> {
     // wiring is untouched — but `error` is NOT internal-listener-free: the
     // Subscription constructor installs its own no-op `error` listener precisely
     // "to avoid unhandled exception in EventEmitter for non-set error handler"
-    // (centrifuge 5.7.4, build/index.js:762), and the bundled emitter throws on
-    // an `error` emit with no listener (`:162`). This call removes that guard,
+    // (centrifuge 5.7.4, `build/index.js`. The line number this used to cite — 762
+    // — matches neither the pinned copy, where the guard sits at 763-764, nor the
+    // 5.7.0 copy in the store, where it is at 748; whether it drifted or was
+    // mis-copied is not recoverable from here. That is the argument for quoting
+    // the dependency's own comment as the locator instead of a number), and the
+    // bundled emitter throws on an `error` emit with no listener
+    // (`throw er; // Unhandled 'error' event` in the same file).
+    // This call removes that guard,
     // and the `subscription.on('error', …)` re-installation below puts one back for
-    // as long as this session holds the subscription — four statements later (the
+    // as long as this session holds the subscription — three statements later (the
     // `unsubscribed` removal, the `subscriptions` set, the `publication` wiring), all
     // of them inside this same synchronous task, so no emit can land in between.
     // `unsubscribe()` removes both — this handler and the constructor's no-op — and
     // adds nothing back, which is settled rather than open. All twelve `emit('error')`
-    // sites in `BaseSubscription` (`:667-2674`) sit behind a
+    // sites in `BaseSubscription` (its class body is lines 667-2673 of that file, and
+    // the twelve were counted in it) sit behind a
     // `_isSubscribing()`/`_isSubscribed()` test except one, the
     // `badConfiguration` emit in `_getSubscriptionToken`; and after
     // `_setUnsubscribed` has moved `state` to `Unsubscribed` no path re-enters it
