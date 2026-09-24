@@ -5133,6 +5133,72 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     expect(() => makeReplayBus({ persistenceRetry: { backoffMs: -1 } })).toThrow(TypeError);
   });
 
+  it('waits the default backoff when a persistenceRetry names only maxAttempts', async () => {
+    // The omitted half of a partial policy is the half no test had ever read.
+    // `assertPersistenceRetryOptions` checks each field only when present, and every
+    // partial object in this file (`{ maxAttempts: 0 }`, `{ maxAttempts: 1.5 }`,
+    // `{ backoffMs: -1 }`) throws at one field or the other, so the validator's
+    // "backoff omitted" fall-through had never *completed*, and
+    // `persistenceRetryBackoffMs: … ?? 50` had never been read for a config that did
+    // name an attempt count. `backoffMs: 0` is what separates the two claims here:
+    // the retry tests above observe both appends after a single `setTimeout(0)`, so a
+    // default that had collapsed to zero would show the retry at the first assertion.
+    let attempts = 0;
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('transient append');
+      })
+    };
+    const events: Array<{ type: string; operation?: string; attempt?: number }> = [];
+    const { bus, transport } = makeReplayBus(
+      { persistence, persistenceRetry: { maxAttempts: 2 } },
+      undefined,
+      event => events.push(event)
+    );
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1);
+    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(persistence.append, 'the default backoff is not zero').toHaveBeenCalledTimes(1);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(persistence.append).toHaveBeenCalledTimes(2);
+    expect(events).toContainEqual(expect.objectContaining({
+      operation: 'persistence_retry', attempt: 1
+    }));
+    await bus.stop();
+  });
+
+  it('does not retry when a persistenceRetry names only backoffMs', async () => {
+    // The mirror leg, and it needs its own config: the case above supplies
+    // `maxAttempts` and so never reads `persistenceRetryMaxAttempts: … ?? 1`. Naming
+    // only a backoff must retry zero times, which is observable without any timing
+    // claim at all — the attempt ceiling is reached before the retry event is emitted,
+    // so a default that had drifted to 2 would show up as a second `append` (five
+    // milliseconds later, well inside the wait) plus a `persistence_retry` event.
+    const persistence = {
+      load: vi.fn(async () => []),
+      append: vi.fn(async () => {
+        throw new Error('persistent append failure');
+      })
+    };
+    const events: Array<{ type: string; operation?: string }> = [];
+    const { bus, transport } = makeReplayBus(
+      { persistence, persistenceRetry: { backoffMs: 5 } },
+      undefined,
+      event => events.push(event)
+    );
+    await bus.ready();
+    bus.subscribe('t', () => {});
+    transport.emit('t', 1);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(persistence.append).toHaveBeenCalledTimes(1);
+    expect(events.filter(event => event.operation === 'persistence_retry')).toEqual([]);
+    await bus.stop();
+  });
+
   it('routes a caller-supplied publish message ID to the transport', async () => {
     const { bus, transport } = makeReplayBus();
     await bus.ready();
