@@ -596,7 +596,7 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // converts that one deferral into a microtask busy-wait which starves the
     // macrotask the transport stop needs, and allocates a promise chain per turn
     // until the heap goes. Measured: the mutation leaves `tests/data-bus.test.ts`
-    // 195/195 green and aborts `tests/lifecycle-invariants.test.ts`'s worker with
+    // 194/194 green and aborts `tests/lifecycle-invariants.test.ts`'s worker with
     // `Ineffective mark-compacts near heap limit` inside `Builtins_RunMicrotasks`
     // after ~40 s of growth. That fuzz is this line's only witness, and it reports a
     // crash rather than an assertion; no assertion can replace it, measured — a test

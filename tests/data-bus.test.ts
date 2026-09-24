@@ -699,7 +699,7 @@ describe('CrossTabDataBus', () => {
     // Two claims here are measured, and they land on different lines.
     //
     // The order asserted below is NOT this expression's protection. Deleting the read
-    // outright (`const stop = Promise.resolve()`) leaves this file 195/195 green, and
+    // outright (`const stop = Promise.resolve()`) leaves this file 194/194 green, and
     // so does moving the `pendingStop` installation below the `cluster.stop()` window,
     // because `start()` chains the reopen behind `this.pendingStop` on its own: the
     // `start` → `stop` → `start` order survives both mutations. That makes the
@@ -714,7 +714,7 @@ describe('CrossTabDataBus', () => {
     // `start()`) reddens it, as an escaped `Transport failed during startup.` from the
     // fresh-open path `start()` then takes. Measured against that single mutation:
     // exactly this test and the pre-existing "performs a fresh stop when the previous
-    // stop gate is settled but not yet cleared" fail, 193 pass.
+    // stop gate is settled but not yet cleared" fail, 192 pass.
     const storage = new (class extends MemoryStorage {
       onWorkerRemoval: (() => void) | null = null;
 
