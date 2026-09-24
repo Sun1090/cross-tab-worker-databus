@@ -118,9 +118,12 @@ export class ChannelHub {
       return;
     }
     // The member set is read inside the microtask, not when the frame was posted, so
-    // a peer that closed in between receives nothing — which is also the browser's
-    // rule, and what lets `forgeSubscribe()` in the coordination sweep close its
-    // channel immediately without cancelling the frame it just sent.
+    // a peer that closes before delivery is not addressed at all. Recorded as
+    // defensive rather than as pinned: substituting a set snapshotted at post time
+    // keeps the whole file green, because `FakeChannel.close()` clears its listeners
+    // and so makes the two forms indistinguishable through this fake. It is kept
+    // because it is the browser's rule, and because the sweep's `forgeSubscribe()`
+    // closes its own channel in the same stack that posts.
     queueMicrotask(() => {
       for (const target of this.channels.get(source.name) ?? []) {
         if (target !== source) target.deliver(message);

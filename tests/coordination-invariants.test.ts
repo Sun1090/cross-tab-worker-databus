@@ -306,7 +306,10 @@ describe('cross-tab coordination invariants', () => {
     // task. Enabling the option on the sweep's hub is what surfaced the stranded
     // transport subscription fixed in 0.21.16 — measured on the pre-fix code, the
     // async sweep fails six seeds and the synchronous sweep passes — so the
-    // fidelity has a proven difference behind it rather than a plausibility.
+    // fidelity has a proven difference behind it rather than a plausibility. Which
+    // half is pinned was measured: forcing the option to a no-op kills the assertion
+    // below, while removing the sweep's own opt-in leaves all five cases green on the
+    // fixed code — the option stands because of what it caught, not as a new kill.
     const frame = { type: CLUSTER_MESSAGE_TYPE.REGISTRY, sourceWorkerId: 'worker-x' } as WorkerClusterMessage;
 
     const syncHub = new ChannelHub();
