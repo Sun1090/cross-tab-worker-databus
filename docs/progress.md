@@ -7818,11 +7818,11 @@ corroborates the 26-spec collection.)
 
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/phase-144-result`, off `main` at
   `3b0e690`. One structural test plus `docs/progress.md`; no `src/`, and no shipped prose file changed.
-- **Status:** open PR, locally green.
+- **Status:** **merged** — PR #237, squashed as `5acd831` on `main`; `verify`, `browser` and CodeQL green there.
 - **What the log said vs. what had happened.** Ten phase rows still read "open PR" / "PR open against
   `main`" for work that had already merged: 133/134/135 (PR #224/#225/#226, all shipped in `0.21.13`) and
-  137/138/139 (PR #228/#229/#230, shipped in `0.21.14`), plus 141/142/143/144 from the three most recent
-  passes — none of which the later commits that merged them had touched. Each row now names its PR number,
+  137/138/139 (PR #228/#229/#230, shipped in `0.21.14`), plus 141/142/143/144 — the four newest entries,
+  none of which the later commits that merged them had touched. Each row now names its PR number,
   its squash SHA, and the release that carried it — the ancestry checked with `git merge-base --is-ancestor`
   rather than recalled.
 - **The duplicate, and how it hid.** Closed PR #233 and merged PR #234 were the same change on two branches
@@ -7868,7 +7868,7 @@ corroborates the 26-spec collection.)
 - **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/churn-diagnosis-corrected`, off `main` at
   `5acd831`. No `src/` change; the corrected text is inside the *Unreleased* CHANGELOG section, which has not
   shipped, so no published artifact moves.
-- **Status:** open PR, locally green.
+- **Status:** **merged** — PR #238, squashed as `cd7bf51` on `main`, and shipped in `0.21.15`.
 - **What task #71 asked, and what it actually found.** The open question recorded in Phase 144 was "which
   read answers stale between the re-election's `writeRoute` and the next pass". There is no such read. The
   instrumented replay counts the legs instead of inferring them: for seed 1046, **11,542
@@ -7918,6 +7918,58 @@ corroborates the 26-spec collection.)
   usual one — the retracted text made this repository look like it harboured a coordination bug it does not
   have, and the replacement says plainly which half is still open.
 - **Next:** the harness-fidelity change (deferrable delivery + the two forged-frame seeds), then 0.21.15.
+- **Update date:** 2026-09-24.
+
+## Phase 147 / 0.21.15 shipped — the release whose own defect claim was corrected before it shipped
+
+- **Milestone / version:** `0.21.15`, prepared on branch `release/0.21.15` from `main` at `cd7bf51` (#238).
+- **Status:** **published.** PR #239 merged (squash) into `main` as `48843b5`; annotated tag `v0.21.15`
+  peels to exactly that commit; the `Release` run `35943975685` completed with `success`, and `Publish to npm`,
+  the blocking `Verify published npm consumers` and `Record release verification context` each report
+  `success` rather than `skipped`. `registry.npmjs.org` reports `dist-tags.latest = 0.21.15` and lists the
+  version; an offline manual repeat (`PUBLISHED_VERSION=0.21.15 pnpm verify:published`) passed on its first
+  attempt.
+- **What the release contains.** Five accumulated passes since `v0.21.14`, none of which changes behavior:
+  #232 and #235 (both point-to-point addressee guards pinned, with the mutant counts recorded at each),
+  #236 (the `ChannelHub` delivery budget, the fuzz's third limit and the only one that can reach a
+  microtask-bound loop), #234 (the self-excusing `bench:compare` baseline, in both release checklists),
+  #237 (the progress log's phase-numbering gate, plus ten stale PR-status rows corrected), and #238 (the
+  churn diagnosis, corrected against measurement).
+- **Why a docs-and-tests release is owed at all.** `docs/release-checklist.md` and its `docs/zh/` mirror are in
+  `package.json` `files`, so #234 changed what `npm install` delivers; the same applies to the rewritten
+  `CHANGELOG.md` section. No `src/` file is touched by this version.
+- **The correction that made it into the release rather than out of it.** #236's own note described the loop it
+  cuts as "a real behavior and is not fixed". Measurement before the freeze said otherwise — 11,542 accepts
+  against 11,538 `confirmRoute` skips and 6 writes reaching storage, and the same sweep going storm-free when
+  the hub defers delivery by one microtask — so the claim was rewritten *inside the unreleased section* and
+  shipped accurate on the first try, which is the ordering this repository has previously gotten backwards
+  (0.21.2/0.21.3 shipped a promise-chain deletion justified by an enumeration that assumed `reportError`
+  could not throw, and 0.21.4 had to fix it).
+- **Change set:** `package.json` `0.21.14 → 0.21.15`; `CHANGELOG.md`'s Unreleased block became
+  `## [0.21.15] - 2026-09-24` with an empty Unreleased above it; `docs/roadmap.md` and `docs/zh/roadmap.md`
+  gained the delivered-scope section (parity re-measured: 130 h2 / 283 list items on each side).
+- **Verification:** `pnpm check` 0 (37 files / **902** tests), `pnpm lint` 0, `pnpm test:coverage` 0 at
+  99.01 statements / 96.9 branches / 99.26 functions / 99.69 lines against the 98/96/98/99 floors,
+  `pnpm bench` 0, `pnpm test:e2e` **37 passed (39.3 s)**, `pnpm verify:compat` 0, `pnpm verify:types` 0
+  ("6 entries, 90 importable names, surface closed"), `pnpm verify:pack` 0,
+  `pnpm audit --registry=https://registry.npmjs.org` "No known vulnerabilities", `git diff --check` 0,
+  `RELEASE_TAG=v0.21.15 node scripts/verify-release-version.mjs` 0, `npm pack --dry-run --json` 109 files /
+  4.11 MB with `docs/progress.md` absent and both roadmap files present. CI on the release PR: `verify` pass,
+  `browser` pass, CodeQL pass.
+- **Deferred, with its numbers:** `pnpm bench:browser` / `pnpm bench:compare`. Host load averaged 12.7 → 25.8
+  → 93.5 across the verification window, and step 4 of the checklist — added by #234, in this very release —
+  says to record a suspect sample as deferred rather than append it to the archive that will excuse the next
+  failure. No browser-bench sample was taken, so `docs/benchmarks.md` was **not** regenerated and its tables
+  still stop at the last idle-host run. That is the second release in a row carrying this item forward.
+- **Risk / rollback:** none in the artifact (no `src/` change). A defect found now ships as 0.21.16; tags are
+  immutable once pushed.
+- **Tooling note from this release:** two GitHub API calls dropped with `unexpected EOF` — one mid
+  `gh pr merge`, which left the PR `OPEN` and its `mergeCommit` null (the command's own exit status said
+  nothing useful), and one mid `gh run watch`, which exited 1 while the run was still `in_progress`. Both
+  were resolved by re-querying state rather than assuming it: `gh pr view --json state,mergeCommit` and
+  `gh run view --json status,conclusion`.
+- **Next:** task #74, the async-delivery change and the six injected-frame seeds it exposes. Then the deferred
+  idle-host browser-bench sample.
 - **Update date:** 2026-09-24.
 
 ## Next candidates (project is feature-complete; future work is verification/deepening)
