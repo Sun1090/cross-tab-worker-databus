@@ -277,10 +277,11 @@ export class DataBusTraceReporter {
 
   /** Synchronous snapshot of the current metrics window without resetting it.
    * Returns the same derived counters as a periodic `message_metrics` event,
-   * or null when metrics recording is inactive (disabled or events-only mode).
-   * The window keeps accumulating until the next interval flush. */
+   * or null when metrics recording is inactive, which covers each of disabled,
+   * stopped and events-only mode. The window keeps accumulating until the next
+   * interval flush. */
   getMetrics(): DataBusMetricsSnapshot | null {
-    if (!this.metricsActive || this.stopped) return null;
+    if (!this.metricsActive) return null;
     const timestamp = this.now();
     const samples = this.latencySamples;
     return {
@@ -386,16 +387,29 @@ export class DataBusTraceReporter {
 
   /** True when metrics recording is active: enabled, not stopped, and the mode
    * includes metrics. Extracted so the seven readers — `getMetrics`, the five
-   * `record*` methods and `flush` — share one guard instead of repeating it.
-   * The `!stopped` term is part of the contract, not a bonus: `event()` does not
-   * go through this getter and gates on `stopped` itself. */
+   * `record*` methods and `flush` — share one guard instead of repeating it, which
+   * leaves `stopped` read in exactly two places: this term, and `event()`, which
+   * skips metrics entirely and so gates on the field itself.
+   *
+   * Do not add a `|| this.stopped` back at a call site. `getMetrics` and `flush`
+   * each carried one, and the repetition is what made this term look untestable:
+   * deleting the term left all 37 test files green, because a read of a field the
+   * guard consulted one expression earlier can never be the decider. With both
+   * repeats gone the same deletion dies twice in `tests/trace.test.ts` — to
+   * "starts a fresh metrics window after pause and resume, and stop prevents later
+   * flushes", and to "getMetrics returns null while metrics recording is inactive",
+   * whose name promises all three inactive cases and which tested two of them until
+   * this file stopped absorbing the third. What the term holds: `stop()` resets the
+   * counters through `pause()` before any later call can reach them, so without it a
+   * `record*` during a stopped window accumulates unreset and `start()` — which
+   * clears `stopped` without resetting — hands it to the new session's window. */
   private get metricsActive(): boolean {
     return this.enabled && !this.stopped && this.mode !== TRACE_MODE.EVENTS;
   }
 
   /** Emit the accumulated metrics snapshot if the interval is active. */
   flush(): void {
-    if (!this.metricsActive || this.stopped) return;
+    if (!this.metricsActive) return;
     this.flushNow();
   }
 
@@ -483,7 +497,21 @@ function normalizeInterval(value: number | undefined): number {
  * Approximate a percentile from the bucketed histogram. Walks buckets in
  * order, accumulating counts until the cumulative total reaches the rank
  * (`percentile * sampleCount`), and returns the bucket's midpoint as the
- * estimate. Returns the histogram ceiling when the rank exceeds all counts.
+ * estimate.
+ *
+ * The closing `return` — the histogram ceiling, for a rank that exceeds every
+ * count — has never executed, and it is not a leg a test is missing. All six
+ * calls pass one of `0.5`, `0.95`, `1` together with this reporter's own
+ * `latencySamples`, and `recordDispatched` increments that counter and exactly
+ * one bucket in the same synchronous block with nothing between the two that can
+ * skip either, so `samples === sum(buckets)` at every read; `sampleCount <= 0`
+ * returns one line above, so `rank = max(1, ceil(p * samples)) <= samples` and
+ * the walk always returns inside the loop. `recordDispatched`'s non-finite guard
+ * is what keeps that true — before it, a `NaN` delay raised the sample count
+ * while the bucket write landed on the non-index key `"NaN"`, and this line was
+ * the value p95 and the max both reported. Deleting the statement is TS2366
+ * ("Function lacks ending return statement"), not a passing edit, so the zero
+ * count is a classification rather than a gap.
  */
 function percentileMs(buckets: readonly number[], sampleCount: number, percentile: number): number {
   if (sampleCount <= 0) return 0;

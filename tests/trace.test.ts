@@ -393,6 +393,14 @@ describe('DataBusTraceReporter', () => {
     eventsOnly.start();
     expect(eventsOnly.getMetrics()).toBeNull();
     eventsOnly.stop();
+
+    // The third inactive case, and the only one that goes through the getter's
+    // `!stopped` term rather than a constructor option: a stopped reporter must
+    // not answer a metrics query even though `enabled` and `mode` both allow it.
+    const stopped = new DataBusTraceReporter({ enabled: true, sink: () => {} });
+    stopped.start();
+    stopped.stop();
+    expect(stopped.getMetrics()).toBeNull();
   });
 
   it('stays silent after stop and resets for an explicitly restarted session', async () => {
