@@ -1908,12 +1908,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // opening before transport.start() is reached.
     this.updateStatus(WORKER_STATUS.CONNECTING);
     if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping || this.suspended) {
-      // The only handler this opening ever gets. `resumeTransport()` calls here with
-      // `void`, and the `opening.then(f, g)` below is unreachable from this arm, so
-      // without this line a rejected reopen — a superseded lifecycle whose transport
-      // then failed to start — lands as an unhandled rejection. Unlike the absorb at
-      // the top of this method, this one is not dominated by anything: it is the
-      // handler.
+      // The backstop for the one caller that attaches nothing. Five sites call this
+      // method, and they do not all handle what they get back: `startDemandRecovery()`,
+      // `updateStatus()`'s recovery-timer arm and `runTransport()` each chain their own
+      // `opening.then(f, g)` onto the promise this returns — the same object, so their
+      // `g` is already a handler of `opening` and this line decides nothing on those
+      // three paths — `start()` passes the promise out to its own caller, and
+      // `resumeTransport()` calls with `void`, which is the path this exists for.
+      // Without it, a rejected reopen on that path — a superseded lifecycle whose
+      // transport then failed to start — lands as an unhandled rejection. Measured,
+      // and the measurement is symmetric: deleting this line leaves all 37 test files
+      // green with zero unhandled-rejection reports, and so does deleting the `.catch`
+      // at the top of this method. No test constructs the void path's rejection, so
+      // what separates the two absorbs is the caller list above plus the terminal
+      // `.catch(reportError)` on every `pending` chain — an enumeration, not a pin.
+      // The note before this method's `return opening` draws the same line from the
+      // other side: Promise semantics decide what can surface, and no test decides
+      // anything here either way.
       void opening.catch(() => undefined);
       return opening;
     }
@@ -2007,17 +2018,29 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
       this.transportHasConnected && this.status === WORKER_STATUS.DISCONNECTED;
     // Four operands, measured one deletion at a time against the whole suite and
     // then classified with the flag-vector census described in `stop()`'s note.
-    // Observed at this line: the fast path `1000`, plus `0000`, `0100`, `1001` and
-    // `1010`. `transportReady` dies to at least eight named cases (the probe prints
-    // eight) and `droppedAfterConnect` to two (`parks every operation behind a
+    // The row strings are the four premises in source order — `transportReady`,
+    // `status === ERROR`, `droppedAfterConnect`, `stopping` — so the fast path is
+    // `1000`. Observed at this line: `1000`, plus `0000`, `0100`, `1001` and
+    // `1010`; that set is one first-sight `console.log` per distinct row over a
+    // whole-suite run, so re-derive it rather than trusting the list.
+    // `transportReady` is the load-bearing one: deleting it fails nine tests in
+    // `data-bus.test.ts` and `centrifuge.test.ts`, every one of them an operation
+    // the test expects to be deferred. `droppedAfterConnect` dies to exactly two
+    // (`parks every operation behind a
     // demanded reopen instead of writing to
     // the closed connection`, `reopens a cleanly disconnected transport when an
-    // explicit operation demands it`). `!this.stopping` was live and unnamed until
+    // explicit operation demands it`). Both counts were re-run for this note, and
+    // the first has already drifted once: it read eight when this sentence was
+    // written, and because the eight were never named the newcomer cannot be
+    // identified. So take either number as "run the mutant", never as a limit.
+    // `!this.stopping` was live and unnamed until
     // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
     // premise is the `1001` row, and the only thing in the suite that reaches it is
-    // `WorkerClusterRuntime.stop()`'s handoff posting an UNSUBSCRIBE after
-    // `beginStop()` raised the flag - which needs a peer that will take the topic,
-    // because with no remaining subscriber the handoff drops the route instead.
+    // `WorkerClusterRuntime.stop()`'s handoff — measured, the first-sight stack is
+    // `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` — posting an
+    // UNSUBSCRIBE after `beginStop()` raised the flag, which needs a peer that will
+    // take the topic, because with no remaining subscriber the handoff drops the
+    // route instead.
     //
     // `this.status !== WORKER_STATUS.ERROR` is the survivor, and the census says no
     // test ever evaluates this guard with the transport ready *and* the status
