@@ -686,6 +686,98 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('queues a start() re-entered from the environment port behind a failed open teardown', async () => {
+    // The sibling of the case above, at the *other* `stopPromise ?? Promise.resolve()`
+    // site: `queueStartAfterStop()` waits on the gate an explicit `stop()` installs,
+    // and no test had reached it while that field was still null. A failed *initial*
+    // open is exactly that state — its teardown is owned by `pendingStop`, not by
+    // `stopPromise` — and the only application-code seam inside the `stopping` window
+    // is the caller-supplied `ClusterEnvironment` port (a browser `localStorage`
+    // never re-enters the bus), so the storage below wraps it. The scenario is the
+    // port's contract, not a browser page.
+    //
+    // Two claims here are measured, and they land on different lines.
+    //
+    // The order asserted below is NOT this expression's protection. Deleting the read
+    // outright (`const stop = Promise.resolve()`) leaves this file 194/194 green, and
+    // so does moving the `pendingStop` installation below the `cluster.stop()` window,
+    // because `start()` chains the reopen behind `this.pendingStop` on its own: the
+    // `start` → `stop` → `start` order survives both mutations. That makes the
+    // fallback leg executing-and-redundant rather than dominated. The same mutation
+    // does have a consequence elsewhere — it aborts `tests/lifecycle-invariants.test.ts`
+    // with an out-of-memory after ~40 s, because a restart woken too early re-queues
+    // through `start()`'s `stopping` routing forever — and that is the *gate* operand's
+    // job, recorded at `queueStartAfterStop()`.
+    //
+    // What this case does have teeth on is one line above that leg: routing on the
+    // gate instead of the flag (`if (this.stopping)` → `if (this.stopPromise)` in
+    // `start()`) reddens it, as an escaped `Transport failed during startup.` from the
+    // fresh-open path `start()` then takes. Measured against that single mutation:
+    // exactly this test and the pre-existing "performs a fresh stop when the previous
+    // stop gate is settled but not yet cleared" fail, 192 pass.
+    const storage = new (class extends MemoryStorage {
+      onWorkerRemoval: (() => void) | null = null;
+
+      override removeItem(key: string): void {
+        if (key.includes(':worker:')) this.onWorkerRemoval?.();
+        super.removeItem(key);
+      }
+    })();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-port-start' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    const calls: string[] = [];
+    const openTransport = transport.start.bind(transport);
+    const shutTransport = transport.stop.bind(transport);
+    transport.start = (config, handlers) => {
+      calls.push('start');
+      return openTransport(config, handlers);
+    };
+    transport.stop = () => {
+      calls.push('stop');
+      return shutTransport();
+    };
+
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-port-start',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    let reentered = 0;
+    let startCallsAtReentry = -1;
+    let restart: Promise<void> | undefined;
+    storage.onWorkerRemoval = () => {
+      if (reentered > 0) return;
+      reentered += 1;
+      startCallsAtReentry = transport.startCalls;
+      // The retry this one stands for: the port write happens while the first
+      // attempt's failure is still being cleaned up, and the open now succeeds.
+      transport.startShouldFail = false;
+      restart = bus.start({});
+    };
+    bus.subscribe('feed', vi.fn());
+
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+    expect(restart).toBeInstanceOf(Promise);
+    await restart!;
+    await flushMicrotasks();
+
+    expect(startCallsAtReentry).toBe(1);
+    expect(calls).toEqual(['start', 'stop', 'start']);
+    expect(transport.startCalls).toBe(2);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getStatus()).toBe(WORKER_STATUS.CONNECTED);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, started: true, suspended: false });
+    // The intent registered on the failed lifecycle is replayed by the retry, so a
+    // reordered teardown that stopped the fresh transport would also lose this.
+    expect(transport.subscribed.has('feed')).toBe(true);
+
+    await bus.stop();
+  });
+
   it('lets a stop() re-entered from the RESUME trace keep pageshow from reactivating the cluster', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

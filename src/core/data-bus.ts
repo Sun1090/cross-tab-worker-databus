@@ -588,6 +588,33 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // assigned a non-null value in exactly one place — stop()'s hand-resolved
     // gate — and both of that gate's settle handlers resolve it, which is what
     // keeps the public stop() contract non-rejecting.
+    //
+    // The read itself is load-bearing, and not for ordering. A restart that wakes
+    // before its teardown settled goes back through `start()`'s
+    // `if (this.stopping) return this.queueStartAfterStop(config)`, which re-queues
+    // it — so replacing `this.stopPromise ?? …` with a bare `Promise.resolve()`
+    // converts that one deferral into a microtask busy-wait which starves the
+    // macrotask the transport stop needs, and allocates a promise chain per turn
+    // until the heap goes. Measured: the mutation leaves `tests/data-bus.test.ts`
+    // 194/194 green and aborts `tests/lifecycle-invariants.test.ts`'s worker with
+    // `Ineffective mark-compacts near heap limit` inside `Builtins_RunMicrotasks`
+    // after ~40 s of growth. That fuzz is this line's only witness, and it reports a
+    // crash rather than an assertion; no assertion can replace it, measured — a test
+    // that waits a bounded number of microtasks on a gated teardown and then releases
+    // the gate passes with the read deleted, because the loop is invisible to anything
+    // that never yields to the timer queue. So: do not delete that file's stop/restart
+    // interleavings to speed it up.
+    //
+    // The fallback operand is a different question and now has its own case. Nothing
+    // reachable through a browser re-enters here while `stopPromise` is null: a
+    // failed *initial* open owns its cleanup through `pendingStop`, and the only
+    // synchronous application-code seam inside that `stopping` window is the caller's
+    // own `ClusterEnvironment` port. `tests/data-bus.test.ts`'s "queues a start()
+    // re-entered from the environment port behind a failed open teardown" drives that
+    // seam, and the ordering it asserts survives both this expression and a moved
+    // `pendingStop` installation, because `start()` chains the reopen behind
+    // `this.pendingStop` regardless. Neither operand can be dropped either: the field
+    // is `Promise<void> | null`, so the bare read makes the `.then` below `TS18047`.
     const stop = this.stopPromise ?? Promise.resolve();
     const token = ++this.queuedStartToken;
     const queued = stop
