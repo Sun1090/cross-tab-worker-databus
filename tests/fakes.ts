@@ -52,6 +52,16 @@ export class ChannelHub {
   private budget: number | null = null;
   private posted = 0;
   private budgetExceeded = false;
+  private asyncDelivery = false;
+
+  /** A real `BroadcastChannel` delivers in a *later task*, so a runtime that posts
+   * a frame and then reads coordination state in the same stack never sees the
+   * effect of its own post. The hub's default is synchronous because a large number
+   * of tests post a frame and assert without awaiting; this opts one hub into the
+   * browser's ordering. */
+  setAsyncDelivery(enabled: boolean): void {
+    this.asyncDelivery = enabled;
+  }
 
   /** Cap how many messages the hub will deliver, dropping the rest. A
    * coordination loop that never converges otherwise costs unbounded CPU in the
@@ -101,9 +111,21 @@ export class ChannelHub {
       this.shouldDropNextControl = false;
       return;
     }
-    for (const target of this.channels.get(source.name) ?? []) {
-      if (target !== source) target.deliver(message);
+    if (!this.asyncDelivery) {
+      for (const target of this.channels.get(source.name) ?? []) {
+        if (target !== source) target.deliver(message);
+      }
+      return;
     }
+    // The member set is read inside the microtask, not when the frame was posted, so
+    // a peer that closed in between receives nothing — which is also the browser's
+    // rule, and what lets `forgeSubscribe()` in the coordination sweep close its
+    // channel immediately without cancelling the frame it just sent.
+    queueMicrotask(() => {
+      for (const target of this.channels.get(source.name) ?? []) {
+        if (target !== source) target.deliver(message);
+      }
+    });
   }
 
   close(channel: FakeChannel): void {
