@@ -8050,8 +8050,10 @@ corroborates the 26-spec collection.)
 
 - **Milestone / version:** `0.21.16`, prepared on branch `release/0.21.16` from `main` at `723d582`.
 - **Status:** **published.** PR #243 merged (squash) into `main` as `c1bb407`; annotated tag `v0.21.16` peels to
-  exactly that commit; the `Release` run is `35955059490`, whose `Publish to npm` step reports `success`, and
-  `registry.npmjs.org` already answers `dist-tags.latest = 0.21.16` with the version listed. Verified from a clean
+  exactly that commit; the `Release` run is `35955059490`, which **completed with `success`** — `Publish to npm`, the
+  blocking `Verify published npm consumers` and `Record release verification context` each report `success` rather
+  than `skipped` — and
+  `registry.npmjs.org` answers `dist-tags.latest = 0.21.16` with the version listed. Verified from a clean
   consumer offline as well: `PUBLISHED_VERSION=0.21.16 pnpm verify:published` exits 0
   ("verified published cross-tab-worker-databus@0.21.16 ESM/CJS consumers").
 - **What the release contains.** Two PRs since `v0.21.15`: **#241** (`d1fcb91`) — the behavior fix: a transport
