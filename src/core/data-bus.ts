@@ -1882,12 +1882,18 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // this seam for every reopen in the file, absorb intact: likewise green in full, so nothing
     // even observes the violation this block's premise says cannot happen. The same
     // forcing with the absorb deleted: **51 tests fail** — the only leg carrying a
-    // count, since a pass needs no denominator. That count was taken when the file
-    // held 194 tests, and it has not been re-run since; the three green legs above
-    // were rewritten to say "green in full" precisely so they stop going stale.
+    // count, since a pass needs no denominator. Re-run while writing this note, with the
+    // file at 198 tests rather than the 194 it held when the number was first taken, and
+    // the same 51 came back — so read it as "run the probe", not as a limit.
     // And the forcing's extra
     // `.then` link alone, rejection absent: green in full, which is what makes the 51 the
-    // rejection rather than the added link. A note here previously read "fails exactly
+    // rejection rather than the added link. Build that forcing by *appending a link to*
+    // `pending`, never by replacing it: a substituted fresh promise made the two legs that
+    // must be green each fail three tests (`does not reopen a transport queued behind a
+    // pending stop when stop() is called`, `reopens after repeated hide/show cycles that
+    // all precede a pending initial open`, and the async-stop recovery case), because those
+    // assert on *which* promise the reopen waits for rather than on whether it rejects.
+    // A note here previously read "fails exactly
     // one test whether this line is present or deleted"; that reproduces under none of
     // the four, and the corrected set argues the same way more strongly — no assertion
     // protects the premise, and deleting the guard is not one diagnosable failure but
