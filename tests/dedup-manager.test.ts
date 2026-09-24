@@ -141,6 +141,31 @@ describe('DedupManager — sweep lifecycle', () => {
     }
   });
 
+  it('arms no sweep timer when the manager is disabled, and none without a sweep interval', () => {
+    // One configuration per option leg of `start()`'s guard, because the case above
+    // exercises only the armed-timer leg. Measured: deleting `!this.enabled` or
+    // `!this.sweepMs` from that guard left all 37 test files green, so the method's
+    // own sentence — "No-op when disabled or no sweepMs was configured" — was an
+    // assertion about a behavior nothing checked. The two legs are not equally quiet
+    // if they go: an unset interval does not mean "no sweep", it means
+    // `setInterval(fn, undefined)`, whose delay the host picks and which is far
+    // shorter than any interval an application would configure for a prune.
+    vi.useFakeTimers();
+    try {
+      const disabled = createManager({ enabled: false, sweepMs: 500 });
+      disabled.manager.start();
+      expect(vi.getTimerCount(), 'a disabled manager must not schedule a sweep').toBe(0);
+      disabled.manager.stop();
+
+      const noInterval = createManager({ ttlMs: 1_000 });
+      noInterval.manager.start();
+      expect(vi.getTimerCount(), 'no configured interval must not schedule a sweep').toBe(0);
+      noInterval.manager.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('prunes only the entries that are past the TTL, keeping recent IDs', () => {
     vi.useFakeTimers();
     try {
