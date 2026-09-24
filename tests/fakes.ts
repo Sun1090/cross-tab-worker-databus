@@ -15,6 +15,15 @@ import type { EVENT_TYPE } from '../src/utils/constants';
 
 export class MemoryStorage implements StorageLike {
   private readonly values = new Map<string, string>();
+  private failingWrites = 0;
+
+  /** Make the next `n` `setItem` calls throw the error a quota-full `localStorage`
+   * throws, then resume succeeding. Only writes fail: `removeItem` cannot, so a
+   * test that needs a lost deletion has to name the write whose flush the failure
+   * cut short (`BatchingStorageWriter.flush()` breaks at the first throw). */
+  failNextWrites(n: number): void {
+    this.failingWrites = n;
+  }
 
   get length(): number {
     return this.values.size;
@@ -37,6 +46,10 @@ export class MemoryStorage implements StorageLike {
   }
 
   setItem(key: string, value: string): void {
+    if (this.failingWrites > 0) {
+      this.failingWrites -= 1;
+      throw new DOMException('Quota exceeded');
+    }
     this.values.set(key, value);
   }
 

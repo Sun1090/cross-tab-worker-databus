@@ -1863,6 +1863,122 @@ describe('WorkerClusterRuntime resilience', () => {
     }
   });
 
+  it('reclaims a confirmed self-route whose assignment was lost with its handoff write', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControlA = vi.fn();
+    const a = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a', onControl: onControlA });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    // A owns the topic and B is a second subscriber, so A's pagehide has to hand
+    // the route over. Failed writes cut that flush short, and the teardown ends
+    // with `discardPending()`, so the durable record still names worker-a — while
+    // `pause()` has cleared the in-memory assignment map, and a handoff the new
+    // owner cannot confirm (the route it authorizes against names somebody else)
+    // leaves no worker holding the transport either.
+    storage.failNextWrites(2);
+    a.env.pageHide();
+    await Promise.resolve();
+    const routeOf = (topic: string) =>
+      JSON.parse(storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey(topic)}`))![1]!) as Record<string, unknown>;
+    expect(routeOf('topic-a')).toMatchObject({ workerId: 'worker-a', generation: 1 });
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual([]);
+
+    // The tab comes back — a BFCache restore, so the same worker id registers
+    // again with its local subscription intact.
+    a.env.pageShow();
+    await Promise.resolve();
+
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    expect(onControlA).toHaveBeenLastCalledWith(CONTROL_ACTION.SUBSCRIBE, 'topic-a', undefined);
+    // Reclaiming is not re-electing: the owner and its generation are untouched,
+    // so peers see no churn on a route that already named this worker.
+    expect(routeOf('topic-a')).toMatchObject({ workerId: 'worker-a', generation: 1, confirmedAt: 1_000 });
+    expect(b.runtime.getSnapshot().assignedTopics).toEqual([]);
+  });
+
+  it('releases a confirmed self-route that names this worker for a topic it no longer subscribes', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a1 = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a1.runtime.start();
+    a1.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    storage.failNextWrites(2);
+    a1.env.pageHide();
+    await Promise.resolve();
+
+    // The same route survives into a *new* runtime that carries the same worker
+    // id (an explicit `workerId`, or a worker that rebuilds its runtime) and does
+    // not subscribe the topic. Nothing in that worker visits it any more:
+    // `reconcileSubscriptions` walks local subscriptions and
+    // `reconcileAssignedTopics` walks the assignment map, and it has neither —
+    // while B, which does subscribe, defers to a route whose owner is alive.
+    const a2 = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    a2.runtime.start();
+    a2.runtime.subscribe('topic-b');
+    await Promise.resolve();
+    a2.env.runIntervals();
+    await Promise.resolve();
+    b.env.runIntervals();
+    await Promise.resolve();
+    a2.env.runIntervals();
+    await Promise.resolve();
+
+    // The phantom ownership is gone and the remaining subscriber owns the topic.
+    expect(a2.runtime.getSnapshot().assignedTopics).toEqual(['topic-b']);
+    expect(b.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    const route = JSON.parse(
+      storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`))![1]!
+    ) as { workerId: string };
+    expect(route.workerId).toBe('worker-b');
+  });
+
+  it('leaves a route naming this worker alone while it still holds the assignment', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControlA = vi.fn();
+    const a = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a', onControl: onControlA });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a.runtime.start();
+    await Promise.resolve();
+    b.runtime.start();
+    // Only B subscribes, and the election still lands on A: both records report
+    // load 0, and an equal-load tie is broken by the worker id, where `worker-a`
+    // sorts first. A therefore owns a topic it has no local handler for — the
+    // documented exception, and the state a self-route sweep that stopped at
+    // `subscribedTopics` would delete every pass.
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    expect(a.runtime.getSnapshot().subscribedTopics).toEqual([]);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      a.env.runIntervals();
+      b.env.runIntervals();
+      await Promise.resolve();
+    }
+
+    // The assignment survives: this is the state a sweep that keyed on
+    // `subscribedTopics` instead of the assignment map would delete every pass,
+    // and the durable route is not rewritten, so no peer sees a re-election.
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    const route = JSON.parse(
+      storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`))![1]!
+    ) as { workerId: string; generation: number };
+    expect(route).toMatchObject({ workerId: 'worker-a', generation: 1 });
+  });
+
   it('prunes a crashed worker and its records after the TTL expires', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
