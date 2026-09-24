@@ -686,6 +686,88 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('queues a start() re-entered from the environment port behind a failed open teardown', async () => {
+    // The sibling of the case above, at the *other* `stopPromise ?? Promise.resolve()`
+    // site: `queueStartAfterStop()` reads the gate an explicit `stop()` installs, and
+    // no test had ever reached it while that field was still null. A failed *initial*
+    // open is exactly that state — its teardown is owned by `pendingStop`, not by
+    // `stopPromise` — and the only synchronous application-code seam inside the
+    // `stopping` window is the caller-supplied `ClusterEnvironment` port (a browser
+    // `localStorage.removeItem` never re-enters the bus), so the storage below wraps
+    // it. Everything else about this scenario is the port's contract, not a browser.
+    //
+    // What is pinned is the *order*, not the value. `pendingStop` is installed a few
+    // statements before `stopping` is raised, so the failed open's `transport.stop()`
+    // microtask is already queued by the time the re-entered start chains behind an
+    // already-resolved promise, and FIFO puts the reopen last: measured
+    // `start` (fails) → `stop` → `start` (succeeds). Moving the `pendingStop`
+    // installation below the `cluster.stop()` window flips that to
+    // `start` → `start` → `stop`, which shuts down the transport the retry just
+    // opened while its promise resolves — a bus that reports healthy and hears
+    // nothing. That mutant is what this test exists to fail.
+    const storage = new (class extends MemoryStorage {
+      onWorkerRemoval: (() => void) | null = null;
+
+      override removeItem(key: string): void {
+        if (key.includes(':worker:')) this.onWorkerRemoval?.();
+        super.removeItem(key);
+      }
+    })();
+    const hub = new ChannelHub();
+    const environment = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'reentrant-port-start' });
+    const transport = new FakeTransport<number>();
+    transport.startShouldFail = true;
+    const calls: string[] = [];
+    const openTransport = transport.start.bind(transport);
+    const shutTransport = transport.stop.bind(transport);
+    transport.start = (config, handlers) => {
+      calls.push('start');
+      return openTransport(config, handlers);
+    };
+    transport.stop = () => {
+      calls.push('stop');
+      return shutTransport();
+    };
+
+    const bus = new CrossTabDataBus({
+      clusterKey: 'reentrant-port-start',
+      environment: environment.environment,
+      initialConfig: {},
+      transport
+    });
+
+    let reentered = 0;
+    let startCallsAtReentry = -1;
+    let restart: Promise<void> | undefined;
+    storage.onWorkerRemoval = () => {
+      if (reentered > 0) return;
+      reentered += 1;
+      startCallsAtReentry = transport.startCalls;
+      // The retry this one stands for: the port write happens while the first
+      // attempt's failure is still being cleaned up, and the open now succeeds.
+      transport.startShouldFail = false;
+      restart = bus.start({});
+    };
+    bus.subscribe('feed', vi.fn());
+
+    await expect(bus.ready()).rejects.toThrow('Transport failed during startup.');
+    expect(restart).toBeInstanceOf(Promise);
+    await restart!;
+    await flushMicrotasks();
+
+    expect(startCallsAtReentry).toBe(1);
+    expect(calls).toEqual(['start', 'stop', 'start']);
+    expect(transport.startCalls).toBe(2);
+    expect(transport.stopCalls).toBe(1);
+    expect(bus.getStatus()).toBe(WORKER_STATUS.CONNECTED);
+    expect(bus.getHealthSummary()).toMatchObject({ healthy: true, started: true, suspended: false });
+    // The intent registered on the failed lifecycle is replayed by the retry, so a
+    // reordered teardown that stopped the fresh transport would also lose this.
+    expect(transport.subscribed.has('feed')).toBe(true);
+
+    await bus.stop();
+  });
+
   it('lets a stop() re-entered from the RESUME trace keep pageshow from reactivating the cluster', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
