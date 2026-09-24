@@ -217,6 +217,20 @@ export class WebSocketTransport<TData = unknown>
           this.settleConnect();
         }
       };
+      // Each guard below ends in an operand that the first two cannot see: a socket
+      // that died without being replaced. `stop()` clears `this.socket`, so a
+      // teardown is caught by the first operand anywhere; a timeout, a close and an
+      // error each lower `socketActive` while leaving `this.socket` naming the same
+      // object, so for anything that socket delivers afterwards only that last
+      // operand can decide. Measured one operand at a time against the whole suite:
+      // `onclose`'s was already pinned (three lifecycle cases), while `onerror`'s,
+      // `onmessage`'s and `handleMessage`'s Blob-path one each killed nothing until
+      // tests/websocket.test.ts's 'drops a late error from the socket whose connect
+      // timeout already reported one', 'drops a server frame that arrives after the
+      // connect attempt timed out' and 'drops a Blob frame whose conversion finishes
+      // after its connection closed'. `onopen`'s third term is a different flag,
+      // `handshakeFailed`, set by the timeout and by the close/error paths below
+      // rather than read from the field.
       socket.onclose = () => {
         if (this.socket !== socket || this.handlers !== handlers || !this.socketActive) return;
         this.socketActive = false;

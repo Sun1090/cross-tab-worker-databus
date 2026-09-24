@@ -68,6 +68,36 @@ function makeTransport(factory?: (url: string) => FakeWebSocket) {
   return { sockets, transport, onMessage, onStatus, onError };
 }
 
+/** Run one attempt through its connect timeout, with fake timers already
+ * installed. This is the state where the transport has abandoned a socket while
+ * `this.socket` still names it: the timer's own body lowers `socketActive` and
+ * `abortSocket()` only closes, and nothing clears `this.socket` but `stop()`. So
+ * for anything that socket delivers afterwards, the third term of each
+ * listener's guard is the only operand that can decide — the first two compare a
+ * pair that still matches. */
+async function timedOutAttempt() {
+  const sockets: FakeWebSocket[] = [];
+  const onMessage = vi.fn();
+  const transport = new WebSocketTransport({
+    url: 'wss://example.test/ws',
+    webSocketFactory: url => {
+      const socket = new FakeWebSocket(url);
+      sockets.push(socket);
+      return socket;
+    }
+  });
+  const onStatus = vi.fn();
+  const onError = vi.fn();
+  const opening = Promise.resolve(
+    transport.start(
+      { url: 'wss://example.test/ws', connectTimeoutMs: 25 },
+      { onMessage, onStatus, onError }
+    )
+  ).then(() => null, error => error);
+  await vi.advanceTimersByTimeAsync(25);
+  return { sockets, transport, onMessage, onStatus, onError, error: await opening };
+}
+
 /** Let the DataBus lifecycle gate reach transport.start(), whose socket
  * factory runs after a couple of chained microtasks. */
 async function flushMicrotasks(): Promise<void> {
@@ -840,6 +870,92 @@ describe('WebSocketTransport', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('drops a late error from the socket whose connect timeout already reported one', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sockets, transport, onStatus, onError, error } = await timedOutAttempt();
+      expect(error).toBeInstanceOf(Error);
+      // One failure has already been announced. Without the guard's third term a
+      // `close`-triggered or server-driven `error` on the abandoned socket reports a
+      // second one for a connection the application was already told had failed —
+      // and this is the state the first two operands cannot see, because `stop()` is
+      // what clears `this.socket`, not a timeout.
+      const statusCalls = onStatus.mock.calls.length;
+      const errorCalls = onError.mock.calls.length;
+      sockets[0]!.onerror?.();
+      expect(onStatus).toHaveBeenCalledTimes(statusCalls);
+      expect(onError).toHaveBeenCalledTimes(errorCalls);
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a server frame that arrives after the connect attempt timed out', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sockets, transport, onMessage } = await timedOutAttempt();
+      sockets[0]!.serverFrame({ topic: 'late', data: 1 });
+      await flushMicrotasks();
+      // Positive control for the frame itself: 'propagates optional publication
+      // message IDs in JSON frames' shows the identical JSON shape reaching
+      // `onMessage` while the attempt is live, so this assertion is about the dead
+      // attempt rather than an unreadable frame.
+      expect(onMessage).not.toHaveBeenCalled();
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a Blob frame whose conversion finishes after its connection closed', async () => {
+    // The one way `handleMessage`'s own `!this.socketActive` operand can be reached:
+    // the frame clears the listener's live check, the connection then dies while
+    // `arrayBuffer()` is still pending, and `this.socket` still names the same
+    // object — only `stop()` clears that field, which is why the replaced-socket case
+    // elsewhere is decided by the first operand and never arrives here.
+    const { sockets, transport, onMessage, onError } = makeTransport();
+    const socket = sockets[0]!;
+    socket.open();
+
+    let resolveFrame!: (buffer: ArrayBuffer) => void;
+    const pending = new Blob([new Uint8Array([1])]);
+    Object.defineProperty(pending, 'arrayBuffer', {
+      value: () => new Promise<ArrayBuffer>(resolve => { resolveFrame = resolve; })
+    });
+    socket.onmessage?.({ data: pending });
+    socket.onclose?.();
+
+    const bytes = new Uint8Array([0xc7, 0, 9, ...new TextEncoder().encode('bin.topic'), 6, 7]);
+    resolveFrame(bytes.buffer);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const closedCalls = onMessage.mock.calls.length;
+    expect(closedCalls).toBe(0);
+
+    // Control, in the same construction: the identical deferred resolution on a
+    // connection that stayed open does deliver. Without it this test would also pass
+    // with the guard deleted, because an undeliverable frame and a correctly dropped
+    // one look the same from `not.toHaveBeenCalled()`. (That is how the first version
+    // of this case survived the mutation it was written for: a timed-out attempt
+    // cannot reach here at all, since `onmessage`'s own guard is what rejects it.)
+    const live = makeTransport();
+    live.sockets[0]!.open();
+    let resolveLive!: (buffer: ArrayBuffer) => void;
+    const liveBlob = new Blob([new Uint8Array([1])]);
+    Object.defineProperty(liveBlob, 'arrayBuffer', {
+      value: () => new Promise<ArrayBuffer>(resolve => { resolveLive = resolve; })
+    });
+    live.sockets[0]!.onmessage?.({ data: liveBlob });
+    resolveLive(bytes.buffer);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(live.onMessage).toHaveBeenCalledTimes(1);
+    expect(Array.from(new Uint8Array(live.onMessage.mock.calls[0]![0].data))).toEqual([6, 7]);
+    expect(onMessage).toHaveBeenCalledTimes(closedCalls);
+    expect(onError).not.toHaveBeenCalled();
+    transport.stop();
+    live.transport.stop();
   });
 
   it('never lets the connect timer tear down a handshake that already completed', async () => {
