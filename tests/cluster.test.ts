@@ -2123,6 +2123,12 @@ describe('WorkerClusterRuntime resilience', () => {
     // with no `Object.prototype` behind it, into a field consumers report by name
     // — the failure class `0.21.4` had to fix in the error reporter, where
     // `String(Object.create(null))` throws while trying to describe a bad value.
+    // The *string* arm already has a sibling: "ignores unknown protocol message
+    // variants and reports them to the opt-in hook" above dispatches a future
+    // protocol type and asserts the handler sees it. What had never executed is the
+    // `null` side of the normalization, and no test at all read
+    // `getUnknownMessageStats()`, so the string case is asserted again here on
+    // purpose — the frame has to *report*, not only dispatch.
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
     const now = 1_000;
