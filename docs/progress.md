@@ -8452,6 +8452,20 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Update date:** 2026-09-24.
 
 
+## Phase 175 / Two managers, one guard shape, and only one file that learned to test the options separately
+
+- **Milestone / version:** test work after `0.21.21`. Branch `test/dedup-sweep-option-legs` off `ebcbe3a`.
+- **The target.** Next down Phase 174's queue: `DedupManager.start()`'s `this.sweepTimer || !this.enabled || !this.sweepMs`, and its sibling in `ReplayManager.start()`, which has the same shape with one more term. Probed the same way — each operand deleted alone, whole suite.
+- **Result.** The dedup guard's first operand (the already-armed check) dies to `prunes quiet entries on the sweep interval and stops with the manager`; deleting either **option** leg left all 37 test files green. So the method's own doc — "No-op when disabled or no sweepMs was configured" — stated two behaviors nothing verified, the Phase 171 shape again: a sentence about a contract with no test on the other side of it. `arms no sweep timer when the manager is disabled, and none without a sweep interval` now feeds one configuration per leg, and each of the two deletions dies to it.
+- **Why the second leg matters more than a missing prune:** an unset interval is not "no sweep", it is `setInterval(fn, undefined)`, and the delay in that call is the host's choice rather than a configured one. Recorded as the asymmetry between the two legs, without a number attached to it — no measurement in this repository fixes what a given browser does with an absent timeout, and a comment that claims one would be the kind of unverified absolute this project keeps having to retract.
+- **The clean bill, which is the more useful half.** `ReplayManager.start()`'s four-term gate has **every** operand pinned: dropping `retentionTimer` dies to `sweeps durable history on the configured interval and stops on stop()`, and each of the three option legs dies to `start() is a no-op without a retention window, sweep interval, or clearBefore support` — one test, three configurations, one missing option each. That test is exactly the shape the dedup file lacked, and its absence there is the whole gap: the two managers are the same construct (`timer || option || option`), so parity between them was the cheapest place to look and the only place it was missing.
+- **Ledger:** unchanged at **47** zero branch arms of **1958**, aggregate **99.02 / 97.59 / 99.27 / 99.69**. As in the three phases before it, the operands all evaluate on every call, so there was no zero count to move and no coverage signal that could have pointed at either gap. 929 tests (+1).
+- **Verification:** `pnpm check` 0 (typecheck, build, 929 tests, 5/5 perf gates), `pnpm test:coverage` 0, `pnpm lint` 0, `pnpm typecheck` 0, `git diff --check` clean — all on this tree. The two verdict rows were re-run after the wording above was final, and each names its own killing test in the driver's output rather than being read off an exit code.
+- **Risk / rollback:** one test. No behavior changes, so the public-surface gates see nothing and `git revert` removes the phase.
+- **Next:** `validation.ts`'s three `typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0` chains, which are the last multi-term guards in the queue and the ones most likely to hide a joint-assertion gap of the same family (a test passing `0` and `'x'` never distinguishes the non-integer leg). Then `data-bus.ts`'s four-term guards. Material for `0.21.22` is now Phases 171-175.
+- **Update date:** 2026-09-24.
+
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
