@@ -1048,6 +1048,9 @@ export class WorkerClusterRuntime {
   private reconcile(): void {
     if (!this.started) return;
     const workers = this.reconcileWorkers();
+    // Runs before the subscription pass so a route released here is re-elected by
+    // its remaining subscribers inside the same cycle, not one heartbeat later.
+    this.reconcileStrandedSelfRoutes();
     const activeWorkers = selectActiveWorkers(workers, this.maxActiveWorkers);
     this.reconcileSubscriptions(workers, activeWorkers);
     this.reconcileAssignedTopics();
@@ -1158,6 +1161,70 @@ export class WorkerClusterRuntime {
           this.notifyRegistry();
         }
       }
+    }
+  }
+
+  /**
+   * Repair a confirmed route that names this Worker while its assignment is gone.
+   *
+   * Every write that settles ownership stamps the new owner's assignment in the
+   * same task as the confirmation (`confirmRoute()` has exactly three call sites,
+   * each directly after an `assignedTopics.set`), so a route carrying
+   * `confirmedAt` while this map has no entry can only mean the assignment was
+   * taken *after* the route settled. That is what `pause()` does: it clears the
+   * map unconditionally but rewrites only the routes it can hand off, so a
+   * handoff whose final flush is cut short by a storage failure — and the
+   * `discardPending()` that ends the teardown throws the rest away — leaves a
+   * durable route naming this worker. If the same worker id registers again (a
+   * BFCache restore, or a runtime rebuilt with an explicit `workerId`), every
+   * peer reads that route as a live, confirmed owner and stands down, while no
+   * worker holds a transport subscription for the topic any more. Both reconcile
+   * passes miss it by construction: one walks `subscribedTopics`, the other
+   * `assignedTopics`, and the phantom is in neither.
+   *
+   * Acting here is this worker's alone — a peer that elected it is still waiting
+   * for its own CONTROL/SUBSCRIBE to be accepted, and the single-writer rule
+   * recorded in `reconcileSubscriptions()` forbids anyone else rewriting the
+   * record. Reclaim when the local subscription is still live, which restores the
+   * assignment and the transport subscription without touching the route, so the
+   * owner and its generation stay exactly as peers recorded them; release
+   * otherwise, since an owner that has no handler for the topic and never will is
+   * a record nothing can act on.
+   */
+  private reconcileStrandedSelfRoutes(): void {
+    if (!this.storage) return;
+    let released = false;
+    for (const { key, value: route } of readAllByPrefix<WorkerRoute>(this.storage, this.routePrefix)) {
+      // The addressee and the confirmation both have to hold: an unconfirmed
+      // route naming this worker is an election or a handoff still in flight, and
+      // taking it over would put two transport subscriptions on one topic — the
+      // overlap the strict handoff exists to prevent.
+      if (route.confirmedAt === undefined || route.workerId !== this.workerId) continue;
+      if (this.assignedTopics.has(route.topicKey)) continue;
+      // `knownTopics` is the only place a stored key is ever paired with its
+      // plaintext, and it answers only for a key this worker hashed itself, so
+      // the reclaim leg cannot be steered by a hand-written route record.
+      const topic = this.knownTopics.get(route.topicKey);
+      if (topic !== undefined && this.subscribedTopics.has(topic)) {
+        // The same self-assignment `subscribe()` performs for a local owner: it
+        // sets the map and asks the transport, and leaves the durable record
+        // byte-identical because `confirmRoute()` no-ops on a confirmed route.
+        this.sendControl(this.workerId, CONTROL_ACTION.SUBSCRIBE, topic, route.topicKey);
+        continue;
+      }
+      // No local handler and no way to name the topic: drop the record and nudge,
+      // so a remaining subscriber elects an owner it can act on.
+      this.removeStorage(key);
+      released = true;
+    }
+    if (released) {
+      // Flush before nudging, for the reason recorded in `pause()` and in
+      // `handoffAssignedTopics()`: the deletion is queued in this worker's
+      // batching writer, so a peer that reconciles on the nudge would otherwise
+      // read the route that is still on disk, stand down, and wait a heartbeat
+      // for the write to land.
+      this.flushStorage();
+      this.notifyRegistry();
     }
   }
 

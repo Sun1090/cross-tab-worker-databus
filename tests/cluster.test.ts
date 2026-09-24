@@ -1863,6 +1863,139 @@ describe('WorkerClusterRuntime resilience', () => {
     }
   });
 
+  it('reclaims a confirmed self-route whose assignment was lost with its handoff write', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControlA = vi.fn();
+    const a = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a', onControl: onControlA });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    // A owns the topic and B is a second subscriber, so A's pagehide has to hand
+    // the route over. Failed writes cut that flush short, and the teardown ends
+    // with `discardPending()`, so the durable record still names worker-a — while
+    // `pause()` has cleared the in-memory assignment map, and a handoff the new
+    // owner cannot confirm (the route it authorizes against names somebody else)
+    // leaves no worker holding the transport either.
+    storage.failNextWrites(2);
+    a.env.pageHide();
+    await Promise.resolve();
+    const routeOf = (topic: string) =>
+      JSON.parse(storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey(topic)}`))![1]!) as Record<string, unknown>;
+    expect(routeOf('topic-a')).toMatchObject({ workerId: 'worker-a', generation: 1 });
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual([]);
+
+    // The tab comes back — a BFCache restore, so the same worker id registers
+    // again with its local subscription intact.
+    a.env.pageShow();
+    await Promise.resolve();
+
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    expect(onControlA).toHaveBeenLastCalledWith(CONTROL_ACTION.SUBSCRIBE, 'topic-a', undefined);
+    // Reclaiming is not re-electing: the owner and its generation are untouched,
+    // so peers see no churn on a route that already named this worker.
+    expect(routeOf('topic-a')).toMatchObject({ workerId: 'worker-a', generation: 1, confirmedAt: 1_000 });
+    expect(b.runtime.getSnapshot().assignedTopics).toEqual([]);
+  });
+
+  it('releases a confirmed self-route that names this worker for a topic it no longer subscribes', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const a1 = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a1.runtime.start();
+    a1.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    b.runtime.start();
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    storage.failNextWrites(2);
+    a1.env.pageHide();
+    await Promise.resolve();
+
+    // The same route survives into a *new* runtime that carries the same worker
+    // id (an explicit `workerId`, or a worker that rebuilds its runtime) and does
+    // not subscribe the topic. Nothing in that worker visits it any more:
+    // `reconcileSubscriptions` walks local subscriptions and
+    // `reconcileAssignedTopics` walks the assignment map, and it has neither —
+    // while B, which does subscribe, defers to a route whose owner is alive.
+    const a2 = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    const routeOfTopicA = () => {
+      const entry = storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`));
+      return entry ? (JSON.parse(entry[1]) as { workerId: string; confirmedAt?: number }) : null;
+    };
+    const holders = () => [a2, b].filter(worker => worker.runtime.getSnapshot().assignedTopics.includes('topic-a'));
+
+    a2.runtime.start();
+    // Synchronously, before any other task can run: the release pass is over and
+    // its deletion is already on disk, so a peer reading storage now sees the
+    // repaired state rather than the record still queued in this worker's writer.
+    expect(routeOfTopicA()).toBeNull();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // B's heartbeat has not run once, so the record below can only exist because
+    // the release nudged it: B reconciled on the REGISTRY frame, found no owner,
+    // and elected one.
+    expect(routeOfTopicA()).not.toBeNull();
+    a2.env.runIntervals();
+    b.env.runIntervals();
+    await Promise.resolve();
+    a2.env.runIntervals();
+    b.env.runIntervals();
+    await Promise.resolve();
+
+    // The phantom is broken and the ownership is real: exactly one live worker
+    // holds the assignment, and the durable route names that worker and is
+    // confirmed for it. Which one it is follows from the election (both records
+    // report load 0, and an equal-load tie breaks on the worker id) — either
+    // answer is correct, so the assertion names the holder rather than the id.
+    const owners = holders();
+    expect(owners).toHaveLength(1);
+    expect(routeOfTopicA()?.workerId).toBe(owners[0] === a2 ? 'worker-a' : 'worker-b');
+    expect(routeOfTopicA()?.confirmedAt).toBeDefined();
+  });
+
+  it('leaves a route naming this worker alone while it still holds the assignment', async () => {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControlA = vi.fn();
+    const a = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a', onControl: onControlA });
+    const b = makeRuntime({ storage, hub, tabId: 'tab-b', workerId: 'worker-b' });
+    a.runtime.start();
+    await Promise.resolve();
+    b.runtime.start();
+    // Only B subscribes, and the election still lands on A: both records report
+    // load 0, and an equal-load tie is broken by the worker id, where `worker-a`
+    // sorts first. A therefore owns a topic it has no local handler for — the
+    // documented exception, and the state a self-route sweep that stopped at
+    // `subscribedTopics` would delete every pass.
+    b.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    expect(a.runtime.getSnapshot().subscribedTopics).toEqual([]);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      a.env.runIntervals();
+      b.env.runIntervals();
+      await Promise.resolve();
+    }
+
+    // The assignment survives: this is the state a sweep that keyed on
+    // `subscribedTopics` instead of the assignment map would delete every pass,
+    // and the durable route is not rewritten, so no peer sees a re-election.
+    expect(a.runtime.getSnapshot().assignedTopics).toEqual(['topic-a']);
+    const route = JSON.parse(
+      storage.entries().find(([key]) => key.includes(`:route:${createOpaqueKey('topic-a')}`))![1]!
+    ) as { workerId: string; generation: number };
+    expect(route).toMatchObject({ workerId: 'worker-a', generation: 1 });
+  });
+
   it('prunes a crashed worker and its records after the TTL expires', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
@@ -3091,12 +3224,22 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(a.runtime.isAssigned('topic-a')).toBe(true);
 
     // Simulate the route being taken over by another live worker in this
-    // tab's absence (e.g. a peer that won the race after a pause).
+    // tab's absence (e.g. a peer that won the race after a pause). The record is
+    // left unconfirmed on purpose: a *confirmed* route naming worker-b while
+    // worker-b holds no assignment is a phantom, and
+    // `reconcileStrandedSelfRoutes()` releases it, which would have this same
+    // assertion pass by a different route — and hide the sweep it names.
     const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
     const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
     storage.setItem(
       routeEntry[0],
-      JSON.stringify({ ...route, workerId: 'worker-b', tabId: 'tab-b', generation: (route.generation as number) + 1, updatedAt: now })
+      JSON.stringify({
+        topicKey: route.topicKey,
+        workerId: 'worker-b',
+        tabId: 'tab-b',
+        updatedAt: now,
+        generation: (route.generation as number) + 1
+      })
     );
 
     a.env.runIntervals();
