@@ -118,7 +118,7 @@ cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
 - Each topic gets a stable `topicKey`. The reverse mapping (`topicKey → topic`) is held in the `knownTopics` in-memory cache (FIFO eviction, max 500 entries).
 - `knownTopics` never evicts a key the worker still owns (`assignedTopics` guard), because the storage-less fallback path needs it.
 - `isAssigned()` deliberately recomputes the hash via `createOpaqueKey` rather than calling `rememberTopic()` — it's a read-only query that must not populate the cache.
-- `clusterKey` defines the cluster boundary: different clusterKeys = fully isolated storage and BroadcastChannel namespaces.
+- `clusterKey` defines the cluster boundary: different clusterKeys = fully isolated storage and BroadcastChannel namespaces. One exception, in the derivation rather than the hash: `options.clusterKey || '__default__'` means an **empty** key is hashed as the literal `'__default__'`, so `''` and `'__default__'` are the same cluster (pinned by `tests/cluster.test.ts`'s 'treats an empty clusterKey as the default cluster…').
 
 ## Wildcard topic subscriptions
 

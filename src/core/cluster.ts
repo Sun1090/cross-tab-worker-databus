@@ -84,7 +84,12 @@ export interface WorkerClusterHandlers {
 
 export interface WorkerClusterOptions {
   /** Namespace for the cluster's storage keys and BroadcastChannel.
-   * Two DataBus instances with different clusterKeys operate in isolation. */
+   * Two DataBus instances with different clusterKeys operate in isolation.
+   * The one exception is in the derivation rather than in the hash: an *empty*
+   * key falls back to the literal `'__default__'` before it is hashed, so `''`
+   * and `'__default__'` name the same cluster. Pinned by tests/cluster.test.ts's
+   * 'treats an empty clusterKey as the default cluster, and every other key as
+   * isolated', which also holds the other side — any third key still isolates. */
   clusterKey: string;
   /** Callbacks the cluster invokes to drive the transport and lifecycle. */
   handlers: WorkerClusterHandlers;
@@ -529,6 +534,14 @@ export class WorkerClusterRuntime {
       // is why it is recorded here rather than pinned by a test.
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
+      // This `?? 0` is the odd one out among the three fallbacks in this block.
+      // Deleting the other two is a compile error — the compiler is what holds
+      // them — while deleting this one type-checks, because `WorkerRoute.generation`
+      // is a required `number`. What makes its zero count honest is the filter
+      // three lines above: a null `previous` makes `previous?.workerId` evaluate to
+      // `undefined`, which never equals this worker's id, so that `continue` takes
+      // every route-less topic out of the loop. The domination therefore lives in
+      // that line rather than in this expression.
       const generation = (previous?.generation ?? 0) + 1;
       this.writeRoute(topicKey, owner, previous?.workerId, generation);
       this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_MIGRATION, topic });
