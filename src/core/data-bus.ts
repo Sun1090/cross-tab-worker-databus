@@ -1470,15 +1470,33 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
 
   /** Deliver a message to every local handler registered for its topic,
    * plus every handler registered with a wildcard subscription that matches
-   * (e.g. a handler subscribed to "chat.*" receives "chat.room.1"). */
+   * (e.g. a handler subscribed to "chat.*" receives "chat.room.1"). Both sets are
+   * collected before the first handler runs, so a publication is delivered to the
+   * subscribers that existed when its delivery began — see the note in the body. */
   private dispatch(message: DataBusMessage<TData>): void {
     this.trace.recordDispatched(message.topic);
-    this.invokeHandlers(this.topicHandlers.get(message.topic) ?? [], handler => handler(message));
+    // Handlers are held in a `Set` per topic and this method used to iterate the
+    // live collection, which is observable in both directions: Set iteration
+    // visits entries appended after the cursor and skips ones deleted before it,
+    // so a handler that registered another one received the message that triggered
+    // the registration, and a handler that unsubscribed a later one removed it
+    // from a delivery already in flight. The first half is not merely surprising,
+    // it does not terminate: measured with a handler that registers a fresh
+    // closure for its own topic on every invocation, a *single* publication ran
+    // 500 handlers (the probe's own ceiling, not the library's) and the next one
+    // delivered to 999, because the registrations persist. Re-subscribing the
+    // *same* function reference is a no-op by Set identity, which is what made the
+    // shape look safe until it was measured with distinct closures.
+    const exactHandlers = this.topicHandlers.get(message.topic);
+    const delivered = exactHandlers ? Array.from(exactHandlers) : [];
+    const wildcards: DataBusMessageHandler<TData>[] = [];
     for (const [pattern, handlers] of this.topicHandlers) {
       if (pattern !== message.topic && topicMatchesPattern(pattern, message.topic)) {
-        this.invokeHandlers(handlers, handler => handler(message));
+        for (const handler of handlers) wildcards.push(handler);
       }
     }
+    this.invokeHandlers(delivered, handler => handler(message));
+    this.invokeHandlers(wildcards, handler => handler(message));
     this.replayManager.record(message);
   }
 

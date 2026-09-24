@@ -1,6 +1,13 @@
 # Roadmap
 
-0.21.24 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.25 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.25 delivered scope
+
+- **A fan-out that did not terminate.** Handler lists are `Set`s and `dispatch()` iterated the live collection, so a handler that registered a *fresh* closure for its own topic was served the message that caused the registration — and that handler registered another, and so on. Measured: **500 handlers invoked for one publication** (the probe's ceiling, not a limit the library had) and **999 for the next**, since the registrations persist. The pattern behind it is ordinary application code: re-arming a one-shot handler on every message.
+- **Both halves of the same mutation.** `Set` iteration also skips entries deleted before the cursor, so an `unsubscribe()` issued by an earlier handler used to remove a later one from a delivery already in flight (measured as the pair delivering `['first']`). The contract is now fixed in the predictable direction: a message is delivered to the subscribers that existed when its delivery began.
+- **Why no earlier pass saw it.** Re-subscribing the *same* function reference is a no-op by `Set` identity, and the first probe written for this question used a named function and measured exactly one invocation. The defect only appears with distinct closures, which is the difference between a probe that confirms a suspicion and one that invents it — the measurement, not the reasoning, is what settled it.
+- **Sized rather than assumed.** None of the five perf gates covers dispatch, so the snapshot was measured directly: 9-23 ns per dispatch for 1-20 handlers, +15 ns for a matching wildcard pattern with two handlers, against a per-message budget in the tens of microseconds. Three new tests each fail with the number that was measured (`expected 500 to be 1` and two array comparisons), the 933 existing tests are untouched by the change, and coverage stayed at 46 zero-count arms of 1963.
 
 ## 0.21.24 delivered scope
 
