@@ -428,6 +428,48 @@ describe('ReplayManager — hydration', () => {
     expect(received).toEqual([1, 3]);
   });
 
+  it('keeps the newest cutoff when clearBefore runs twice before hydration', async () => {
+    // `clearBefore` folds a second cutoff into the pending hydration filter with
+    // `Math.max`, and that leg had never run: every other case issues one
+    // `clearBefore` per lifecycle, and `resetBuffers()` is the only thing that
+    // clears the flag. The max matters here specifically because the flag filters
+    // **what `load()` returns**, not what the store holds — this adapter has no
+    // `clearBefore`, so nothing is pruned durably and the filter is the only
+    // enforcement. Overwriting with the later value instead of the maximum would
+    // re-hydrate history the caller had already cleared (message 2 in this case).
+    const persistence = new FakePersistence();
+    persistence.messages = [message('t', 1, 4_000), message('t', 2, 8_000), message('t', 3, 12_000)];
+    const { manager } = createManager({ persistence, maxPerTopic: 5 });
+    await manager.clearBefore(10_000);
+    await manager.clearBefore(6_000);
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(received).toEqual([3]);
+    expect(persistence.clearBeforeCalls).toEqual([]);
+  });
+
+  it('clears in-memory history on an adapter that has no clear method', async () => {
+    // The `: null` of `clearAll()`'s capability check. `clear` is optional on the
+    // adapter type, so an injected store may implement only `load`/`append`, and
+    // clearing must still drop the rings **and set the hydration filter**, or the
+    // next load rehydrates what the caller just cleared. What the leg guards
+    // against is the check degrading from `this.persistence?.clear` to
+    // `this.persistence`: calling `clear!()` on an adapter without it makes
+    // `clearAll()` reject after the retry budget, which is a failure the caller
+    // observes from an operation that had nothing durable to do.
+    const persistence = new FakePersistence();
+    persistence.messages = [message('t', 1, 4_000), message('t', 2, 8_000)];
+    const { manager, persistenceErrors } = createManager({ persistence, maxPerTopic: 5 });
+    await manager.clearAll();
+    expect(persistenceErrors).toEqual([]);
+    const received: number[] = [];
+    manager.deliverReplay('t', true, item => received.push(item.data.value));
+    await settle();
+    expect(received).toEqual([]);
+    expect(persistence.messages).toHaveLength(2);
+  });
+
   it('keeps age-retained timestamped history in memory while delivery stays capped', async () => {
     const persistence = new FakePersistence();
     persistence.messages = [message('t', 1, 9_500), message('t', 2, 9_600), message('t', 3, 9_700)];
