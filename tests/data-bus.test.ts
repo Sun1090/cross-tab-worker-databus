@@ -688,23 +688,33 @@ describe('CrossTabDataBus', () => {
 
   it('queues a start() re-entered from the environment port behind a failed open teardown', async () => {
     // The sibling of the case above, at the *other* `stopPromise ?? Promise.resolve()`
-    // site: `queueStartAfterStop()` reads the gate an explicit `stop()` installs, and
-    // no test had ever reached it while that field was still null. A failed *initial*
+    // site: `queueStartAfterStop()` waits on the gate an explicit `stop()` installs,
+    // and no test had reached it while that field was still null. A failed *initial*
     // open is exactly that state — its teardown is owned by `pendingStop`, not by
-    // `stopPromise` — and the only synchronous application-code seam inside the
-    // `stopping` window is the caller-supplied `ClusterEnvironment` port (a browser
-    // `localStorage.removeItem` never re-enters the bus), so the storage below wraps
-    // it. Everything else about this scenario is the port's contract, not a browser.
+    // `stopPromise` — and the only application-code seam inside the `stopping` window
+    // is the caller-supplied `ClusterEnvironment` port (a browser `localStorage`
+    // never re-enters the bus), so the storage below wraps it. The scenario is the
+    // port's contract, not a browser page.
     //
-    // What is pinned is the *order*, not the value. `pendingStop` is installed a few
-    // statements before `stopping` is raised, so the failed open's `transport.stop()`
-    // microtask is already queued by the time the re-entered start chains behind an
-    // already-resolved promise, and FIFO puts the reopen last: measured
-    // `start` (fails) → `stop` → `start` (succeeds). Moving the `pendingStop`
-    // installation below the `cluster.stop()` window flips that to
-    // `start` → `start` → `stop`, which shuts down the transport the retry just
-    // opened while its promise resolves — a bus that reports healthy and hears
-    // nothing. That mutant is what this test exists to fail.
+    // Two claims here are measured, and they land on different lines.
+    //
+    // The order asserted below is NOT this expression's protection. Deleting the read
+    // outright (`const stop = Promise.resolve()`) leaves this file 195/195 green, and
+    // so does moving the `pendingStop` installation below the `cluster.stop()` window,
+    // because `start()` chains the reopen behind `this.pendingStop` on its own: the
+    // `start` → `stop` → `start` order survives both mutations. That makes the
+    // fallback leg executing-and-redundant rather than dominated. The same mutation
+    // does have a consequence elsewhere — it aborts `tests/lifecycle-invariants.test.ts`
+    // with an out-of-memory after ~40 s, because a restart woken too early re-queues
+    // through `start()`'s `stopping` routing forever — and that is the *gate* operand's
+    // job, recorded at `queueStartAfterStop()`.
+    //
+    // What this case does have teeth on is one line above that leg: routing on the
+    // gate instead of the flag (`if (this.stopping)` → `if (this.stopPromise)` in
+    // `start()`) reddens it, as an escaped `Transport failed during startup.` from the
+    // fresh-open path `start()` then takes. Measured against that single mutation:
+    // exactly this test and the pre-existing "performs a fresh stop when the previous
+    // stop gate is settled but not yet cleared" fail, 193 pass.
     const storage = new (class extends MemoryStorage {
       onWorkerRemoval: (() => void) | null = null;
 
