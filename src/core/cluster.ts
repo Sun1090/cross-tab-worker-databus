@@ -448,11 +448,17 @@ export class WorkerClusterRuntime {
     // the `readWorkers()` call above: while `started` — which the top of this
     // method asserts — it appends this worker's own record when storage names
     // nobody, so `activeWorkers` cannot be empty and the election cannot return
-    // undefined. `reconcileSubscriptions()` holds the identical pair for the same
-    // reason. Deleting both fallbacks leaves the suite green (vitest does not type
-    // check), but `tsc --noEmit` then rejects `writeRoute(…, owner, …)` and
-    // `owner.workerId` as `WorkerRecord | undefined`: the fallback is what the
-    // call sites' types rest on, which is why it is recorded rather than pinned.
+    // undefined. `reconcileSubscriptions()` holds two more of the same shape, on its
+    // invalidated-route leg and on its stale-handoff re-election, so this is one of
+    // three fallbacks rather than a pair. None of the three is a behavior a test
+    // could take and all three are something the call sites' types rest on: measured
+    // per site by deleting just that one and running `tsc --noEmit`, this one is
+    // rejected three times (`writeRoute(…, owner, …)` as `WorkerRecord | undefined`,
+    // then `owner.workerId` twice), the route leg twice, and the stale-handoff leg
+    // seven times across its projected-load set, its three `owner.workerId` reads and
+    // its own `writeRoute`. Vitest transpiles without type checking, so the suite
+    // stays green at its full count with any of them deleted — which is why the
+    // classification is recorded here rather than pinned by a test.
     this.writeRoute(topicKey, owner, undefined, (existingRoute?.generation ?? 0) + 1);
     this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
     this.notifyRegistry();
@@ -530,7 +536,8 @@ export class WorkerClusterRuntime {
       // (projectedLoads.get(owner.workerId) ?? owner.load) + 1)`, one on
       // `writeRoute(…, owner, …)`, one on `sendRouteReleased(owner.workerId, …)`. So
       // this is the narrowing the three calls below rest on, not a branch behavior
-      // could take — the same shape as the two `?? this.currentRecord` pairs, which
+      // could take — the same shape as the three `?? this.currentRecord` fallbacks
+      // (this method's own election and the two in `reconcileSubscriptions()`), which
       // is why it is recorded here rather than pinned by a test.
       if (!owner) continue;
       projectedLoads.set(owner.workerId, (projectedLoads.get(owner.workerId) ?? owner.load) + 1);
@@ -1162,6 +1169,11 @@ export class WorkerClusterRuntime {
           // stranded one. While the previous owner is still alive this branch
           // is unreachable, so the strict handoff keeps its no-overlap
           // guarantee.
+          // The third `?? this.currentRecord` in this class. Why it can never be
+          // taken, and that it is a type narrowing rather than a behavior, is
+          // enumerated at `subscribe()`'s copy; this one is the widest of the three,
+          // seven `tsc` rejections across its projected-load set, its three
+          // `owner.workerId` reads and its own `writeRoute`.
           const owner = selectLeastLoadedWorker(
             activeWorkers.map(worker => ({ ...worker, load: recoveryProjectedLoads.get(worker.workerId) ?? worker.load })),
             undefined,
