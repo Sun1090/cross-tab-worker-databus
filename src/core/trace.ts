@@ -423,15 +423,17 @@ export class DataBusTraceReporter {
     // 'isolates event and metrics modes while all mode emits both categories',
     // 'suppresses metrics recording in events mode and events in metrics mode' and
     // 'starts a fresh metrics window after pause and resume, and stop prevents later
-    // flushes'; deleting `dispatched` reddens 'does not emit latency samples for
-    // dispatches without a local receive' and 'does not pair latency for dispatches
-    // without a local receive'. The dedup pair was not pinned at all, and the reason is
-    // the shape of the test that covers them — 'includes dedup outcomes in metrics
-    // windows' raises both counters in one window, so either surviving operand still
-    // emits and neither deletion was observable. Two single-counter cases now pin
-    // each half, one test each: 'emits a metrics window whose only activity is an
-    // accepted dedup' and 'emits a metrics window whose only activity is a suppressed
-    // dedup'.
+    // flushes', all three in `tests/trace.test.ts`; deleting `dispatched` reddens
+    // 'does not emit latency samples for dispatches without a local receive' in
+    // `tests/data-bus.test.ts` and 'does not pair latency for dispatches without a
+    // local receive' in `tests/trace.test.ts` — that pair spans two files, which is
+    // what the old "(two cases)" left out. The dedup pair was not pinned at all, and
+    // the reason is the shape of the test that covers them — 'includes dedup outcomes
+    // in metrics windows' raises both counters in one window, so either surviving
+    // operand still emits and neither deletion was observable. Two single-counter
+    // cases now pin each half, one test each, both in `tests/trace.test.ts`:
+    // 'emits a metrics window whose only activity is an accepted dedup' and
+    // 'emits a metrics window whose only activity is a suppressed dedup'.
     //
     // What the two dedup legs have in common is the reporter; what they do not is
     // reachability through the bus. `DedupManager.isDuplicate` has exactly one

@@ -126,9 +126,16 @@ jobs:
           # a guess. Re-derive both: npm's own `time[<version>]` stamp for the release
           # versus the `Publish to npm` step completion, which `gh api
           # repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs` prints (attempt 1
-          # is the failed one). Measured on 0.21.27 through 0.21.30 (2026-09-24): that
-          # ack -> `time[]` gap was 75-310 s, and every green verify consumed 304-305 s
-          # of a then-360 s ceiling. The ceiling's shape is explained by the packument
+          # is the failed one). Measured on 0.21.27 through 0.21.31 (2026-09-24): that
+          # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 s in version
+          # order. The verify's own duration is the other half of the picture, and it is
+          # remarkably flat: the five green tag runs from 0.21.25 to 0.21.29 took 307, 304,
+          # 305, 304 and 304 s against a then-360 s ceiling, and 0.21.31's took 308 s
+          # against this one. Six samples inside a 5-second band is the regularity the
+          # cache lifetime below explains — a 300 s object plus a few seconds of command
+          # time — and it is measured, not a habit: read `steps[].started_at`/
+          # `completed_at` for the `Verify published npm consumers` step of each release
+          # run. The ceiling's shape is explained by the packument
           # being served `cache-control: public, max-age=300` — a copy anywhere in the
           # path is up to five minutes stale *by design*, so resolution cannot beat one
           # cache lifetime after a write that lands inside it. Which copy (npm's local
@@ -140,7 +147,10 @@ jobs:
           # and a local pack had both succeeded by 21:44:35Z, then resolved on a retry at
           # 21:47:10Z — 487 s past its ack. 96 x 7.5 s = 720 s clears 310 + 300 with
           # margin, and costs nothing when the package already resolves, because the loop
-          # returns on the first successful pack. A red here is still adjudicated by
+          # returns on the first successful pack. 0.21.31 is the first run to exercise this
+          # ceiling — green on attempt 1 — and its own two numbers say which term the wait
+          # bought: its record landed 127.2 s after the ack, so the remaining ~181 s was the
+          # cache lifetime, not the publish lag. A red here is still adjudicated by
           # re-running the failed step against the SAME tag, never by moving or
           # re-pushing it: docs/release-checklist.md.
           PUBLISHED_VERIFY_ATTEMPTS: 96

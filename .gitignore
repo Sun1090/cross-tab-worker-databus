@@ -12,3 +12,9 @@ playwright/.cache/
 
 # Local browser benchmark archives
 bench-results/
+
+# Session scratch: mutation-probe harnesses and per-step gate logs. Kept in-tree
+# rather than in $TMPDIR because the OS evicts temp files mid-session and
+# `pnpm test:coverage` deletes `coverage/` — both have cost the only copy of a
+# failing run. Untracked and unlinted on purpose; never a commit input.
+.gate-logs/
