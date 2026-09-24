@@ -1782,6 +1782,7 @@ describe('WorkerClusterRuntime resilience', () => {
     workerTtlMs?: number;
     onControl?: (action: string, topic: string, data?: unknown) => void;
     onDiagnostic?: (event: { operation: string; topic: string }) => void;
+    onUnknownMessage?: (message: unknown) => void;
   }) {
     const env = createFakeEnvironment({
       storage: options.storage,
@@ -1798,7 +1799,8 @@ describe('WorkerClusterRuntime resilience', () => {
       handlers: {
         onControl: options.onControl ?? vi.fn(),
         onEvent: vi.fn(),
-        ...(options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {})
+        ...(options.onDiagnostic ? { onDiagnostic: options.onDiagnostic } : {}),
+        ...(options.onUnknownMessage ? { onUnknownMessage: options.onUnknownMessage } : {})
       }
     });
     return { env, runtime };
@@ -2109,6 +2111,69 @@ describe('WorkerClusterRuntime resilience', () => {
       })
     ).not.toThrow();
     expect(controlB).toHaveBeenCalledWith('FUTURE-ACTION', 'topic-a', undefined);
+  });
+
+  it('normalizes a non-string frame type to null in the unknown-message diagnostic', async () => {
+    // `handleMessage` dispatches on `type` alone, and the cluster channel is a
+    // BroadcastChannel any same-origin script can post into, so the value that
+    // reaches the default arm is not constrained by this library. What it becomes
+    // is: `getUnknownMessageStats().lastType`, published as
+    // `getDiagnostics().protocol.lastUnknownMessageType` under a declared
+    // `string | null`. Forwarding the raw value would put a number, or an object
+    // with no `Object.prototype` behind it, into a field consumers report by name
+    // — the failure class `0.21.4` had to fix in the error reporter, where
+    // `String(Object.create(null))` throws while trying to describe a bad value.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = 1_000;
+    const unknown = vi.fn();
+    const channelNames: string[] = [];
+    const a = makeRuntime({
+      storage, hub, now: () => now, tabId: 'tab-a', workerId: 'worker-a', onUnknownMessage: unknown
+    });
+    a.env.environment.createChannel = name => {
+      channelNames.push(name);
+      return hub.create(name);
+    };
+    a.runtime.start();
+    await Promise.resolve();
+    const forged = hub.create(channelNames[0]!);
+    expect(a.runtime.getUnknownMessageStats()).toEqual({ count: 0, lastType: null });
+
+    // The two shapes a real poster can deliver: a recognized-looking frame whose
+    // `type` is not a string, and a bare primitive, which is truthy so it passes
+    // the null-frame guard and simply has no `type` at all.
+    forged.postMessage({ type: 42, sourceWorkerId: 'forged-peer' });
+    expect(a.runtime.getUnknownMessageStats(), 'a numeric type is not a string').toEqual({ count: 1, lastType: null });
+    forged.postMessage('junk' as unknown as WorkerClusterMessage);
+    expect(a.runtime.getUnknownMessageStats(), 'a posted primitive must not throw out of the listener').toEqual({
+      count: 2, lastType: null
+    });
+
+    // The value whose stringification would throw, so the normalization cannot be
+    // replaced by a coercion at the read site.
+    forged.postMessage({ type: Object.create(null), sourceWorkerId: 'forged-peer' });
+    expect(a.runtime.getUnknownMessageStats(), 'a prototype-less object has no String()').toEqual({
+      count: 3, lastType: null
+    });
+
+    // And the arm that does have a value to report: an older or future SDK's frame
+    // type, named exactly as it arrived.
+    forged.postMessage({ type: 'FUTURE_MESSAGE', sourceWorkerId: 'forged-peer' });
+    expect(a.runtime.getUnknownMessageStats(), 'a string type is reported verbatim').toEqual({
+      count: 4, lastType: 'FUTURE_MESSAGE'
+    });
+
+    // Every one of them is still forwarded to the handler raw, the posted
+    // primitive included: the counter is the only place the shape is judged, and an
+    // application collecting the frames has to see what actually arrived.
+    expect(unknown).toHaveBeenCalledTimes(4);
+    expect(unknown.mock.calls.map(([message]) => message)).toEqual([
+      { type: 42, sourceWorkerId: 'forged-peer' },
+      'junk',
+      { type: Object.create(null), sourceWorkerId: 'forged-peer' },
+      { type: 'FUTURE_MESSAGE', sourceWorkerId: 'forged-peer' }
+    ]);
   });
 
   it('drops a CONTROL frame addressed to another worker instead of acting on it', async () => {
