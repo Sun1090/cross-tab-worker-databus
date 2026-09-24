@@ -7863,6 +7863,55 @@ corroborates the 26-spec collection.)
   the bench-checklist prose and this gate. Then #71, the teardown subscribe storm.
 - **Update date:** 2026-09-24.
 
+## Phase 146 / The churn loop was the harness's synchronous pump, and the diagnosis that said otherwise is retracted
+
+- **Milestone / version:** post-`0.21.14`, unreleased. Branch `docs/churn-diagnosis-corrected`, off `main` at
+  `5acd831`. No `src/` change; the corrected text is inside the *Unreleased* CHANGELOG section, which has not
+  shipped, so no published artifact moves.
+- **Status:** open PR, locally green.
+- **What task #71 asked, and what it actually found.** The open question recorded in Phase 144 was "which
+  read answers stale between the re-election's `writeRoute` and the next pass". There is no such read. The
+  instrumented replay counts the legs instead of inferring them: for seed 1046, **11,542
+  `handleControlMessage` accepts, 11,541 `reconcileSubscriptions` re-sends, 11,538 `confirmRoute` skips, 6
+  confirmations written**, and at the store **27,571 reads of route keys against 6 writes that reached it**.
+  Re-election (`writeRoute` in the `!route || owner not live` branch) fires 5 times in the whole seed, not
+  thousands: the loop is the *re-send* leg, which writes nothing by design.
+- **The mechanism, in one step.** The route owner accepts the SUBSCRIBE and stamps `confirmedAt` — into its own
+  `BatchingStorageWriter.pending`. A peer reading that key goes through *its* writer, finds nothing pending,
+  reads the flushed record, and still sees `confirmedAt === undefined`, so it re-sends. The owner's
+  `confirmRoute` then skips, correctly, because its own read does see the confirmation. The only event that
+  ends the cycle is a microtask boundary — and the harness never reaches one, because `ChannelHub.send()`
+  delivers each frame on the caller's stack, so a whole `reconcile → post → reconcile` cascade runs inside a
+  single synchronous call.
+- **The control that makes that a measurement and not a story.** Deferring delivery by one `queueMicrotask`
+  (re-checking the member set at delivery time, so a channel closed in between still receives nothing) takes
+  the sweep from ~18 seeds over 500 posts per 5,000 to **0 seeds over 500 in 1,050**, with no `[CHURN]` line
+  and the budget never tripping. A browser cannot produce the loop at all: `BroadcastChannel` posts to a later
+  task, so the flush always lands before any peer reacts, and the re-send is bounded by one heartbeat.
+- **What this changes in the shipped record.** `CHANGELOG.md`'s Unreleased bullet that called this "a real
+  behavior and is not fixed", and named the `[CHURN]` count as the number a product fix must drive to zero, is
+  replaced by the account above. `AGENTS.md` gains the rule that came out of it — attribute a loop by counting
+  its legs, and treat "the fake channel delivered synchronously" as a first-class hypothesis wherever a hub
+  and a batching writer share a test.
+- **What is NOT claimed.** Async delivery is not shipped here. Under it the same sweep fails two end-state
+  invariant checks — seeds 100 and 727, both immediately after an injected `a:forge:<topic>` frame, reporting
+  `no subscriber left but owners=[] transportSubscriptions=[a]` — so raising the harness's fidelity is its own
+  change with its own diagnosis, and whether a route-less `CONTROL/SUBSCRIBE` landing after the final sweep can
+  leave a transport subscription held is a product question this phase surfaced and did not settle.
+- **Also fixed in passing:** two duplications PR #236 left in `tests/coordination-invariants.test.ts` —
+  `hub.setDeliveryBudget(DELIVERY_BUDGET)` on consecutive lines, and the same three-line comment twice around
+  `const churnedHere`. Net 0 insertions / 4 deletions.
+- **Changed files:** `CHANGELOG.md`, `AGENTS.md`, `docs/progress.md`, `tests/coordination-invariants.test.ts`.
+- **Verification:** the trace and the async control run with temporary instrumentation in `src/core/cluster.ts`
+  and `tests/fakes.ts`, both reverted afterwards (`git checkout -- src/core/cluster.ts`; harness files
+  restored from `/tmp` copies and confirmed with `git diff --numstat` showing only the intended 0/4). With the
+  probes restored: `npx vitest run tests/coordination-invariants.test.ts` and the full suite below.
+- **Risk / rollback:** documentation and a comment dedup; `git revert`. The residual risk is the reverse of the
+  usual one — the retracted text made this repository look like it harboured a coordination bug it does not
+  have, and the replacement says plainly which half is still open.
+- **Next:** the harness-fidelity change (deferrable delivery + the two forged-frame seeds), then 0.21.15.
+- **Update date:** 2026-09-24.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
