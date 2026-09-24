@@ -1471,6 +1471,32 @@ describe('CentrifugeWorkerTransport credential bridge', () => {
     expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 2, token: 'channel-token-chat.room.1' });
   });
 
+  it('answers a channelToken request that names no channel with an empty one', async () => {
+    // `channel` is optional on the wire (`{ …; kind; channel?: string }`) and
+    // `centrifuge-session.ts` posts it with `...(channel === undefined ? {} :
+    // { channel })`, so the nameless shape is reachable two ways: an older or
+    // foreign worker on the port, and our own session handed a non-string by the
+    // dependency it trusts for the callback argument. Either way the receiver owes
+    // the application a value its `getChannelToken(channel: string)` can hold, and
+    // `?? ''` is the only thing between a missing field and `undefined` crossing
+    // that type boundary — the 0.21.4 failure class, where a string operation on a
+    // value with no primitive form throws inside the reporting path.
+    const worker = new WorkerDouble();
+    const getChannelToken = vi.fn(async channel => `channel-token-${channel}`);
+    const transport = new CentrifugeWorkerTransport({
+      workerMode: 'dedicated',
+      workerFactory: () => worker as unknown as Worker,
+      credentialProvider: { getToken: () => 'unused-token', getChannelToken }
+    });
+    transport.start({ url: 'wss://example.test/connection/websocket' }, { onStatus: () => {}, onMessage: () => {}, onError: () => {} });
+
+    worker.emit({ type: 'TOKEN_REQUEST', requestId: 3, kind: 'channelToken' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getChannelToken).toHaveBeenCalledWith('');
+    expect(worker.messages).toContainEqual({ type: 'TOKEN_RESPONSE', requestId: 3, token: 'channel-token-' });
+  });
+
   it('reports a rejecting credential provider as TOKEN_ERROR', async () => {
     // A provider that rejects (a token endpoint returning 500) is the common
     // failure, not a provider that throws synchronously. Without this the
