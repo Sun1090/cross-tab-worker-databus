@@ -1,6 +1,29 @@
 # Roadmap
 
-0.21.15 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.16 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.16 delivered scope
+
+- **A deferred transport operation is cancelable by its own release.** `subscribeTransport()` and
+  `unsubscribeTransport()` recorded intent in `transportSubscribedTopics` and then handed `runTransport()` a
+  captured call, so a subscribe parked behind a pending opening could flush *after* the unsubscribe that cancelled
+  it. The connection then held a channel that no local handler, cluster assignment, or route record owns — and
+  nothing recovers, because the dedupe that prevents double-subscribes reads the same stale set. `runTransport()`
+  now also takes the desired state as a predicate and re-reads it at each place that resumes on a later task. Three
+  regression cases, with per-leg mutation attribution: the two resume points have disjoint kill sets (1 test versus
+  2), and inverting the guard fails 20 cases including the pre-existing startup-queueing test.
+- **The coordination fuzz now delivers frames the way a browser does.** `ChannelHub.setAsyncDelivery(true)` defers
+  each post by one microtask; it is opt-in because 15 tests post a frame and assert without awaiting. Enabling it
+  on the sweep's hub is what turned the previous release's unresolved observation into the defect above — measured
+  as a control in both directions, six seeds failing before the fix and zero after, with the synchronous hub
+  passing on the broken code.
+- **What the raised fidelity did *not* claim is recorded at the sites.** The async hub adds no standing mutant kill
+  on the fixed code, the member-set re-read inside the deferred pump is defensive rather than observable through
+  this fake, and the unsubscribe direction's measured cost is a redundant wire frame rather than a stranded
+  channel.
+- **Shipped prose the fix invalidated**, corrected in English and Chinese: both subscription propagation chains
+  wrote the set *after* the transport call (the code does it before), the recovery-gate paragraph credited only the
+  cancellation-generation guard, and `api.md`'s `subscribe()` row promised queueing without cancellation.
 
 ## 0.21.15 delivered scope
 

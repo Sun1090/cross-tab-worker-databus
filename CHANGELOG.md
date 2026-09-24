@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [0.21.16] - 2026-09-24
+
 ### Fixed
 
 - **A transport subscribe deferred behind an opening no longer flushes after the unsubscribe that cancelled it.** `subscribeTransport()` and `unsubscribeTransport()` mutate `transportSubscribedTopics` and then hand the work to `runTransport()` as a captured closure. When the subscribe was parked behind an opening and the release reached the transport immediately — the window between the opening resolving and its own parked continuation running — the connection was left holding a channel that no local handler, cluster assignment, or route record owns. Nothing recovers from that: `subscribeTransport`'s dedupe returns early for a topic already in the set, and the set here says the channel is held, so the tab stays subscribed to a topic it has released and deaf to one it re-takes. `runTransport()` now also takes the desired state as a `stillWanted()` predicate and re-reads it at each place that resumes on a later task (the recovery-gate waiter and the opening flush). The immediate branch keeps no check because every path into it evaluated the set in the same task.
