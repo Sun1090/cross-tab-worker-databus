@@ -15,8 +15,9 @@
  * Persistence failures are reported through the injected `onPersistenceError`
  * sink (the DataBus routes these to its persistence failure ledger and health
  * summary). Transient failures are retried with exponential backoff; a
- * `PersistenceRetryCancelledError` is thrown when a lifecycle transition
- * (suspend/stop) supersedes the in-flight operation, and is swallowed by the
+ * `PersistenceRetryCancelledError` is thrown when a lifecycle transition that
+ * bumps `retryGeneration` supersedes the in-flight operation — in this class
+ * that is `suspend()` alone, see the field's own note — and is swallowed by the
  * DataBus's persistence error sink so teardown never surfaces noise.
  */
 import { isWildcardTopic, topicMatchesPattern } from './routing';
@@ -81,7 +82,9 @@ export class ReplayManager<TData = unknown> {
   private readonly trace: DataBusTraceReporter;
   private readonly onPersistenceError: (error: unknown) => void;
   private readonly onDispatchError: (error: unknown) => void;
-  /** Bumped on suspend/stop so in-flight persistence retries are cancelled. */
+  /** Bumped by exactly one statement, in `suspend()` below — which is where the
+   * `generation !== this.retryGeneration` tests throughout this file look for a
+   * cancellation. This class's own `stop()` does not touch the field. */
   private retryGeneration = 0;
   private pendingReplayPersistence: DataBusMessage<TData>[] = [];
   private persistenceFlushScheduled = false;
@@ -292,14 +295,20 @@ export class ReplayManager<TData = unknown> {
     }, this.retentionSweepMs);
   }
 
-  /** Stop the periodic retention sweep. */
+  /** Stop the periodic retention sweep. Its only caller in `src/` is `suspend()`,
+   * which chains it at its end — the class is internal (`ReplayManager` appears
+   * nowhere in the barrel), so no consumer reaches this method directly. It
+   * cancels no in-flight work: that is the `retryGeneration` bump in `suspend()`. */
   stop(): void {
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     this.retentionTimer = null;
   }
 
-  /** Suspend the manager: cancel in-flight persistence retries (so a hidden tab
-   * or stopped bus does not keep hammering the store) and stop the sweep. */
+  /** Cancel in-flight persistence retries by superseding their generation, so a
+   * hidden tab or a stopped bus does not keep hammering the store. This is the
+   * field's only writer; the bus reaches it from its two `replayManager.suspend()`
+   * call sites (the cluster's `onSuspend` handler, and `beginStop()`), and this
+   * class's own `stop()` only clears the sweep timer. */
   suspend(): void {
     this.retryGeneration += 1;
     // Detach an in-flight hydration so a re-entrant start() can begin a fresh
@@ -553,7 +562,7 @@ export class ReplayManager<TData = unknown> {
   }
 
   /** Run a persistence operation with exponential backoff on transient failure.
-   * Bumped `retryGeneration` (suspend/stop) cancels the loop early; a
+   * The `suspend()` bump of `retryGeneration` cancels the loop early; a
    * structurally failing operation throws after `persistenceRetryMaxAttempts`,
    * leaving the ring buffer intact so the bus keeps working. */
   private async withPersistenceRetry<T>(
@@ -576,7 +585,7 @@ export class ReplayManager<TData = unknown> {
         const result = await operation();
         // A lifecycle transition may complete while an async backend operation
         // is in flight. Do not let its successful result mutate application
-        // state after suspend/stop has already cleared that state.
+        // state after `suspend()` has already cleared it.
         if (generation !== this.retryGeneration) throw new PersistenceRetryCancelledError();
         return result;
       } catch (error) {
