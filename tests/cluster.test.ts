@@ -2152,20 +2152,28 @@ describe('WorkerClusterRuntime resilience', () => {
     const postForged = (forged.postMessage as (message: unknown) => void).bind(forged);
     expect(a.runtime.getUnknownMessageStats()).toEqual({ count: 0, lastType: null });
 
-    // The two shapes a real poster can deliver: a recognized-looking frame whose
-    // `type` is not a string, and a bare primitive, which is truthy so it passes
-    // the null-frame guard and simply has no `type` at all.
-    postForged({ type: 42, sourceWorkerId: 'forged-peer' });
-    expect(a.runtime.getUnknownMessageStats(), 'a numeric type is not a string').toEqual({ count: 1, lastType: null });
-    postForged('junk');
-    expect(a.runtime.getUnknownMessageStats(), 'a posted primitive must not throw out of the listener').toEqual({
-      count: 2, lastType: null
-    });
-
-    // The value whose stringification would throw, so the normalization cannot be
-    // replaced by a coercion at the read site.
+    // This frame leads on purpose. The mutant it exists to catch is a coercion at the
+    // write or read site rather than a `typeof` check, and that mutant *throws* here
+    // where it only mismatches a value on the others — measured, `String(unknown.type)`
+    // in place of the `typeof` guard raises out of the post. Posted second or third it
+    // is never reached, because the numeric assertion below fails first, so the order
+    // decides whether the test can report a crash at all.
     postForged({ type: Object.create(null), sourceWorkerId: 'forged-peer' });
     expect(a.runtime.getUnknownMessageStats(), 'a prototype-less object has no String()').toEqual({
+      count: 1, lastType: null
+    });
+
+    // The two shapes a real poster can deliver that a value check has to name: a
+    // recognized-looking frame whose `type` is not a string, and a bare primitive,
+    // which is truthy so it passes the null-frame guard and simply has no `type`.
+    // The numeric one is what kills a raw forward on a *value* (`lastType: 42`); no
+    // mutant was found that dies only to the bare primitive — every variant that
+    // mishandles it mishandles the two frames above it too — so it is kept as the one
+    // input carrying no `type` property at all, not as a separate claim.
+    postForged({ type: 42, sourceWorkerId: 'forged-peer' });
+    expect(a.runtime.getUnknownMessageStats(), 'a numeric type is not a string').toEqual({ count: 2, lastType: null });
+    postForged('junk');
+    expect(a.runtime.getUnknownMessageStats(), 'a posted primitive must not throw out of the listener').toEqual({
       count: 3, lastType: null
     });
 
@@ -2181,9 +2189,9 @@ describe('WorkerClusterRuntime resilience', () => {
     // application collecting the frames has to see what actually arrived.
     expect(unknown).toHaveBeenCalledTimes(4);
     expect(unknown.mock.calls.map(([message]) => message)).toEqual([
+      { type: Object.create(null), sourceWorkerId: 'forged-peer' },
       { type: 42, sourceWorkerId: 'forged-peer' },
       'junk',
-      { type: Object.create(null), sourceWorkerId: 'forged-peer' },
       { type: 'FUTURE_MESSAGE', sourceWorkerId: 'forged-peer' }
     ]);
   });
