@@ -1,3 +1,28 @@
+## [0.21.23] - 2026-09-24
+
+A sixteen-mutant sweep of the last multi-term guards in the repository, one behavior that no test had ever named, and a comment that existed to justify an otherwise dead operand replaced by a lint gate that refuses the edit for real.
+
+### Tests
+
+- **One live gap in sixteen operands.** Every four-term state chain in `data-bus.ts` was measured one deletion at a time against the whole suite: `stop()`'s "nothing to tear down" early return, the recovery-timer callback gate, `runTransport()`'s ready shortcut, and the demand reopen under it. Four of the sixteen were already pinned by a named test, eleven are closed by construction, and exactly one — `!this.stopping` on the ready shortcut — was live and unnamed. `sends no unsubscribe to a transport while the bus is stopping` pins it now, and dies to that mutant alone.
+- **How the guard was found is the reusable part.** For a state guard there is no input vector to differential, so the operands were classified with a *flag-vector census*: instrument the guard, record the operand fields at every evaluation, run the suite once, and compare the observed rows against the single assignment each surviving operand needs to be the decider (7589 recorded `stop()` calls over seven vectors; 49 timer-callback entries over two). Where a premise row did occur but its deletion still passed, printing a short stack on first sight named the *production path* reaching the guard — `unsubscribeTransport()` ← a control frame ← `WorkerClusterRuntime.stop()`'s handoff — which is what turned a surviving mutant into a test. The construction needed a second tab: with no remaining subscriber the handoff removes the route instead of posting a frame, and the single-tab version of the test passed against its own mutation.
+- **Two closure mechanisms that had not met this repository before.** A leg can be dominated by the *function it calls* rather than by a neighbouring operand: three of the demand reopen's four legs restate guards `reopenTransport()` performs first, so deleting one assigns the caller the same promise it would have received. And a leg can have a premise that genuinely exists for the length of every `start()` and still be unobservable, because no caller boundary falls inside it — `stop()`'s `!this.started` is that case, and the same invariant is already written down at `reopenTransport()`, in the one copy of two that had a comment.
+- **Two tests were written, measured, and deleted.** A draft aimed at the `status !== ERROR` leg and an early single-tab version of the unsubscribe test both passed against the mutation they were written for: the first parked its operation behind the recovery gate, which pre-empts the guard a few lines earlier; the second never reached the guard at all. Neither is in the suite; the verdicts that replaced them say "no route found, held against this branch being relaxed" instead of claiming unreachability.
+
+### Quality gates
+
+- **`no-restricted-globals` now refuses `isFinite` and `isNaN`.** The three `typeof value !== 'number'` operands in `src/utils/validation.ts` cannot decide anything for any input, and the only reason recorded for keeping one was that it catches a specific edit — writing the coercing global `isFinite(value)` where `Number.isFinite(value)` was — which nothing refused. A leg justified by a forbidden edit should have a gate refusing the edit, so the rule was added, and then *proved to have teeth* by introducing the swap: `pnpm lint` reports it at the call. The clean tree has zero findings, because no bare `isFinite(`/`isNaN(` call exists anywhere in `src/`, `tests/` or `scripts/`.
+- **Which meant the claim had to be hunted down.** Two live copies said the rule does not exist — the validator's own paragraph and the `AGENTS.md` bullet citing this measurement — and both now state that the operand is defended twice, and which removal each defence covers. Five historical `docs/progress.md` mentions were left as written, with the new entry as the pointer.
+
+### Documentation
+
+- **Three repository rules.** Measure a *state* guard with a flag-vector census plus the assignment enumeration, and use a stack on first sight of a premise row to find the path that reaches it; a cannot-decide leg whose justification is a forbidden edit should end up with a gate in front of the edit, not only a comment; and name which of "no test reaches it" and "it cannot be reached" a verdict actually establishes, because the first is a coverage statement and the second is a claim about the state machine.
+- **Ledger:** **47** zero-count branch arms of **1958** at both ends of all three phases, aggregate **99.02 / 97.59 / 99.27 / 99.69**, tests 929 → 930. Every operand probed is evaluated on every call, so no coverage total could have pointed at the gap this release closed — the sixth consecutive phase to make that argument by measurement rather than by assertion.
+
+### Compatibility
+
+Mixed-version peers are unaffected: no frame, default, storage key, export or behavior moved. The pinned behavior is one the code already had and no test named; the lint rule is repository-local and reaches consumers only as comment text in the declarations and the bundles. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.22`.
+
 ## [0.21.22] - 2026-09-24
 
 Six phases of one method, applied to every multi-term guard the previous scan ranked: delete a single operand, run the whole suite, and ask which of three answers that mutant produced. Nine behaviors that no test named are now named, five operands are closed as incapable of deciding anything, and the coverage ledger did not move once — which is the finding, not a shortfall.
