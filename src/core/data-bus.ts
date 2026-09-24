@@ -1908,12 +1908,23 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // opening before transport.start() is reached.
     this.updateStatus(WORKER_STATUS.CONNECTING);
     if (lifecycleEpoch !== this.lifecycleEpoch || this.stopping || this.suspended) {
-      // The only handler this opening ever gets. `resumeTransport()` calls here with
-      // `void`, and the `opening.then(f, g)` below is unreachable from this arm, so
-      // without this line a rejected reopen — a superseded lifecycle whose transport
-      // then failed to start — lands as an unhandled rejection. Unlike the absorb at
-      // the top of this method, this one is not dominated by anything: it is the
-      // handler.
+      // The backstop for the one caller that attaches nothing. Five sites call this
+      // method, and they do not all handle what they get back: `startDemandRecovery()`,
+      // `updateStatus()`'s recovery-timer arm and `runTransport()` each chain their own
+      // `opening.then(f, g)` onto the promise this returns — the same object, so their
+      // `g` is already a handler of `opening` and this line decides nothing on those
+      // three paths — `start()` passes the promise out to its own caller, and
+      // `resumeTransport()` calls with `void`, which is the path this exists for.
+      // Without it, a rejected reopen on that path — a superseded lifecycle whose
+      // transport then failed to start — lands as an unhandled rejection. Measured,
+      // and the measurement is symmetric: deleting this line leaves all 37 test files
+      // green with zero unhandled-rejection reports, and so does deleting the `.catch`
+      // at the top of this method. No test constructs the void path's rejection, so
+      // what separates the two absorbs is the caller list above plus the terminal
+      // `.catch(reportError)` on every `pending` chain — an enumeration, not a pin.
+      // The note before this method's `return opening` draws the same line from the
+      // other side: Promise semantics decide what can surface, and no test decides
+      // anything here either way.
       void opening.catch(() => undefined);
       return opening;
     }
