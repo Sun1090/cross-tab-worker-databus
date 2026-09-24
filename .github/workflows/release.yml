@@ -126,31 +126,42 @@ jobs:
           # a guess. Re-derive both: npm's own `time[<version>]` stamp for the release
           # versus the `Publish to npm` step completion, which `gh api
           # repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs` prints (attempt 1
-          # is the failed one). Measured on 0.21.27 through 0.21.31 (2026-09-24): that
-          # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 s in version
+          # is the failed one). Measured on 0.21.27 through 0.21.32 (2026-09-24): that
+          # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 s in version
           # order. The verify's own duration is the other half of the picture, and it is
           # remarkably flat: the five green tag runs from 0.21.25 to 0.21.29 took 307, 304,
-          # 305, 304 and 304 s against a then-360 s ceiling, and 0.21.31's took 308 s
-          # against this one. Six samples inside a 5-second band is the regularity the
-          # cache lifetime below explains — a 300 s object plus a few seconds of command
-          # time — and it is measured, not a habit: read `steps[].started_at`/
-          # `completed_at` for the `Verify published npm consumers` step of each release
-          # run. The ceiling's shape is explained by the packument
+          # 305, 304 and 304 s against a then-360 s ceiling, 0.21.31's took 308 s and
+          # 0.21.32's 304 s against this one. Seven samples inside a 5-second band is the
+          # regularity the cache lifetime below explains — a 300 s object plus a few
+          # seconds of command time — and it is measured, not a habit: read
+          # `steps[].started_at`/`completed_at` for the `Verify published npm consumers`
+          # step of each release run. 0.21.32 is the model's cleanest sample: its record
+          # landed 76.1 s in, a `no-cache` read from a laptop saw the new `latest` 151 s in,
+          # and this runner still took 304 s — one lifetime after its own first fetch.
+          # The ceiling's shape is explained by the packument
           # being served `cache-control: public, max-age=300` — a copy anywhere in the
           # path is up to five minutes stale *by design*, so resolution cannot beat one
           # cache lifetime after a write that lands inside it. Which copy (npm's local
-          # cache, or an intermediate) served this run's stale views is NOT established:
-          # a local-cache account predicts the retry below should have waited too, and
-          # it did not. So the rule is arithmetic, not a model — worst-case ack->`time[]`
+          # cache, or an intermediate) served these stale views is NOT established, and
+          # the counter-observation this comment used to offer against a local account is
+          # WITHDRAWN: it joined two machines. The "local pack had succeeded by 21:44:35Z"
+          # read came from a laptop, while the 1 s green at 21:47:10Z was a *new runner
+          # job*, whose npm cache starts empty -- which is what a local account predicts,
+          # not what refutes it. The one reading a purely-local account still cannot
+          # explain is the ETARGET at 21:45:07Z: 364 s after the poll loop opened at
+          # 21:39:03Z, so ~60 s after a copy taken then must have expired.
+          # So the rule is arithmetic, not a model — worst-case ack->`time[]`
           # gap plus one cache lifetime — and 0.21.30 showed the sum is not theoretical:
           # it burned all 364 s and still saw ETARGET at 21:45:07Z while the tarball HEAD
           # and a local pack had both succeeded by 21:44:35Z, then resolved on a retry at
           # 21:47:10Z — 487 s past its ack. 96 x 7.5 s = 720 s clears 310 + 300 with
           # margin, and costs nothing when the package already resolves, because the loop
-          # returns on the first successful pack. 0.21.31 is the first run to exercise this
-          # ceiling — green on attempt 1 — and its own two numbers say which term the wait
-          # bought: its record landed 127.2 s after the ack, so the remaining ~181 s was the
-          # cache lifetime, not the publish lag. A red here is still adjudicated by
+          # returns on the first successful pack. 0.21.31 and 0.21.32 are the first two
+          # runs to exercise this ceiling, both green on attempt 1, and their two splits
+          # say which term the wait buys: 127.2 s of record then ~181 s of cache for the
+          # one; 76.1 s of record, a laptop reading the new `latest` at 151 s, and 304 s
+          # before this runner saw it for the other — one lifetime after its own fetch.
+          # A red here is still adjudicated by
           # re-running the failed step against the SAME tag, never by moving or
           # re-pushing it: docs/release-checklist.md.
           PUBLISHED_VERIFY_ATTEMPTS: 96
