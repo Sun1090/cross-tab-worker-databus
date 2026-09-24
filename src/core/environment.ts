@@ -136,6 +136,33 @@ export function createStorageEventChannel(options: {
     let message: WorkerClusterMessage;
     try {
       const parsed = JSON.parse(event.newValue) as { senderId?: unknown; seq?: unknown; message?: WorkerClusterMessage };
+      // Four operands, measured one at a time against the whole suite.
+      //
+      // The last two decide, and each now dies to a case of its own: `seq` must be a
+      // number (a numeric string is rejected, not coerced) and `message` must be
+      // truthy. Neither was observable before, because the one malformed-envelope
+      // write in `tests/storage-channel.test.ts` carried a payload failing *both*, so
+      // whichever operand survived still rejected it — the same joint-assertion shape
+      // that hid the two dedup counters in `trace.ts`.
+      //
+      // The middle operand, `typeof parsed !== 'object'`, is never the first true
+      // operand for anything `JSON.parse` returns: a non-null primitive has no numeric
+      // `seq`, so the next test rejects it. `!parsed` *is* first for `null` (since
+      // `typeof null === 'object'`), yet deleting it changes nothing observable either
+      // — `null.seq` then throws inside this `try`, and the `catch` below returns the
+      // same way. Measured rather than argued: over 23 stored values spanning `null`,
+      // every JSON primitive, arrays, and an envelope with each field absent, null,
+      // boolean, a numeric string or `1e999`, plus unparseable text, the accept/drop
+      // vector is byte-identical for this line as written and for either of those two
+      // deleted.
+      //
+      // Both stay, because each is load-bearing against a *different* later edit
+      // rather than against an input: dropping `!parsed` turns a contained rejection
+      // into an exception routed through `catch`, which only holds while the parse and
+      // the property reads share that `try`; dropping the object test starts
+      // accepting primitives the moment the `seq` test is relaxed. The writer of this
+      // value is any same-origin script, so the envelope's shape is stated here, not
+      // inferred from the sender.
       if (!parsed || typeof parsed !== 'object' || typeof parsed.seq !== 'number' || !parsed.message) return;
       message = parsed.message;
     } catch {
