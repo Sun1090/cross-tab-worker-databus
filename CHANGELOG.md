@@ -18,6 +18,7 @@ Every claim quoted in a shipped comment that this pass could re-run was re-run a
 ### Documentation
 
 - **`AGENTS.md`: pinning a dependency version is not the same as checking its lines.** The existing rule said a claim about another library must be verified in the installed package and pinned to a version; this release's citation was pinned *and* wrong, matching no copy in the store. So the rule now says to read the number off the installed file at the time of writing, and to prefer the dependency's own comment string as the locator — it is searchable, and a reflow does not invalidate it.
+- **And a new mutation-testing rule: a mutant that was never inserted reports as a surviving mutant.** The void probe above is the mirror of the existing "diff the mutant itself before believing what it kills" — there the diff was too large, here it was empty, and both look like a result. A harness that runs several mutants must print and assert its insertion count before the suite runs, and treat `applied=0` as a void leg rather than a green one.
 
 ### Compatibility
 
