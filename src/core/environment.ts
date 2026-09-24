@@ -37,11 +37,21 @@ export interface ClusterEnvironment {
   storage: StorageLike | null;
   /** sessionStorage (or null if unavailable). Used for stable tab IDs. */
   sessionStorage: StorageLike | null;
-  /** Epoch milliseconds. In the browser this is `Date.now()`, which is a *wall*
-   * clock, not a monotonic one: an NTP correction or a user changing the system
-   * time can move it backwards, and the TTL math above tolerates that by
-   * treating a negative age as "not expired". Injected so tests can control
-   * time — the injected clock is the only monotonic one in the picture. */
+  /** Epoch milliseconds. A *wall* clock, and the only kind this library has:
+   * `createBrowserEnvironment` binds this field straight to `Date.now`, and no
+   * monotonic source (`performance.now()`, `hrtime`) is read anywhere in `src/`.
+   * An NTP correction or a user changing the system time can therefore move two
+   * consecutive reads backwards, so the field promises no ordering — and neither
+   * do the injected ones: `tests/trace.test.ts`'s 'keeps counting a measurable
+   * dispatch whose clock ran backwards' steps its fake clock down on purpose.
+   * What that costs is decided at each subtraction rather than by the clock:
+   * `cluster.ts` is this field's only reader in `src/`, and the sites that
+   * subtract (`isStaleHandoff`, `readWorkers`, `cleanupOrphanedRoutes`) all
+   * compare `now - <stamped field> > ttl` or keep on `<= ttl`, so a record
+   * stamped before a backwards jump reads as not yet expired and survives until
+   * the clock climbs back past its stamp. `sampleThroughput`, given the same
+   * reading that becomes `heartbeatAt`, returns no sample for that tick instead
+   * of publishing a negative window. Injected so tests can control time. */
   now: () => number;
   /** Generates a random ID (UUID when crypto is available, else Math.random). */
   randomId: () => string;
