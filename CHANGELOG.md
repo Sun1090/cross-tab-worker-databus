@@ -1,3 +1,22 @@
+## [0.21.20] - 2026-09-24
+
+Six uncovered branch arms closed by calls no test had ever made, one shipped sentence corrected, and the coverage ledger given a third tier — the kind a compiler, not a test, owns.
+
+### Tests
+
+- **The string overload of `publish()` had never been called.** `WorkerClusterRuntime.publish` declares `(topic, data, messageId: string)` alongside the metadata form, and the normalization at the top of the method is the only thing that turns it into the object every downstream reader expects. `CrossTabDataBus.publish` always hands over an object, so nothing reachable *through the bus* can take that arm — and no test had called the runtime directly with a string, even though `docs/api.md` points callers who coordinate straight at the cluster there.
+- **A single-item `publishBatch` whose item carries partial or no metadata.** Every existing case supplied both `messageId` and `timestamp`, so the `… || …` test, its `: undefined` fallback, and both conditional spreads had each only ever been evaluated one way. The absent-metadata case is the one with a consequence: `sendControl` calls the handler with **three** arguments when the metadata is falsy and five otherwise, and that arity is what separates "arrived without an id" from "arrived with an id of `undefined`". The two partial shapes are now covered and have no assertion of their own — recorded as such, because the receiving side re-normalizes with `metadata?.x === undefined ? {} : …`, so an omitted key and an `undefined` value produce the same wire frame.
+- **`clusterKey: ''` is a namespace alias, and it is now pinned on both sides.** The namespace is `createOpaqueKey(options.clusterKey || '__default__')`, so an empty key hashes the literal `'__default__'` rather than naming its own cluster. Two runtimes on one storage and channel, keyed `''` and `'__default__'`, now have to leave exactly one owner for a shared topic, and a third runtime on another key owns its own copy — which is the half that fails if the fallback ever widens past the empty string.
+
+### Documentation
+
+- **`clusterKey`'s shipped JSDoc said different keys "operate in isolation" without naming that pair** — an absolute about behavior, reaching consumers through both the declarations and the bundles. The exception is now stated where the option is declared, and in `AGENTS.md`.
+- **A third tier in the uncovered-arm ledger, in `AGENTS.md`.** With `noUncheckedIndexedAccess` on, an index read is `T | undefined` whether or not a hole is reachable, so a `?? fallback` that satisfies an assignment can neither run nor be deleted; `exactOptionalPropertyTypes` produces the same tier from the other side, where the always-present form of a conditional spread is a `TS2769` while the whole suite stays green. Both were established by **deleting the fallback and running `tsc`** per arm, which is the procedure the rule prescribes: in the route-write block it separated five compiler-held legs from one (`(previous?.generation ?? 0)`) that compiles bare and is therefore dominated by a filter three lines above rather than by its own expression.
+
+### Compatibility
+
+Mixed-version peers are unaffected: no frame, default, storage key, or export moved, and no behavior changed — the empty-`clusterKey` alias is documented as it already was, because moving `''` into its own namespace would silently relocate storage for anyone passing an empty key today. `verify:compat`, `verify:types` and `verify:pack` pass against `v0.21.19`.
+
 ## [0.21.19] - 2026-09-24
 
 One behavior fix in the trace reporter, two test pins that each close a leg no test named, and the last unclassified uncovered-branch legs outside the two large modules written up at their sites.

@@ -1,6 +1,14 @@
 # Roadmap
 
-0.21.19 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.20 was released on September 24, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+
+## 0.21.20 delivered scope
+
+- **Six uncovered branch arms closed by calls no test had ever made** — not by harder-to-reach guards. `publish(topic, data, messageId: string)` is a declared overload on the exported runtime and its normalization had never executed, because the bus always passes an object and nothing called the runtime with a string. Same for a single-item `publishBatch`: every case had supplied both `messageId` and `timestamp`, so the "one of them", "the other one" and "neither" shapes had never been delegated.
+- **Which of those has a consequence, and which only has coverage.** An absent metadata reaches `sendControl` as `undefined`, which calls the handler with **three** arguments instead of five — the arity is how a listener tells "no id at all" from "an id of `undefined`". The two partial shapes are covered and have no assertion that separates them from always building the object, because the receiving side re-normalizes with `metadata?.x === undefined ? {} : …`: an omitted key and an `undefined` value are the same wire frame.
+- **`clusterKey: ''` is a namespace alias, and the shipped sentence said otherwise.** The namespace is derived from `options.clusterKey || '__default__'`, so an empty key hashes the literal string and shares storage and BroadcastChannel with `'__default__'` — while the option's own JSDoc said different cluster keys "operate in isolation", an absolute that reaches consumers through the declarations and the bundles. Both sides are now pinned (the alias, and that a third key still isolates) and the exception is stated where the option is declared. The behavior is documented rather than changed: moving `''` would silently relocate storage for anyone already passing it.
+- **The ledger's third tier, established per arm by deleting the fallback and running `tsc`.** `noUncheckedIndexedAccess` makes an index read `T | undefined` whether or not a hole is reachable, and `exactOptionalPropertyTypes` forbids the always-present form of a conditional spread (`TS2769`) while the whole suite stays green — so those legs can neither run nor be deleted, and the compiler is the only check that exists for them. Applying the probe inside the route-write block separated five compiler-held legs from one that compiles bare: `(previous?.generation ?? 0)` is unreachable because of a null filter three lines above it, not because of its own expression. In a coverage report the two are indistinguishable.
+- **What moved, and what did not.** `cluster.ts` 20 → 14 zero arms and `src/` **54 → 48 of 1962**, with aggregate branches at 97.55. No frame, default, storage key, export or behavior changed, so mixed-version peers see nothing new.
 
 ## 0.21.19 delivered scope
 
