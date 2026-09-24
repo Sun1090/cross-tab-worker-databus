@@ -118,6 +118,20 @@ export class WebSocketTransport<TData = unknown>
       // Reuse the live socket instead of orphaning it. While the first
       // attempt is still connecting, share its handshake gate so a duplicate
       // start() cannot report readiness before the socket is usable.
+      // The `?? undefined` side of this has zero counts, and it is a type
+      // conversion rather than a behavior branch: `MaybePromise<void>` admits
+      // `void | Promise<void>` and not `null`, so writing `return this.connectPromise`
+      // is TS2322, not a passing edit (measured). The state it would have to report
+      // — a live socket with no gate — is excluded by the field's whole write set:
+      // `connectPromise` is assigned in exactly two statements, `start()`'s
+      // `= opening` immediately after the promise executor that sets `socket` and
+      // `socketActive`, and `stop()`'s `= null` in the same frame as the two clears
+      // that un-satisfy the test above. Neither pair yields to anything between its
+      // members, so no observer — including a re-entrant `start()` — can see the
+      // premise standing while the gate is gone. The statement order inside each
+      // frame is not what carries this; any reorder within a frame is equally
+      // unobservable, and the `settleConnect()`/`failConnect()` pair that does reach
+      // across frames never touches the field.
       return this.connectPromise ?? undefined;
     }
     // A failed or closed socket is one-shot; retain its object only long

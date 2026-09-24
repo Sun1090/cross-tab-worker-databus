@@ -198,6 +198,18 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
     // transiently (quota, private-mode initialization, a closing connection,
     // or a browser shutdown); the next operation must be able to retry.
     void pending.catch(() => {
+      // The fall-through — a rejection that arrives with the cache already
+      // pointing somewhere else — has zero counts, and no writer fits in its
+      // window: this catch is attached two statements after `dbPromise = pending`,
+      // so it is the first reaction that rejection can run, and nothing can register
+      // a reaction on `pending` earlier — `invalidate()` is reached only with a
+      // connection from a *resolved* open, and its chained read takes the
+      // `() => undefined` arm on a rejected promise anyway, while `onversionchange`
+      // is installed inside `onsuccess`, which an errored request never reaches.
+      // Kept, because what dropping the condition costs is asymmetric: an
+      // unconditional clear would evict a newer open's cached connection and the
+      // next operation would open a second database connection while the first is
+      // still usable.
       if (dbPromise === pending) dbPromise = null;
     });
     return pending;
@@ -266,6 +278,8 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         catch (error) { invalidate(db); reject(error); return; }
         let settled = false;
         const fail = (error: unknown): void => {
+          // One of the four `invalidate`+`reject` latches whose zero-count arm is
+          // enumerated in `load()`'s closure above.
           if (settled) return;
           settled = true;
           invalidate(db);
@@ -290,6 +304,8 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         catch (error) { invalidate(db); reject(error); return; }
         let settled = false;
         const fail = (error: unknown): void => {
+          // One of the four `invalidate`+`reject` latches whose zero-count arm is
+          // enumerated in `load()`'s closure above.
           if (settled) return;
           settled = true;
           invalidate(db);
@@ -314,6 +330,8 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
         catch (error) { invalidate(db); reject(error); return; }
         let settled = false;
         const fail = (error: unknown): void => {
+          // One of the four `invalidate`+`reject` latches whose zero-count arm is
+          // enumerated in `load()`'s closure above.
           if (settled) return;
           settled = true;
           invalidate(db);
