@@ -2050,7 +2050,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `status === ERROR`, `droppedAfterConnect`, `stopping` — so the fast path is
     // `1000`. Observed at this line: `1000`, plus `0000`, `0100`, `1001` and
     // `1010`; that set is one first-sight `console.log` per distinct row over a
-    // whole-suite run, so re-derive it rather than trusting the list.
+    // whole-suite run, so re-derive it rather than trusting the list. Re-derived on
+    // 2026-09-25 it came back the same five, and deliberately no count is quoted here:
+    // this guard is evaluated tens of thousands of times per run, most of them inside
+    // `tests/coordination-invariants.test.ts`, so a total would move with the sweep
+    // depth the way `stop()`'s did — see that note for the measurement.
     // `transportReady` is the load-bearing one: deleting it fails nine tests in
     // `data-bus.test.ts` and `centrifuge.test.ts`, every one of them an operation
     // the test expects to be deferred. `droppedAfterConnect` dies to exactly two
@@ -2064,8 +2068,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `!this.stopping` was live and unnamed until
     // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
     // premise is the `1001` row, and the only thing in the suite that reaches it is
-    // `WorkerClusterRuntime.stop()`'s handoff — measured, the first-sight stack is
-    // `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` — posting an
+    // `WorkerClusterRuntime.stop()`'s handoff — and that "only" is now an enumeration rather
+    // than a first sight: the stack captured at *every* `1001` evaluation over one
+    // whole-suite run came back as exactly one distinct path, `beginStop()` → `stop()` →
+    // `pause()` → `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` → here.
+    // Posting an
     // UNSUBSCRIBE after `beginStop()` raised the flag, which needs a peer that will
     // take the topic, because with no remaining subscriber the handoff drops the
     // route instead.
