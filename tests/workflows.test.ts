@@ -129,4 +129,37 @@ describe('workflow files', () => {
       `release.yml: the published-consumer gate only waits ${totalMs / 1000}s; it must clear the measured ack->registry-record gap (${maxMeasuredAckToRecordMs / 1000}s) plus one full packument cache lifetime (${packumentCacheLifetimeMs / 1000}s), or a good release fails this blocking step`
     ).toBeGreaterThanOrEqual(packumentCacheLifetimeMs + maxMeasuredAckToRecordMs);
   });
+
+  it('lists every gate the workflows run in the AGENTS.md quick reference', () => {
+    // The command table is what a fresh session reads first, and its own note records
+    // that it was assembled from these steps and should be re-read against them. The
+    // note did not prevent the drift it warns about: `pnpm audit` is a blocking step in
+    // the verify job and was absent from the table until this case existed, so an
+    // agent working from the table could land a vulnerable dependency and be surprised
+    // by CI. Comparing the two artifacts is the fix; restating the rule was not.
+    //
+    // Scope is decided by what the command *is* rather than by a hand-kept list of
+    // gates: every `run: pnpm …` except the two provisioning commands is either a
+    // package script or a pnpm built-in that can fail a build, so both belong in the
+    // table. Deleting the exclusion below makes this case fail on
+    // `pnpm exec playwright install`, which is what keeps that set honest.
+    const provisioning = new Set(['install', 'exec']);
+    const documented = new Set<string>();
+    for (const line of readFileSync('AGENTS.md', 'utf8').split('\n')) {
+      if (!line.startsWith('|')) continue;
+      for (const match of line.matchAll(/pnpm ([\w:-]+)/g)) documented.add(match[1]!);
+    }
+    const missing: string[] = [];
+    for (const file of ['ci.yml', 'release.yml']) {
+      for (const match of readWorkflow(file).matchAll(/run:\s*pnpm ([\w:-]+)/g)) {
+        const command = match[1]!;
+        if (provisioning.has(command)) continue;
+        if (!documented.has(command)) missing.push(`${file} runs pnpm ${command}`);
+      }
+    }
+    expect(missing, 'the AGENTS.md quick reference is missing a gate the workflows run').toEqual([]);
+    // An empty `missing` is also what a table scan that read nothing produces, so the
+    // other half of the instrument is checked separately.
+    expect(documented.size, 'the table scan must read commands out of AGENTS.md').toBeGreaterThan(10);
+  });
 });
