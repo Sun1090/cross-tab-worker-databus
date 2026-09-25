@@ -308,10 +308,18 @@ export class DataBusTraceReporter {
     this.received += 1;
     this.topics.add(topic);
     const queue = this.receivedAt.get(topic);
-    // First receive for this topic creates a new FIFO queue (subject to the
-    // topic cap); subsequent receives append to the existing queue (subject to
-    // the per-topic cap). Both caps prevent a single misbehaving topic from
-    // exhausting memory.
+    // The two caps bound different shapes of burst, and neither of them bounds the
+    // `topics` Set above. `MAX_PENDING_TOPICS` is an *admission* gate rather than a
+    // per-topic bound: once a window holds 1,000 topics every later new one is
+    // dropped untracked however quiet it is, while an already-admitted topic keeps
+    // appending regardless. `MAX_PENDING_MESSAGES_PER_TOPIC` is the depth bound for
+    // one such queue. Both are pinned by `tests/trace.test.ts` ('caps the number of
+    // topics tracked for pending receives', 'caps the pending receive queue per
+    // topic'). `topics` carries neither cap on purpose — it answers which topics
+    // were *touched*, which includes the ones admission refused, and that first
+    // test asserts the pair (1,100 touched against 1,000 sampled) — so what bounds
+    // it is the window flush instead: both record paths increment a counted field
+    // before adding, so any window that grows this Set reaches `resetMetrics()`.
     if (!queue) {
       if (this.receivedAt.size >= MAX_PENDING_TOPICS) return;
       this.receivedAt.set(topic, [this.now()]);

@@ -307,8 +307,8 @@ console.table(__bus.getClusterSnapshot().routes)
 | `topicHandlers` | `CrossTabDataBus` | 明文 `topic` | `Set<handler>` | 应用 `subscribe`/`unsubscribe` 增删；最后一个 handler 离开时删除条目 | 引用计数应用层 handler；属于业务层职责 |
 | `transportSubscribedTopics` | `CrossTabDataBus` | 明文 `topic` | 标记 | 断开时清空；重连时从 `assignedTopics` 重放 | 跟踪真实 transport 连接实际持有的订阅；随连接一起消亡 |
 | `subscribedTopics` | `WorkerClusterRuntime` | 明文 `topic` | 标记 | 第一个本地 handler 订阅时增长；最后一个退出时收缩 | Tab 的持久订阅意图，transport 故障后仍保留 |
-| `assignedTopics` | `WorkerClusterRuntime` | `topicKey` | 明文 `topic` | 收到 `CONTROL/SUBSCRIBE` 时设置；`CONTROL/UNSUBSCRIBE` 或交接时清除 | "我拥有什么"的权威集合；驱动 `isAssigned` 和负载 |
-| `knownTopics` | `WorkerClusterRuntime` | `topicKey` | 明文 `topic` | FIFO 上限 500；永不淘汰拥有中的键 | 反查缓存；也是无 storage 模式下明文的唯一来源 |
+| `assignedTopics` | `WorkerClusterRuntime` | `topicKey` | 明文 `topic` | 收到 `CONTROL/SUBSCRIBE` 时设置；`CONTROL/UNSUBSCRIBE` 或交接时清除，或由 `reconcileAssignedTopics` 在持久 route 不再指向本 worker 后收回——最后这一条才是收养洪水的出口 | "我拥有什么"的权威集合；驱动 `isAssigned` 和负载 |
+| `knownTopics` | `WorkerClusterRuntime` | `topicKey` | 明文 `topic` | FIFO 扫描上限 500，会跳过持有的 key 与本次正在记忆的 key，因此所有条目都被持有时上限会失守 | 反查缓存；也是无 storage 模式下明文的唯一来源 |
 | 存储 `worker:` | 持久化 | `clusterHash:…:worker:{workerId}` | JSON `WorkerRecord` | 心跳刷新；超过 `workerTtlMs` 被清理 | 跨 Tab 存活发现 |
 | 存储 `route:` | 持久化 | `clusterHash:…:route:{topicKey}` | JSON `WorkerRoute` | 由订阅方创建/盖章；无订阅者且 TTL 过期时清理 | 跨 Tab owner 映射 |
 | 存储 `subscriber:` | 持久化 | `clusterHash:…:subscriber:{topicKey}:{tabId}` | JSON `TopicSubscriberRecord` | 每次 Tab 订阅写入；Tab 死亡时清理 | 跨 Tab 订阅意图 |
