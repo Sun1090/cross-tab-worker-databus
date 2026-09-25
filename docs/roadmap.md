@@ -620,6 +620,10 @@ The line continues the async-callback isolation audit: every fix below binds a c
 
 - Added peer protocol capability discovery to cluster snapshots and diagnostics. Current runtimes advertise protocol version 1; legacy peers remain visible as `null`.
 
+## 0.20.68 delivered scope
+
+- Added protocol version metadata and compatibility behavior for mixed-version cluster peers.
+
 ## 0.20.67 delivered scope
 
 - Added bounded unknown protocol message diagnostics on `WorkerClusterRuntime` and `CrossTabDataBus.getDiagnostics()`, including count and last message type while preserving safe ignore behavior.
@@ -997,10 +1001,6 @@ The line continues the async-callback isolation audit: every fix below binds a c
 - Deduplication accepted/suppressed counters in periodic trace metrics.
 - Publication metadata compatibility coverage across WebSocket, Centrifuge, Worker boundaries, and browser E2E.
 - Service Worker transport decision: remain deliberately unimplemented until a stable connection-lifetime contract exists across target browsers.
-
-## 0.20.68 delivered scope
-
-- Added protocol version metadata and compatibility behavior for mixed-version cluster peers.
 
 ## 0.20.69 candidates
 

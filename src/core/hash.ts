@@ -23,7 +23,10 @@ export function createOpaqueKey(value: string): string {
   let h3 = SEED_H3 ^ value.length;
   let h4 = SEED_H4 ^ value.length;
 
-  // Feed every UTF-16 code unit into all four lanes with distinct large primes.
+  // Feed every UTF-16 code unit into all four lanes with the four distinct odd
+  // multipliers below. Oddness is the property the mixing needs — see the note
+  // on `PRIME_H1`, which also records that the name is not a claim: one of the
+  // four is composite.
   // Note: this operates on UTF-16 code units, so astral-plane characters (emoji,
   // rare CJK) are hashed as surrogate pairs — consistent within a process, but
   // not Unicode-normalized. Callers should normalize the topic string beforehand
@@ -63,14 +66,22 @@ const PRIME_H3 = 2_246_822_519;
 const PRIME_H4 = 3_266_489_917;
 
 /** Final avalanche constant pair. Each lane is mixed with itself (shifted)
- * and XORed with a neighbor lane (shifted) to cross-diffuse the lanes. */
+ * and XORed with a neighbor lane (shifted) to cross-diffuse the lanes.
+ * Neither value is prime, whatever the first name says: 2_246_822_507 =
+ * 15809 × 142123 and 3_266_489_909 = 1223 × 2670883. Both are odd, and that is
+ * the property `Math.imul` needs for the multiply to be a bijection on 32 bits.
+ * Do not "correct" either number towards a prime: the digest keys route and
+ * worker records already in localStorage. */
 const AVALANCHE_PRIME = 2_246_822_507;
 const AVALANCHE_CROSS = 3_266_489_909;
 
-/** One step of the final avalanche: mix `self` with a shift and prime, then
- * XOR with a cross-mix of `neighbor` (also shifted and primed) so a change
- * in any lane propagates to the others. The 16/13 shifts spread bits across
- * the 32-bit word before the odd multiplier mixes them across it. */
+/** One step of the final avalanche: mix `self` with a shift and an odd
+ * multiplier, then XOR with a cross-mix of `neighbor` (also shifted and
+ * multiplied by its own odd constant) so a change in any lane propagates to the
+ * others. The 16/13 shifts spread bits across the 32-bit word before the odd
+ * multiplier mixes them across it. Neither multiplier is prime — see
+ * `AVALANCHE_PRIME` for the factorizations and for why the values stay as they
+ * are. */
 function avalancheMix(self: number, neighbor: number): number {
   return (
     Math.imul(self ^ (self >>> 16), AVALANCHE_PRIME) ^
