@@ -528,6 +528,12 @@ describe('test-name citations', () => {
     // because a proximity window cannot tell "the test this note cites" from "a
     // quoted string that happens to sit below it". A form that needs a heuristic
     // to separate from prose is a form whose first output is its own parser.
+    //
+    // What this gate does *not* yet exercise: the `e2e` half of the citation
+    // pattern. No possessive citation in the scanned scope names an
+    // `e2e/*.spec.ts` — the spec files are mentioned only in `progress.md`, which
+    // is exempt, and even there never in the possessive form — so whoever first
+    // cites a Playwright case from a scanned file pins that alternation.
     const titlesByFile = new Map<string, Set<string>>();
     for (const file of [...listSourceFiles('tests'), ...listSourceFiles('e2e')]) {
       if (!/\.(test|spec)\.tsx?$/.test(file)) continue;
@@ -550,6 +556,13 @@ describe('test-name citations', () => {
       [...titlesByFile.values()].reduce((total, set) => total + set.size, 0),
       'the citation scan must find the suite case titles'
     ).toBeGreaterThan(500);
+    // And the e2e corpus separately, because the total above cannot notice it
+    // going empty: 936 of the 976 titles come from `tests/`, so dropping the e2e
+    // sweep entirely still clears a 500 floor.
+    expect(
+      [...titlesByFile.keys()].filter(name => name.endsWith('.spec.ts')).length,
+      'the citation scan must collect titles from the e2e specs as well as tests/'
+    ).toBeGreaterThan(0);
 
     const citation = /(?:tests|e2e)\/([A-Za-z0-9_.-]+\.(?:test\.)?tsx?)`?['’]s\s*([`'“"])((?:\\.|(?!\2)[^\\]){6,300}?)\2/g;
     const unresolved: string[] = [];
