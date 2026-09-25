@@ -17,6 +17,21 @@ const forbiddenPatterns = [
   /renderPrice|orderStore/i
 ];
 
+/**
+ * Every path in the repository's own index. A prose gate's scope is expressed
+ * against this set rather than against the directory on disk, because a walk
+ * silently includes generated, gitignored output — and whether that output
+ * exists depends on whether a build has run on this machine.
+ */
+function trackedFiles(): Set<string> {
+  return new Set(execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean));
+}
+
+/** Keep only the tracked members of a walked list. */
+function keepTracked(files: string[], tracked: Set<string>): string[] {
+  return files.filter(file => tracked.has(file));
+}
+
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
@@ -28,13 +43,53 @@ function listDocumentationFiles(path: string): string[] {
 }
 
 describe('public documentation', () => {
+  it('scans tracked files only, so a build artifact cannot join or leave the scope', () => {
+    // The predicate the privacy gate is scoped by, pinned on *fabricated* input
+    // rather than on the working tree — which is the only way this case means the
+    // same thing on a clean checkout and on one that has run `pnpm examples`.
+    // `examples/react/vendor/react.esm.js` is gitignored output of
+    // `scripts/build-example-vendor.mjs`, so it is absent in CI's `verify` job
+    // (`pnpm check` never builds examples) and present at home, and it must not
+    // change what a docs gate reads.
+    const tracked = trackedFiles();
+    expect(keepTracked(['README.md', 'examples/react/vendor/react.esm.js'], tracked)).toEqual([
+      'README.md'
+    ]);
+    // The other direction, because a filter that drops everything passes the
+    // assertion above: a tracked example source must survive it.
+    expect(keepTracked(['examples/demo/demo.js'], tracked)).toEqual(['examples/demo/demo.js']);
+    // And the exclusion is about *this* path, not about the walk being empty:
+    // `examples/` has tracked sources to keep. Take the count from the index
+    // (`git ls-files examples | wc -l`) rather than from this comment.
+    expect([...tracked].filter(f => f.startsWith('examples/')).length).toBeGreaterThan(0);
+  });
+
   it('does not contain private scopes, local domains, or business-specific fields', () => {
-    const files = [
-      'README.md',
-      'CHANGELOG.md',
-      ...listDocumentationFiles('docs'),
-      ...listDocumentationFiles('examples')
-    ];
+    // Scope is the repository's own files. `listDocumentationFiles` walks a
+    // directory as it is on disk, and `examples/` holds generated output:
+    // `pnpm build:examples` writes `examples/react/vendor/react.esm.js` (1.13 MB)
+    // plus a 1.75 MB map, so an unfiltered walk runs these regexes over a
+    // third-party bundle — on *some* machines only. CI's `verify` job never builds
+    // it and the `browser` job that does runs no vitest, so a vendored `@scope/`
+    // import specifier, or an absolute path in a future map, would redden a
+    // docs-only PR at home and pass the gate that decides merge. Neither artifact
+    // matches any pattern today (measured: 0 hits for all three, in both files), so
+    // this is scope stability rather than a live leak; the pin is the case above.
+    const files = keepTracked(
+      [
+        'README.md',
+        'CHANGELOG.md',
+        ...listDocumentationFiles('docs'),
+        ...listDocumentationFiles('examples')
+      ],
+      trackedFiles()
+    );
+    // Control on the scan itself: an over-eager filter that kept only the two root
+    // files would pass every pattern with the example sources unread.
+    expect(
+      files.filter(f => f.startsWith('examples/')).length,
+      'the privacy gate must still read the tracked example sources'
+    ).toBeGreaterThan(0);
     const content = files.map(file => `${file}\n${readFileSync(file, 'utf8')}`).join('\n');
 
     for (const pattern of forbiddenPatterns) expect(content).not.toMatch(pattern);
