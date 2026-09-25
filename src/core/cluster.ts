@@ -142,8 +142,11 @@ const CLUSTER_PROTOCOL_VERSION = 1;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
 const DEFAULT_WORKER_TTL_MS = 10_000;
 // Upper bound on the topicKey → topic reverse cache. Control messages from
-// other workers can reference arbitrary topics, so cap growth to avoid an
-// unbounded memory leak from a misbehaving or malicious peer.
+// other workers can reference arbitrary topics, so growth is capped — but only
+// for entries this worker does not own. An adopted peer SUBSCRIBE counts as
+// owned, so a flood of them is released by the reconcile sweep, not by this
+// number; `rememberTopic`'s eviction loop carries what happens when every
+// entry is owned.
 const MAX_KNOWN_TOPICS = 500;
 
 /**
@@ -1756,15 +1759,21 @@ export class WorkerClusterRuntime {
     // plaintext topic. Never evict a key this worker still owns, or those reads
     // would silently return null for an assigned topic.
     if (this.knownTopics.size > MAX_KNOWN_TOPICS) {
-      // Evict the oldest non-owned entry (FIFO). Scan from the front so the
-      // cap holds as long as at least one tracked topic is not owned. Only
-      // when every entry is owned (degenerate) do we let the cap slip — owned
-      // topics must stay resolvable for the storage-less read path.
-      // Scan from the front (oldest insertion) for the first non-owned entry.
-      // `break` after one eviction: we only need to get back under the cap, and
-      // evicting more would unnecessarily drop resolvable topics. If every
-      // entry is owned (degenerate), the loop completes without evicting —
-      // owned topics must stay resolvable for the storage-less read path.
+      // Evict ONE entry — the oldest that is neither owned nor the key being
+      // remembered — then stop: `break` after a single deletion because getting
+      // back under the cap is all that is required, and dropping more would
+      // discard resolvable topics for nothing. Both skips are load-bearing, for
+      // different reasons. An owned key must stay because the storage-less read
+      // path recovers its plaintext only from this cache. And the key being
+      // remembered must stay even though a new write lands at the BACK of the
+      // insertion-ordered Map: the only way the front-scan reaches it is a cache
+      // whose older entries are all owned, and there deleting it would throw away
+      // the very mapping this call exists to install — pinned by
+      // `tests/cluster.test.ts`'s "keeps the topic it is remembering when the
+      // cache is full and every older entry is owned". When every entry is owned
+      // nothing is eligible and the cap slips: owned topics outrank a bounded
+      // cache, and a slipping cap is visible in `getSnapshot().knownTopics`
+      // while a lost mapping is not.
       for (const candidate of this.knownTopics.keys()) {
         if (candidate === topicKey || this.assignedTopics.has(candidate)) continue;
         this.knownTopics.delete(candidate);

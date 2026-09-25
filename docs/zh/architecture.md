@@ -197,14 +197,15 @@ BroadcastChannel CONTROL
 1. **无 storage 退化路径**。localStorage 不可用时（降级模式），`readRoute()` 和 `readSubscriberTabIds()` 没有持久化记录可查，只能从内存状态重建路由——但需要从 `topicKey` 反推出原始 `topic`。没有 `knownTopics`，即使 worker 仍持有该 topic，被淘汰的 key 也会让 `readRoute()` 静默返回 `null`。
 2. **避免每次 reconcile 重复哈希**。每次 reconcile 循环遍历 `subscribedTopics`，对每个 topic 调用 `rememberTopic`。缓存总是无条件更新（哈希很便宜，命中/未命中开销可忽略），但反向映射对无 storage 路径至关重要。
 
-**上限与淘汰**。缓存上限为 `MAX_KNOWN_TOPICS = 500` 条。此限制防止恶意或异常 peer 通过控制消息引用任意 topic 耗尽内存——每个被处理的 `CONTROL` 消息都会调用 `rememberTopic`，否则 Map 会无限制增长。
+**上限与淘汰**。缓存上限为 `MAX_KNOWN_TOPICS = 500` 条，而这个上界管住的是本 worker **不持有**的那些条目。每个被处理的 `CONTROL` 消息都会调用 `rememberTopic`，而淘汰扫描一路走到缓存末尾都没找到非持有的条目时，它宁可什么都不删——持有的 key 必须留下，因为无 storage 的读取路径只能从这张表里还原它们的明文。所以一个对任意 topic 刷 `CONTROL/SUBSCRIBE` 的 peer 并不被这个上限挡住：这样的帧每个都会被收养，收养就让它变成持有的，因而不可淘汰。实测 1,200 条 peer SUBSCRIBE 帧：`knownTopics` 连同 `assignedTopics` 一起涨到 1,200 条，一轮 reconcile 又把两者都带回 `0`——因为一次没有可确认 route 的收养本来就是临时的。对这种洪水，内存的界是清扫，不是上限。
 
 有一张形状相同的记忆表后来是被**直接删掉，而不是加上上限**，理由值得留下：`wildcardPublishCache` 把具体 topic 映射到匹配它的本地通配模式（或用 `null` 表示"扫描过了，没有匹配"），本 Worker 每发布到一个新的 topic 就多一条记录，而且完全没有限界。实测：对 1,200 个互不相同的 topic 调用 `publish()` 之后，`knownTopics` 仍是 500 条，而这张表存有 1,200 条。它当时定不下一条淘汰规则，因为两种取值都不能随便忘——而这个问题本身就问错了。存下来的取值其实什么也没决定：两种形状都只被当作"这个 topic 我扫过没有"来读，唯一的路由影响是某个 topic 的*第一次*发布在匹配到通配模式时会在本地分发，并且完全不查持久化的 route。于是一个 Worker 持有 `chat.*`、对端 Worker 具体持有 `chat.room.1` 时，从通配持有者发出的三次发布是 `1,0,0` 留在自己这里、`0,1,1` 送到 owner——第一次根本没被转发出去，而投递语义是 at-most-once。所以这条快速路径已经删掉，所有非本地持有的发布现在都经由 route 决定 owner，那张表也一起消失了：它的无界增长只是这个优化本身的副作用，而这个优化本身就是 bug。
 
-淘汰策略为 FIFO（按插入顺序，即 Map 迭代顺序）。当缓存超过上限时，删除最早插入的条目：
+淘汰策略为 FIFO（按插入顺序，即 Map 迭代顺序）。当缓存超过上限时，扫描删掉它**被允许**删的第一个条目然后停下——回到上限之内只需一次删除，多删只会白白丢掉还能解析的 topic：
 
-- **当前 worker 仍持有的 key 不会被淘汰**（`assignedTopics.has(oldest)` 守卫），因为无 storage 的 `readRoute` 路径依赖它。
-- 刚插入的条目不会被本轮淘汰（`oldest !== topicKey` 守卫）。
+- **当前 worker 仍持有的 key 不会被淘汰**（扫描里 `this.assignedTopics.has(candidate)` 这一项跳过），因为无 storage 的 `readRoute` 路径依赖它。
+- 本次正在记忆的 key 不会被自己这次调用淘汰（同一个跳过里的 `candidate === topicKey` 这一项）。新写入的 `Map.set` 落在末尾，所以扫描只有在本轮之前的条目全部被持有时才会走到它——而在那里删掉它，等于丢弃本次调用本来要建立的映射。由 `tests/cluster.test.ts` 的 "keeps the topic it is remembering when the cache is full and every older entry is owned" 钉住。
+- 没有任何条目可选时，上限失守而不是淘汰一个持有的 key：持有比有界缓存更重要，而失守的上限在 `getSnapshot().knownTopics` 里看得见，丢失的映射看不见。
 - 读取不会提升 recency，因此这不是真正的 LRU。哈希足够便宜，反向查找未命中只需重新计算一次 key。
 
 **`isAssigned` 绕过缓存**。`isAssigned(topic)` 直接调用 `createOpaqueKey(topic)` 而非 `rememberTopic()`。这是刻意的：`isAssigned` 是只读查询，不是状态变更，因此不应填充 `knownTopics`（那可能淘汰无 storage 路径需要的条目）。它也优先使用同步的 `assignedTopics` Map 而非从 storage 读取路由，避免与 `BatchingStorageWriter` 的 flush 窗口产生竞态。
@@ -227,14 +228,14 @@ BroadcastChannel CONTROL
 | 收到 `CONTROL/UNSUBSCRIBE` | 不做直接删除 | `rememberTopic` 仍会缓存该 topic；路由不再指向本 worker 后由 `reconcileAssignedTopics` 移除 |
 | `reconcileAssignedTopics` | 如未订阅且未持有则 `delete(topicKey)` | 路由不再指向我们——除非仍是 subscriber 否则清理 |
 | `stop()` | `clear()` | 完全销毁 |
-| FIFO 淘汰（下次 `rememberTopic` 调用时） | 如 `!assignedTopics.has(oldest)` 则 `delete(oldest)` | 缓存超出 `MAX_KNOWN_TOPICS`；从不淘汰持有的 key |
+| FIFO 淘汰（下次 `rememberTopic` 调用时） | 从最老的条目往后扫描，`delete` 第一个既不在 `assignedTopics` 中、也不是本次正在记忆的 key，然后停止 | 缓存超出 `MAX_KNOWN_TOPICS`；持有的 key 与新 key 都被跳过，所以所有条目都被持有时上限会失守 |
 
 **无 storage 退化依赖**。当 `this.storage` 为 `null`（降级模式）时，`readRoute()` 和 `readSubscriberTabIds()` 无法查询持久化记录，只能从内存状态重建路由：
 
 - `readRoute(topicKey)` → 用 `knownTopics.get(topicKey)` 恢复明文 topic，然后检查 `subscribedTopics.has(topic)` 或 `assignedTopics.has(topicKey)` 判断本 worker 是否是 owner。
 - `readSubscriberTabIds(topicKey, workers)` → `knownTopics.get(topicKey)` 恢复明文 topic，然后检查 `subscribedTopics.has(topic)`——如果本 worker 是 subscriber，那就是唯一的 subscriber（无 storage 意味着无跨 Tab 协调）。
 
-这就是为什么 `assignedTopics` 守卫 FIFO 淘汰：淘汰仍持有的 key 会在无 storage 模式下静默破坏 `readRoute()`，导致 `isAssigned()` 与 `readRoute()` 结果不一致。
+这就是为什么 `assignedTopics` 守卫 FIFO 淘汰：淘汰仍持有的 key 会在无 storage 模式下静默破坏 `readRoute()`，导致 `isAssigned()` 与 `readRoute()` 结果不一致。扫描同时跳过本次调用带进来的那个 key，理由同构——删掉它等于丢弃这次调用本来要建立的映射——而它只有在更早的条目全部被持有时才会走到那里，因为新写入的 `set` 落在插入有序 `Map` 的末尾。
 
 ### 一次订阅和消息分发流程
 

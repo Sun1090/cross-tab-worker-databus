@@ -235,6 +235,68 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('keeps the topic it is remembering when the cache is full and every older entry is owned', async () => {
+    // `rememberTopic()` overflows its cap on a NEW key, which lands at the back of
+    // the Map, so the eviction scan walks every older entry before it reaches the
+    // one just written. Each of those is skipped when it is owned, so there is one
+    // reachable state where the only candidate left is the key the caller is about
+    // to use: a cache whose older entries are all owned. Without the loop's
+    // `candidate === topicKey` term, that write evicts itself — and the loss is
+    // silent, because `readRoute()` and the storage-less paths then resolve a
+    // `topicKey` they can no longer name, which is exactly what the
+    // `assignedTopics` guard in the same loop exists to prevent for owned keys.
+    // The cap's value is not a constant this module exports, so the 500 below is
+    // the number the sibling case 'caps knownTopics at MAX_KNOWN_TOPICS and evicts
+    // the oldest non-owned entries first (FIFO)' already pins through
+    // `expect(known.length).toBe(500)`; raising `MAX_KNOWN_TOPICS` reddens that
+    // test first, and this owned prefix has to be raised with it. What the
+    // assertions below care about is *which* entry survives, not how many.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'evict-self' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'evict-self',
+      environment: env.environment,
+      tabId: 'tab-evict-self',
+      workerId: 'worker-evict-self',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('evict-self')}`);
+    const post = (topic: string, action: WorkerControlAction, extra: Record<string, unknown>) => {
+      channel.postMessage({
+        type: CLUSTER_MESSAGE_TYPE.CONTROL,
+        sourceWorkerId: 'peer-evict',
+        targetWorkerId: 'worker-evict-self',
+        action,
+        topic,
+        topicKey: createOpaqueKey(topic),
+        ...extra
+      } as WorkerClusterMessage);
+    };
+
+    // A peer SUBSCRIBE with no durable route is adopted (`assignedTopics.set`), so
+    // these fill the cache with keys eviction must never drop. PUBLISH is used for
+    // the last write because it remembers the topic without claiming it.
+    const ownedCount = 500;
+    for (let index = 0; index < ownedCount; index += 1) post(`owned.${index}`, 'SUBSCRIBE', {});
+    await Promise.resolve();
+
+    const before = runtime.getSnapshot();
+    expect(before.knownTopics.length).toBe(ownedCount);
+    expect(before.assignedTopics.length).toBe(ownedCount);
+
+    post('evict.extra', 'PUBLISH', { data: 'filler' });
+    await Promise.resolve();
+
+    const after = runtime.getSnapshot().knownTopics;
+    expect(after.map(entry => entry.topic)).toContain('evict.extra');
+    expect(after.length).toBe(ownedCount + 1);
+    channel.close();
+    runtime.stop();
+  });
+
   it('drops a batched PUBLISH whose items are not a usable batch', async () => {
     // The batched branch gates on `message.items.length`, then iterates. Every
     // sender builds `items` with `Array.prototype.map`, so a value with a length

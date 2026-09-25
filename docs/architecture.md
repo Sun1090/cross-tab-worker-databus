@@ -227,14 +227,15 @@ The cache exists for two reasons:
 
 2. **Avoid re-hashing on every reconcile.** Each reconcile cycle iterates `subscribedTopics` and calls `rememberTopic` for each topic. The cache is updated unconditionally (hash is cheap, so there is no hit/miss penalty), but the reverse mapping is essential for the storage-less path.
 
-**Cap and eviction.** The cache is capped at `MAX_KNOWN_TOPICS = 500` entries. This limit prevents a misbehaving or malicious peer from exhausting memory by referencing arbitrary topics in control messages — every `CONTROL` message the handler processes calls `rememberTopic`, which would otherwise grow the map unboundedly.
+**Cap and eviction.** The cache is capped at `MAX_KNOWN_TOPICS = 500` entries, and what that bound covers is entries this worker does **not** own. Every `CONTROL` message the handler processes calls `rememberTopic`, and when the eviction scan reaches the end of the cache without finding an unowned entry it declines to drop anything — owned keys stay because the storage-less read path recovers their plaintext only from this cache. So a peer that posts `CONTROL/SUBSCRIBE` for arbitrary topics is not stopped by this cap: each such frame is adopted, which makes its key owned and therefore unevictable. Measured on 1,200 peer SUBSCRIBE frames: `knownTopics` grew to 1,200 entries along with `assignedTopics`, and one reconcile tick took both back to `0` — because an adoption with no durable route to confirm is transient by design. For that flood the memory bound is the sweep, not the cap.
 
 One memo of the same shape has since been **removed rather than capped**, and the reason is worth keeping: `wildcardPublishCache` mapped a concrete topic to the local wildcard pattern that matched it (or `null` for "scanned, nothing matched"), growing one entry per distinct topic this worker published and bounded by nothing. Measured: 1,200 `publish()` calls on distinct topic names left `knownTopics` at its 500 entries while that map held 1,200. It had no eviction rule because neither value shape could safely be forgotten — and that turned out to be the wrong question. The stored value decided nothing at all: both shapes were read only as "have I scanned this topic yet", and the single routing effect was that a topic's *first* publication, on a wildcard match, was dispatched locally without consulting the durable route. With one worker holding `chat.*` and a peer concretely owning `chat.room.1`, three publications from the wildcard holder delivered `1,0,0` to itself and `0,1,1` to the owner — the first was never forwarded, and delivery is at-most-once. So the fast path is gone, every non-owned publication now resolves its owner through the route, and with it went the map: the unbounded growth was a side effect of an optimization that was also the bug.
 
-Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds the cap, the oldest entry (first key in Map iteration) is removed:
+Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds the cap, the scan removes the **first** entry it is allowed to drop and then stops — one deletion is enough to get back under the cap, and dropping more would discard resolvable topics for nothing:
 
-- An entry is **never evicted** if the current worker still owns it (`assignedTopics.has(oldest)` guard), because the storage-less `readRoute` path depends on it.
-- The entry being inserted is never evicted in the same step (`oldest !== topicKey` guard).
+- An entry is **never evicted** if the current worker still owns it (the scan's `this.assignedTopics.has(candidate)` skip), because the storage-less `readRoute` path depends on it.
+- The key being remembered is never evicted by its own call (the same skip's `candidate === topicKey` term). A fresh `Map.set` lands at the back, so the scan only reaches it when every older entry is owned — and there dropping it would discard the mapping the call exists to install. Pinned by `tests/cluster.test.ts`'s "keeps the topic it is remembering when the cache is full and every older entry is owned".
+- When nothing is eligible the cap slips rather than evicting an owned key; owned topics outrank a bounded cache, and a slipping cap is visible in `getSnapshot().knownTopics` while a lost mapping is not.
 - Reads do not promote recency, so this is not true LRU. Hashing is cheap enough that a missed reverse-lookup merely recomputes the key.
 
 **`isAssigned` bypasses the cache.** `isAssigned(topic)` calls `createOpaqueKey(topic)` directly rather than `rememberTopic()`. This is deliberate: `isAssigned` is a read-only query, not a state change, so it must not populate `knownTopics` (which could evict an entry the storage-less path needs). It also prefers the synchronous `assignedTopics` Map over reading the route from storage, avoiding a race with the `BatchingStorageWriter` flush window.
@@ -257,14 +258,14 @@ Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds 
 | `CONTROL/UNSUBSCRIBE` received | no direct deletion | `rememberTopic` still caches the topic; the entry is later removed by `reconcileAssignedTopics` once the route no longer points to this worker |
 | `reconcileAssignedTopics` | `delete(topicKey)` if not subscribed and not owned | Route no longer points to us — clean up unless we're still a subscriber |
 | `stop()` | `clear()` | Full teardown |
-| FIFO eviction (next `rememberTopic` call) | `delete(oldest)` if `!assignedTopics.has(oldest)` | Cache size exceeded `MAX_KNOWN_TOPICS`; never evict owned keys |
+| FIFO eviction (next `rememberTopic` call) | scan from the oldest and `delete` the first key that is neither in `assignedTopics` nor the key being remembered, then stop | Cache size exceeded `MAX_KNOWN_TOPICS`; owned keys and the new key are both skipped, so when every entry is owned the cap slips |
 
 **Storage-less fallback dependency.** When `this.storage` is `null` (degraded mode), `readRoute()` and `readSubscriberTabIds()` cannot query persisted records. They reconstruct routes from in-memory state alone:
 
 - `readRoute(topicKey)` → looks up `knownTopics.get(topicKey)` to recover the plaintext topic, then checks `subscribedTopics.has(topic)` or `assignedTopics.has(topicKey)` to determine if this worker is the owner.
 - `readSubscriberTabIds(topicKey, workers)` → `knownTopics.get(topicKey)` recovers the plaintext topic, then checks `subscribedTopics.has(topic)` — if we are a subscriber, we are the only subscriber (no storage means no cross-tab coordination).
 
-This is why `assignedTopics` guards the FIFO eviction: evicting a key we still own would silently break `readRoute()` in storage-less mode, causing `isAssigned()` to disagree with `readRoute()`.
+This is why `assignedTopics` guards the FIFO eviction: evicting a key we still own would silently break `readRoute()` in storage-less mode, causing `isAssigned()` to disagree with `readRoute()`. The scan skips the key it was called with for the same kind of reason — deleting it would discard the very mapping this call exists to install — and it only ever gets that far when every older entry is owned, because a fresh `set` lands at the back of an insertion-ordered `Map`.
 
 ### One subscription and publication flow
 
