@@ -371,9 +371,18 @@ describe('public documentation', () => {
     }
 
     expect(offenders, 'a release section dated outside the day its tag exists').toEqual([]);
-    // The floor is what makes an empty tag read a failure rather than a clean pass: a
-    // shallow checkout has no tags, which would skip every section and report nothing.
-    expect(checked, 'this pass needs a clone with release tags; it checked almost nothing').toBeGreaterThan(100);
+    // The floor makes an *empty* tag read a failure rather than a clean pass: a
+    // shallow checkout has no tags at all, every section would `continue` past the
+    // lookup, and the pass would report nothing while proving nothing. It is
+    // deliberately a fraction of the section count rather than a constant, because
+    // the count grows one per release. This does not catch *partial* loss — the
+    // `%(*creatordate)` mistake keeps every tag entry and empties the field, so
+    // `checked` is unchanged and the offender list is what reddens it. Which leg
+    // catches which mistake is the thing worth knowing before editing either.
+    expect(
+      checked,
+      'this pass needs a clone with release tags; it checked almost none of the sections'
+    ).toBeGreaterThan(sections.length / 2);
     // Both object types must appear among the checked rows. Releases here are tagged
     // both ways, and `%(creatordate)` is the only field that answers for the two —
     // `%(*creatordate)` is empty for every lightweight tag.
