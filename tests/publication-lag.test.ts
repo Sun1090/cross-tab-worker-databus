@@ -160,6 +160,35 @@ describe('publication-lag sweep', () => {
     expect(line('measured=')).toContain('measured=2 of 4 tags');
   });
 
+  // The summary line prints only min/p50/max, so the convention behind `p50` is readable
+  // from it only when the sorted list is fully exposed by those three fields — which at
+  // n=2 it is: sorted = [min, max]. This is a pin on *which* statistic the tool prints,
+  // not on its value: `p50` is nearest-rank (`sorted[Math.floor(n / 2)]`), so at even n it
+  // reports the element above the middle rather than the mean of the two middle ones.
+  // That distinction is what makes one extra sample move the reported figure in the real
+  // series — the modern window went from `p50=97.3` (n=45) to `p50=126.4` (n=46) without
+  // any change in registry behaviour — and `docs/progress.md` quotes that figure across
+  // releases. If this fixture ever gains a third measured tag the derivation stops
+  // holding and the `n` expect below says so rather than passing vacuously.
+  it('reports p50 as the upper-middle element rather than the mean of the middle two', () => {
+    const rows = result.stdout.split('\n').filter(l => /^(gap|verify) n=\d+ min=/.test(l));
+    expect(rows.map(r => r.split(' ')[0]).sort()).toEqual(['gap', 'verify']);
+    for (const row of rows) {
+      // One pattern for the whole line: four independent regexes each guessed at the field
+      // order, and the first two guesses were wrong.
+      const [, label, nText, minText, p50Text, maxText] =
+        /^(\S+) n=(\d+) min=(-?[\d.]+) p50=(-?[\d.]+) max=(-?[\d.]+)$/.exec(row)!;
+      const n = Number(nText!);
+      const min = Number(minText!);
+      const p50 = Number(p50Text!);
+      const max = Number(maxText!);
+      expect(n, `this leg derives sorted=[min,max] from n=2; row was: ${row}`).toBe(2);
+      expect(max, `min and max must differ or the two conventions coincide: ${row}`).not.toBe(min);
+      expect(p50, `${label} p50 should be the upper of the two`).toBe(max);
+      expect(p50, `the interpolated median would be ${(min + max) / 2}: ${row}`).not.toBeCloseTo((min + max) / 2, 5);
+    }
+  });
+
   it('prints a progress line before each tag so a stopped run names where it stopped', () => {
     expect(result.stderr).toContain('reading 0.2.0');
     expect(result.stderr.split('\n').filter(l => l.startsWith('reading ')).length).toBe(4);

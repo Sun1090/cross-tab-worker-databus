@@ -35,6 +35,11 @@
 // reason: the first full sweep of this logic hung on one `gh api` for four minutes and
 // printed nothing, and an unbounded probe does not read as slow — it reads as pending,
 // which is indistinguishable from working.
+//
+// `EXCLUDED-NON-SUCCESS` names a *run* it passed over, not a verdict on the tag: runs are
+// keyed by the tag ref, and a ref that was later re-pointed leaves its failed build behind,
+// so `v0.21.39` prints the line *and* its own reading. "This version never shipped" is
+// decided by the `measured=N of M` denominator, not by this line.
 import { execFileSync } from 'node:child_process';
 
 const from = process.argv[2] ?? '0.20.85';
@@ -161,6 +166,14 @@ for (const r of rows) {
 const summary = (label, values) => {
   if (!values.length) return console.log(`${label}: none`);
   const sorted = [...values].sort((a, b) => a - b);
+  // `p50` below is nearest-rank — `sorted[floor(n/2)]`, the upper of the two middle
+  // values — not their mean. For odd n the two agree; for even n they do not, so a single
+  // added sample can move the printed figure to the next value up with nothing having
+  // changed in the thing being measured: the modern gap window read `p50=97.3` at n=45 and
+  // `p50=126.4` at n=46, where the interpolated median of those same 46 values is 111.85.
+  // `n` is printed on the same line because it is the only clue to that on the page.
+  // Pinned by tests/publication-lag.test.ts's "reports p50 as the upper-middle element",
+  // which is decidable only while the fixture has an even, fully-exposed n (see there).
   console.log(`${label} n=${sorted.length} min=${sorted[0].toFixed(1)} p50=${sorted[Math.floor(sorted.length / 2)].toFixed(1)} max=${sorted.at(-1).toFixed(1)}`);
   return sorted;
 };
