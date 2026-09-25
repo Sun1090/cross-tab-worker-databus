@@ -487,3 +487,85 @@ describe('public documentation', () => {
     expect(emptySections).toEqual([]);
   });
 });
+
+/** Every `.ts`/`.tsx` under `dir`, recursing into subdirectories. */
+function listSourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap(name => {
+    const child = join(dir, name);
+    if (statSync(child).isDirectory()) return listSourceFiles(child);
+    return /\.tsx?$/.test(name) ? [child] : [];
+  });
+}
+
+describe('test-name citations', () => {
+  it('resolve to a case that exists in the file they name', () => {
+    // A comment that cites a case by name is a claim that the name exists, and
+    // like a line number it decays silently: nothing in the build, the type
+    // check or the suite contradicts it when the case is renamed. Found twice in
+    // one pass — `src/core/routing.ts` cited `sticky-existing-routes` and
+    // `src/core/trace.ts` cited `no-trace`, and neither is an `it()` title. Both
+    // are `clusterKey` literals sitting *inside* the test body, so the citation
+    // sends a reader to the middle of a case, and the first fixture rename to
+    // those arbitrary strings would have sent them nowhere at all.
+    //
+    // Scope is the two steering surfaces, `src/**` and `AGENTS.md`. A docs
+    // citation is outlived by its own entry: `docs/progress.md` and the roadmaps
+    // date what a sweep found, so they are exempt by the rule that lets a
+    // published CHANGELOG section stand uncorrected.
+    const titlesByFile = new Map<string, Set<string>>();
+    for (const file of [...listSourceFiles('tests'), ...listSourceFiles('e2e')]) {
+      if (!/\.(test|spec)\.tsx?$/.test(file)) continue;
+      const content = readFileSync(file, 'utf8');
+      const titles = new Set<string>();
+      for (const match of content.matchAll(
+        /\b(?:it|test)(?:\.\w+)*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g
+      )) {
+        titles.add(match[2]!);
+      }
+      titlesByFile.set(file.split('/').pop()!, titles);
+    }
+    // Guard the scan itself: a broken title collector would report every
+    // citation as dead, and one that collected nothing would pass trivially.
+    expect(
+      [...titlesByFile.values()].reduce((total, set) => total + set.size, 0),
+      'the citation scan must find the suite case titles'
+    ).toBeGreaterThan(500);
+
+    const citation = /(?:tests|e2e)\/([A-Za-z0-9_.-]+\.(?:test\.)?tsx?)`?['’]s\s*([`'“"])((?:\\.|(?!\2)[^\\]){6,300}?)\2/g;
+    const unresolved: string[] = [];
+    let examined = 0;
+    for (const file of ['AGENTS.md', ...listSourceFiles('src')]) {
+      for (const match of readFileSync(file, 'utf8').matchAll(citation)) {
+        examined += 1;
+        const namedFile = match[1]!;
+        const rawName = match[3]!;
+        // Comments wrap, and the continuation marker is part of the source line
+        // rather than of the cited name.
+        const name = rawName
+          .replace(/\n\s*(?:\/\/+\s*|\*\s*)/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const titles = titlesByFile.get(namedFile);
+        if (!titles) {
+          unresolved.push(`${file} cites tests/${namedFile}, which has no cases here`);
+          continue;
+        }
+        // A trailing ellipsis is how a citation marks truncation, so prefix-match
+        // it — but only against one case, or the name decides nothing.
+        const hits = name.endsWith('…')
+          ? [...titles].filter(title => title.startsWith(name.slice(0, -1)))
+          : [...titles].filter(title => title === name);
+        if (hits.length !== 1) {
+          unresolved.push(`${file} cites tests/${namedFile}'s "${name}" (${hits.length} matches)`);
+        }
+      }
+    }
+    expect(unresolved).toEqual([]);
+    // The other way this gate can go wrong is by looking at nothing: an empty
+    // `unresolved` is also what a citation pattern that matches no file
+    // produces, and it would read as a clean bill. (16 citations when this was
+    // written — re-derive with `console.log(examined)` here rather than trusting
+    // that number.)
+    expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);
+  });
+});
