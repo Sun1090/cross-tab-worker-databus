@@ -414,30 +414,44 @@ describe('public documentation', () => {
     expect([...typesSeen].sort(), 'the checked rows must span both tag object types').toEqual(['commit', 'tag']);
   });
 
-  it('opens both roadmap languages with the newest tagged release and its own date', () => {
+  it('opens both roadmap languages with a released version and that release\'s own date', () => {
     // The roadmap preamble is the *second* shipped copy of the claim the case above
     // checks, and the reason to gate both is the reason the file already greps the
     // claim rather than the file: a release's date appears in `CHANGELOG.md` as
     // `2026-09-25` and here as `September 25, 2026` / `2026 年 9 月 25 日`, so a
     // correction that reaches one copy can leave the other standing.
     //
-    // The version has to be the newest one that carries a **tag**, not the newest
-    // section in the changelog and not `package.json`'s version: while a release is
-    // being prepared the changelog already names the pending version and the
-    // preamble legitimately does not, because it is updated by the record commit
-    // *after* the tag exists.
+    // The named version must be one that actually shipped, and it cannot be pinned
+    // to a *single* release: the preamble is advanced by the record commit, which
+    // lands **after** the tag exists. So "which release is last?" has a different
+    // answer at each of the four moments a tree can be built — prep (the pending
+    // version is untagged, preamble one behind), the tag build (its own tag exists,
+    // preamble still one behind), the record commit (preamble caught up), and the
+    // next prep. "The newest tag" is false during the window the Release workflow
+    // itself builds: on `v0.21.39` the newest tag *is* `0.21.39` while the preamble
+    // legitimately says `0.21.38`. That is what killed release run 159, and no PR CI
+    // could have shown it — a branch build never has the tag its own release creates.
+    //
+    // The set true at every moment is { greatest tag strictly below `package.json`'s
+    // version, that version once it is tagged }. It still rejects a preamble two
+    // releases behind, which is the only staleness a single tree can decide.
     const monthNumbers = new Map([
       ['January', 1], ['February', 2], ['March', 3], ['April', 4], ['May', 5], ['June', 6],
       ['July', 7], ['August', 8], ['September', 9], ['October', 10], ['November', 11], ['December', 12],
     ]);
     const tags = tagCreations();
-    let newest: string | null = null;
+    const packageVersion: string = JSON.parse(readFileSync('package.json', 'utf8')).version;
+    let previousTag: string | null = null;
     for (const ref of tags.keys()) {
       const version = /^v(\d+\.\d+\.\d+)$/.exec(ref)?.[1];
-      if (!version) continue;
-      if (newest === null || compareVersions(version, newest) > 0) newest = version;
+      if (!version || compareVersions(version, packageVersion) >= 0) continue;
+      if (previousTag === null || compareVersions(version, previousTag) > 0) previousTag = version;
     }
-    expect(newest, 'the repository has no release tags to compare against').not.toBeNull();
+    const allowed = new Set<string>([
+      ...(previousTag ? [previousTag] : []),
+      ...(tags.has(`v${packageVersion}`) ? [packageVersion] : []),
+    ]);
+    expect([...allowed].sort(), 'no release tag exists to compare the preamble against').not.toEqual([]);
 
     const shapes: Array<[string, RegExp, (parts: RegExpExecArray) => string]> = [
       [
@@ -463,8 +477,14 @@ describe('public documentation', () => {
       // point of this case is that the two languages make the same checkable claim.
       expect(line, `${file} preamble no longer names a version and a date`).not.toBeNull();
       const version = line![1]!;
-      expect(version, `${file} preamble does not name the newest tagged release`).toBe(newest);
-      const instant = tags.get(`v${version}`)!.instant;
+      expect(
+        [...allowed].sort(),
+        `${file} preamble names v${version}, which is neither the release before the one in ` +
+          'package.json nor that release itself once tagged'
+      ).toContain(version);
+      const tag = tags.get(`v${version}`);
+      expect(tag, `${file} preamble names v${version}, which has no tag`).not.toBeUndefined();
+      const instant = tag!.instant;
       const written = toIso(line!);
       expect(
         [dayIn(instant, 0), dayIn(instant, 8)],
