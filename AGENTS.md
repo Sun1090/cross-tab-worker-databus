@@ -104,6 +104,7 @@ tests/
   dual-format.test.ts           # ESM + CJS dist artifacts expose the public API
   verify-packed-consumer.test.ts # Tarball entry points + export-target flattening
   release-version.test.ts       # Tag/version/notes gate + CHANGELOG-vs-registry completeness
+  publication-lag.test.ts       # the lag sweep's attempt selection + named exclusions, on a stub `gh`
   version-compat.test.ts        # Handoff protocol across throwaway git repos + spawned gate
   workflows.test.ts             # CI/release workflow text gates (lint, retry budget, job order)
   documentation.test.ts         # Shipped-prose gates: coverage, citations, en/zh parity
