@@ -86,10 +86,11 @@ describe('workflow files', () => {
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
     // registry records the publish *minutes* after `npm publish` returns: the
-    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.32 was
-    // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 s in version order, so
-    // the two samples taken since this floor was written both landed inside the band
-    // and `maxMeasuredAckToRecordMs` below stays at 310 s. (2) The packument `npm pack` resolves against is served
+    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.33 was
+    // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 s in version
+    // order. The three releases that ran after this floor was written recorded 127.2
+    // (0.21.31), 76.1 (0.21.32) and 75.5 s (0.21.33), all inside the band, so
+    // `maxMeasuredAckToRecordMs` below stays at 310 s. (2) The packument `npm pack` resolves against is served
     // `cache-control: public, max-age=300`, so a copy anywhere in the path may be
     // five minutes stale by design and cannot be read sooner than that. Re-derive
     // (1) from a tag run: subtract the `Publish to npm` step's completion from
