@@ -32,6 +32,16 @@ function keepTracked(files: string[], tracked: Set<string>): string[] {
   return files.filter(file => tracked.has(file));
 }
 
+/**
+ * The calendar date of an ISO instant read through a fixed offset. The offset is
+ * an argument because a date written by a person has no frame until one is chosen:
+ * slicing the string instead returns whatever offset that string happens to carry,
+ * which reads like a conversion and is a pass-through.
+ */
+function dayIn(iso: string, offsetHours: number): string {
+  return new Date(new Date(iso).getTime() + offsetHours * 3_600_000).toISOString().slice(0, 10);
+}
+
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
@@ -304,6 +314,70 @@ describe('public documentation', () => {
         `CHANGELOG.md:${index + 1} version heading must use "## " so the Release workflow can match it`
       ).toBe('##');
     }
+  });
+
+  it('dates every tagged release section on a day its tag actually exists', () => {
+    // A CHANGELOG date is a claim about an instant, and the repository holds two
+    // independent ones: the release tag and npm's `time[<version>]`. The tag is the
+    // authority here because publishing lags tagging — 0.4.0's tag reads
+    // 2026-08-30T21:28Z and its registry record 2026-08-31T00:03Z, the same release
+    // on two calendar days. A registry-based rule reports 3 sections wrong (0.4.0,
+    // 0.20.85 and 0.20.10) where the tag reports 1, so two of its three findings are
+    // the gate being wrong.
+    //
+    // Both the UTC and the +08:00 reading are accepted, because the prose uses both:
+    // over the dated sections that carry a tag, most agree in every frame, a large
+    // group only in +08:00 and a smaller one only in UTC (take the three counts from
+    // the sweep's own `agreement kinds:` line). A single-frame rule would redden
+    // dozens of sections that describe a real event.
+    //
+    // `dayIn` converts rather than slices. `iso.slice(0, 10)` returns whatever offset
+    // the string already carries, and the first version of this check did that for the
+    // tag half: it reported 11 findings where the true number was 1, and only a
+    // hand-built control row (2026-08-31T05:28:12+08:00, which is 2026-08-30 in UTC)
+    // distinguished the two.
+    const sections = [
+      ...readFileSync('CHANGELOG.md', 'utf8').matchAll(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})$/gm),
+    ].map(match => ({ version: match[1]!, date: match[2]! }));
+    const tagFormat = '--format=%(refname:lstrip=2) %(objecttype) %(creatordate:iso-strict)';
+    const tagLines = execFileSync('git', ['for-each-ref', 'refs/tags', tagFormat], { encoding: 'utf8' })
+      .split('\n')
+      .filter(line => line.trim() !== '');
+    const tagOf = new Map<string, { type: string; instant: string }>();
+    for (const line of tagLines) {
+      const [ref, type, instant] = line.split(' ');
+      tagOf.set(ref!, { type: type ?? '', instant: instant ?? '' });
+    }
+
+    const offenders: string[] = [];
+    let checked = 0;
+    const typesSeen = new Set<string>();
+    for (const section of sections) {
+      const tag = tagOf.get(`v${section.version}`);
+      if (tag === undefined) continue; // never tagged — scripts/verify-release-version.mjs owns that question
+      checked += 1;
+      if (tag.instant === '') {
+        offenders.push(`${section.version}: tag v${section.version} has an unreadable creatordate`);
+        continue;
+      }
+      typesSeen.add(tag.type);
+      const utcDay = dayIn(tag.instant, 0);
+      const localDay = dayIn(tag.instant, 8);
+      if (section.date !== utcDay && section.date !== localDay) {
+        offenders.push(
+          `${section.version}: CHANGELOG says ${section.date}, tag instant ${tag.instant} is ${utcDay} (UTC) or ${localDay} (+08:00)`
+        );
+      }
+    }
+
+    expect(offenders, 'a release section dated outside the day its tag exists').toEqual([]);
+    // The floor is what makes an empty tag read a failure rather than a clean pass: a
+    // shallow checkout has no tags, which would skip every section and report nothing.
+    expect(checked, 'this pass needs a clone with release tags; it checked almost nothing').toBeGreaterThan(100);
+    // Both object types must appear among the checked rows. Releases here are tagged
+    // both ways, and `%(creatordate)` is the only field that answers for the two —
+    // `%(*creatordate)` is empty for every lightweight tag.
+    expect([...typesSeen].sort(), 'the checked rows must span both tag object types').toEqual(['commit', 'tag']);
   });
 
   // The localized docs are maintained side by side with the English originals,

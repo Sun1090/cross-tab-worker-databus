@@ -1489,7 +1489,7 @@ No behavior, wire-format, storage-layout or cluster-protocol change: `git diff -
 
 - Release workflow runs one serialized job per tag and records the exact npm version, tag, and commit in the GitHub step summary for easier failure diagnosis.
 
-## [0.20.10] - 2026-09-02
+## [0.20.10] - 2026-09-03
 
 ### Added
 
