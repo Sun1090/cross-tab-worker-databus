@@ -42,6 +42,28 @@ function dayIn(iso: string, offsetHours: number): string {
   return new Date(new Date(iso).getTime() + offsetHours * 3_600_000).toISOString().slice(0, 10);
 }
 
+/**
+ * Every release tag, keyed by short name, with the instant it was created and the
+ * type of the object it points at. Releases in this repository are tagged both
+ * lightweight and annotated, so the field has to answer for both: `%(creatordate)`
+ * does, while `%(*creatordate)` is empty for every lightweight tag.
+ */
+function tagCreations(): Map<string, { type: string; instant: string }> {
+  const lines = execFileSync(
+    'git',
+    ['for-each-ref', 'refs/tags', '--format=%(refname:lstrip=2) %(objecttype) %(creatordate:iso-strict)'],
+    { encoding: 'utf8' }
+  )
+    .split('\n')
+    .filter(line => line.trim() !== '');
+  const tags = new Map<string, { type: string; instant: string }>();
+  for (const line of lines) {
+    const [ref, type, instant] = line.split(' ');
+    tags.set(ref!, { type: type ?? '', instant: instant ?? '' });
+  }
+  return tags;
+}
+
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
@@ -50,6 +72,17 @@ function listDocumentationFiles(path: string): string[] {
     if (name === 'progress.md') return [];
     return statSync(child).isDirectory() ? listDocumentationFiles(child) : [child];
   });
+}
+
+/** Numeric-tuple ordering. A string comparison puts `0.9.0` above `0.10.0`. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 describe('public documentation', () => {
@@ -339,15 +372,7 @@ describe('public documentation', () => {
     const sections = [
       ...readFileSync('CHANGELOG.md', 'utf8').matchAll(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})$/gm),
     ].map(match => ({ version: match[1]!, date: match[2]! }));
-    const tagFormat = '--format=%(refname:lstrip=2) %(objecttype) %(creatordate:iso-strict)';
-    const tagLines = execFileSync('git', ['for-each-ref', 'refs/tags', tagFormat], { encoding: 'utf8' })
-      .split('\n')
-      .filter(line => line.trim() !== '');
-    const tagOf = new Map<string, { type: string; instant: string }>();
-    for (const line of tagLines) {
-      const [ref, type, instant] = line.split(' ');
-      tagOf.set(ref!, { type: type ?? '', instant: instant ?? '' });
-    }
+    const tagOf = tagCreations();
 
     const offenders: string[] = [];
     let checked = 0;
@@ -387,6 +412,65 @@ describe('public documentation', () => {
     // both ways, and `%(creatordate)` is the only field that answers for the two —
     // `%(*creatordate)` is empty for every lightweight tag.
     expect([...typesSeen].sort(), 'the checked rows must span both tag object types').toEqual(['commit', 'tag']);
+  });
+
+  it('opens both roadmap languages with the newest tagged release and its own date', () => {
+    // The roadmap preamble is the *second* shipped copy of the claim the case above
+    // checks, and the reason to gate both is the reason the file already greps the
+    // claim rather than the file: a release's date appears in `CHANGELOG.md` as
+    // `2026-09-25` and here as `September 25, 2026` / `2026 年 9 月 25 日`, so a
+    // correction that reaches one copy can leave the other standing.
+    //
+    // The version has to be the newest one that carries a **tag**, not the newest
+    // section in the changelog and not `package.json`'s version: while a release is
+    // being prepared the changelog already names the pending version and the
+    // preamble legitimately does not, because it is updated by the record commit
+    // *after* the tag exists.
+    const monthNumbers = new Map([
+      ['January', 1], ['February', 2], ['March', 3], ['April', 4], ['May', 5], ['June', 6],
+      ['July', 7], ['August', 8], ['September', 9], ['October', 10], ['November', 11], ['December', 12],
+    ]);
+    const tags = tagCreations();
+    let newest: string | null = null;
+    for (const ref of tags.keys()) {
+      const version = /^v(\d+\.\d+\.\d+)$/.exec(ref)?.[1];
+      if (!version) continue;
+      if (newest === null || compareVersions(version, newest) > 0) newest = version;
+    }
+    expect(newest, 'the repository has no release tags to compare against').not.toBeNull();
+
+    const shapes: Array<[string, RegExp, (parts: RegExpExecArray) => string]> = [
+      [
+        'docs/roadmap.md',
+        /^(\d+\.\d+\.\d+) was released on ([A-Z][a-z]+) (\d{1,2}), (\d{4})\./m,
+        parts => {
+          const month = monthNumbers.get(parts[2]!);
+          // An unrecognized month name yields `??`, which cannot equal any real
+          // reading of the tag — the failure message then shows it verbatim.
+          return `${parts[4]}-${month === undefined ? '??' : String(month).padStart(2, '0')}-${parts[3]!.padStart(2, '0')}`;
+        }
+      ],
+      [
+        'docs/zh/roadmap.md',
+        /^(\d+\.\d+\.\d+) 已于 (\d{4}) 年 (\d{1,2}) 月 (\d{1,2}) 日发布/m,
+        parts => `${parts[2]}-${parts[3]!.padStart(2, '0')}-${parts[4]!.padStart(2, '0')}`
+      ],
+    ];
+
+    for (const [file, pattern, toIso] of shapes) {
+      const line = pattern.exec(readFileSync(file, 'utf8'));
+      // A pattern that stops matching is a broken preamble, not a pass: the whole
+      // point of this case is that the two languages make the same checkable claim.
+      expect(line, `${file} preamble no longer names a version and a date`).not.toBeNull();
+      const version = line![1]!;
+      expect(version, `${file} preamble does not name the newest tagged release`).toBe(newest);
+      const instant = tags.get(`v${version}`)!.instant;
+      const written = toIso(line!);
+      expect(
+        [dayIn(instant, 0), dayIn(instant, 8)],
+        `${file} preamble says ${written}, which is neither reading of tag v${version} (${instant})`
+      ).toContain(written);
+    }
   });
 
   // The localized docs are maintained side by side with the English originals,
