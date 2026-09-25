@@ -86,16 +86,18 @@ describe('workflow files', () => {
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
     // registry records the publish *minutes* after `npm publish` returns — for every
-    // release from 0.20.92 on, which is 42 consecutive ones; the five before that window
+    // release in the sweep's modern window, whose size is `scripts/publication-lag.mjs`'s
+    // own `modern gap (from 0.20.92) n=` line rather than a count kept here (one lived in
+    // this comment and read 42 while the window was already wider); the five releases
+    // before that window
     // (0.20.86, 0.20.87, 0.20.88, 0.20.90, 0.20.91) recorded within +-0.6 s of their acks,
     // so the lag is a property of the window and not of npm, and what the budget needs
     // from it is only the maximum. The
-    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.35 was
+    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.37 was
     // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 / 75.8 /
-    // 127.3 s in version order (nine values, re-counted from this enumeration).
-    // The five releases that ran after this floor was written recorded 127.2
-    // (0.21.31), 76.1 (0.21.32), 75.5 (0.21.33), 75.8 (0.21.34) and 127.3 s
-    // (0.21.35), all inside the band, so `maxMeasuredAckToRecordMs` below stays at
+    // 127.3 / 126.4 / 77.1 s in version order (eleven values; re-count them from this
+    // enumeration, or re-derive the series from the tool instead of trusting the list).
+    // None exceeds 310 s, so `maxMeasuredAckToRecordMs` below stays at
     // 310 s. (2) The packument `npm pack` resolves against is served
     // `cache-control: public, max-age=300`, so a copy anywhere in the path may be
     // five minutes stale by design and cannot be read sooner than that. Re-derive
@@ -128,5 +130,38 @@ describe('workflow files', () => {
       totalMs,
       `release.yml: the published-consumer gate only waits ${totalMs / 1000}s; it must clear the measured ack->registry-record gap (${maxMeasuredAckToRecordMs / 1000}s) plus one full packument cache lifetime (${packumentCacheLifetimeMs / 1000}s), or a good release fails this blocking step`
     ).toBeGreaterThanOrEqual(packumentCacheLifetimeMs + maxMeasuredAckToRecordMs);
+  });
+
+  it('lists every gate the workflows run in the AGENTS.md quick reference', () => {
+    // The command table is what a fresh session reads first, and its own note records
+    // that it was assembled from these steps and should be re-read against them. The
+    // note did not prevent the drift it warns about: `pnpm audit` is a blocking step in
+    // the verify job and was absent from the table until this case existed, so an
+    // agent working from the table could land a vulnerable dependency and be surprised
+    // by CI. Comparing the two artifacts is the fix; restating the rule was not.
+    //
+    // Scope is decided by what the command *is* rather than by a hand-kept list of
+    // gates: every `run: pnpm …` except the two provisioning commands is either a
+    // package script or a pnpm built-in that can fail a build, so both belong in the
+    // table. Deleting the exclusion below makes this case fail on
+    // `pnpm exec playwright install`, which is what keeps that set honest.
+    const provisioning = new Set(['install', 'exec']);
+    const documented = new Set<string>();
+    for (const line of readFileSync('AGENTS.md', 'utf8').split('\n')) {
+      if (!line.startsWith('|')) continue;
+      for (const match of line.matchAll(/pnpm ([\w:-]+)/g)) documented.add(match[1]!);
+    }
+    const missing: string[] = [];
+    for (const file of ['ci.yml', 'release.yml']) {
+      for (const match of readWorkflow(file).matchAll(/run:\s*pnpm ([\w:-]+)/g)) {
+        const command = match[1]!;
+        if (provisioning.has(command)) continue;
+        if (!documented.has(command)) missing.push(`${file} runs pnpm ${command}`);
+      }
+    }
+    expect(missing, 'the AGENTS.md quick reference is missing a gate the workflows run').toEqual([]);
+    // An empty `missing` is also what a table scan that read nothing produces, so the
+    // other half of the instrument is checked separately.
+    expect(documented.size, 'the table scan must read commands out of AGENTS.md').toBeGreaterThan(10);
   });
 });
