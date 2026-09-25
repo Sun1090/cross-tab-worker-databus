@@ -642,15 +642,17 @@ describe('AGENTS.md directory layout', () => {
     const unnamedIn = (layout: string) =>
       tracked.filter(file => !layout.includes(file) && !layout.includes(file.split('/').pop()!));
 
+    expect(unnamedIn(block)).toEqual([]);
     // A control the gate has to pass before its green means anything: doctor the block
     // by removing one real name and require that the same filter reports exactly that
     // file. Without it, a filter that always returns `[]` — from an empty tracked list,
     // or a substring rule that matches too broadly — is indistinguishable from a clean
-    // tree.
+    // tree. It runs *after* the real assertion on purpose: measured with the control
+    // first, deleting a layout entry failed at the control with `expected
+    // ['e2e/topics.ts', …] to deeply equal ['tests/workflows.test.ts']`, which names the
+    // regression only by accident and reads as though the control itself broke.
     expect(unnamedIn(block.replace('workflows.test.ts', 'removed-by-control')),
       'the layout check must report a file whose entry is missing').toEqual(['tests/workflows.test.ts']);
-
-    expect(unnamedIn(block)).toEqual([]);
     // And the corpus must not be empty, which is the other half of the same silence.
     // Floor is deliberately below the measured 76 tracked files (`git ls-files src tests
     // e2e | wc -l`), because a floor at the size reddens when a file is deleted.
