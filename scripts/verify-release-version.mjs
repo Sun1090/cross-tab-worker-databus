@@ -46,6 +46,16 @@
  * absence. `verify-published-consumer.mjs` already pinned `--registry` for both
  * its reads and for the same reason; this was the last npm-based registry read in
  * the repository that did not.
+ *
+ * The failure message names two remedies, and one of them is a prose edit, so it has
+ * to say which prose works. Measured against `findUnpublishedReleases` with a version
+ * absent from `time`: `## [0.20.91] - never released` is still reported, exactly like
+ * the plain standing section, while `## 0.20.91 — never released` and
+ * `## ~~[0.20.91]~~ …` come back clean. The exemption is the heading *shape* this scan
+ * matches, not a keyword — the good property (no phrase a typo can trip) and the one
+ * the earlier wording hid. Pinned both ways in `tests/release-version.test.ts`,
+ * including the still-reported direction, so a later reader cannot turn the gate into
+ * a keyword scan by "fixing" the marker case.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -147,9 +157,10 @@ export function main() {
   if (missing.length > 0) {
     throw new Error(
       `[release] CHANGELOG names ${missing.length} release(s) the registry has never recorded: ` +
-      `${missing.join(', ')}. Each needs either its artifact published or its section marked as a ` +
-      `version that was never released — the floor here is ${firstGatedRelease}, above which every ` +
-      'named release has been published since.'
+      `${missing.join(', ')}. Each needs either its artifact published or its section heading ` +
+      `dropped out of the \`## [x.y.z]\` form this scan reads (writing "never released" beside a ` +
+      `bracketed version does not exempt it) — the floor here is ${firstGatedRelease}, above which ` +
+      'every named release has been published since.'
     );
   }
   const gated = [...new Set(
