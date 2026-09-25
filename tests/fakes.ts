@@ -69,11 +69,15 @@ export class ChannelHub {
 
   /** A real `BroadcastChannel` delivers in a *later task*, so a runtime that posts
    * a frame and then reads coordination state in the same stack never sees the
-   * effect of its own post. The hub's default stays synchronous because 15 tests in
+   * effect of its own post. The hub's default stays synchronous because 16 tests in
    * `cluster`, `data-bus` and `stability` post a frame and assert without awaiting
-   * — measured, not estimated: flipping this default to async reddens exactly 17
-   * cases, those 15 plus the two hub-infrastructure pins in
-   * `tests/coordination-invariants.test.ts`. */
+   * — measured, not estimated: flipping this default to async reddens exactly 18
+   * cases on the current suite (9 `cluster`, 6 `data-bus`, 1 `stability`, plus the
+   * two hub-infrastructure pins in `tests/coordination-invariants.test.ts`, one of
+   * which asserts this default by name). Re-derive by editing the field below and
+   * running `npx vitest run`; the count moves with the suite, so treat it as the
+   * recipe rather than the number. An earlier copy of this note said 15 and 17, and
+   * `AGENTS.md` carried both the old pair and the new one in two different bullets. */
   setAsyncDelivery(enabled: boolean): void {
     this.asyncDelivery = enabled;
   }

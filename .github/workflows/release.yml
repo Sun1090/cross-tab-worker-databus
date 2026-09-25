@@ -126,19 +126,20 @@ jobs:
           # a guess. Re-derive both: npm's own `time[<version>]` stamp for the release
           # versus the `Publish to npm` step completion, which `gh api
           # repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs` prints (attempt 1
-          # is the failed one). Measured on 0.21.27 through 0.21.33 (2026-09-25): that
-          # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 s
-          # in version order. The verify's own duration is the other half of the
+          # is the failed one). Measured on 0.21.27 through 0.21.34 (2026-09-25): that
+          # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 /
+          # 75.8 s in version order. The verify's own duration is the other half of the
           # picture, and it is remarkably flat: the five green tag runs from 0.21.25 to
           # 0.21.29 took 307, 304, 305, 304 and 304 s against a then-360 s ceiling,
-          # 0.21.31's took 308 s and 0.21.32's and 0.21.33's took 304 s each against
-          # this one. Eight samples inside a 5-second band is the regularity the cache
-          # lifetime below explains — a 300 s object plus a few seconds of command
+          # 0.21.31's took 308 s and 0.21.32's, 0.21.33's and 0.21.34's took 304 s each
+          # against this one. Nine samples inside a 5-second band is the regularity the
+          # cache lifetime below explains — a 300 s object plus a few seconds of command
           # time — and it is measured, not a habit: read
           # `steps[].started_at`/`completed_at` for the `Verify published npm consumers`
-          # step of each release run. 0.21.33 is the model's cleanest sample: its record
-          # landed 75.5 s in and this runner still took 304 s — one lifetime after its
-          # own first fetch. 0.21.32 is the one carrying the laptop-side reading: record
+          # step of each release run. 0.21.33 and 0.21.34 are the model's two cleanest
+          # samples and they repeat each other: records 75.5 s and 75.8 s in, both
+          # runners still taking 304 s — one lifetime after their own first fetch.
+          # 0.21.32 is the one carrying the laptop-side reading: record
           # 76.1 s in, a `no-cache` read from a laptop saw the new `latest` 151 s in, and
           # the runner took 304 s.
           # The ceiling's shape is explained by the packument

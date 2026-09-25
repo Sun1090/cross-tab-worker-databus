@@ -548,8 +548,10 @@ describe('test-name citations', () => {
     }
     // Guard the scan itself: a title collector that matches nothing would report
     // every citation dead, and one that matches too much would accept anything.
-    // The floor is deliberately not the corpus size (976 titles across 40 files
-    // when this was written, `console.log` it here to re-derive) — a floor at the
+    // The floor is deliberately not the corpus size (977 titles across 40 files
+    // when this was last re-read, and it was 976 the day the gate landed — a suite
+    // that gains a case moves this number, which is exactly why the floor is not it;
+    // `console.log` it here to re-derive) — a floor at the
     // current count reddens the moment a test file moves out of the scan, and
     // half of it still cannot be reached by a collector that has stopped working.
     expect(
@@ -557,7 +559,7 @@ describe('test-name citations', () => {
       'the citation scan must find the suite case titles'
     ).toBeGreaterThan(500);
     // And the e2e corpus separately, because the total above cannot notice it
-    // going empty: 936 of the 976 titles come from `tests/`, so dropping the e2e
+    // going empty: 937 of the 977 titles come from `tests/`, so dropping the e2e
     // sweep entirely still clears a 500 floor.
     expect(
       [...titlesByFile.keys()].filter(name => name.endsWith('.spec.ts')).length,
@@ -601,7 +603,7 @@ describe('test-name citations', () => {
     expect(unresolved).toEqual([]);
     // The other way this gate can go wrong is by looking at nothing: an empty
     // `unresolved` is also what a citation pattern that matches no file produces,
-    // and that reads as a clean bill. 17 citations across 52 files when this was
+    // and that reads as a clean bill. 18 citations across 52 files when this was
     // written — re-derive with `console.log(examined)` here rather than trusting
     // the number, which is the same decay this test exists to catch.
     expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);

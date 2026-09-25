@@ -420,8 +420,9 @@ describe('cross-tab coordination invariants', () => {
       hub.setDeliveryBudget(DELIVERY_BUDGET);
       // Browser fidelity: `BroadcastChannel` delivers in a later task, so no
       // runtime ever reacts to its own post inside the same stack. Deliberately
-      // opt-in — the synchronous default is what 15 tests in `cluster`, `data-bus`
-      // and `stability` post-and-assert against.
+      // opt-in — the synchronous default is what 16 tests in `cluster`, `data-bus`
+      // and `stability` post-and-assert against (18 fail when it is flipped; the
+      // recipe is in `ChannelHub`'s own doc comment).
       hub.setAsyncDelivery(true);
       const clock = { now: 1_000 };
       const tabs = [
