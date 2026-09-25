@@ -1047,7 +1047,7 @@ The line continues the async-callback isolation audit: every fix below binds a c
 
 ## Release checklist
 
-- Update the `[Unreleased]` section and version date.
+- Write the release's own `## [x.y.z] - date` section (the repository no longer keeps an `[Unreleased]` section — the versioned heading is opened in the change's own PR, and `docs/release-checklist.md` is the authoritative procedure).
 - Run `pnpm check`, `pnpm lint`, `pnpm test:e2e`, `pnpm bench`, and `pnpm bench:browser`.
 - Run ESM/CJS package-consumption smoke tests from the packed tarball.
 - Tag the release and verify the GitHub Release and npm `latest` dist-tag.

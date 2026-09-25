@@ -993,7 +993,7 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 
 ## 发版检查清单
 
-- 更新 `[Unreleased]` 与版本日期；
+- 写好本次发布自己的 `## [x.y.z] - 日期` 一节（仓库已不再维护 `[Unreleased]` 段——版本标题在变更自身的 PR 里开出，权威流程见 `docs/zh/release-checklist.md`）；
 - 执行 `pnpm check`、`pnpm lint`、`pnpm test:e2e`、`pnpm bench`、`pnpm bench:browser`；
 - 从打包 tarball 做 ESM/CJS 消费冒烟验证；
 - 推送 tag 后核验 GitHub Release 与 npm `latest` dist-tag。
