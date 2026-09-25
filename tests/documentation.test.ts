@@ -41,7 +41,7 @@ describe('public documentation', () => {
   });
 
   it('keeps relative documentation links valid', () => {
-    const files = ['README.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
+    const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
 
     for (const file of files) {
       const content = readFileSync(file, 'utf8');
@@ -469,7 +469,7 @@ describe('public documentation', () => {
     // A heading immediately followed by another heading of the same or higher
     // level renders as an empty section. (Found: docs/zh/roadmap.md's
     // "0.13.0 候选" section had lost its four items.)
-    const files = ['README.md', 'README.zh.md', ...listDocumentationFiles('docs')];
+    const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', ...listDocumentationFiles('docs')];
     const emptySections: string[] = [];
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');
@@ -509,12 +509,12 @@ describe('test-name citations', () => {
     // sends a reader to the middle of a case, and the first fixture rename to
     // those arbitrary strings would have sent them nowhere at all.
     //
-    // Scope is every living prose surface: `src/**`, `AGENTS.md`, both root READMEs and
-    // the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
+    // Scope is every living prose surface: `src/**`, `AGENTS.md`, both root READMEs,
+    // `CONTRIBUTING.md` and the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
     // from the shipped-docs guard, and the same exemption applies here for the
     // same kind of reason — a phase entry dates what a sweep found, so its
     // citations are records rather than instructions. That exemption is what
-    // makes the scope affordable: 18 citations sit in 9 of the 53 files it walks
+    // makes the scope affordable: 18 citations sit in 9 of the 54 files it walks
     // (`AGENTS.md` 4, `docs/architecture.md` 1, and the remaining 13 across seven `src/`
     // files), and every one of them resolves. The exempt pair holds 11 more — 8 in
     // `docs/progress.md` and 3 in `CHANGELOG.md` — and re-running this scan over that
@@ -577,6 +577,7 @@ describe('test-name citations', () => {
       'AGENTS.md',
       'README.md',
       'README.zh.md',
+      'CONTRIBUTING.md',
       ...listDocumentationFiles('docs').filter(name => name.endsWith('.md')),
       ...listSourceFiles('src')
     ]) {
