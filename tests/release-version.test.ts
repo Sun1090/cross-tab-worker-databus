@@ -106,8 +106,10 @@ describe('release version gate', () => {
  * The read that decides "this version was never published" has to be a read of
  * npm itself, not of whatever `npm` is configured to talk to. Measured while
  * preparing `0.21.35`: this machine's registry is a mirror whose copy of the
- * packument still reported `modified` at the `0.21.33` publish — 75 minutes after
- * npmjs recorded `0.21.34` — so the gate declared a public version one "the
+ * packument still reported `modified` at the `0.21.33` publish when the gate ran at
+ * 03:41:18Z, 3,207 s after npmjs recorded `0.21.34` (the mirror's own `modified` did not
+ * move until 03:44:48.778Z, 3,418 s after the record), so the gate declared a public
+ * version one "the
  * registry has never recorded", and it did so from a read that *succeeded*. A
  * mirror's own sync lag is not HTTP caching, so `cache-control: no-cache` returns
  * the same stale document; only naming the registry fixes it.
