@@ -509,17 +509,19 @@ describe('test-name citations', () => {
     // sends a reader to the middle of a case, and the first fixture rename to
     // those arbitrary strings would have sent them nowhere at all.
     //
-    // Scope is every living prose surface: `src/**`, `AGENTS.md`, `README.md` and
+    // Scope is every living prose surface: `src/**`, `AGENTS.md`, both root READMEs and
     // the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
     // from the shipped-docs guard, and the same exemption applies here for the
     // same kind of reason — a phase entry dates what a sweep found, so its
     // citations are records rather than instructions. That exemption is what
-    // makes the scope affordable: `docs/` carries 8 such citations, and the only
-    // 4 in the tree that do not resolve are all in `progress.md` — two are the
-    // fixture-token forms this change removes from `src/`, two quote a case by a
-    // truncated name with no ellipsis marking it as one. The `docs/` citation
-    // outside that file resolves. A gate that scanned `progress.md` would spend
-    // its first run on history.
+    // makes the scope affordable: 18 citations sit in 9 of the 53 files it walks
+    // (`AGENTS.md` 4, `docs/architecture.md` 1, and the remaining 13 across seven `src/`
+    // files), and every one of them resolves. The exempt pair holds 11 more — 8 in
+    // `docs/progress.md` and 3 in `CHANGELOG.md` — and re-running this scan over that
+    // pair by hand leaves exactly one non-resolver: a `progress.md` entry quoting the
+    // gate's own failure message, which is a report of what it printed rather than a
+    // pointer into the suite. A gate that scanned `progress.md` would spend its first
+    // run on history, so the pass stays manual and its recipe is recorded in `AGENTS.md`.
     //
     // The possessive form is the only shape scanned, and that is measured rather
     // than timid. The next loosest one — the file named, then `('a name')` within
@@ -549,19 +551,20 @@ describe('test-name citations', () => {
     }
     // Guard the scan itself: a title collector that matches nothing would report
     // every citation dead, and one that matches too much would accept anything.
-    // The floor is deliberately not the corpus size (977 titles across 40 files
-    // when this was last re-read, and it was 976 the day the gate landed — a suite
-    // that gains a case moves this number, which is exactly why the floor is not it;
-    // `console.log` it here to re-derive) — a floor at the
-    // current count reddens the moment a test file moves out of the scan, and
-    // half of it still cannot be reached by a collector that has stopped working.
+    // The floor is deliberately not the corpus size. That number moves every time a
+    // case is added anywhere in `tests/` — this file's own new case moves it — so a
+    // floor at it would redden an unrelated PR, and a floor at half of it is still
+    // out of reach of a collector that stopped working. Re-derive it by printing the
+    // reduced total here rather than trusting any figure quoted in this comment,
+    // including the two that were here until they were replaced by this sentence.
     expect(
       [...titlesByFile.values()].reduce((total, set) => total + set.size, 0),
       'the citation scan must find the suite case titles'
     ).toBeGreaterThan(500);
-    // And the e2e corpus separately, because the total above cannot notice it
-    // going empty: 937 of the 977 titles come from `tests/`, so dropping the e2e
-    // sweep entirely still clears a 500 floor.
+    // And the e2e corpus separately, because the total above cannot notice it going
+    // empty: almost every title comes from `tests/`, so dropping the e2e sweep
+    // entirely still clears a 500 floor. Sum the two key sets separately to see the
+    // skew; do not quote it.
     expect(
       [...titlesByFile.keys()].filter(name => name.endsWith('.spec.ts')).length,
       'the citation scan must collect titles from the e2e specs as well as tests/'
@@ -573,6 +576,7 @@ describe('test-name citations', () => {
     for (const file of [
       'AGENTS.md',
       'README.md',
+      'README.zh.md',
       ...listDocumentationFiles('docs').filter(name => name.endsWith('.md')),
       ...listSourceFiles('src')
     ]) {
@@ -604,9 +608,12 @@ describe('test-name citations', () => {
     expect(unresolved).toEqual([]);
     // The other way this gate can go wrong is by looking at nothing: an empty
     // `unresolved` is also what a citation pattern that matches no file produces,
-    // and that reads as a clean bill. 18 citations across 52 files when this was
-    // written — re-derive with `console.log(examined)` here rather than trusting
-    // the number, which is the same decay this test exists to catch.
+    // and that reads as a clean bill. Re-derive `examined` with a `console.log` here,
+    // and the scope's size from the array above — the same rule this test exists to
+    // enforce on other people's prose. `README.zh.md` was added to the list because the
+    // scope sentence claims every living prose surface, and it carries zero citations
+    // today, so that addition changes nothing a reader can see; it is the *next* one
+    // that would otherwise slip past a gate whose comment says it was scanned.
     expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);
   });
 });
