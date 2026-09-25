@@ -86,6 +86,35 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
+ * Floor a prose scan on its own row count.
+ *
+ * Most of this file builds an `offenders` array inside a loop that is gated on a regex
+ * matching, then asserts the array is empty — which is *also* precisely what a scan whose
+ * regex stopped matching anything reports. A heading convention change, a rewritten link
+ * form, or a table style this walk does not recognise turns such a gate into a clean bill
+ * that read nothing, and nothing in the run distinguishes the two. Two instances were
+ * closed individually (#336 gave the CHANGELOG date check a denominator it does not share
+ * with its own rows; #338 floored the phase-order scan), and the rest of the family is
+ * here.
+ *
+ * The bound is a constant set well under the measured population, never a fraction of it:
+ * a fraction taken from the same set the scan shrinks is the failure this helper exists to
+ * catch, wearing a decimal point. Where a per-row floor would fail on arrival — some files
+ * legitimately carry no tables, one carries no h2 — the floor goes on the aggregate, and
+ * the site comment says which. Re-take any figure quoted below by running the scan it
+ * describes; the numbers here are the measurement that set the bound, not a value to
+ * maintain.
+ */
+function expectScanSaw(label: string, rows: number, minimum: number): void {
+  expect(
+    rows,
+    `${label}: this pass matched ${rows} row(s), so its "no offenders" result is a scan that read ` +
+      'nothing rather than a document that is clean. Either the pattern no longer describes the ' +
+      'convention or the content it guards has moved out of the scanned scope.'
+  ).toBeGreaterThan(minimum);
+}
+
+/**
  * Which versions a roadmap preamble is allowed to name, given `package.json`'s version and
  * the release tag names present in the clone: the greatest tag strictly below that version,
  * plus that version itself once its tag exists.
@@ -167,15 +196,21 @@ describe('public documentation', () => {
   it('keeps relative documentation links valid', () => {
     const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
 
+    let examined = 0;
     for (const file of files) {
       const content = readFileSync(file, 'utf8');
       const links = [...content.matchAll(/\[[^\]]+\]\((\.\.?\/[^)#]+)(?:#[^)]+)?\)/g)];
+      examined += links.length;
       for (const match of links) {
         const link = match[1];
         expect(link, `${file} contains an invalid relative link`).toBeDefined();
         expect(existsSync(resolve(dirname(file), link!)), `${file} -> ${link}`).toBe(true);
       }
     }
+    // 95 links across 24 files when this floor was cut; 40 leaves room for the links a
+    // refactor removes and is far above zero. A per-file floor is impossible here — most
+    // of those files carry no relative link at all — so this bounds the whole sweep.
+    expectScanSaw('relative-link scan', examined, 40);
   });
 
   it('keeps the CHANGELOG section for the current package version', () => {
@@ -247,11 +282,13 @@ describe('public documentation', () => {
     };
     const files = ['README.md', 'README.zh.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
 
+    let tablesChecked = 0;
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');
       let block: Array<{ line: number; text: string }> = [];
       const check = () => {
         if (block.length < 2) return;
+        tablesChecked += 1;
         const widths = new Set(block.map(entry => countCells(entry.text)));
         expect(
           widths.size,
@@ -268,6 +305,12 @@ describe('public documentation', () => {
       });
       check();
     }
+    // 42 blocks of >=2 pipe-led lines across 23 files at the time this was cut. This gate
+    // is the one whose emptiness is easiest to miss, because `block.length < 2` already
+    // returns quietly for every prose file: a convention that indents its tables (four
+    // spaces before the `|`, which CommonMark renders as a table inside a list item) leaves
+    // every table out of scope and every assertion unscored.
+    expectScanSaw('table-rectangularity scan', tablesChecked, 20);
   });
 
   it('documents every replay/dedup option field in both configuration references', () => {
@@ -305,6 +348,7 @@ describe('public documentation', () => {
     // headings had accumulated across sessions.)
     const lines = readFileSync('CHANGELOG.md', 'utf8').split('\n');
     let section = '(preamble)';
+    let examined = 0;
     const seen = new Map<string, Set<string>>();
     for (const line of lines) {
       const sectionMatch = /^## \[?([^\]]+)\]?/.exec(line);
@@ -314,6 +358,7 @@ describe('public documentation', () => {
       }
       const heading = /^### (.+)$/.exec(line);
       if (heading) {
+        examined += 1;
         const headings = seen.get(section) ?? new Set<string>();
         expect(
           headings.has(heading[1]!),
@@ -323,6 +368,9 @@ describe('public documentation', () => {
         seen.set(section, headings);
       }
     }
+    // 294 `### ` headings across 171 sections when this floor was cut, so the bound is a
+    // third of the population and no single release's rewrite can reach it.
+    expectScanSaw('CHANGELOG subheading scan', examined, 100);
   });
 
   it('keeps each progress-log phase entry numbered once, in order, and above the standing sections', () => {
@@ -378,14 +426,34 @@ describe('public documentation', () => {
     // an h1, which also made its `### Added` block look like a duplicate of
     // the previous version's.)
     const lines = readFileSync('CHANGELOG.md', 'utf8').split('\n');
+    let examined = 0;
     for (const [index, line] of lines.entries()) {
       const heading = /^(#{1,6}) \[?\d+\.\d+\.\d+\]?/.exec(line);
       if (!heading) continue;
+      examined += 1;
       expect(
         heading[1],
         `CHANGELOG.md:${index + 1} version heading must use "## " so the Release workflow can match it`
       ).toBe('##');
     }
+    // A cross-denominator rather than a constant, because this file already keeps an
+    // independent count of the same headings: `scripts/verify-release-version.mjs` reads
+    // `## [x.y.z]`, the date check above reads `## [x.y.z] - YYYY-MM-DD`, and this scan
+    // reads any heading level carrying a version. Every bracketed release section is by
+    // construction a row for this scan, so `examined >= bracketed` holds at every moment of
+    // the release cycle and needs no maintenance as the file grows — while the day this
+    // pattern stops describing the convention, `examined` drops under it. Measured equal
+    // (171 each) on the tree that added this, which is the strongest form the relation
+    // takes: the two readings of CHANGELOG.md name the same set, so a heading visible to the
+    // release tooling but invisible here would be reported by neither.
+    const bracketed = countMatches(
+      readFileSync('CHANGELOG.md', 'utf8'),
+      /^## \[(\d+\.\d+\.\d+(?:-[^\]]+)?)\]/gm
+    );
+    expect(
+      examined,
+      `this scan saw ${examined} version heading(s) but ${bracketed} bracketed release sections exist — some heading form is invisible to it`
+    ).toBeGreaterThanOrEqual(bracketed);
   });
 
   it('dates every tagged release section on a day its tag actually exists', () => {
@@ -595,14 +663,29 @@ describe('public documentation', () => {
     // A section present in only one language is invisible to readers of the
     // other. (Found: docs/release-checklist.md lacked the "Security and
     // dependency scanning" section that only the Chinese copy carried.)
+    //
+    // Parity gates are the self-satisfying kind: each asserts one number equals
+    // another, so 0 == 0 passes, and all three below read the *same* file list —
+    // if `localizedDocNames` came back empty every pair of counts would agree and
+    // this describe block would report ten green cases having compared nothing. So
+    // each of the three floors both the pair count and, separately, the English
+    // population it is comparing against.
+    expectScanSaw('localized doc pairs', localizedDocNames.length, 5);
+    let englishSections = 0;
     for (const name of localizedDocNames) {
       const en = readFileSync(join('docs', name), 'utf8');
       const zh = readFileSync(join('docs/zh', name), 'utf8');
+      englishSections += countMatches(en, /^## /gm);
       expect(
         countMatches(zh, /^## /gm),
         `docs/zh/${name} has a different number of "## " sections than docs/${name}`
       ).toBe(countMatches(en, /^## /gm));
     }
+    // 221 English h2 sections across the ten pairs when this floor was cut. A per-pair floor
+    // is not available: docs/benchmarks.md is generated by `scripts/bench-trend.mjs` and
+    // carries no h2 of its own in either language, so it is a legitimate 0 == 0 and the
+    // aggregate is the only place a collapse to zero can be seen.
+    expectScanSaw('localized h2 parity', englishSections, 100);
   });
 
   it('keeps every localized doc pair at the same markdown table row count', () => {
@@ -610,14 +693,21 @@ describe('public documentation', () => {
     // so a missing row means a documented option silently vanished from one
     // language. (Found: docs/zh/configuration.md was missing the
     // `recovery.cooldownMs` and `recovery.maxAttempts` rows.)
+    let englishRows = 0;
     for (const name of localizedDocNames) {
       const en = readFileSync(join('docs', name), 'utf8');
       const zh = readFileSync(join('docs/zh', name), 'utf8');
+      englishRows += countMatches(en, /^\|/gm);
       expect(
         countMatches(zh, /^\|/gm),
         `docs/zh/${name} has a different number of table rows than docs/${name}`
       ).toBe(countMatches(en, /^\|/gm));
     }
+    // 217 English table rows over the same ten pairs, and five of the pairs carry none at all
+    // (api, getting-started, release-checklist, roadmap, transports), so this floor is the
+    // aggregate for a second reason: it is the only reading that can be non-zero. Re-take the
+    // five names with the same `^\|` count over docs/*.md rather than trusting the list.
+    expectScanSaw('localized table-row parity', englishRows, 50);
   });
 
   it('enumerates every shipped doc explicitly in package.json files', () => {
@@ -631,9 +721,11 @@ describe('public documentation', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { files: string[] };
     const listed = new Set(pkg.files);
     const missing: string[] = [];
+    let examined = 0;
     for (const dir of ['docs', 'docs/zh']) {
       for (const name of readdirSync(dir)) {
         if (!name.endsWith('.md') || name === 'progress.md') continue;
+        examined += 1;
         const relative = `${dir}/${name}`;
         if (!listed.has(relative)) missing.push(relative);
       }
@@ -643,6 +735,13 @@ describe('public documentation', () => {
     }
     expect(missing, 'every shipped doc must be enumerated in package.json files').toEqual([]);
     expect(pkg.files, 'the internal progress.md must not be published').not.toContain('docs/progress.md');
+    // 20 docs on the walk (10 per language) when this floor was cut. Without it, a
+    // `readdirSync` that returned nothing — a moved docs directory, or an `.md` filter
+    // overtaken by `.markdown` — leaves `missing` empty, and an empty `missing` is this
+    // gate's own success message. The root-file loop below cannot supply the floor either:
+    // its four names are literals, so it reports the same four regardless of what the walk
+    // saw.
+    expectScanSaw('package.json shipped-doc sweep', examined, 10);
   });
 
   it('documents every public root export in both API references', async () => {
@@ -716,14 +815,22 @@ describe('public documentation', () => {
     // Bullet and ordered-list items are 1:1 across languages, so a dropped item
     // is a silently lost guarantee/step in one language. (Would have caught the
     // Chinese roadmap losing the 0.11.0 section and the 0.13.0 candidate list.)
+    let englishItems = 0;
     for (const name of localizedDocNames) {
       const en = readFileSync(join('docs', name), 'utf8');
       const zh = readFileSync(join('docs/zh', name), 'utf8');
+      englishItems += countMatches(en, /^([-*] |\d+\. )/gm);
       expect(
         countMatches(zh, /^([-*] |\d+\. )/gm),
         `docs/zh/${name} has a different number of list items than docs/${name}`
       ).toBe(countMatches(en, /^([-*] |\d+\. )/gm));
     }
+    // 652 English list items over the ten pairs — and unlike the two floors above, every pair
+    // is non-zero here today, so this is the loosest of the three. It stays an aggregate
+    // because a future generated doc (the `benchmarks.md` shape) is the one most likely to
+    // have no bullets, and a per-pair floor would then be a rule about prose style rather
+    // than a guard on the scan.
+    expectScanSaw('localized list-item parity', englishItems, 100);
   });
 
   it('keeps every release-scope block in the roadmap titled, ordered and mirrored', () => {
@@ -770,6 +877,12 @@ describe('public documentation', () => {
     const asText = (v: [number, number, number]) => v.join('.');
 
     for (const [file, list] of [['docs/roadmap.md', en], ['docs/zh/roadmap.md', zh]] as const) {
+      // 152 scope blocks per language when this floor was cut. The two assertions this case
+      // makes after it are both vacuous on an empty ledger: the ordering loop never enters,
+      // and the mirror leg compares two empty sets, whose symmetric difference is exactly as
+      // empty as a matched pair. The `offenders` list cannot supply the floor either, because
+      // a heading that fails the *version* pattern is skipped before `allowed` is consulted.
+      expectScanSaw(`${file} release-scope ledger`, list.length, 50);
       const misplaced: string[] = [];
       for (let i = 1; i < list.length; i += 1) {
         const before = list[i - 1]!;
@@ -801,11 +914,13 @@ describe('public documentation', () => {
     // "0.13.0 候选" section had lost its four items.)
     const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', ...listDocumentationFiles('docs')];
     const emptySections: string[] = [];
+    let examined = 0;
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');
       lines.forEach((line, index) => {
         const heading = /^(#{2,3}) /.exec(line);
         if (!heading) return;
+        examined += 1;
         let next = index + 1;
         while (next < lines.length && lines[next]!.trim() === '') next += 1;
         if (next >= lines.length) return;
@@ -816,6 +931,12 @@ describe('public documentation', () => {
       });
     }
     expect(emptySections).toEqual([]);
+    // 592 h2/h3 headings across the scanned files at the time this floor was cut. This gate's
+    // finding shape is "a section lost its body", and the zh roadmap's `0.13.0 候选` is the
+    // instance it was written for — but any change that makes `^(#{2,3}) ` match nothing (a
+    // docs tree moved out of `listDocumentationFiles`' scope, a heading style the walk does
+    // not recognise) reports the same empty list the clean tree does.
+    expectScanSaw('empty-section sweep', examined, 100);
   });
 });
 
