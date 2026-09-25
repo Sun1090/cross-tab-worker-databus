@@ -1,3 +1,12 @@
+## [0.21.38] - 2026-09-25
+
+One English sentence in the shipped roadmap described a ratio backwards while its Chinese mirror had the direction right — the class of defect only a two-language comparison finds. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.37`'s.
+
+### Fixed
+
+- **`docs/roadmap.md` placed the failing seed *below* the floor it is above.** The `0.21.17` block said the `storage-fail` interleaving reddens the sweep "from seed 414 onward, which is four times below the sweep's depth floor". The floor is `MIN_SEEDS = 100` in `tests/coordination-invariants.test.ts`, and 414 is more than four times it — which is the whole point of the sentence: the finding needs depth past what the sweep asserts as a minimum, so it is a finder rather than a guard. The Chinese mirror read 是……下限的四倍, correct in direction, so the two languages agreed on every digit and disagreed on the relation. Fixed in the English side; the Chinese side is left as written.
+- **The English side of the same file now names the timeout its mirror names.** The `0.21.37` block credited `scripts/publication-lag.mjs` with "a per-call timeout"; the Chinese block said 30 秒超时. The script sets `CALL_TIMEOUT_MS = 30_000`, so the figure is in `scripts/publication-lag.mjs` and both languages now make the same claim rather than one making it more precisely than the other.
+
 ## [0.21.37] - 2026-09-25
 
 One shipped instruction told every reader to run a script that exists in no clone, and making that script tracked turned up three numbers its own quoted prose had wrong. No library behavior, export, option or storage key changed.
