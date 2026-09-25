@@ -1,3 +1,15 @@
+## [0.21.39] - 2026-09-25
+
+One section of this file carried a date on which no release event happened — not a figure that aged, but a line written a day behind the one above it. The check that now reads every section date does so against the tag rather than against npm, and the two rows that forced that choice are recorded below. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.38`'s.
+
+### Fixed
+
+- **`## [0.20.10]` said 2026-09-02; that release is 2026-09-03.** Its tag reads `2026-09-03T12:27:29+08:00` and the registry recorded the version at `2026-09-03T04:28:11Z` — the same instant, and the same calendar day under either frame, so no reading of either authority produces `09-02`. The neighboring `0.20.9` was tagged 2026-09-02T21:33+08:00, which is what the heading should have advanced past and did not. Correcting it is not a dated record being rewritten: the exemption in `AGENTS.md` covers numbers *measured* at the time (test counts, lag samples), whereas a release date has one answer that the repository and the registry both hold. Of the 151 sections that carry a tag, this was the only one dated outside both readings of its tag instant.
+
+### Added
+
+- **`tests/documentation.test.ts` now compares every dated section with its tag.** For each `## [<version>] - <date>`, the date must be the calendar day of `v<version>`'s creation instant read either in UTC or in `+08:00`. The **tag** is the authority and not `time[<version>]`, because publishing lags tagging across a UTC midnight: `0.4.0`'s tag reads `2026-08-30T21:28Z` while its registry record reads `2026-08-31T00:03Z`, and `0.20.85` has the same shape — so a registry-keyed rule reports three bad sections where the tag reports one, and two of its three findings are the gate being wrong. Both frames are accepted because the prose genuinely uses both: over the tag-dated sections, 84 agree whichever frame is read, 46 only in `+08:00` and 20 only in UTC, so a single-frame rule would fail 66 rows that each describe a real event. Three controls ride along: a floor on how many sections were checked (a clone without tags would skip all of them and report a clean pass), an empty-instant case reported as a broken read rather than a skip, and an assertion that the checked rows span **both** tag object types — this repository tags releases both ways (92 lightweight, 59 annotated), and `%(creatordate)` is the only field that answers for the two, so `%(creatordate)` → `%(*creatordate)` reddens 92 sections rather than quietly emptying them. Mutation record in `docs/progress.md`.
+
 ## [0.21.38] - 2026-09-25
 
 One English sentence in the shipped roadmap described a ratio backwards while its Chinese mirror had the direction right — the class of defect only a two-language comparison finds. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.37`'s.
