@@ -487,3 +487,123 @@ describe('public documentation', () => {
     expect(emptySections).toEqual([]);
   });
 });
+
+/** Every `.ts`/`.tsx` under `dir`, recursing into subdirectories. */
+function listSourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap(name => {
+    const child = join(dir, name);
+    if (statSync(child).isDirectory()) return listSourceFiles(child);
+    return /\.tsx?$/.test(name) ? [child] : [];
+  });
+}
+
+describe('test-name citations', () => {
+  it('resolve to a case that exists in the file they name', () => {
+    // A comment that cites a case by name is a claim that the name exists, and
+    // like a line number it decays silently: nothing in the build, the type
+    // check or the suite contradicts it when the case is renamed. Found twice in
+    // one pass — `src/core/routing.ts` cited `sticky-existing-routes` and
+    // `src/core/trace.ts` cited `no-trace`, and neither is an `it()` title. Both
+    // are `clusterKey` literals sitting *inside* the test body, so the citation
+    // sends a reader to the middle of a case, and the first fixture rename to
+    // those arbitrary strings would have sent them nowhere at all.
+    //
+    // Scope is every living prose surface: `src/**`, `AGENTS.md`, `README.md` and
+    // the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
+    // from the shipped-docs guard, and the same exemption applies here for the
+    // same kind of reason — a phase entry dates what a sweep found, so its
+    // citations are records rather than instructions. That exemption is what
+    // makes the scope affordable: `docs/` carries 8 such citations, and the only
+    // 4 in the tree that do not resolve are all in `progress.md` — two are the
+    // fixture-token forms this change removes from `src/`, two quote a case by a
+    // truncated name with no ellipsis marking it as one. The `docs/` citation
+    // outside that file resolves. A gate that scanned `progress.md` would spend
+    // its first run on history.
+    //
+    // The possessive form is the only shape scanned, and that is measured rather
+    // than timid. The next loosest one — the file named, then `('a name')` within
+    // a window — yields exactly one candidate across this whole scope, and it is
+    // not a citation: it is the `new Error("…")` message in the `catch` of the
+    // very function whose doc comment names `tests/dual-format.test.ts`, joined
+    // because a proximity window cannot tell "the test this note cites" from "a
+    // quoted string that happens to sit below it". A form that needs a heuristic
+    // to separate from prose is a form whose first output is its own parser.
+    //
+    // What this gate does *not* yet exercise: the `e2e` half of the citation
+    // pattern. No possessive citation in the scanned scope names an
+    // `e2e/*.spec.ts` — the spec files are mentioned only in `progress.md`, which
+    // is exempt, and even there never in the possessive form — so whoever first
+    // cites a Playwright case from a scanned file pins that alternation.
+    const titlesByFile = new Map<string, Set<string>>();
+    for (const file of [...listSourceFiles('tests'), ...listSourceFiles('e2e')]) {
+      if (!/\.(test|spec)\.tsx?$/.test(file)) continue;
+      const content = readFileSync(file, 'utf8');
+      const titles = new Set<string>();
+      for (const match of content.matchAll(
+        /\b(?:it|test)(?:\.\w+)*\(\s*(['"])((?:\\.|(?!\1)[^\\])*)\1/g
+      )) {
+        titles.add(match[2]!);
+      }
+      titlesByFile.set(file.split('/').pop()!, titles);
+    }
+    // Guard the scan itself: a title collector that matches nothing would report
+    // every citation dead, and one that matches too much would accept anything.
+    // The floor is deliberately not the corpus size (976 titles across 40 files
+    // when this was written, `console.log` it here to re-derive) — a floor at the
+    // current count reddens the moment a test file moves out of the scan, and
+    // half of it still cannot be reached by a collector that has stopped working.
+    expect(
+      [...titlesByFile.values()].reduce((total, set) => total + set.size, 0),
+      'the citation scan must find the suite case titles'
+    ).toBeGreaterThan(500);
+    // And the e2e corpus separately, because the total above cannot notice it
+    // going empty: 936 of the 976 titles come from `tests/`, so dropping the e2e
+    // sweep entirely still clears a 500 floor.
+    expect(
+      [...titlesByFile.keys()].filter(name => name.endsWith('.spec.ts')).length,
+      'the citation scan must collect titles from the e2e specs as well as tests/'
+    ).toBeGreaterThan(0);
+
+    const citation = /(?:tests|e2e)\/([A-Za-z0-9_.-]+\.(?:test\.)?tsx?)`?['’]s\s*([`'“"])((?:\\.|(?!\2)[^\\]){6,300}?)\2/g;
+    const unresolved: string[] = [];
+    let examined = 0;
+    for (const file of [
+      'AGENTS.md',
+      'README.md',
+      ...listDocumentationFiles('docs').filter(name => name.endsWith('.md')),
+      ...listSourceFiles('src')
+    ]) {
+      for (const match of readFileSync(file, 'utf8').matchAll(citation)) {
+        examined += 1;
+        const namedFile = match[1]!;
+        const rawName = match[3]!;
+        // Comments wrap, and the continuation marker is part of the source line
+        // rather than of the cited name.
+        const name = rawName
+          .replace(/\n\s*(?:\/\/+\s*|\*\s*)/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const titles = titlesByFile.get(namedFile);
+        if (!titles) {
+          unresolved.push(`${file} cites tests/${namedFile}, which has no cases here`);
+          continue;
+        }
+        // A trailing ellipsis is how a citation marks truncation, so prefix-match
+        // it — but only against one case, or the name decides nothing.
+        const hits = name.endsWith('…')
+          ? [...titles].filter(title => title.startsWith(name.slice(0, -1)))
+          : [...titles].filter(title => title === name);
+        if (hits.length !== 1) {
+          unresolved.push(`${file} cites tests/${namedFile}'s "${name}" (${hits.length} matches)`);
+        }
+      }
+    }
+    expect(unresolved).toEqual([]);
+    // The other way this gate can go wrong is by looking at nothing: an empty
+    // `unresolved` is also what a citation pattern that matches no file produces,
+    // and that reads as a clean bill. 17 citations across 52 files when this was
+    // written — re-derive with `console.log(examined)` here rather than trusting
+    // the number, which is the same decay this test exists to catch.
+    expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);
+  });
+});

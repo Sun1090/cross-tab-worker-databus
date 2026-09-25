@@ -156,7 +156,8 @@ type DataBusTraceEventInput = DataBusTraceEvent extends infer TEvent
 export interface DataBusTraceOptions {
   /** Tracing is opt-in: when `false` the reporter is inert, and the default is
    * `false` — so `trace: { sink }` alone emits nothing and `enabled: true` is
-   * required. Pinned by `tests/data-bus.test.ts`'s `no-trace` case. */
+   * required. Pinned by `tests/data-bus.test.ts`'s "keeps tracing disabled by
+   * default". */
   enabled?: boolean;
   /** Which event categories to emit. Default `all`. */
   mode?: DataBusTraceMode;

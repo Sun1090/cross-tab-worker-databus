@@ -194,8 +194,9 @@ export function selectActiveWorkers(
  * WorkerClusterRuntime intentionally does not use it — it has no caller in `src/`
  * besides the barrel — so nothing here migrates a route on any cadence:
  * established routes are sticky and load applies only when selecting a *new*
- * owner. Pinned by tests/cluster.test.ts's `sticky-existing-routes` case and
- * tests/routing.test.ts's "keeps a live owner sticky before considering load".
+ * owner. Pinned by tests/cluster.test.ts's "keeps existing topic owners and
+ * balances only newly introduced topics" and tests/routing.test.ts's
+ * "keeps a live owner sticky before considering load".
  */
 export function selectRebalanceTarget(
   workers: readonly WorkerRecord[],
