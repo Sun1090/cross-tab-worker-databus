@@ -86,16 +86,18 @@ describe('workflow files', () => {
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
     // registry records the publish *minutes* after `npm publish` returns — for every
-    // release from 0.20.92 on, which is 42 consecutive ones; the five before that window
+    // release in the sweep's modern window, whose size is `scripts/publication-lag.mjs`'s
+    // own `modern gap (from 0.20.92) n=` line rather than a count kept here (one lived in
+    // this comment and read 42 while the window was already wider); the five releases
+    // before that window
     // (0.20.86, 0.20.87, 0.20.88, 0.20.90, 0.20.91) recorded within +-0.6 s of their acks,
     // so the lag is a property of the window and not of npm, and what the budget needs
     // from it is only the maximum. The
-    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.35 was
+    // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.37 was
     // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 / 75.8 /
-    // 127.3 s in version order (nine values, re-counted from this enumeration).
-    // The five releases that ran after this floor was written recorded 127.2
-    // (0.21.31), 76.1 (0.21.32), 75.5 (0.21.33), 75.8 (0.21.34) and 127.3 s
-    // (0.21.35), all inside the band, so `maxMeasuredAckToRecordMs` below stays at
+    // 127.3 / 126.4 / 77.1 s in version order (eleven values; re-count them from this
+    // enumeration, or re-derive the series from the tool instead of trusting the list).
+    // None exceeds 310 s, so `maxMeasuredAckToRecordMs` below stays at
     // 310 s. (2) The packument `npm pack` resolves against is served
     // `cache-control: public, max-age=300`, so a copy anywhere in the path may be
     // five minutes stale by design and cannot be read sooner than that. Re-derive
