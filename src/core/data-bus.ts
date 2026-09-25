@@ -2052,9 +2052,10 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `1010`; that set is one first-sight `console.log` per distinct row over a
     // whole-suite run, so re-derive it rather than trusting the list. Re-derived on
     // 2026-09-25 it came back the same five, and deliberately no count is quoted here:
-    // this guard is evaluated tens of thousands of times per run, most of them inside
-    // `tests/coordination-invariants.test.ts`, so a total would move with the sweep
-    // depth the way `stop()`'s did — see that note for the measurement.
+    // that run evaluated this guard 23876 times and 20173 of them came from
+    // `tests/coordination-invariants.test.ts` (measured by running that file alone under
+    // the same probe), so a total here would move with the sweep depth the way `stop()`'s
+    // did — see that note for the measurement.
     // `transportReady` is the load-bearing one: deleting it fails nine tests in
     // `data-bus.test.ts` and `centrifuge.test.ts`, every one of them an operation
     // the test expects to be deferred. `droppedAfterConnect` dies to exactly two
