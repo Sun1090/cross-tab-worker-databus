@@ -422,6 +422,23 @@ describe('public documentation', () => {
     }
 
     expect(offenders, 'a release section dated outside the day its tag exists').toEqual([]);
+    // A second denominator, because the one above is produced by the same anchored
+    // pattern as the rows: a versioned heading with any suffix after its date
+    // (`## [x.y.z] - 2026-09-25 (backport)`) matches neither, so it leaves `sections`
+    // *and* shrinks the floor's divisor, and the pass reports nothing while skipping
+    // one release forever. This is not hypothetical for the file's own tooling:
+    // `scripts/verify-release-version.mjs` now tells a maintainer that exempting an
+    // abandoned release requires leaving the bracketed heading shape, and the natural
+    // mis-execution of that instruction is a suffix — which the completeness gate
+    // would still report and this gate would silently stop seeing.
+    const versionedHeadings = countMatches(
+      readFileSync('CHANGELOG.md', 'utf8'),
+      /^## \[(\d+\.\d+\.\d+(?:-[^\]]+)?)\]/gm
+    );
+    expect(
+      sections.length,
+      `${versionedHeadings - sections.length} versioned CHANGELOG heading(s) are not dated in the form this case reads`
+    ).toBe(versionedHeadings);
     // The floor makes an *empty* tag read a failure rather than a clean pass: a
     // shallow checkout has no tags at all, every section would `continue` past the
     // lookup, and the pass would report nothing while proving nothing. It is
