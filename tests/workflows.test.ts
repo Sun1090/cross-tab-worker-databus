@@ -68,13 +68,22 @@ describe('workflow files', () => {
   it('checks out the full history where a release-tag baseline is needed', () => {
     // verify:compat resolves its baseline tag from git history; a shallow
     // checkout fails with "no version tag found".
+    let reached = 0;
     for (const file of ['ci.yml', 'release.yml']) {
       const workflow = readWorkflow(file);
       if (!workflow.includes('verify:compat')) continue;
+      reached += 1;
       expect(workflow, `${file} runs verify:compat but has no full-history checkout`).toMatch(
         /fetch-depth:\s*0/
       );
     }
+    // The `continue` above is the whole gate's off switch. Both files name the script today
+    // (measured: 2 mentions each), so `reached` of zero means the string left the workflows —
+    // a rename, or the step moving into a composite action where this file-level scan cannot
+    // see it — and the requirement it exists to enforce is then unchecked while the case
+    // reports green. Re-take the count by grepping the script name in .github/workflows rather
+    // than from this sentence.
+    expect(reached, 'the full-history checkout check must find a workflow that needs it').toBeGreaterThan(0);
   });
 
   it('re-runs lint in the release job before publishing', () => {
@@ -152,10 +161,12 @@ describe('workflow files', () => {
       for (const match of line.matchAll(/pnpm ([\w:-]+)/g)) documented.add(match[1]!);
     }
     const missing: string[] = [];
+    let gated = 0;
     for (const file of ['ci.yml', 'release.yml']) {
       for (const match of readWorkflow(file).matchAll(/run:\s*pnpm ([\w:-]+)/g)) {
         const command = match[1]!;
         if (provisioning.has(command)) continue;
+        gated += 1;
         if (!documented.has(command)) missing.push(`${file} runs pnpm ${command}`);
       }
     }
@@ -163,5 +174,11 @@ describe('workflow files', () => {
     // An empty `missing` is also what a table scan that read nothing produces, so the
     // other half of the instrument is checked separately.
     expect(documented.size, 'the table scan must read commands out of AGENTS.md').toBeGreaterThan(10);
+    // And the same on this side of the comparison, which the floor above cannot see: a
+    // `documented` set of twenty commands against a workflow scan that matched nothing is a
+    // perfect pass with nothing compared. Measured 19 `run: pnpm` lines across the two files,
+    // 17 of them outside `provisioning`; the floor is set where a whole workflow file leaving
+    // scope still reddens it but a single step moving to `npm run` does not.
+    expect(gated, 'the workflow scan must read commands out of .github/workflows').toBeGreaterThan(10);
   });
 });
