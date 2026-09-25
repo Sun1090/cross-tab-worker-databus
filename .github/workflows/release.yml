@@ -125,8 +125,12 @@ jobs:
           # can resolve the version, and the budget is a sum of two measured lags, not
           # a guess. Re-derive both: npm's own `time[<version>]` stamp for the release
           # versus the `Publish to npm` step completion, which `gh api
-          # repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs` prints (attempt 1
-          # is the failed one). Measured on 0.21.27 through 0.21.35 (2026-09-25): that
+          # repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs` prints. Take `<n>`
+          # from the run's `run_attempt` and read the attempt that actually published:
+          # `/jobs` with no segment returns the *latest* attempt, and for v0.21.30 — the
+          # one re-run release in this series, attempt 2 — that attempt republished
+          # nothing, so the default read reports a -177.0 s gap and a 1.0 s step.
+          # Attempt 1 is where its 310.0 s and its 364 s failure live. Measured on 0.21.27 through 0.21.35 (2026-09-25): that
           # ack -> `time[]` gap was 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 /
           # 75.8 / 127.3 s in version order — nine values, counted off this list. Do not
           # read the middle of that as a constant: 0.21.32-0.21.34 recorded at 76.1, 75.5

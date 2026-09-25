@@ -97,7 +97,12 @@ describe('workflow files', () => {
     // five minutes stale by design and cannot be read sooner than that. Re-derive
     // (1) from a tag run: subtract the `Publish to npm` step's completion from
     // `time[<version>]` in the packument (`gh api
-    // repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs`).
+    // repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs`). Read `<n>` off the
+    // run's own `run_attempt` rather than leaving it out: `/jobs` without the segment
+    // returns the **latest** attempt, and for the only re-run release in this series
+    // (v0.21.30, `run_attempt` 2) that attempt republished nothing — measured, the
+    // default read gives a -177.0 s gap and a 1.0 s verify step, while attempt 1 gives
+    // the 310.0 s and the 364 s failure quoted above and below.
     //
     // 0.20.89 exhausted a 2-minute budget and 0.21.30 exhausted a 6-minute one,
     // both after successful publishes; the 6-minute case failed at 364 s while the
