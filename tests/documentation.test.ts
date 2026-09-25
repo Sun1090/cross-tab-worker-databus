@@ -568,15 +568,20 @@ describe('test-name citations', () => {
     // `CONTRIBUTING.md` and the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
     // from the shipped-docs guard, and the same exemption applies here for the
     // same kind of reason — a phase entry dates what a sweep found, so its
-    // citations are records rather than instructions. That exemption is what
-    // makes the scope affordable: 18 citations sit in 9 of the 54 files it walks
-    // (`AGENTS.md` 4, `docs/architecture.md` 1, and the remaining 13 across seven `src/`
-    // files), and every one of them resolves. The exempt pair holds 11 more — 8 in
-    // `docs/progress.md` and 3 in `CHANGELOG.md` — and re-running this scan over that
-    // pair by hand leaves exactly one non-resolver: a `progress.md` entry quoting the
-    // gate's own failure message, which is a report of what it printed rather than a
-    // pointer into the suite. A gate that scanned `progress.md` would spend its first
-    // run on history, so the pass stays manual and its recipe is recorded in `AGENTS.md`.
+    // citations are records rather than instructions. That exemption is what makes the
+    // scope affordable. Take any tally from the scope array plus the two regexes below in
+    // a scratch script, never from this comment: the scanned scope holds few citations and
+    // the assertion right here proves each resolves, while the exempt pair holds more and
+    // grows with every phase entry — so a count quoted for it is stale by the next commit,
+    // which is exactly the decay this gate exists to catch. What the hand re-run over
+    // `docs/progress.md` and `CHANGELOG.md` establishes is the *kind* of each non-resolver,
+    // and every one found so far is a report rather than a pointer: an entry quoting this
+    // gate's own failure message verbatim. (A second one appeared on this tree and was not
+    // a report — it was an exemplum written in citation form, naming a fixture's method the
+    // way a citation names a case title. That class is the one `AGENTS.md` forbids, so the
+    // entry was rewritten into bare form rather than exempted.) A gate that scanned
+    // `progress.md` would spend its first run on history, so the pass stays manual and its
+    // recipe is recorded in `AGENTS.md`.
     //
     // The possessive form is the only shape scanned, and that is measured rather
     // than timid. The next loosest one — the file named, then `('a name')` within
