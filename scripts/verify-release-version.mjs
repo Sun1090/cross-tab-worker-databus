@@ -7,9 +7,10 @@
  * the registry. The second half is the failure mode this exists to stop. Measured
  * against the packument on the day `v0.21.33` published: 40 of this file's 163
  * `## [x.y.z]` sections name versions the registry has never recorded (no `time[]`
- * entry at all) — 0.9.0, 0.12.0–0.20.5, 0.20.54, 0.20.55, 0.20.69 and
- * 0.20.72–0.20.84 — 27 of them carrying a git tag and 38 a `docs/roadmap.md`
- * delivered-scope block. Those were cut as releases and never published, and
+ * entry at all) — `0.9.0`, each minor's first patch from `0.12.0` to `0.18.0`, all
+ * ten `0.19.x`, `0.20.0`–`0.20.5`, `0.20.54`, `0.20.55`, `0.20.69` and
+ * `0.20.72`–`0.20.84`, which is 1 + 7 + 10 + 6 + 2 + 1 + 13 = 40 — 27 of them
+ * carrying a git tag and 38 a `docs/roadmap.md` delivered-scope block. Those were cut as releases and never published, and
  * nothing noticed for twenty releases. Re-derive the tally with
  * `npm view cross-tab-worker-databus time --json` compared against
  * `grep -c '^## \[' CHANGELOG.md`; the number above is a snapshot of that lookup,
