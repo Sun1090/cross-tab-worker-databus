@@ -219,6 +219,21 @@ if (invokedDirectly) {
   const rows = explicitPair
     ? compareReports(load(files[0]), load(files[1]))
     : compareAgainstBaseline(files.map(load));
+  // A comparison that scored no metric has no verdict to give, and the closing line
+  // below would otherwise print `OK: no metric regressed` over an empty table. Both
+  // paths can get here: `compareAgainstBaseline` skips any metric with no preceding
+  // sample, so when the newest report's labels share nothing with the archive's — a
+  // renamed `reportMetrics` label, a report written by a different generator — every
+  // metric is skipped and the run is silent rather than empty-by-legitimacy. The
+  // first run of a fresh archive cannot reach this: the `files.length < 2` guard above
+  // already exits on fewer than two reports.
+  if (rows.length === 0) {
+    console.error(
+      `[bench] no metric in ${explicitPair ? 'the newer report' : 'the newest report'} has a baseline ` +
+      'sample, so nothing was compared — check that the metric labels still line up'
+    );
+    process.exit(1);
+  }
 
   if (explicitPair) {
     console.log(`older: ${files[0]}`);
