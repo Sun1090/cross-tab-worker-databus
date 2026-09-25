@@ -257,14 +257,14 @@ Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds 
 | `CONTROL/UNSUBSCRIBE` received | no direct deletion | `rememberTopic` still caches the topic; the entry is later removed by `reconcileAssignedTopics` once the route no longer points to this worker |
 | `reconcileAssignedTopics` | `delete(topicKey)` if not subscribed and not owned | Route no longer points to us — clean up unless we're still a subscriber |
 | `stop()` | `clear()` | Full teardown |
-| FIFO eviction (next `rememberTopic` call) | `delete(oldest)` if `!assignedTopics.has(oldest)` | Cache size exceeded `MAX_KNOWN_TOPICS`; never evict owned keys |
+| FIFO eviction (next `rememberTopic` call) | scan from the oldest and `delete` the first key that is neither in `assignedTopics` nor the key being remembered, then stop | Cache size exceeded `MAX_KNOWN_TOPICS`; owned keys and the new key are both skipped, so when every entry is owned the cap slips |
 
 **Storage-less fallback dependency.** When `this.storage` is `null` (degraded mode), `readRoute()` and `readSubscriberTabIds()` cannot query persisted records. They reconstruct routes from in-memory state alone:
 
 - `readRoute(topicKey)` → looks up `knownTopics.get(topicKey)` to recover the plaintext topic, then checks `subscribedTopics.has(topic)` or `assignedTopics.has(topicKey)` to determine if this worker is the owner.
 - `readSubscriberTabIds(topicKey, workers)` → `knownTopics.get(topicKey)` recovers the plaintext topic, then checks `subscribedTopics.has(topic)` — if we are a subscriber, we are the only subscriber (no storage means no cross-tab coordination).
 
-This is why `assignedTopics` guards the FIFO eviction: evicting a key we still own would silently break `readRoute()` in storage-less mode, causing `isAssigned()` to disagree with `readRoute()`.
+This is why `assignedTopics` guards the FIFO eviction: evicting a key we still own would silently break `readRoute()` in storage-less mode, causing `isAssigned()` to disagree with `readRoute()`. The scan skips the key it was called with for the same kind of reason — deleting it would discard the very mapping this call exists to install — and it only ever gets that far when every older entry is owned, because a fresh `set` lands at the back of an insertion-ordered `Map`.
 
 ### One subscription and publication flow
 

@@ -227,14 +227,14 @@ BroadcastChannel CONTROL
 | 收到 `CONTROL/UNSUBSCRIBE` | 不做直接删除 | `rememberTopic` 仍会缓存该 topic；路由不再指向本 worker 后由 `reconcileAssignedTopics` 移除 |
 | `reconcileAssignedTopics` | 如未订阅且未持有则 `delete(topicKey)` | 路由不再指向我们——除非仍是 subscriber 否则清理 |
 | `stop()` | `clear()` | 完全销毁 |
-| FIFO 淘汰（下次 `rememberTopic` 调用时） | 如 `!assignedTopics.has(oldest)` 则 `delete(oldest)` | 缓存超出 `MAX_KNOWN_TOPICS`；从不淘汰持有的 key |
+| FIFO 淘汰（下次 `rememberTopic` 调用时） | 从最老的条目往后扫描，`delete` 第一个既不在 `assignedTopics` 中、也不是本次正在记忆的 key，然后停止 | 缓存超出 `MAX_KNOWN_TOPICS`；持有的 key 与新 key 都被跳过，所以所有条目都被持有时上限会失守 |
 
 **无 storage 退化依赖**。当 `this.storage` 为 `null`（降级模式）时，`readRoute()` 和 `readSubscriberTabIds()` 无法查询持久化记录，只能从内存状态重建路由：
 
 - `readRoute(topicKey)` → 用 `knownTopics.get(topicKey)` 恢复明文 topic，然后检查 `subscribedTopics.has(topic)` 或 `assignedTopics.has(topicKey)` 判断本 worker 是否是 owner。
 - `readSubscriberTabIds(topicKey, workers)` → `knownTopics.get(topicKey)` 恢复明文 topic，然后检查 `subscribedTopics.has(topic)`——如果本 worker 是 subscriber，那就是唯一的 subscriber（无 storage 意味着无跨 Tab 协调）。
 
-这就是为什么 `assignedTopics` 守卫 FIFO 淘汰：淘汰仍持有的 key 会在无 storage 模式下静默破坏 `readRoute()`，导致 `isAssigned()` 与 `readRoute()` 结果不一致。
+这就是为什么 `assignedTopics` 守卫 FIFO 淘汰：淘汰仍持有的 key 会在无 storage 模式下静默破坏 `readRoute()`，导致 `isAssigned()` 与 `readRoute()` 结果不一致。扫描同时跳过本次调用带进来的那个 key，理由同构——删掉它等于丢弃这次调用本来要建立的映射——而它只有在更早的条目全部被持有时才会走到那里，因为新写入的 `set` 落在插入有序 `Map` 的末尾。
 
 ### 一次订阅和消息分发流程
 
