@@ -36,9 +36,11 @@
  * packument reported `modified: 2026-09-25T00:32:51.767Z` — the `0.21.33` publish —
  * while npmjs had recorded `0.21.34` at `02:47:50.782Z`. So the gate reported
  * `CHANGELOG names 1 release(s) the registry has never recorded: 0.21.34` for a
- * version that has been public for an hour, and it did so from a read that
- * **succeeded**: a mirror's own sync lag is not HTTP caching, and a no-store
- * request returns the same stale document. That falsifies the inference above in
+ * version npmjs had recorded **3,207 s** earlier (that run is stamped
+ * `03:41:18Z`; the mirror's own `modified` did not move until `03:44:48.778Z`,
+ * 3,418 s after the record), and it did so from a read that **succeeded**: a
+ * mirror's own sync lag is not HTTP caching, and a no-store request returns the
+ * same stale document. That falsifies the inference above in
  * its second premise, not its first — `time[]` entries do not expire, but a
  * document that has never *learned* about a version is not a record of its
  * absence. `verify-published-consumer.mjs` already pinned `--registry` for both
