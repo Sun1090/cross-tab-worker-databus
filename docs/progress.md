@@ -7299,6 +7299,13 @@ corroborates the 26-spec collection.)
     needs is oddness, all six are odd, and the comment now says so *plus* that the values are
     load-bearing because the digest keys records already in localStorage — so nobody "fixes" a
     number into a prime and re-clusters every existing route key.
+    *(That last sentence was true of the four per-character constants and false of the avalanche
+    pair: the note beside them went on describing "a shift and prime" and "also shifted and
+    primed", and `AVALANCHE_PRIME` = 15809 × 142123 and `AVALANCHE_CROSS` = 1223 × 2_670_883 are
+    composite as well. Recorded as task #116 on 2026-09-24 and closed by this tree's
+    `docs(hash): the multipliers are odd, not prime…` commit, which is the point at which the
+    claim above finally became true — the entry had been re-reading its own fix as covering all
+    six constants because the sentence describing them is one sentence.)*
   - **Two claims worth their space because a third party acts on them.** `websocket.ts`'s header
     enumerated a JSON-only wire protocol while `sendBinaryFrame` writes a tagged
     `0xc7 | uint16 len | topic | payload` frame (and degrades to JSON-with-metadata-array when
