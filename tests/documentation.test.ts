@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -607,5 +608,52 @@ describe('test-name citations', () => {
     // written — re-derive with `console.log(examined)` here rather than trusting
     // the number, which is the same decay this test exists to catch.
     expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);
+  });
+});
+
+describe('AGENTS.md directory layout', () => {
+  it('names every tracked file under src, tests and e2e', () => {
+    // This section is the map a fresh session reads first, so an entry it does not
+    // contain is a file that session will not know exists — and a file it names that
+    // has since moved is a path it walks to and does not find. Both halves are cheap
+    // to check and neither contradicts itself at build time. The block named 18 of the
+    // 46 `.ts`/`.tsx` files under `tests/` and `e2e/` when this gate was written, so
+    // the drift is not hypothetical; it is also why `docs/` is out of scope, since
+    // that half of the block is a deliberate summary rather than an index.
+    const agents = readFileSync('AGENTS.md', 'utf8');
+    const heading = agents.indexOf('## Directory layout');
+    const open = agents.indexOf('```', heading);
+    const close = agents.indexOf('```', open + 3);
+    expect(heading, 'AGENTS.md must keep a `## Directory layout` section').toBeGreaterThanOrEqual(0);
+    expect(open, 'the layout section must stay a fenced block').toBeGreaterThan(heading);
+    expect(close, 'the layout fence must be closed').toBeGreaterThan(open);
+    const block = agents.slice(open + 3, close);
+    // The fence extraction is the failure mode that makes this gate vacuous: slip it
+    // and `block` becomes the whole file, every name "appears", and the gate passes by
+    // reading prose that sits outside the map. So pin the block's own edges rather than
+    // trusting the indices — it starts at the first directory and stops before the next
+    // heading.
+    expect(block.trimStart().startsWith('src/'), 'the extracted block must start at the layout, not earlier').toBe(true);
+    expect(block.includes('## Common tasks'), 'the extracted block must not have run past the layout section').toBe(false);
+
+    const tracked = execFileSync('git', ['ls-files', 'src', 'tests', 'e2e'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(name => name.length > 0);
+    const unnamedIn = (layout: string) =>
+      tracked.filter(file => !layout.includes(file) && !layout.includes(file.split('/').pop()!));
+
+    // A control the gate has to pass before its green means anything: doctor the block
+    // by removing one real name and require that the same filter reports exactly that
+    // file. Without it, a filter that always returns `[]` — from an empty tracked list,
+    // or a substring rule that matches too broadly — is indistinguishable from a clean
+    // tree.
+    expect(unnamedIn(block.replace('workflows.test.ts', 'removed-by-control')),
+      'the layout check must report a file whose entry is missing').toEqual(['tests/workflows.test.ts']);
+
+    expect(unnamedIn(block)).toEqual([]);
+    // And the corpus must not be empty, which is the other half of the same silence.
+    // Floor is deliberately below the measured 76 tracked files (`git ls-files src tests
+    // e2e | wc -l`), because a floor at the size reddens when a file is deleted.
+    expect(tracked.length, 'the layout gate must actually see the source tree').toBeGreaterThan(50);
   });
 });

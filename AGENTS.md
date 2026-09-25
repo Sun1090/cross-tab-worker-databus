@@ -77,21 +77,49 @@ tests/
   data-bus.test.ts              # CrossTabDataBus integration tests
   routing.test.ts               # Pure function tests (owner selection, load balancing)
   storage-batch.test.ts         # BatchingStorageWriter write coalescing + backoff
+  storage-utils.test.ts         # readJson/writeJson/listKeys/readAllByPrefix failure tolerance
+  storage-channel.test.ts       # createStorageEventChannel probes + the frame fallback
+  dedup-manager.test.ts         # DedupManager accept/suppress, adaptive TTL, disabled instance
+  replay-manager.test.ts        # ReplayManager rings, pruning, retention, suspend
+  replay-persistence.test.ts    # createIndexedDbReplayPersistence round trip + stale-signal teardown
+  publication.test.ts           # parseDataBusPublication legacy, envelope, canonical shapes
+  error-utils.test.ts           # serializeError/deserializeWorkerError + describeFailure
+  hash.test.ts                 # createOpaqueKey determinism + collision properties
+  worker-mode.test.ts           # selectWorkerBackend capability detection + degradation
+  port-reaper.test.ts           # PortReaper adaptive cadence + session timeout
+  environment.test.ts           # createBrowserEnvironment probes + getOrCreateTabId
+  trace.test.ts                 # DataBusTraceReporter caps, percentiles, sink isolation
   centrifuge.test.ts            # CentrifugeWorkerTransport backend selection + lifecycle
   centrifuge-session.test.ts    # CentrifugeSession subscribe/publish/stop protocol
   websocket.test.ts             # WebSocketTransport lifecycle + frame protocol
-  environment.test.ts           # createBrowserEnvironment probes + getOrCreateTabId
-  trace.test.ts                 # DataBusTraceReporter caps, percentiles, sink isolation
-  dual-format.test.ts           # ESM + CJS dist artifacts expose the public API
+  stability.test.ts             # Owner-handoff ACK validation against the route record
+  property.test.ts              # selectActiveWorkers invariants (subset, bound, never throws)
+  regression.test.ts            # Locale-independent routing tie-break
+  coordination-invariants.test.ts # Multi-tab seeded fuzz: one owner, no orphan, once-per-publication
+  lifecycle-invariants.test.ts  # Interleaving sweep over bus/cluster/transport flags
   hooks.test.tsx                # React hooks (jsdom + @testing-library/react)
-  port-reaper.test.ts           # PortReaper adaptive cadence + session timeout
-  worker-mode.test.ts           # selectWorkerBackend capability detection + degradation
-  hash.test.ts                 # createOpaqueKey determinism + collision properties
-  fakes.ts                      # Shared test doubles (MemoryStorage, FakeTransport, etc.)
-  demo-centrifuge-server.test.ts # Demo server contract tests
+  vue.test.ts                   # Vue composables (jsdom, app lifecycle, status mirror)
+  demo-centrifuge-server.test.ts # Demo Centrifugo hub contract
+  demo-ws-server.test.ts        # DemoWsBusHub exact + wildcard fan-out
+  dual-format.test.ts           # ESM + CJS dist artifacts expose the public API
+  verify-packed-consumer.test.ts # Tarball entry points + export-target flattening
+  release-version.test.ts       # Tag/version/notes gate + CHANGELOG-vs-registry completeness
+  version-compat.test.ts        # Handoff protocol across throwaway git repos + spawned gate
+  workflows.test.ts             # CI/release workflow text gates (lint, retry budget, job order)
+  documentation.test.ts         # Shipped-prose gates: coverage, citations, en/zh parity
+  bench-compare.test.ts         # bench:compare threshold parsing + regression detection
+  bench-trend.test.ts           # bench:trend report generation + which clock stamps a report
+  bench-browser.test.ts         # Browser bench env parsing + the documented defaults
+  bench/cluster.bench.ts        # Cluster coordination micro-benchmarks (`pnpm bench`)
+  bench/data-bus.bench.ts       # DataBus hot-path micro-benchmarks
+  bench/routing.bench.ts        # Routing micro-benchmarks
+  perf-gate.test.ts             # Absolute-ms hot-path ceilings — own step, `pnpm test:perf`
+  setup.ts                      # Restores real timers after every test (budget-clock hygiene)
+  fakes.ts                      # Shared test doubles (MemoryStorage, ChannelHub, FakeTransport, etc.)
 e2e/
   demo.spec.ts                  # Playwright multi-tab browser E2E
   adapters.spec.ts              # Vue composables driven in real tabs (examples/vue)
+  topics.ts                     # uniqueTopic() — a topic is also a server-wide channel
 docs/
   architecture.md               # Detailed design doc (English + Chinese)
   api.md                        # Public API reference
