@@ -1,6 +1,6 @@
 # Roadmap
 
-0.21.37 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
+0.21.38 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
 ## 0.21.38 delivered scope
 
