@@ -85,6 +85,32 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Which versions a roadmap preamble is allowed to name, given `package.json`'s version and
+ * the release tag names present in the clone: the greatest tag strictly below that version,
+ * plus that version itself once its tag exists.
+ *
+ * Extracted because the case that reads the real files can only ever exercise the one moment
+ * the repository happens to be in, and the moment this rule exists to survive — a tag build,
+ * where `package.json`'s own tag exists while the preamble is legitimately still one behind,
+ * because the record commit advances it — is a state no checkout of `main` is in after its
+ * own record lands. Measured with `.gate-logs/probe-preamble-legs.mjs`: against the live-file
+ * case, dropping the "own tag counts" member reddens it, but dropping the filter that keeps a
+ * tag *at or above* `packageVersion` out of `previousTag` does not, and neither does turning
+ * `>=` into `>`. Those two legs are what the moment table below pins.
+ */
+function allowedPreambleVersions(packageVersion: string, tagRefs: readonly string[]): Set<string> {
+  let previousTag: string | null = null;
+  for (const ref of tagRefs) {
+    const version = /^v(\d+\.\d+\.\d+)$/.exec(ref)?.[1];
+    if (!version || compareVersions(version, packageVersion) >= 0) continue;
+    if (previousTag === null || compareVersions(version, previousTag) > 0) previousTag = version;
+  }
+  const allowed = new Set<string>(previousTag ? [previousTag] : []);
+  if (tagRefs.includes(`v${packageVersion}`)) allowed.add(packageVersion);
+  return allowed;
+}
+
 describe('public documentation', () => {
   it('scans tracked files only, so a build artifact cannot join or leave the scope', () => {
     // The predicate the privacy gate is scoped by, pinned on *fabricated* input
@@ -448,16 +474,7 @@ describe('public documentation', () => {
     ]);
     const tags = tagCreations();
     const packageVersion: string = JSON.parse(readFileSync('package.json', 'utf8')).version;
-    let previousTag: string | null = null;
-    for (const ref of tags.keys()) {
-      const version = /^v(\d+\.\d+\.\d+)$/.exec(ref)?.[1];
-      if (!version || compareVersions(version, packageVersion) >= 0) continue;
-      if (previousTag === null || compareVersions(version, previousTag) > 0) previousTag = version;
-    }
-    const allowed = new Set<string>([
-      ...(previousTag ? [previousTag] : []),
-      ...(tags.has(`v${packageVersion}`) ? [packageVersion] : []),
-    ]);
+    const allowed = allowedPreambleVersions(packageVersion, [...tags.keys()]);
     expect([...allowed].sort(), 'no release tag exists to compare the preamble against').not.toEqual([]);
 
     const shapes: Array<[string, RegExp, (parts: RegExpExecArray) => string]> = [
@@ -497,6 +514,40 @@ describe('public documentation', () => {
         [dayIn(instant, 0), dayIn(instant, 8)],
         `${file} preamble says ${written}, which is neither reading of tag v${version} (${instant})`
       ).toContain(written);
+    }
+  });
+
+  it('keeps the preamble rule true at every moment of the release cycle', () => {
+    // A table rather than a file read: the live case above sees exactly one of these states,
+    // and the state that killed release run 159 is not among the ones `main` can be checked
+    // out into. Each row is the answer `allowedPreambleVersions` must give for a preamble
+    // naming `preamble` while `package.json` says `packageVersion` and `tags` exist.
+    const shipped = ['v0.21.37', 'v0.21.38'];
+    const tagged = [...shipped, 'v0.21.39'];
+    const rows: Array<{ moment: string; packageVersion: string; tags: readonly string[]; preamble: string; ok: boolean }> = [
+      { moment: 'prep — pending version untagged, preamble one behind', packageVersion: '0.21.39', tags: shipped, preamble: '0.21.38', ok: true },
+      { moment: 'tag build — its own tag exists, record commit has not landed', packageVersion: '0.21.39', tags: tagged, preamble: '0.21.38', ok: true },
+      { moment: 'record commit — preamble caught up', packageVersion: '0.21.39', tags: tagged, preamble: '0.21.39', ok: true },
+      { moment: 'prep, preamble two releases behind', packageVersion: '0.21.39', tags: shipped, preamble: '0.21.37', ok: false },
+      { moment: 'tag build, preamble two releases behind', packageVersion: '0.21.39', tags: tagged, preamble: '0.21.37', ok: false },
+      { moment: 'preamble names a version that was never tagged', packageVersion: '0.21.39', tags: shipped, preamble: '0.21.39', ok: false },
+      // The filter's own rows: a *later* release exists in the clone (this tree is an old
+      // checkout, or the sweep ran after the next tag), and the future must not become
+      // admissible. Without the `>= packageVersion` filter `previousTag` resolves to 0.21.40,
+      // which is what makes the first of these two rows decide anything.
+      { moment: 'a newer tag exists, preamble names the release before package.json', packageVersion: '0.21.39', tags: [...tagged, 'v0.21.40'], preamble: '0.21.38', ok: true },
+      { moment: 'a newer tag exists, preamble names that newer tag', packageVersion: '0.21.39', tags: [...tagged, 'v0.21.40'], preamble: '0.21.40', ok: false },
+      // Ordering, not membership: with a string comparison `0.9.0` outranks `0.21.9`, so the
+      // greatest-tag lookup would name a release from two minor lines back.
+      { moment: 'double-digit minors sort numerically', packageVersion: '0.21.10', tags: ['v0.9.0', 'v0.21.9'], preamble: '0.21.9', ok: true },
+      { moment: 'double-digit minors sort numerically, naming the lexicographic winner', packageVersion: '0.21.10', tags: ['v0.9.0', 'v0.21.9'], preamble: '0.9.0', ok: false }
+    ];
+    for (const row of rows) {
+      const allowed = allowedPreambleVersions(row.packageVersion, row.tags);
+      expect(
+        allowed.has(row.preamble),
+        `${row.moment}: v${row.preamble} with package.json at ${row.packageVersion} and tags [${row.tags.join(', ')}] → allowed [${[...allowed].join(', ')}]`
+      ).toBe(row.ok);
     }
   });
 
