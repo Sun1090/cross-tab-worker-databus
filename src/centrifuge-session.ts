@@ -187,17 +187,32 @@ export class CentrifugeSession<TData = unknown> {
     // adds nothing back, which is settled rather than open. All twelve `emit('error')`
     // sites in `BaseSubscription` (its class body is lines 667-2673 of that file, and
     // the twelve were counted in it) sit behind a
-    // `_isSubscribing()`/`_isSubscribed()` test except one, the
-    // `badConfiguration` emit in `_getSubscriptionToken`; and after
+    // `_isSubscribing()`/`_isSubscribed()` test except one: the `getToken === null`
+    // emit in `_getSubscriptionToken`. Calling it "the `badConfiguration` emit" is
+    // ambiguous and this note used to — that code is shared with the guarded
+    // `_handleGetDataError` emit, so it identifies neither site on its own. And after
     // `_setUnsubscribed` has moved `state` to `Unsubscribed` no path re-enters it
     // — the resubscribe timer's callback re-tests `_isSubscribing()` before it
     // does anything, the client's reconnect pass (`_sendSubscribeCommands`)
     // drives only subscriptions whose state is already `Subscribing`, and
-    // `_refresh()`, the one entry into `_getSubscriptionToken` with no state test
-    // of its own, is reachable only through `_refreshTimeout`, which
-    // `_setUnsubscribed` clears via `_clearSubscribedState()`. So a throw would
-    // need the listeners gone while the object is still live, and
-    // `unsubscribe()` does not leave it live. `MapSubscription` and
+    // `_refresh()` is reachable only through `_refreshTimeout`, which
+    // `_setUnsubscribed` clears via `_clearSubscribedState()`. What singles
+    // `_refresh()` out among the four `_getSubscriptionToken()` call sites is *not*
+    // the absence of a state test — an earlier draft of this note said "the one entry
+    // with no state test of its own", and `_subscribe()`, `_loadStreamState()`'s
+    // `_getState().then(…)` continuation and `_mapSubscribe()` reach their calls with
+    // none above them either. It is the `if` each of those three is the `else` of:
+    // `_canSubscribeWithoutGettingToken()` reads `!_usesToken() || !!_token`, so
+    // entering the else needs `_usesToken()` true with a falsy `_token`; every falsy
+    // value the class itself writes there is `''` (its option handling is
+    // `if (options.token)`), and for `''` the `_usesToken()` half is exactly
+    // `_getToken !== null`, which the emit's own `if (getToken === null)` refutes. So
+    // the exclusion runs through the token, not the state — and through one of the
+    // token's writers: `_refresh` assigns `self._token = token` whatever an application
+    // `getToken` resolved with, so a falsy value that is not `''` would put a wrapped
+    // call back in reach of the emit. A throw still needs the listeners gone while the
+    // object is still live, and `unsubscribe()` does not leave it live.
+    // `MapSubscription` and
     // `SharedPollSubscription` have their own emit sites but never carry this
     // session's listeners — `newSubscription` constructs a plain `Subscription`.
     subscription.removeAllListeners('publication');
