@@ -261,8 +261,10 @@ export class CentrifugeWorkerTransport<TData = unknown>
   };
 
   /** Route a Worker output message to the appropriate handler callback.
-   * Shared by the Worker message listener, the SharedWorker port listener,
-   * and the local-session sink — all three feed into this single dispatcher. */
+   * Three message sources reach it — the dedicated Worker, the SharedWorker
+   * MessagePort, and the in-process session sink — but through two call sites: the
+   * first two share this one `handleMessage` handler, registered on the Worker and
+   * on the port, and only the session path arrives through its own wrapper. */
   private handleOutput(message: CentrifugeWorkerOutput<TData>): void {
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.STATUS) this.handlers?.onStatus(message.status);
     if (message.type === CENTRIFUGE_OUTPUT_TYPE.MESSAGE) this.handlers?.onMessage({ topic: message.topic, data: message.data, ...publicationMetadata(message.messageId, message.timestamp) });
