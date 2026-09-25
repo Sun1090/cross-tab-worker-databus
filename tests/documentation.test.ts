@@ -395,6 +395,75 @@ describe('public documentation', () => {
     }
   });
 
+  it('keeps every release-scope block in the roadmap titled, ordered and mirrored', () => {
+    // Three structural properties of docs/roadmap.md's release ledger, each
+    // written against something measured on this tree rather than imagined:
+    // - *Title.* The suffix is part of the convention, not decoration. One zh
+    //   block was titled `## 0.20.68 已交付` while the other 141 said
+    //   `已完成范围`, and a heading-set diff keyed on that suffix reported the
+    //   block as absent from the Chinese mirror — a paraphrase read as an
+    //   absence, and the false finding outlived the measurement that produced
+    //   it. So the allowed set is enumerated here, and anything else is red.
+    // - *Order.* The blocks run newest-first. Exactly one of the 144 was
+    //   elsewhere (0.20.68, left where an appended block had landed: after
+    //   0.11.0), and nothing but a scan could see that a ledger of 144 entries
+    //   had one insertion in the wrong place.
+    // - *Mirror.* Both languages must list the same set of releases. This leg is
+    //   prospective — measured clean across all ten localized pairs today — and
+    //   it is the one the count-equality gates above cannot do: equal h2 counts
+    //   passed while one pair disagreed on which releases it named.
+    const ledger = (file: string, allowed: readonly string[]) => {
+      const offenders: string[] = [];
+      const versions: Array<[number, number, number]> = [];
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        const match = /^## (\d+)\.(\d+)\.(\d+) (.+)$/.exec(line);
+        if (!match) continue;
+        const [, major, minor, patch, suffix] = match;
+        const kind = suffix!.replace(/[:：]?\s*$/, '');
+        // `## 0.20.69 candidates` / `## 0.13.0 候选` name a *future* list, and
+        // one version can legitimately head both a scope block and a candidate
+        // list; only the scope blocks join the ledger.
+        if (kind === 'candidates' || kind === '候选') continue;
+        if (!allowed.includes(kind)) {
+          offenders.push(`${file}: "${line}" is not one of ${allowed.join(' / ')}`);
+          continue;
+        }
+        versions.push([Number(major), Number(minor), Number(patch)]);
+      }
+      expect(offenders, 'every roadmap release heading uses a title from that file\'s convention').toEqual([]);
+      return versions;
+    };
+
+    const en = ledger('docs/roadmap.md', ['delivered scope', 'frozen scope']);
+    const zh = ledger('docs/zh/roadmap.md', ['已完成范围', '冻结范围']);
+    const asText = (v: [number, number, number]) => v.join('.');
+
+    for (const [file, list] of [['docs/roadmap.md', en], ['docs/zh/roadmap.md', zh]] as const) {
+      const misplaced: string[] = [];
+      for (let i = 1; i < list.length; i += 1) {
+        const before = list[i - 1]!;
+        const current = list[i]!;
+        const newerFirst =
+          before[0] - current[0] || before[1] - current[1] || before[2] - current[2];
+        if (newerFirst <= 0) {
+          misplaced.push(
+            `${file}: ${asText(current)} is not older than ${asText(before)} — the ledger runs newest-first`
+          );
+        }
+      }
+      expect(misplaced).toEqual([]);
+    }
+
+    const sorted = (list: Array<[number, number, number]>) =>
+      [...list].sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]).map(asText);
+    const enVersions = new Set(sorted(en));
+    const zhVersions = new Set(sorted(zh));
+    expect(
+      [...enVersions].filter(v => !zhVersions.has(v)).concat([...zhVersions].filter(v => !enVersions.has(v))),
+      'both roadmap languages must carry a release-scope block for the same versions'
+    ).toEqual([]);
+  });
+
   it('leaves no empty section in the shipped documentation', () => {
     // A heading immediately followed by another heading of the same or higher
     // level renders as an empty section. (Found: docs/zh/roadmap.md's

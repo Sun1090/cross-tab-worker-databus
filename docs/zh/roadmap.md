@@ -566,6 +566,10 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 
 - 在 cluster snapshot 与 diagnostics 中新增 peer 协议能力发现。当前 runtime 广播协议版本 1；旧 peer 显示为 `null`。
 
+## 0.20.68 已完成范围
+
+- 为集群帧和 worker snapshot 增加协议版本元数据，并保持旧版本缺失字段时的兼容处理。
+
 ## 0.20.67 已完成范围
 
 - 新增未知协议消息计数与最近类型诊断，并纳入 `getDiagnostics()`，同时保持旧 runtime 安全忽略未知消息。
@@ -943,10 +947,6 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 - 周期性 trace 指标中加入去重接受/抑制计数。
 - 覆盖 WebSocket、Centrifuge、Worker 边界与浏览器 E2E 的 publication metadata 兼容性测试。
 - Service Worker transport 决策：在目标浏览器具备稳定的连接生命周期契约前，刻意保持不实现。
-
-## 0.20.68 已交付
-
-- 为集群帧和 worker snapshot 增加协议版本元数据，并保持旧版本缺失字段时的兼容处理。
 
 ## 0.20.69 候选
 
