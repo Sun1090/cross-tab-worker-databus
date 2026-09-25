@@ -117,6 +117,13 @@ if (!baseTag) {
 }
 
 const removed = [];
+// Counts the names the baseline side of this comparison actually produced. `removed`
+// is built by iterating `baselineNames`, so an empty one means either "nothing was
+// lost" or "the parser found nothing to lose" — and both print the same success line.
+// The parser is the shared suspect: `exportedNamesFromSourceText` feeds the baseline
+// *and* `currentExportedNames` feeds the other side, so a regression in it does not
+// produce a false removal report, it produces a clean run over an empty set.
+let baselineNamesSeen = 0;
 for (const entry of entries) {
   let baselineText;
   try {
@@ -134,9 +141,23 @@ for (const entry of entries) {
   }
   const baselineNames = exportedNamesFromSourceText(baselineText, relative(workspace, entry.source));
   const now = currentExportedNames(entry);
+  baselineNamesSeen += baselineNames.size;
   for (const name of baselineNames) {
     if (!now.has(name)) removed.push(`${entry.subpath}: ${name}`);
   }
+}
+// 96 baseline names across the six public subpaths when this bound was set, two of which
+// legitimately carry none (a worker entry newer than the baseline tag). The floor is on the
+// aggregate for that reason, and it is deliberately far below the measurement: reaching it
+// would take the parser returning nothing for most entries, which is the failure being
+// guarded against and not a healthy tree. Re-derive the current total by printing
+// `baselineNames.size` per entry in this loop — do not copy a number out of this comment.
+if (baselineNamesSeen <= 50) {
+  throw new Error(
+    `[types] the baseline scan produced ${baselineNamesSeen} exported name(s) across ${entries.length} ` +
+      'public subpaths, which is too few for the non-removal check to have compared anything. ' +
+      'Check exportedNamesFromSourceText before believing any "no removals" line from this script.'
+  );
 }
 
 // --- check 2: closure over the union of public entries ----------------------
