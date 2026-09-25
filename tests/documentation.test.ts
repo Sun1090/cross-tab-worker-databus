@@ -519,6 +519,15 @@ describe('test-name citations', () => {
     // truncated name with no ellipsis marking it as one. The `docs/` citation
     // outside that file resolves. A gate that scanned `progress.md` would spend
     // its first run on history.
+    //
+    // The possessive form is the only shape scanned, and that is measured rather
+    // than timid. The next loosest one — the file named, then `('a name')` within
+    // a window — yields exactly one candidate across this whole scope, and it is
+    // not a citation: it is the `new Error("…")` message in the `catch` of the
+    // very function whose doc comment names `tests/dual-format.test.ts`, joined
+    // because a proximity window cannot tell "the test this note cites" from "a
+    // quoted string that happens to sit below it". A form that needs a heuristic
+    // to separate from prose is a form whose first output is its own parser.
     const titlesByFile = new Map<string, Set<string>>();
     for (const file of [...listSourceFiles('tests'), ...listSourceFiles('e2e')]) {
       if (!/\.(test|spec)\.tsx?$/.test(file)) continue;
