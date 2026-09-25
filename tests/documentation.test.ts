@@ -32,6 +32,38 @@ function keepTracked(files: string[], tracked: Set<string>): string[] {
   return files.filter(file => tracked.has(file));
 }
 
+/**
+ * The calendar date of an ISO instant read through a fixed offset. The offset is
+ * an argument because a date written by a person has no frame until one is chosen:
+ * slicing the string instead returns whatever offset that string happens to carry,
+ * which reads like a conversion and is a pass-through.
+ */
+function dayIn(iso: string, offsetHours: number): string {
+  return new Date(new Date(iso).getTime() + offsetHours * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Every release tag, keyed by short name, with the instant it was created and the
+ * type of the object it points at. Releases in this repository are tagged both
+ * lightweight and annotated, so the field has to answer for both: `%(creatordate)`
+ * does, while `%(*creatordate)` is empty for every lightweight tag.
+ */
+function tagCreations(): Map<string, { type: string; instant: string }> {
+  const lines = execFileSync(
+    'git',
+    ['for-each-ref', 'refs/tags', '--format=%(refname:lstrip=2) %(objecttype) %(creatordate:iso-strict)'],
+    { encoding: 'utf8' }
+  )
+    .split('\n')
+    .filter(line => line.trim() !== '');
+  const tags = new Map<string, { type: string; instant: string }>();
+  for (const line of lines) {
+    const [ref, type, instant] = line.split(' ');
+    tags.set(ref!, { type: type ?? '', instant: instant ?? '' });
+  }
+  return tags;
+}
+
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
@@ -40,6 +72,17 @@ function listDocumentationFiles(path: string): string[] {
     if (name === 'progress.md') return [];
     return statSync(child).isDirectory() ? listDocumentationFiles(child) : [child];
   });
+}
+
+/** Numeric-tuple ordering. A string comparison puts `0.9.0` above `0.10.0`. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 describe('public documentation', () => {
@@ -303,6 +346,130 @@ describe('public documentation', () => {
         heading[1],
         `CHANGELOG.md:${index + 1} version heading must use "## " so the Release workflow can match it`
       ).toBe('##');
+    }
+  });
+
+  it('dates every tagged release section on a day its tag actually exists', () => {
+    // A CHANGELOG date is a claim about an instant, and the repository holds two
+    // independent ones: the release tag and npm's `time[<version>]`. The tag is the
+    // authority here because publishing lags tagging — 0.4.0's tag reads
+    // 2026-08-30T21:28Z and its registry record 2026-08-31T00:03Z, the same release
+    // on two calendar days. A registry-based rule reports 3 sections wrong (0.4.0,
+    // 0.20.85 and 0.20.10) where the tag reports 1, so two of its three findings are
+    // the gate being wrong.
+    //
+    // Both the UTC and the +08:00 reading are accepted, because the prose uses both:
+    // over the dated sections that carry a tag, most agree in every frame, a large
+    // group only in +08:00 and a smaller one only in UTC (take the three counts from
+    // the sweep's own `agreement kinds:` line). A single-frame rule would redden
+    // dozens of sections that describe a real event.
+    //
+    // `dayIn` converts rather than slices. `iso.slice(0, 10)` returns whatever offset
+    // the string already carries, and the first version of this check did that for the
+    // tag half: it reported 11 findings where the true number was 1, and only a
+    // hand-built control row (2026-08-31T05:28:12+08:00, which is 2026-08-30 in UTC)
+    // distinguished the two.
+    const sections = [
+      ...readFileSync('CHANGELOG.md', 'utf8').matchAll(/^## \[([^\]]+)\] - (\d{4}-\d{2}-\d{2})$/gm),
+    ].map(match => ({ version: match[1]!, date: match[2]! }));
+    const tagOf = tagCreations();
+
+    const offenders: string[] = [];
+    let checked = 0;
+    const typesSeen = new Set<string>();
+    for (const section of sections) {
+      const tag = tagOf.get(`v${section.version}`);
+      if (tag === undefined) continue; // never tagged — scripts/verify-release-version.mjs owns that question
+      checked += 1;
+      if (tag.instant === '') {
+        offenders.push(`${section.version}: tag v${section.version} has an unreadable creatordate`);
+        continue;
+      }
+      typesSeen.add(tag.type);
+      const utcDay = dayIn(tag.instant, 0);
+      const localDay = dayIn(tag.instant, 8);
+      if (section.date !== utcDay && section.date !== localDay) {
+        offenders.push(
+          `${section.version}: CHANGELOG says ${section.date}, tag instant ${tag.instant} is ${utcDay} (UTC) or ${localDay} (+08:00)`
+        );
+      }
+    }
+
+    expect(offenders, 'a release section dated outside the day its tag exists').toEqual([]);
+    // The floor makes an *empty* tag read a failure rather than a clean pass: a
+    // shallow checkout has no tags at all, every section would `continue` past the
+    // lookup, and the pass would report nothing while proving nothing. It is
+    // deliberately a fraction of the section count rather than a constant, because
+    // the count grows one per release. This does not catch *partial* loss — the
+    // `%(*creatordate)` mistake keeps every tag entry and empties the field, so
+    // `checked` is unchanged and the offender list is what reddens it. Which leg
+    // catches which mistake is the thing worth knowing before editing either.
+    expect(
+      checked,
+      'this pass needs a clone with release tags; it checked almost none of the sections'
+    ).toBeGreaterThan(sections.length / 2);
+    // Both object types must appear among the checked rows. Releases here are tagged
+    // both ways, and `%(creatordate)` is the only field that answers for the two —
+    // `%(*creatordate)` is empty for every lightweight tag.
+    expect([...typesSeen].sort(), 'the checked rows must span both tag object types').toEqual(['commit', 'tag']);
+  });
+
+  it('opens both roadmap languages with the newest tagged release and its own date', () => {
+    // The roadmap preamble is the *second* shipped copy of the claim the case above
+    // checks, and the reason to gate both is the reason the file already greps the
+    // claim rather than the file: a release's date appears in `CHANGELOG.md` as
+    // `2026-09-25` and here as `September 25, 2026` / `2026 年 9 月 25 日`, so a
+    // correction that reaches one copy can leave the other standing.
+    //
+    // The version has to be the newest one that carries a **tag**, not the newest
+    // section in the changelog and not `package.json`'s version: while a release is
+    // being prepared the changelog already names the pending version and the
+    // preamble legitimately does not, because it is updated by the record commit
+    // *after* the tag exists.
+    const monthNumbers = new Map([
+      ['January', 1], ['February', 2], ['March', 3], ['April', 4], ['May', 5], ['June', 6],
+      ['July', 7], ['August', 8], ['September', 9], ['October', 10], ['November', 11], ['December', 12],
+    ]);
+    const tags = tagCreations();
+    let newest: string | null = null;
+    for (const ref of tags.keys()) {
+      const version = /^v(\d+\.\d+\.\d+)$/.exec(ref)?.[1];
+      if (!version) continue;
+      if (newest === null || compareVersions(version, newest) > 0) newest = version;
+    }
+    expect(newest, 'the repository has no release tags to compare against').not.toBeNull();
+
+    const shapes: Array<[string, RegExp, (parts: RegExpExecArray) => string]> = [
+      [
+        'docs/roadmap.md',
+        /^(\d+\.\d+\.\d+) was released on ([A-Z][a-z]+) (\d{1,2}), (\d{4})\./m,
+        parts => {
+          const month = monthNumbers.get(parts[2]!);
+          // An unrecognized month name yields `??`, which cannot equal any real
+          // reading of the tag — the failure message then shows it verbatim.
+          return `${parts[4]}-${month === undefined ? '??' : String(month).padStart(2, '0')}-${parts[3]!.padStart(2, '0')}`;
+        }
+      ],
+      [
+        'docs/zh/roadmap.md',
+        /^(\d+\.\d+\.\d+) 已于 (\d{4}) 年 (\d{1,2}) 月 (\d{1,2}) 日发布/m,
+        parts => `${parts[2]}-${parts[3]!.padStart(2, '0')}-${parts[4]!.padStart(2, '0')}`
+      ],
+    ];
+
+    for (const [file, pattern, toIso] of shapes) {
+      const line = pattern.exec(readFileSync(file, 'utf8'));
+      // A pattern that stops matching is a broken preamble, not a pass: the whole
+      // point of this case is that the two languages make the same checkable claim.
+      expect(line, `${file} preamble no longer names a version and a date`).not.toBeNull();
+      const version = line![1]!;
+      expect(version, `${file} preamble does not name the newest tagged release`).toBe(newest);
+      const instant = tags.get(`v${version}`)!.instant;
+      const written = toIso(line!);
+      expect(
+        [dayIn(instant, 0), dayIn(instant, 8)],
+        `${file} preamble says ${written}, which is neither reading of tag v${version} (${instant})`
+      ).toContain(written);
     }
   });
 
