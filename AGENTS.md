@@ -392,6 +392,16 @@ The project is feature-complete: follow-up work is verification and deepening of
 ### Upstream Blocked
 
 - Centrifuge major-version upgrade: unblocks = peer transport protocol change, with regression verification
+- **TypeScript 7.** Measured 2026-09-25: npm's `latest` is `7.0.2`, this repo is on `6.0.3` — which is the
+  newest 6.x published (the 6.x line is `6.0.2, 6.0.3`) — and `pnpm outdated` reports **that one row and
+  nothing else**, so `typescript` is the project's entire outdated-dependency surface. Unblocks =
+  `typescript-eslint` declaring 7: its latest's published peer range is
+  `typescript: ">=4.8.4 <6.1.0"`, so 7 is outside what the lint dependency declares, and `pnpm lint` is a
+  separate blocking CI step that `pnpm check` never runs. Re-derive both sides before acting —
+  `npm view typescript version --registry=https://registry.npmjs.org` and
+  `npm view typescript-eslint peerDependencies --registry=https://registry.npmjs.org` — and do not read
+  "7 is latest" as "we can move"; this repository's npm is configured to a mirror, so an unqualified
+  `npm view` answers a different registry than the one whose release you are timing against.
 
 ### Boundary Review Signals
 
