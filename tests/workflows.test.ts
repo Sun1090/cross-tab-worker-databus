@@ -85,7 +85,11 @@ describe('workflow files', () => {
 
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
-    // registry records the publish *minutes* after `npm publish` returns: the
+    // registry records the publish *minutes* after `npm publish` returns — for every
+    // release from 0.20.92 on, which is 42 consecutive ones; the five before that window
+    // (0.20.86, 0.20.87, 0.20.88, 0.20.90, 0.20.91) recorded within +-0.6 s of their acks,
+    // so the lag is a property of the window and not of npm, and what the budget needs
+    // from it is only the maximum. The
     // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.35 was
     // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 / 75.8 /
     // 127.3 s in version order (nine values, re-counted from this enumeration).
@@ -97,7 +101,12 @@ describe('workflow files', () => {
     // five minutes stale by design and cannot be read sooner than that. Re-derive
     // (1) from a tag run: subtract the `Publish to npm` step's completion from
     // `time[<version>]` in the packument (`gh api
-    // repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs`).
+    // repos/<owner>/<repo>/actions/runs/<id>/attempts/<n>/jobs`). Read `<n>` off the
+    // run's own `run_attempt` rather than leaving it out: `/jobs` without the segment
+    // returns the **latest** attempt, and for the only re-run release in this series
+    // (v0.21.30, `run_attempt` 2) that attempt republished nothing — measured, the
+    // default read gives a -177.0 s gap and a 1.0 s verify step, while attempt 1 gives
+    // the 310.0 s and the 364 s failure quoted above and below.
     //
     // 0.20.89 exhausted a 2-minute budget and 0.21.30 exhausted a 6-minute one,
     // both after successful publishes; the 6-minute case failed at 364 s while the

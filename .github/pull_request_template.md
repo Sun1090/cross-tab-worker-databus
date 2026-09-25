@@ -15,7 +15,7 @@
 
 - [ ] `pnpm lint && pnpm check` 全绿
 - [ ] 新增/变更行为有对应单元测试（含边界分支）
-- [ ] 用户可见变更已更新 `CHANGELOG.md` 的 `[Unreleased]` 段
+- [ ] 用户可见变更已在 `CHANGELOG.md` 里为它将要发布的那个版本开一节（`## [x.y.z] - 日期`，直接写在本次 PR 里；仓库不再维护 `[Unreleased]` 段，权威流程见 `docs/release-checklist.md`）
 - [ ] 中英文档已同步（README / docs/*.md 与 docs/zh/*.md）
 - [ ] 涉及协调平面时已跑过 e2e（`pnpm test:e2e`）
 

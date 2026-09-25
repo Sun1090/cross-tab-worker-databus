@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -16,6 +17,21 @@ const forbiddenPatterns = [
   /renderPrice|orderStore/i
 ];
 
+/**
+ * Every path in the repository's own index. A prose gate's scope is expressed
+ * against this set rather than against the directory on disk, because a walk
+ * silently includes generated, gitignored output — and whether that output
+ * exists depends on whether a build has run on this machine.
+ */
+function trackedFiles(): Set<string> {
+  return new Set(execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split('\n').filter(Boolean));
+}
+
+/** Keep only the tracked members of a walked list. */
+function keepTracked(files: string[], tracked: Set<string>): string[] {
+  return files.filter(file => tracked.has(file));
+}
+
 function listDocumentationFiles(path: string): string[] {
   return readdirSync(path).flatMap(name => {
     const child = join(path, name);
@@ -27,20 +43,60 @@ function listDocumentationFiles(path: string): string[] {
 }
 
 describe('public documentation', () => {
+  it('scans tracked files only, so a build artifact cannot join or leave the scope', () => {
+    // The predicate the privacy gate is scoped by, pinned on *fabricated* input
+    // rather than on the working tree — which is the only way this case means the
+    // same thing on a clean checkout and on one that has run `pnpm examples`.
+    // `examples/react/vendor/react.esm.js` is gitignored output of
+    // `scripts/build-example-vendor.mjs`, so it is absent in CI's `verify` job
+    // (`pnpm check` never builds examples) and present at home, and it must not
+    // change what a docs gate reads.
+    const tracked = trackedFiles();
+    expect(keepTracked(['README.md', 'examples/react/vendor/react.esm.js'], tracked)).toEqual([
+      'README.md'
+    ]);
+    // The other direction, because a filter that drops everything passes the
+    // assertion above: a tracked example source must survive it.
+    expect(keepTracked(['examples/demo/demo.js'], tracked)).toEqual(['examples/demo/demo.js']);
+    // And the exclusion is about *this* path, not about the walk being empty:
+    // `examples/` has tracked sources to keep. Take the count from the index
+    // (`git ls-files examples | wc -l`) rather than from this comment.
+    expect([...tracked].filter(f => f.startsWith('examples/')).length).toBeGreaterThan(0);
+  });
+
   it('does not contain private scopes, local domains, or business-specific fields', () => {
-    const files = [
-      'README.md',
-      'CHANGELOG.md',
-      ...listDocumentationFiles('docs'),
-      ...listDocumentationFiles('examples')
-    ];
+    // Scope is the repository's own files. `listDocumentationFiles` walks a
+    // directory as it is on disk, and `examples/` holds generated output:
+    // `pnpm build:examples` writes `examples/react/vendor/react.esm.js` (1.13 MB)
+    // plus a 1.75 MB map, so an unfiltered walk runs these regexes over a
+    // third-party bundle — on *some* machines only. CI's `verify` job never builds
+    // it and the `browser` job that does runs no vitest, so a vendored `@scope/`
+    // import specifier, or an absolute path in a future map, would redden a
+    // docs-only PR at home and pass the gate that decides merge. Neither artifact
+    // matches any pattern today (measured: 0 hits for all three, in both files), so
+    // this is scope stability rather than a live leak; the pin is the case above.
+    const files = keepTracked(
+      [
+        'README.md',
+        'CHANGELOG.md',
+        ...listDocumentationFiles('docs'),
+        ...listDocumentationFiles('examples')
+      ],
+      trackedFiles()
+    );
+    // Control on the scan itself: an over-eager filter that kept only the two root
+    // files would pass every pattern with the example sources unread.
+    expect(
+      files.filter(f => f.startsWith('examples/')).length,
+      'the privacy gate must still read the tracked example sources'
+    ).toBeGreaterThan(0);
     const content = files.map(file => `${file}\n${readFileSync(file, 'utf8')}`).join('\n');
 
     for (const pattern of forbiddenPatterns) expect(content).not.toMatch(pattern);
   });
 
   it('keeps relative documentation links valid', () => {
-    const files = ['README.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
+    const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', 'CHANGELOG.md', ...listDocumentationFiles('docs')];
 
     for (const file of files) {
       const content = readFileSync(file, 'utf8');
@@ -468,7 +524,7 @@ describe('public documentation', () => {
     // A heading immediately followed by another heading of the same or higher
     // level renders as an empty section. (Found: docs/zh/roadmap.md's
     // "0.13.0 候选" section had lost its four items.)
-    const files = ['README.md', 'README.zh.md', ...listDocumentationFiles('docs')];
+    const files = ['README.md', 'README.zh.md', 'CONTRIBUTING.md', ...listDocumentationFiles('docs')];
     const emptySections: string[] = [];
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');
@@ -508,17 +564,19 @@ describe('test-name citations', () => {
     // sends a reader to the middle of a case, and the first fixture rename to
     // those arbitrary strings would have sent them nowhere at all.
     //
-    // Scope is every living prose surface: `src/**`, `AGENTS.md`, `README.md` and
-    // the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
+    // Scope is every living prose surface: `src/**`, `AGENTS.md`, both root READMEs,
+    // `CONTRIBUTING.md` and the public docs. `listDocumentationFiles` already exempts `docs/progress.md`
     // from the shipped-docs guard, and the same exemption applies here for the
     // same kind of reason — a phase entry dates what a sweep found, so its
     // citations are records rather than instructions. That exemption is what
-    // makes the scope affordable: `docs/` carries 8 such citations, and the only
-    // 4 in the tree that do not resolve are all in `progress.md` — two are the
-    // fixture-token forms this change removes from `src/`, two quote a case by a
-    // truncated name with no ellipsis marking it as one. The `docs/` citation
-    // outside that file resolves. A gate that scanned `progress.md` would spend
-    // its first run on history.
+    // makes the scope affordable: 18 citations sit in 9 of the 54 files it walks
+    // (`AGENTS.md` 4, `docs/architecture.md` 1, and the remaining 13 across seven `src/`
+    // files), and every one of them resolves. The exempt pair holds 11 more — 8 in
+    // `docs/progress.md` and 3 in `CHANGELOG.md` — and re-running this scan over that
+    // pair by hand leaves exactly one non-resolver: a `progress.md` entry quoting the
+    // gate's own failure message, which is a report of what it printed rather than a
+    // pointer into the suite. A gate that scanned `progress.md` would spend its first
+    // run on history, so the pass stays manual and its recipe is recorded in `AGENTS.md`.
     //
     // The possessive form is the only shape scanned, and that is measured rather
     // than timid. The next loosest one — the file named, then `('a name')` within
@@ -548,19 +606,20 @@ describe('test-name citations', () => {
     }
     // Guard the scan itself: a title collector that matches nothing would report
     // every citation dead, and one that matches too much would accept anything.
-    // The floor is deliberately not the corpus size (977 titles across 40 files
-    // when this was last re-read, and it was 976 the day the gate landed — a suite
-    // that gains a case moves this number, which is exactly why the floor is not it;
-    // `console.log` it here to re-derive) — a floor at the
-    // current count reddens the moment a test file moves out of the scan, and
-    // half of it still cannot be reached by a collector that has stopped working.
+    // The floor is deliberately not the corpus size. That number moves every time a
+    // case is added anywhere in `tests/` — this file's own new case moves it — so a
+    // floor at it would redden an unrelated PR, and a floor at half of it is still
+    // out of reach of a collector that stopped working. Re-derive it by printing the
+    // reduced total here rather than trusting any figure quoted in this comment,
+    // including the two that were here until they were replaced by this sentence.
     expect(
       [...titlesByFile.values()].reduce((total, set) => total + set.size, 0),
       'the citation scan must find the suite case titles'
     ).toBeGreaterThan(500);
-    // And the e2e corpus separately, because the total above cannot notice it
-    // going empty: 937 of the 977 titles come from `tests/`, so dropping the e2e
-    // sweep entirely still clears a 500 floor.
+    // And the e2e corpus separately, because the total above cannot notice it going
+    // empty: almost every title comes from `tests/`, so dropping the e2e sweep
+    // entirely still clears a 500 floor. Sum the two key sets separately to see the
+    // skew; do not quote it.
     expect(
       [...titlesByFile.keys()].filter(name => name.endsWith('.spec.ts')).length,
       'the citation scan must collect titles from the e2e specs as well as tests/'
@@ -572,6 +631,8 @@ describe('test-name citations', () => {
     for (const file of [
       'AGENTS.md',
       'README.md',
+      'README.zh.md',
+      'CONTRIBUTING.md',
       ...listDocumentationFiles('docs').filter(name => name.endsWith('.md')),
       ...listSourceFiles('src')
     ]) {
@@ -603,9 +664,77 @@ describe('test-name citations', () => {
     expect(unresolved).toEqual([]);
     // The other way this gate can go wrong is by looking at nothing: an empty
     // `unresolved` is also what a citation pattern that matches no file produces,
-    // and that reads as a clean bill. 18 citations across 52 files when this was
-    // written — re-derive with `console.log(examined)` here rather than trusting
-    // the number, which is the same decay this test exists to catch.
+    // and that reads as a clean bill. Re-derive `examined` with a `console.log` here,
+    // and the scope's size from the array above — the same rule this test exists to
+    // enforce on other people's prose. `README.zh.md` was added to the list because the
+    // scope sentence claims every living prose surface, and it carries zero citations
+    // today, so that addition changes nothing a reader can see; it is the *next* one
+    // that would otherwise slip past a gate whose comment says it was scanned.
     expect(examined, 'the citation scan must examine at least one citation').toBeGreaterThan(0);
+  });
+});
+
+describe('AGENTS.md directory layout', () => {
+  it('names every tracked file under src, tests and e2e', () => {
+    // This section is the map a fresh session reads first, so an entry it does not
+    // contain is a file that session will not know exists — and a file it names that
+    // has since moved is a path it walks to and does not find. Both halves are cheap
+    // to check and neither contradicts itself at build time. The block named 18 of the
+    // 46 `.ts`/`.tsx` files under `tests/` and `e2e/` when this gate was written, so
+    // the drift is not hypothetical; it is also why `docs/` is out of scope, since
+    // that half of the block is a deliberate summary rather than an index.
+    const agents = readFileSync('AGENTS.md', 'utf8');
+    const heading = agents.indexOf('## Directory layout');
+    const open = agents.indexOf('```', heading);
+    const close = agents.indexOf('```', open + 3);
+    expect(heading, 'AGENTS.md must keep a `## Directory layout` section').toBeGreaterThanOrEqual(0);
+    expect(open, 'the layout section must stay a fenced block').toBeGreaterThan(heading);
+    expect(close, 'the layout fence must be closed').toBeGreaterThan(open);
+    const block = agents.slice(open + 3, close);
+    // The fence extraction is the failure mode that makes this gate vacuous: slip it
+    // and `block` becomes the whole file, every name "appears", and the gate passes by
+    // reading prose that sits outside the map. So pin the block's own edges rather than
+    // trusting the indices — it starts at the first directory and stops before the next
+    // heading.
+    expect(block.trimStart().startsWith('src/'), 'the extracted block must start at the layout, not earlier').toBe(true);
+    expect(block.includes('## Common tasks'), 'the extracted block must not have run past the layout section').toBe(false);
+
+    const tracked = execFileSync('git', ['ls-files', 'src', 'tests', 'e2e'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(name => name.length > 0);
+    const unnamedIn = (layout: string) =>
+      tracked.filter(file => !layout.includes(file) && !layout.includes(file.split('/').pop()!));
+
+    expect(unnamedIn(block)).toEqual([]);
+    // The directory half of the same map. `src`, `tests` and `e2e` are indexed
+    // file-by-file, while `docs`, `scripts` and `examples` are one-line summaries — so
+    // this leg asks only that every top-level directory holding code is *named*, which
+    // is the part that has no scope-dependent answer. `scripts/` and `examples/` were
+    // both missing from the block when this was written, which is what the leg is for.
+    const everyTracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(name => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && name.includes('/'))
+      .map(name => name.split('/')[0]!);
+    const codeDirs = [...new Set(everyTracked)].sort();
+    const unnamedDirs = (layout: string) => codeDirs.filter(dir => !layout.includes(`${dir}/`));
+    expect(unnamedDirs(block), `every directory holding code must be named: ${codeDirs.join(', ')}`).toEqual([]);
+    // Same control discipline as the file leg, one name at a time: a filter that could
+    // not report a missing directory would make the assertion above unfalsifiable.
+    expect(unnamedDirs(block.replace('scripts/', 'removed-by-control')),
+      'the layout check must report a directory whose entry is missing').toEqual(['scripts']);
+    // A control the gate has to pass before its green means anything: doctor the block
+    // by removing one real name and require that the same filter reports exactly that
+    // file. Without it, a filter that always returns `[]` — from an empty tracked list,
+    // or a substring rule that matches too broadly — is indistinguishable from a clean
+    // tree. It runs *after* the real assertion on purpose: measured with the control
+    // first, deleting a layout entry failed at the control with `expected
+    // ['e2e/topics.ts', …] to deeply equal ['tests/workflows.test.ts']`, which names the
+    // regression only by accident and reads as though the control itself broke.
+    expect(unnamedIn(block.replace('workflows.test.ts', 'removed-by-control')),
+      'the layout check must report a file whose entry is missing').toEqual(['tests/workflows.test.ts']);
+    // And the corpus must not be empty, which is the other half of the same silence.
+    // Floor is deliberately below the measured 76 tracked files (`git ls-files src tests
+    // e2e | wc -l`), because a floor at the size reddens when a file is deleted.
+    expect(tracked.length, 'the layout gate must actually see the source tree').toBeGreaterThan(50);
   });
 });
