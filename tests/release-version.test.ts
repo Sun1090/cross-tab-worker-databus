@@ -80,6 +80,22 @@ describe('release version gate', () => {
       .toContain('earlier CHANGELOG releases from 0.20.85 on are all in');
   });
 
+  it('exempts an abandoned release by its heading shape, and says so in the failure', () => {
+    // The message offers two remedies, one of them a prose edit, so which prose works
+    // is the contract: the exemption belongs to the `## [x.y.z]` heading shape this
+    // scan matches, not to any word written beside it.
+    const time = JSON.stringify({ '0.20.92': 't' });
+    const bracketed = '## [0.20.92] - 2026-09-18\n\n- Newer.\n\n## [0.20.91] - never released\n\n- Older.\n';
+    expect(() => verify('v0.20.92', bracketed, '0.20.92', time))
+      .toThrow('the registry has never recorded: 0.20.91');
+    const bare = '## [0.20.92] - 2026-09-18\n\n- Newer.\n\n## 0.20.91 - never released\n\n- Older.\n';
+    expect(verify('v0.20.92', bare, '0.20.92', time)).toContain('are all in');
+    // Read the message rather than trusting the two legs above: a green pair here is
+    // also what a keyword exemption would produce, and that is the wrong lesson.
+    expect(() => verify('v0.20.92', twoReleases, '0.20.92', time))
+      .toThrow('heading dropped out of the');
+  });
+
   it('leaves releases below the floor alone, because the hole predates the discipline', () => {
     const belowFloor = '## [0.20.92] - 2026-09-18\n\n- Newer.\n\n## [0.20.5] - 2026-08-01\n\n- Never published.\n';
     expect(verify('v0.20.92', belowFloor, '0.20.92', JSON.stringify({ '0.20.92': 't' })))
