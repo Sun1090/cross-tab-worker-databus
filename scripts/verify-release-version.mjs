@@ -12,8 +12,9 @@
  * `0.20.72`–`0.20.84`, which is 1 + 7 + 10 + 6 + 2 + 1 + 13 = 40 — 27 of them
  * carrying a git tag and 38 a `docs/roadmap.md` delivered-scope block. Those were cut as releases and never published, and
  * nothing noticed for twenty releases. Re-derive the tally with
- * `npm view cross-tab-worker-databus time --json` compared against
- * `grep -c '^## \[' CHANGELOG.md`; the number above is a snapshot of that lookup,
+ * `npm view cross-tab-worker-databus time --json --registry https://registry.npmjs.org`
+ * compared against `grep -c '^## \[' CHANGELOG.md`; the number above is a
+ * snapshot of that lookup,
  * taken after the tag, because the same measurement taken twelve minutes earlier —
  * while `v0.21.33` was still only a local commit — came out 41, and this comment
  * was written from *that* reading.
@@ -26,8 +27,23 @@
  * A registry read is skipped rather than fatal: refusing a *good* release because
  * one HTTP call failed is the exact failure this project has already paid for
  * twice with the published-consumer ceiling. A confirmed absence is different in
- * kind — `time[]` records never expire, so a version missing from a read that
- * succeeded was never published.
+ * kind — `time[]` records never expire, so a version missing from a read of the
+ * authoritative registry was never published.
+ *
+ * "Authoritative" is doing work in that sentence, which is why the read names
+ * `https://registry.npmjs.org` explicitly. Measured while preparing `0.21.35`: this
+ * machine's `npm` is configured to `registry.npmmirror.com`, whose copy of the
+ * packument reported `modified: 2026-09-25T00:32:51.767Z` — the `0.21.33` publish —
+ * while npmjs had recorded `0.21.34` at `02:47:50.782Z`. So the gate reported
+ * `CHANGELOG names 1 release(s) the registry has never recorded: 0.21.34` for a
+ * version that has been public for an hour, and it did so from a read that
+ * **succeeded**: a mirror's own sync lag is not HTTP caching, and a no-store
+ * request returns the same stale document. That falsifies the inference above in
+ * its second premise, not its first — `time[]` entries do not expire, but a
+ * document that has never *learned* about a version is not a record of its
+ * absence. `verify-published-consumer.mjs` already pinned `--registry` for both
+ * its reads and for the same reason; this was the last npm-based registry read in
+ * the repository that did not.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -68,16 +84,27 @@ export function findUnpublishedReleases({
 }
 
 /**
+ * The registry whose absence-claim is proof: npm itself. Configured mirrors can
+ * lag it by hours while serving a document that reads as a successful fetch — see
+ * the header above for the measured instance.
+ */
+export const authoritativeRegistry = 'https://registry.npmjs.org';
+
+/**
  * The registry's own record of when each version landed. Injectable so the gate is
  * testable without a network, the way its sibling injects the version read.
  */
 export function readRegistryTime(name, read = () => process.env.RELEASE_REGISTRY_TIME) {
   const injected = read();
   if (injected) return JSON.parse(injected);
-  const raw = execFileSync('npm', ['view', name, 'time', '--json'], { encoding: 'utf8' });
+  const raw = execFileSync(
+    'npm',
+    ['view', name, 'time', '--json', '--registry', authoritativeRegistry],
+    { encoding: 'utf8' }
+  );
   const parsed = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`\`npm view ${name} time --json\` did not return an object`);
+    throw new Error(`\`npm view ${name} time --json\` against ${authoritativeRegistry} did not return an object`);
   }
   return parsed;
 }

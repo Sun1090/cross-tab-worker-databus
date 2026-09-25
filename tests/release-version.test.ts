@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const script = resolve('scripts/verify-release-version.mjs');
@@ -40,6 +40,9 @@ function verify(
 
 const notes = '## [Unreleased]\n\nNo unreleased changes yet.\n\n## [0.20.92] - 2026-09-18\n\n### Fixed\n- Lifecycle fixes.\n';
 
+/** Two named releases, so the completeness half has something to audit. */
+const twoReleases = '## [0.20.92] - 2026-09-18\n\n### Fixed\n- Newer.\n\n## [0.20.91] - 2026-09-17\n\n### Fixed\n- Older.\n';
+
 describe('release version gate', () => {
   it('accepts an exact version tag with release notes', () => {
     expect(verify('v0.20.92', notes)).toContain('[release] v0.20.92 matches');
@@ -66,7 +69,6 @@ describe('release version gate', () => {
   // and 41 of them in this repository's history are claims the registry never
   // recorded. See the header of scripts/verify-release-version.mjs for the measured
   // hole and for why the floor sits where it does.
-  const twoReleases = '## [0.20.92] - 2026-09-18\n\n### Fixed\n- Newer.\n\n## [0.20.91] - 2026-09-17\n\n### Fixed\n- Older.\n';
 
   it('rejects a named release the registry never recorded, and names it', () => {
     expect(() => verify('v0.20.92', twoReleases, '0.20.92', JSON.stringify({ '0.20.92': 't' })))
@@ -97,5 +99,60 @@ describe('release version gate', () => {
     const output = verify('v0.20.92', twoReleases, '0.20.92', 'not json');
     expect(output).toContain('SKIPPED');
     expect(output).not.toContain('never recorded');
+  });
+});
+
+/**
+ * The read that decides "this version was never published" has to be a read of
+ * npm itself, not of whatever `npm` is configured to talk to. Measured while
+ * preparing `0.21.35`: this machine's registry is a mirror whose copy of the
+ * packument still reported `modified` at the `0.21.33` publish — 75 minutes after
+ * npmjs recorded `0.21.34` — so the gate declared a public version one "the
+ * registry has never recorded", and it did so from a read that *succeeded*. A
+ * mirror's own sync lag is not HTTP caching, so `cache-control: no-cache` returns
+ * the same stale document; only naming the registry fixes it.
+ *
+ * Every case above injects `RELEASE_REGISTRY_TIME`, so none of them can see which
+ * registry the real path consults — that is why this defect reached a release
+ * tool undetected. This one runs the un-injected path against a stub `npm` and
+ * reads back the argument vector it was handed.
+ */
+describe('registry read', () => {
+  it('names the authoritative registry rather than the ambient npm config', () => {
+    const root = mkdtempSync(join(tmpdir(), 'databus-release-registry-'));
+    try {
+      const bin = join(root, 'bin');
+      mkdirSync(bin);
+      const capture = join(root, 'argv.txt');
+      writeFileSync(capture, '');
+      writeFileSync(
+        join(bin, 'npm'),
+        [
+          '#!/usr/bin/env node',
+          "require('node:fs').appendFileSync(process.env.RELEASE_NPM_ARGV, process.argv.slice(2).join(' ') + '\\n');",
+          `process.stdout.write(${JSON.stringify(JSON.stringify({ '0.20.92': 't', '0.20.91': 't' }))});`
+        ].join('\n'),
+        { mode: 0o755 }
+      );
+      const project = join(root, 'project');
+      mkdirSync(project);
+      writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'cross-tab-worker-databus', version: '0.20.92' }));
+      writeFileSync(join(project, 'CHANGELOG.md'), twoReleases);
+
+      const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, RELEASE_NPM_ARGV: capture };
+      delete env.RELEASE_REGISTRY_TIME;
+      env.RELEASE_TAG = 'v0.20.92';
+      const spawned = spawnSync(process.execPath, [script], { cwd: project, env, encoding: 'utf8' });
+      // The stub answers with both versions present, so a green run here is the
+      // proof the read was made at all; a failed one would print its own skip.
+      expect(`${spawned.stdout ?? ''}${spawned.stderr ?? ''}`).toContain('are all in');
+
+      const args = readFileSync(capture, 'utf8').trim().split(' ');
+      const flag = args.indexOf('--registry');
+      expect(flag, `the gate called npm without naming a registry: ${args.join(' ')}`).toBeGreaterThanOrEqual(0);
+      expect(args[flag + 1]).toBe('https://registry.npmjs.org');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
