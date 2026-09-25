@@ -85,7 +85,11 @@ describe('workflow files', () => {
 
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
-    // registry records the publish *minutes* after `npm publish` returns: the
+    // registry records the publish *minutes* after `npm publish` returns — for every
+    // release from 0.20.92 on, which is 42 consecutive ones; the five before that window
+    // (0.20.86, 0.20.87, 0.20.88, 0.20.90, 0.20.91) recorded within +-0.6 s of their acks,
+    // so the lag is a property of the window and not of npm, and what the budget needs
+    // from it is only the maximum. The
     // ack -> `time[<version>]` gap measured on 0.21.27 through 0.21.35 was
     // 74.8-310.0 s — 248.7 / 96.8 / 74.8 / 310.0 / 127.2 / 76.1 / 75.5 / 75.8 /
     // 127.3 s in version order (nine values, re-counted from this enumeration).
