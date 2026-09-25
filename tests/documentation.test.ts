@@ -650,6 +650,22 @@ describe('AGENTS.md directory layout', () => {
       tracked.filter(file => !layout.includes(file) && !layout.includes(file.split('/').pop()!));
 
     expect(unnamedIn(block)).toEqual([]);
+    // The directory half of the same map. `src`, `tests` and `e2e` are indexed
+    // file-by-file, while `docs`, `scripts` and `examples` are one-line summaries — so
+    // this leg asks only that every top-level directory holding code is *named*, which
+    // is the part that has no scope-dependent answer. `scripts/` and `examples/` were
+    // both missing from the block when this was written, which is what the leg is for.
+    const everyTracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+      .split('\n')
+      .filter(name => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(name) && name.includes('/'))
+      .map(name => name.split('/')[0]!);
+    const codeDirs = [...new Set(everyTracked)].sort();
+    const unnamedDirs = (layout: string) => codeDirs.filter(dir => !layout.includes(`${dir}/`));
+    expect(unnamedDirs(block), `every directory holding code must be named: ${codeDirs.join(', ')}`).toEqual([]);
+    // Same control discipline as the file leg, one name at a time: a filter that could
+    // not report a missing directory would make the assertion above unfalsifiable.
+    expect(unnamedDirs(block.replace('scripts/', 'removed-by-control')),
+      'the layout check must report a directory whose entry is missing').toEqual(['scripts']);
     // A control the gate has to pass before its green means anything: doctor the block
     // by removing one real name and require that the same filter reports exactly that
     // file. Without it, a filter that always returns `[]` — from an empty tracked list,

@@ -125,6 +125,8 @@ docs/
   api.md                        # Public API reference
   configuration.md              # TTL, worker modes, security model
   getting-started.md            # Installation & usage
+scripts/                        # build, bench, demo servers, release verification (`pnpm <script>` names the file)
+examples/                       # demo/ (vanilla), react/, vue/ — `pnpm build:examples` bundles the vendor deps
 ```
 
 ## Architecture principles
