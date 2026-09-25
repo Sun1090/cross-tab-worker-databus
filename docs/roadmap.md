@@ -2,6 +2,11 @@
 
 0.21.40 was released on September 25, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
+## 0.21.41 delivered scope
+
+- **The shipped release checklist now says what to do when a release run dies on its own tag.** `0.21.39` reached exactly that state — the run failed inside its own `pnpm check`, so the tag existed and no artifact did — and the checklist's three branches ("rerun against the unchanged tag", "ship a new patch version", "never move a published tag") do not include it, because the version that follows the second branch leaves an unpublished section behind and the completeness gate then refuses every later tag. Written out in both languages: the two confirming reads and how each can lie, the delete-and-recreate as the two ordinary pushes it is, and the preventive step — build the tag locally, run the gates *with the tag present*, push only after they pass, since that build state is the one neither PR CI nor `main`-push CI ever sees.
+- **A remedy the release gate prints was rewritten into the form that actually applies it.** `scripts/verify-release-version.mjs` refuses a tag while `CHANGELOG.md` names an unpublished version and tells the reader to mark the section as never released; measured against the exported predicate with a standing-section control, `## [0.20.91] - never released` is refused exactly like the section it was meant to excuse, and only a heading that leaves the bracketed shape is exempt. The message now names the shape, and three test legs pin it, one per mutant: a keyword exemption, a bare-heading match, and the reverted wording each fail a different assertion — the first two of which the behavior legs alone would not distinguish.
+
 ## 0.21.40 delivered scope
 
 - **The release notes described the rule their own fix had deleted.** `0.21.39`'s third bullet required the roadmap preamble to name the newest *tagged* release; PR #328 — the reason `0.21.39` exists at all — replaced that with "the greatest tag below `package.json`'s version, or that version once it is tagged", and changed only the test and `AGENTS.md`. Both roadmap copies are corrected where they stand; the `CHANGELOG.md` copy is left as that release published it, on the same footing as `0.21.35`'s three-sample sentence.
