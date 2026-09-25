@@ -2,17 +2,25 @@
  * Pre-publish release-record gate.
  *
  * Two things must be true before a tag is worth pushing: the tag names this tree
- * and its CHANGELOG section has notes, and — since `0.21.34` — every version the
- * CHANGELOG names from `firstGatedRelease` forward actually exists in the
- * registry. The second half is the failure mode this exists to stop: 41 of the
- * 163 `## [x.y.z]` sections in this file name versions the npm registry has never
- * heard of (no `time[]` entry at all — 0.9.0, 0.12.0–0.20.5, 0.20.54, 0.20.55,
- * 0.20.69 and 0.20.72–0.20.84), 27 of them carrying a git tag and 39 a
- * `docs/roadmap.md` delivered-scope block. Those were cut as releases and never
- * published, and nothing noticed for twenty releases. Lockstep holds from
- * `0.20.85` — every section at or after it is on npm — so the floor is set there
- * and this gate is prospective: it stops a new hole, it does not litigate the old
- * ones, which are history and would need 41 rewritten sections to "fix".
+ * and its CHANGELOG section has notes, and — since this release cycle — every
+ * version the CHANGELOG names from `firstGatedRelease` forward actually exists in
+ * the registry. The second half is the failure mode this exists to stop. Measured
+ * against the packument on the day `v0.21.33` published: 40 of this file's 163
+ * `## [x.y.z]` sections name versions the registry has never recorded (no `time[]`
+ * entry at all) — 0.9.0, 0.12.0–0.20.5, 0.20.54, 0.20.55, 0.20.69 and
+ * 0.20.72–0.20.84 — 27 of them carrying a git tag and 38 a `docs/roadmap.md`
+ * delivered-scope block. Those were cut as releases and never published, and
+ * nothing noticed for twenty releases. Re-derive the tally with
+ * `npm view cross-tab-worker-databus time --json` compared against
+ * `grep -c '^## \[' CHANGELOG.md`; the number above is a snapshot of that lookup,
+ * taken after the tag, because the same measurement taken twelve minutes earlier —
+ * while `v0.21.33` was still only a local commit — came out 41, and this comment
+ * was written from *that* reading.
+ *
+ * Lockstep holds from `0.20.85` — every section at or after it is on npm — so the
+ * floor is set there and this gate is prospective: it stops a new hole, it does
+ * not litigate the old ones, which are history and would need 40 rewritten
+ * sections to "fix".
  *
  * A registry read is skipped rather than fatal: refusing a *good* release because
  * one HTTP call failed is the exact failure this project has already paid for
