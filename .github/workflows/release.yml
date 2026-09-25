@@ -152,8 +152,9 @@ jobs:
           # 21:39:03Z, so ~60 s after a copy taken then must have expired.
           # So the rule is arithmetic, not a model — worst-case ack->`time[]`
           # gap plus one cache lifetime — and 0.21.30 showed the sum is not theoretical:
-          # it burned all 364 s and still saw ETARGET at 21:45:07Z while the tarball HEAD
-          # and a local pack had both succeeded by 21:44:35Z, then resolved on a retry at
+          # it burned its whole 360 s ceiling (48 x 7.5 s) and still saw ETARGET at
+          # 21:45:07Z while the tarball HEAD and a local pack had both succeeded by
+          # 21:44:35Z, then resolved on a retry at
           # 21:47:10Z — 487 s past its ack. 96 x 7.5 s = 720 s clears 310 + 300 with
           # margin, and costs nothing when the package already resolves, because the loop
           # returns on the first successful pack. 0.21.31 and 0.21.32 are the first two
