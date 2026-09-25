@@ -18,7 +18,7 @@ Two shipped comments cited a test by a fixture string instead of its name, and t
 
 ### Compatibility
 
-No library code, export, option, default, frame or storage key changed; `verify:compat`, `verify:types` and `verify:pack` run against `v0.21.34`. The suite is 37 files / 951 tests (950 before this cycle, plus the citation gate). The release-time completeness gate now reports 48 gated releases rather than 47, because `0.21.34` has joined the set it audits — the count rising is that gate working.
+No library code, export, option, default, frame or storage key changed; `verify:compat`, `verify:types` and `verify:pack` run against `v0.21.34`. The suite is 37 files / 952 tests (950 before this cycle, plus the citation gate and the registry-read case). The release-time completeness gate now reports 48 gated releases rather than 47, because `0.21.34` has joined the set it audits — the count rising is that gate working.
 
 
 ## [0.21.34] - 2026-09-25
