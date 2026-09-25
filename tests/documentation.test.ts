@@ -435,6 +435,13 @@ describe('public documentation', () => {
     // The set true at every moment is { greatest tag strictly below `package.json`'s
     // version, that version once it is tagged }. It still rejects a preamble two
     // releases behind, which is the only staleness a single tree can decide.
+    //
+    // `scripts/verify-public-types.mjs` and `verify-version-compat.mjs` face the same
+    // question and answer it differently — "newest tag not pointing at HEAD" — which
+    // is right for them because they only need *a* baseline to diff against, and any
+    // consistent choice yields a sound comparison. Reusing it here would break the
+    // window between a prep merge and its record commit, where HEAD is untagged and
+    // the newest tag is the release the preamble has not named yet.
     const monthNumbers = new Map([
       ['January', 1], ['February', 2], ['March', 3], ['April', 4], ['May', 5], ['June', 6],
       ['July', 7], ['August', 8], ['September', 9], ['October', 10], ['November', 11], ['December', 12],
