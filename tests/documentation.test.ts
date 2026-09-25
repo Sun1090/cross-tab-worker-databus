@@ -356,6 +356,19 @@ describe('public documentation', () => {
       previousPhase = phase;
       previousLine = index + 1;
     }
+    // A floor on this scan's own row count, because every ordering assertion above
+    // lives inside `if (heading)`: change the heading convention and the case stays
+    // green having compared nothing. The bound is a constant rather than a share of
+    // the file's `## ` population on purpose — take both numbers from docs/progress.md
+    // and the slash form is a *minority* of its h2 lines (the pre-Phase numbering is
+    // prose titles), so a fraction-based floor would have failed the day it was
+    // written. What the constant has to keep doing is staying below the log's current
+    // number, and it sits far under it so that the day it stops holding is a real
+    // finding about the file rather than a bookkeeping chore.
+    expect(
+      previousPhase,
+      'this scan matched no `## Phase N /` heading, so its ordering assertions never ran'
+    ).toBeGreaterThan(200);
   });
 
   it('marks every CHANGELOG version heading as an h2', () => {
