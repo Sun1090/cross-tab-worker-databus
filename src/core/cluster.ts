@@ -142,8 +142,11 @@ const CLUSTER_PROTOCOL_VERSION = 1;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
 const DEFAULT_WORKER_TTL_MS = 10_000;
 // Upper bound on the topicKey → topic reverse cache. Control messages from
-// other workers can reference arbitrary topics, so cap growth to avoid an
-// unbounded memory leak from a misbehaving or malicious peer.
+// other workers can reference arbitrary topics, so growth is capped — but only
+// for entries this worker does not own. An adopted peer SUBSCRIBE counts as
+// owned, so a flood of them is released by the reconcile sweep, not by this
+// number; `rememberTopic`'s eviction loop carries what happens when every
+// entry is owned.
 const MAX_KNOWN_TOPICS = 500;
 
 /**
