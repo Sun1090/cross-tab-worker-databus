@@ -165,9 +165,12 @@ export class CentrifugeSession<TData = unknown> {
     let subscription = this.client.getSubscription(topic);
     if (!subscription) subscription = this.client.newSubscription(topic);
     // Scoped to the three events this method wires, so the client's own `state`
-    // wiring is untouched — but `error` is NOT internal-listener-free: the
-    // Subscription constructor installs its own no-op `error` listener precisely
-    // "to avoid unhandled exception in EventEmitter for non-set error handler"
+    // wiring is untouched — but `error` is NOT internal-listener-free: a no-op
+    // `error` listener is installed on every subscription precisely
+    // "to avoid unhandled exception in EventEmitter for non-set error handler",
+    // and not by `Subscription` itself — that class body contains no `on('error')`
+    // call at all (measured on the pinned copy), so the guard runs in the
+    // `BaseSubscription` constructor every subscription reaches through `super`.
     // (centrifuge 5.7.4, `build/index.js`. The line number this used to cite — 762
     // — matches neither the pinned copy, where the guard sits at 763-764, nor the
     // 5.7.0 copy in the store, where it is at 748; whether it drifted or was

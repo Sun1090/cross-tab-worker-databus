@@ -227,7 +227,9 @@ export class DataBusTraceReporter {
     // deleting the default costs that caller: each emission throws inside
     // `emitSync` and surfaces as a `[cross-tab-worker-databus] trace sink threw:`
     // warning — measured 2 events → 2 `TypeError`s where the default gives none,
-    // and the 884-test suite is green either way. Recorded rather than pinned,
+    // and the suite is green either way (the same deletion re-run here: all 944 tests
+    // pass, as they did at the 884 this sentence used to claim — take the denominator
+    // from `pnpm test`, since it is not a property of this claim). Recorded rather than pinned,
     // because pinning it needs a cast that fakes a call the declared types forbid.
     this.sink = options?.sink ?? (() => undefined);
     this.asyncSink = options?.asyncSink ?? false;

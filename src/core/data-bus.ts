@@ -1303,9 +1303,19 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // that resets the flag) or belong to the same chain that has already passed that
     // check and clears `transportReady` within the same block.
     //
-    // What the census does show is why this return is the common case: 626 of the
-    // 7589 recorded `stop()` calls read `(0,0,0,0)`, because all four fields are
-    // reset in one synchronous block at the end of every teardown.
+    // What the census does show is that a redundant `stop()` is routine, not exotic:
+    // re-measured over one whole-suite run, 782 of the 20521 evaluations read
+    // `(0,0,0,0)`, because all four fields are reset in one synchronous block at the end
+    // of every teardown. Take both numbers from the probe rather than trusting them as
+    // properties of this code — 18130 of the 20521 come from
+    // `tests/coordination-invariants.test.ts` alone, and temporarily lowering that file's
+    // `MAX_SEEDS` from 5,000 to 1,000 drops its share to 3648 evaluations and its
+    // `(0,0,0,0)` count from 205 to 36. A host whose sweep truncates therefore records a
+    // smaller total and a different share at this line; the figures this note carried
+    // (626 of 7589) were a real reading of a tree that no longer exists, and nothing
+    // contradicted them as they went stale. What does hold across runs is the row *set*
+    // (seven vectors) and the three rows that file never produces — `0010` 4 times, `1010`
+    // 8, `1101` 2 — which is what makes the pinned premise count above stable.
     if (!this.started && !this.startPromise && !this.pendingStop && !this.transportReady) {
       return Promise.resolve();
     }
@@ -1565,10 +1575,14 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
           // shape of answer: only the last of these four can be the decider, and it
           // is pinned — deleting `this.status !== WORKER_STATUS.ERROR` dies to
           // `lets an explicit operation drive an immediate reopen after a failed
-          // auto attempt`, and the flag-vector census taken at this entry point
-          // shows its premise twice out of forty-nine callback executions
-          // (`stopping:false started:true suspended:false statusIsError:false`),
-          // against forty-seven where the guard is not taken at all.
+          // auto attempt`. Re-running that probe (one line appended at this callback's
+          // entry, whole suite; identical on both runs that recorded it) reports fifty
+          // executions: one is absorbed by the token check above, so forty-nine reach this
+          // guard, two carry the premise (`stopping:false started:true suspended:false
+          // statusIsError:false`), and forty-seven take no early return. The 2 and the 47
+          // are stable because they come from the deterministic unit tests: the same probe
+          // run against `tests/coordination-invariants.test.ts` alone records no callback
+          // at all, so unlike `stop()`'s census no fuzz depth is mixed into these counts.
           //
           // The other three cannot decide, and they share one reason, which is the
           // arming site rather than this line. This `setTimeout` is the only place a
@@ -2036,7 +2050,12 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `status === ERROR`, `droppedAfterConnect`, `stopping` — so the fast path is
     // `1000`. Observed at this line: `1000`, plus `0000`, `0100`, `1001` and
     // `1010`; that set is one first-sight `console.log` per distinct row over a
-    // whole-suite run, so re-derive it rather than trusting the list.
+    // whole-suite run, so re-derive it rather than trusting the list. Re-derived on
+    // 2026-09-25 it came back the same five, and deliberately no count is quoted here:
+    // that run evaluated this guard 23876 times and 20173 of them came from
+    // `tests/coordination-invariants.test.ts` (measured by running that file alone under
+    // the same probe), so a total here would move with the sweep depth the way `stop()`'s
+    // did — see that note for the measurement.
     // `transportReady` is the load-bearing one: deleting it fails nine tests in
     // `data-bus.test.ts` and `centrifuge.test.ts`, every one of them an operation
     // the test expects to be deferred. `droppedAfterConnect` dies to exactly two
@@ -2050,8 +2069,11 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     // `!this.stopping` was live and unnamed until
     // `sends no unsubscribe to a transport while the bus is stopping` pinned it: its
     // premise is the `1001` row, and the only thing in the suite that reaches it is
-    // `WorkerClusterRuntime.stop()`'s handoff — measured, the first-sight stack is
-    // `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` — posting an
+    // `WorkerClusterRuntime.stop()`'s handoff — and that "only" is now an enumeration rather
+    // than a first sight: the stack captured at *every* `1001` evaluation over one
+    // whole-suite run came back as exactly one distinct path, `beginStop()` → `stop()` →
+    // `pause()` → `handoffAssignedTopics()` → `onControl` → `unsubscribeTransport()` → here.
+    // Posting an
     // UNSUBSCRIBE after `beginStop()` raised the flag, which needs a peer that will
     // take the topic, because with no remaining subscriber the handoff drops the
     // route instead.
