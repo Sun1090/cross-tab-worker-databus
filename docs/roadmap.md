@@ -2,6 +2,11 @@
 
 0.21.43 was released on September 26, 2026. The project is intentionally continuing through reliability-focused releases before a 1.0.0 stability freeze.
 
+## 0.21.44 delivered scope
+
+- **A non-finite environment clock reached durable state, where it is a sentinel rather than a wrong number.** The worker, route and subscriber records were written with `"updatedAt": null` (because `JSON.stringify(NaN)` is `null`), and `null` coerces to `0` in the TTL arithmetic — so the first tick after the clock recovered would have read every record as ancient and pruned the whole cluster at once. The cluster now holds the last finite reading across its ten read sites, and the bus normalizes once where it binds a clock, covering its own stamps and the dedup manager together. Three inputs with three contracts, one shape of guard: an injected option documented for non-wall-clock hosts, a required environment field whose documented hazard is a backwards step, and a binding point.
+- **Both pins had to be rewritten before they measured anything.** One filtered records by `typeof` and so skipped the very value the bug leaves behind; the other only read fields the broken window never touches. That is the second time in three phases that a case written for a security-adjacent property passed its own mutation, and the third that the instrument — not the mutation — was the defect.
+
 ## 0.21.43 delivered scope
 
 - **A public clock could report `NaN` into the health summary.** `dedup.now` is documented for "non-wall-clock hosts", and every comparison in the dedup manager is arithmetic on a timestamp — so one non-finite reading did not degrade one field: the adaptive window never reset, nothing expired on the hot path or in the sweep, and `getDedupStats().ttlMs` reported `NaN`, which `JSON.stringify` writes as `null`. Measured on the pre-fix class. The manager now holds the last finite reading, and the guard sits at the clock rather than at each comparison — the shape this repository already uses for the same class of input in `trace.ts`, `websocket.ts` and `replay-manager.ts`.
