@@ -22,7 +22,12 @@
  *      subscription and no route record, once the worker TTL has passed a
  *      dozen times over;
  *   3. a publication the owner's transport delivers reaches every live
- *      subscriber exactly once, and nobody else.
+ *      subscriber exactly once, and nobody else;
+ *   4. no coordination key *or value* the cluster persists anywhere in the
+ *      sweep contains a topic's plaintext — the one arm whose subject is a
+ *      security property rather than a convergence property, so it is checked
+ *      on every step instead of only on the quiesced end state (see
+ *      `plaintextLeaks`).
  *
  * What each arm was proved against — each mutation applied alone, `src/`
  * restored and verified clean afterwards: dropping the transport unsubscribe
@@ -30,6 +35,27 @@
  * subscribe kills arm 1 (no holder at all), dispatching a topic's handlers
  * twice kills arm 3, never pruning orphan routes kills arm 2, and emptying
  * `reconcileAssignedTopics`' sweep kills arms 1 and 2 together.
+ *
+ * Arm 4 was measured on three mutations, and the three kill sets are three
+ * different claims — the first draft of this paragraph said "both die at the new
+ * arm and at nothing else", which one of them refutes:
+ *
+ *   - a route record that grows a `topic` field beside its `topicKey` — the
+ *     shape a "helpful" debug field takes — kills **1 test in 969, this arm**.
+ *     Nothing else in the suite can see a value-side leak at all, which is the
+ *     half of the property that had no gate;
+ *   - a plaintext-bearing key written *outside* every prefix the runtime scans
+ *     (so no coordination read can observe it) kills this arm plus two
+ *     pre-existing cases, and both of those are about something else: a
+ *     clusterKey namespace-containment assertion and the pagehide leftovers
+ *     assertion. Keys had incidental coverage; values had none;
+ *   - keying the subscriber record by the topic instead of its `topicKey` kills
+ *     18 (15 `cluster`, 2 `data-bus`, this arm) — but that is a *functional*
+ *     mutation as much as a privacy one, because the subscriber read path is
+ *     itself keyed by the hash, so most of its kill set belongs to convergence
+ *     and none of it is attributable to the plaintext. It is recorded here
+ *     because it is the mistake a reader will picture first, and because the
+ *     number is the reason the other two were measured separately.
  *
  * Three guards deliberately survive it: `handleControlMessage`'s "only the
  * worker the durable route names may accept a SUBSCRIBE", the route write in
@@ -70,6 +96,55 @@ import {
 } from './fakes';
 
 const TOPICS = ['alpha', 'beta', 'gamma'];
+
+/**
+ * Per-seed marker embedded in every topic name, so arm 4 can look for a
+ * plaintext it planted rather than a word the harness happens to use elsewhere.
+ *
+ * `zz` is not hex, and `createOpaqueKey` emits hex only, so no derived key can
+ * contain the marker by coincidence — which is the property that makes "the
+ * marker is absent" a statement about the plaintext and not about luck. The rest
+ * of the marker is the seed, so a leak report names the interleaving it came
+ * from even before the op list is read. `createTab`'s ids (`coord-a`,
+ * `tab-coord-a`, …) and the cluster key carry no `z`, so they cannot collide
+ * either.
+ */
+const marker = (seed: number): string => `zzplain${seed}`;
+
+/** The seed's topic names: the fixed trio, each carrying this seed's marker. */
+const topicsFor = (seed: number): string[] => TOPICS.map(topic => `${topic}-${marker(seed)}`);
+
+/**
+ * Report every persisted key or value carrying `marker` — the plaintext leak
+ * arm's instrument, over the *whole* registry rather than the keys the sweep
+ * knows about, because the leak it looks for is precisely a key the sweep does
+ * not know about.
+ *
+ * Two properties of the reading matter. (1) It sees flushed state only:
+ * `MemoryStorage` holds what `setItem` wrote, and `BatchingStorageWriter` keeps
+ * same-task writes queued, so a write still pending when a step ends is not
+ * visible yet. That is why the sweep checks after the settle rounds as well as
+ * inside the step loop — the final read happens once the cluster has quiesced
+ * and its writers have flushed, which is where a pending plaintext write would
+ * have landed. (2) It is a substring test, not an equality test, so a value that
+ * embeds a topic inside a larger JSON record is caught too, which is the shape a
+ * real leak would take (`{ topicKey, workerId, …, topic }`).
+ *
+ * Returns human-readable findings rather than a boolean so a failure message
+ * names the offending key instead of just the seed. Key and value are reported
+ * independently rather than one per entry: an entry that leaks on both sides is
+ * one defect with two symptoms, and collapsing them would hide the value-side
+ * half from a reader deciding which writer to look at.
+ */
+function plaintextLeaks(storage: MemoryStorage, markerText: string): string[] {
+  const leaks: string[] = [];
+  for (const [key, value] of storage.entries()) {
+    if (key.includes(markerText)) leaks.push(`key ${key}`);
+    if (value.includes(markerText)) leaks.push(`value ${key}`);
+  }
+  return leaks;
+}
+
 
 const pick = <T,>(random: () => number, values: readonly T[]): T =>
   values[Math.floor(random() * values.length)] as T;
@@ -385,8 +460,61 @@ describe('cross-tab coordination invariants', () => {
     }
   });
 
+  it('names a planted topic plaintext in a key and in a value, and clears a hashed registry', () => {
+    // The sweep's fourth arm is an instrument like the two above it, and an
+    // instrument that cannot report anything would leave that arm looking
+    // exactly like a passing one — the shipped sweep's subjects are the topics
+    // it chose itself, so a detector keyed on the wrong field (or inverted) finds
+    // nothing on every seed and the arm is decoration. Pinned on fabricated
+    // input, in both directions and on both sides of the key/value split,
+    // because those are the four ways the reading can be wrong while still
+    // returning an empty list.
+    const seedMarker = marker(7);
+    const topic = `alpha-${seedMarker}`;
+    const clean = new MemoryStorage();
+    const base = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('coordination-invariants')}`;
+
+    // What the cluster actually persists: a hashed key, a record carrying the
+    // hash, and worker/subscriber keys built from ids that contain no `z`.
+    clean.setItem(`${base}:route:${createOpaqueKey(topic)}`, JSON.stringify({ topicKey: createOpaqueKey(topic), workerId: 'worker-tab-coord-a-1', tabId: 'tab-coord-a' }));
+    clean.setItem(`${base}:subscriber:${createOpaqueKey(topic)}:tab-coord-a`, JSON.stringify({ tabId: 'tab-coord-a', updatedAt: 1_000 }));
+    expect(plaintextLeaks(clean, seedMarker), 'a hashed registry must report nothing').toEqual([]);
+
+    // Key side: the subscriber record keyed by the plaintext it is about.
+    const keyedByPlaintext = new MemoryStorage();
+    keyedByPlaintext.setItem(`${base}:subscriber:${topic}:tab-coord-a`, JSON.stringify({ tabId: 'tab-coord-a' }));
+    expect(plaintextLeaks(keyedByPlaintext, seedMarker)).toEqual([`key ${base}:subscriber:${topic}:tab-coord-a`]);
+
+    // Value side: a hashed key whose record carries the topic beside the hash —
+    // the shape a "helpful" debug field would take, and the one the value half
+    // of the arm exists for.
+    const valuedWithPlaintext = new MemoryStorage();
+    valuedWithPlaintext.setItem(`${base}:route:${createOpaqueKey(topic)}`, JSON.stringify({ topicKey: createOpaqueKey(topic), topic }));
+    expect(plaintextLeaks(valuedWithPlaintext, seedMarker)).toEqual([`value ${base}:route:${createOpaqueKey(topic)}`]);
+
+    // Both sides of one entry report separately rather than collapsing.
+    const both = new MemoryStorage();
+    both.setItem(`${base}:route:${topic}`, JSON.stringify({ topic }));
+    expect(plaintextLeaks(both, seedMarker)).toEqual([`key ${base}:route:${topic}`, `value ${base}:route:${topic}`]);
+
+    // The marker cannot be produced by a derived key, which is what makes an
+    // empty result a statement about the plaintext rather than about luck: `zz`
+    // is not a hex digit and `createOpaqueKey` emits hex only. Measured here
+    // rather than asserted by reading, because the whole arm rests on it.
+    expect(createOpaqueKey(topic).includes('z'), 'a hashed key must not contain a non-hex marker').toBe(false);
+  });
+
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
+    // Kept apart from `failures` because the two are different claims with
+    // different evidence, and a shared array reports the wrong one first: a
+    // plaintext write trips the loop's stop condition within a seed or two, so
+    // the sweep never reaches `MIN_SEEDS` and the depth-floor assertion —
+    // "explored only 1 seeds" — fires before the finding that explains it. Both
+    // are real failures, so both are asserted; the order below is what makes the
+    // leak the headline.
+    const leaks: string[] = [];
+
     let completed = 0;
     let cutShort = 0;
     let churned = 0;
@@ -400,7 +528,10 @@ describe('cross-tab coordination invariants', () => {
     let slowestSeedMs = 0;
     let slowestSeed = 0;
     let slowestSeedOps = '';
-    for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6; seed += 1) {
+    // A leak stops the sweep too, for the same reason a convergence failure
+    // does: past a handful of findings the output stops being readable. The
+    // seed is deterministic, so the first one is the whole report.
+    for (let seed = 1; seed <= MAX_SEEDS && failures.length < 6 && leaks.length < 6; seed += 1) {
       const seedStartedAt = realNowMs();
       if (seedStartedAt - startedAt > SEED_BUDGET_MS) break;
       // Progress reported *during* the sweep, not only after it: when the host
@@ -414,6 +545,10 @@ describe('cross-tab coordination invariants', () => {
         );
       }
       const random = mulberry32(seed);
+      // Every topic this seed touches carries its own marker, so arm 4 can
+      // search the registry for a plaintext it planted (see `plaintextLeaks`).
+      const seedMarker = marker(seed);
+      const topics = topicsFor(seed);
       vi.useFakeTimers();
       const storage = new MemoryStorage();
       const hub = new ChannelHub();
@@ -449,7 +584,7 @@ describe('cross-tab coordination invariants', () => {
             break;
           }
           const tab = pick(random, tabs);
-          const topic = pick(random, TOPICS);
+          const topic = pick(random, topics);
           const roll = random();
           if (roll < 0.2) {
             ops.push(`${tab.label}:sub:${topic}`);
@@ -497,6 +632,20 @@ describe('cross-tab coordination invariants', () => {
             ops.push('flush');
           }
           await flushMicrotasks();
+          // Arm 4, checked on every step rather than only at the end. The other
+          // three arms are statements about a quiesced cluster and have to wait
+          // for one; a plaintext write is not — it is a fact about a single
+          // `setItem`, and a route/subscriber record deleted again by the next
+          // reconcile would leave the converged end state clean while the
+          // plaintext was readable in localStorage in between. Not gated on
+          // `aborted`, for the same reason: a seed the budget or the await cap
+          // cut still wrote whatever it wrote.
+          const stepLeaks = plaintextLeaks(storage, seedMarker);
+          if (stepLeaks.length > 0) {
+            leaks.push(
+              `seed=${seed} step=${step} ops=${ops.join(',')}: topic plaintext persisted — ${stepLeaks.join('; ')}`
+            );
+          }
           // The budget is what stops a non-converging loop, so a seed it cut never
           // quiesced: its end state is an artifact of the guard, and asserting on it
           // would report the harness as a product failure. Checked at every
@@ -524,13 +673,25 @@ describe('cross-tab coordination invariants', () => {
         }
         if (hub.deliveriesOverBudget()) aborted = true;
 
+        // Arm 4's second reading, and the only one that sees *flushed* state for
+        // writes the batching writer was still holding when the steps above
+        // sampled it (see `plaintextLeaks`). Placed after the settle rounds for
+        // that reason, and before the end-state comparison so a leak is reported
+        // even on a seed whose convergence is not being asserted.
+        const finalLeaks = plaintextLeaks(storage, seedMarker);
+        if (finalLeaks.length > 0) {
+          leaks.push(
+            `seed=${seed} after settle ops=${ops.join(',')}: topic plaintext persisted — ${finalLeaks.join('; ')}`
+          );
+        }
+
         // `aborted` gates the whole end-state comparison: an interleaving cut
         // short has not been given its twelve settle rounds, and the invariants
         // below are statements about a *quiesced* cluster.
         const state = tabs.map(tab => ({ tab, cluster: tab.bus.getClusterSnapshot() }));
         const trace = ops.join(',');
         const labels = (list: Tab[]) => `[${list.map(tab => tab.label).join(' ')}]`;
-        for (const topic of aborted ? [] : TOPICS) {
+        for (const topic of aborted ? [] : topics) {
           const topicKey = createOpaqueKey(topic);
           const expecters = tabs.filter(tab => tab.handlers.has(topic));
           const owners = state.filter(entry => entry.cluster.assignedTopics.includes(topic)).map(entry => entry.tab);
@@ -646,6 +807,11 @@ describe('cross-tab coordination invariants', () => {
           `${Math.round(slowestSeedMs)}ms: ${slowestSeedOps}`
       );
     }
+    // The leak first, for the reason named where `leaks` is declared: a leak
+    // ends the sweep early, so the depth floor below would otherwise be the
+    // assertion that fires and the finding would read as "the sweep stopped
+    // early" rather than "the cluster wrote a topic into localStorage".
+    expect(leaks).toEqual([]);
     // A budget that always fires early would let the suite go quiet on a slow
     // runner without anyone noticing, so depth is floored as well as capped.
     expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);

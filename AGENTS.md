@@ -150,6 +150,8 @@ cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
 
 `clusterHash` = `createOpaqueKey(clusterKey)`. Topic plaintext never appears in localStorage keys. BroadcastChannel control messages carry topic plaintext in memory only.
 
+Neither does it appear in the coordination plane's own *values*: every key and every record the cluster persists is derived from `topicKey`, which the multi-tab sweep in `tests/coordination-invariants.test.ts` enforces on both sides — it plants a per-seed marker in each topic name and searches the whole registry for it after every step, not only on the quiesced end state, because a record deleted again by the next reconcile would leave the converged state clean while the plaintext was readable in between. Two mutations fix the halves apart, and the numbers say which half had no gate: a route record carrying a `topic` field beside its `topicKey` fails **1 test in 969** (that sweep alone), while a plaintext-bearing key also trips two pre-existing cases that are about something else — a `clusterKey` namespace-containment assertion and the pagehide leftovers assertion. The two documented opt-ins that *do* write plaintext are outside the sweep by construction, since it drives the BroadcastChannel-shaped hub and installs no persistence adapter: `channelFallback: 'storage-event'` (whole frames) and `replay.persistence` (the object store is keyed by the plaintext topic).
+
 ## Opaque key design
 
 - `createOpaqueKey()` is a non-cryptographic 128-bit hash (four-lane MurmurHash-style mixing).
