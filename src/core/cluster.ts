@@ -1086,13 +1086,17 @@ export class WorkerClusterRuntime {
     // inherited from a legacy-peer concern (which is how the optional
     // `protocolVersion` above came to be tolerated, and legitimately). Its only
     // reachable traffic was a forger, and it disagreed with
-    // `handleRouteReleasedMessage`, which never had the tolerance: measured, a
-    // keyless SUBSCRIBE reached the control dispatch and put the attacker's
-    // plaintext into `assignedTopics` and `knownTopics` under the key
-    // `undefined`, so `getSnapshot().assignedTopics` claimed a topic this tab
-    // never subscribed until the next reconcile swept it. The case is
-    // "drops a control frame that carries no topicKey at all" in
-    // `tests/cluster.test.ts`.
+    // `handleRouteReleasedMessage`, which never had the tolerance. Measured with
+    // the clause restored and a keyless SUBSCRIBE forged at this worker, the frame
+    // reached the control dispatch, `getSnapshot().assignedTopics` came back
+    // `[…, 'no-key-channel']` for a topic this tab never subscribed to, and
+    // `knownTopics` held the attacker's plaintext under the key `undefined` — while
+    // `isAssigned('no-key-channel')` stayed false and no storage key or value
+    // carried the topic, which is why this is a lying snapshot for one tick rather
+    // than a routing hole. The next reconcile tick sweeps both entries. The case
+    // is "drops a control frame that carries no topicKey at all" in
+    // `tests/cluster.test.ts`; restoring the clause fails that case and nothing
+    // else in the suite.
     if (createOpaqueKey(message.topic) !== message.topicKey) return;
     this.rememberTopic(message.topic);
     switch (message.action) {
