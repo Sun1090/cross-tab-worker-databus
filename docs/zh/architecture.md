@@ -91,7 +91,7 @@ graph TB
 
 ## 存储结构
 
-所有 key 都通过 `createOpaqueKey(clusterKey)` 隔离。Topic 也以 128-bit 不透明 key 存储。
+所有 `localStorage` key 都通过 `createOpaqueKey(clusterKey)` 隔离。Topic 也以 128-bit 不透明 key 存储。（IndexedDB 不属于这个命名空间——见下面的 `replay.persistence` 说明。）
 
 BroadcastChannel 消息以明文传输 Topic 名称、事件类型和 publication payload。只有通道名称（由 `clusterKey` 派生）会被哈希处理。如果 Topic 名称包含敏感信息，请避免将其包含在明文 payload 中，或在数据总线之上使用端到端加密层。
 
@@ -152,13 +152,15 @@ interface WorkerRoute {
 | `topicKey === createOpaqueKey(topic)` | `CONTROL`（任意 action）与 `ROUTE_RELEASED` | 帧被忽略 |
 | 携带 `items` 的 `CONTROL/PUBLISH` 帧必须给出非空**数组** | `CONTROL/PUBLISH` | 帧被忽略 |
 
-第二行是所有权的授权前提。`topicKey` 是 `topic` 的纯函数，所以本库构造的每个帧两者必然一致；不一致就是替换而非变体。由于所有权依据 `topicKey` 对应的持久路由判定，而传输层订阅的名字来自 `topic`，不校验就允许一帧借用某个频道的授权去命名另一个频道。持久路由记录只保存 `topicKey`、从不保存明文，因此 key → 明文的映射只存在于内存中，无法通过协调记录注入。storage-event 降级通道是唯一一帧"经由 localStorage 到达"的路径；配对规则的作用不变——其他租户写进这块存储的帧，和直接 post 进通道一样无效。
+第二行是所有权的授权前提。`topicKey` 是 `topic` 的纯函数，所以本库构造的每个帧两者必然一致；不一致就是替换而非变体。由于所有权依据 `topicKey` 对应的持久路由判定，而传输层订阅的名字来自 `topic`，不校验就允许一帧借用某个频道的授权去命名另一个频道。
+
+这个比较是无条件的，而且**完全不带 `topicKey` 的帧属于同一类“不一致”**：该字段在这个消息变体上是必填的，`createOpaqueKey(topic)` 是 32 个十六进制字符，而 `undefined` 不是其中之一——因此缺失的字段在这里被丢弃，而不是被当成某种遗留形状。之所以值得写明，是因为另一种读法才是自然的那一种（这项检查拒绝的是*不一致*，那么一个没有可比对象的帧大概是被容忍的），而这正是有读者据此保留了一处守卫的原因，它让这类帧一路通行直到 0.21.42。持久路由记录只保存 `topicKey`、从不保存明文，因此 key → 明文的映射只存在于内存中，无法通过协调记录注入。storage-event 降级通道是唯一一帧"经由 localStorage 到达"的路径；配对规则的作用不变——其他租户写进这块存储的帧，和直接 post 进通道一样无效。
 
 第三行存在是因为批量路径会迭代负载：只有 `length` 而没有迭代器的值会从消息监听器里抛出异常；可迭代的非数组（字符串）会被当成多个单字符条目，其 `data` 为 `undefined`，随后 owner 会以自己的会话把它们发布出去。
 
 有两处是**故意不校验**的。`EVENT` 帧只做形状校验（`eventType` 加一个含字符串 `topic` 的负载）并转发其余字段，因为投递仍要求本地存在该频道的订阅者，而这种宽容正是新旧 SDK 版本能共处一个集群的前提。批量条目内部的*内容*也不校验：`{ data: 任意} ` 就是合法条目的样子，而 `messageId` / `timestamp` 只会被转发给 `transport.publish()`——接收侧在解析发布数据时会丢弃非字符串 id 与非有限数值时间戳。
 
-**给非 JS 对端或自定义 environment 的约定：**用 `createOpaqueKey` 从 topic 推导 `topicKey`，不要发送零条目的批次，并预期不一致的帧会被忽略且没有任何响应。
+**给非 JS 对端或自定义 environment 的约定：**用 `createOpaqueKey` 从 topic 推导 `topicKey`，并且**始终发送它**（不存在“缺少它”这一被容忍的形状），不要发送零条目的批次，并预期当这一对不一致、或 key 缺失时帧会被忽略且没有任何响应。
 
 ### `topic`、`topicKey`、`tabId`、`workerId` 与 BroadcastChannel 的关联
 
@@ -212,7 +214,7 @@ BroadcastChannel CONTROL
 
 **不透明 key 碰撞**。`createOpaqueKey` 是非密码学 128-bit 哈希。生日碰撞概率（50% 概率约需 2⁶⁴ 次尝试）远超单个集群处理的 topic 数量（最多几千个）。同样，`clusterKey` 也通过 `createOpaqueKey` 哈希来派生 storage 前缀和 BroadcastChannel 名称。实践中 `clusterKey` 通常是连接 URL 或开发者控制的命名空间，天然唯一，跨集群碰撞不是问题。
 
-**`clusterKey` 隔离边界**。`clusterKey` 定义了集群边界。两个使用不同 `clusterKey` 的 DataBus 实例——即使在同一 origin——也使用完全隔离的 storage 命名空间和 BroadcastChannel 名称，即使它们碰巧使用相同的 transport 连接。这就是不同逻辑集群（比如行情数据 vs 通知）共存而不互相干扰的方式。
+**`clusterKey` 隔离边界**。`clusterKey` 定义了集群边界。两个使用不同 `clusterKey` 的 DataBus 实例——即使在同一 origin——也使用完全隔离的 `localStorage` 命名空间和 BroadcastChannel 名称，即使它们碰巧使用相同的 transport 连接。这就是不同逻辑集群（比如行情数据 vs 通知）共存而不互相干扰的方式。唯一在这条边界之外的是 `replay.persistence` 这个开关：它的 IndexedDB object store 以 Topic 明文为 key，数据库名默认取 storage 前缀，因此完全不由 `clusterKey` 划分——当应用运行不止一个 cluster 时，请按 cluster 传入 `dbName`。完整的枚举见配置指南中的存储数据边界一节。
 
 **`knownTopics` 生命周期**。缓存在特定时机被写入、读取和清理：
 

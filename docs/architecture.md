@@ -101,7 +101,7 @@ Terms are explained in plain language; the code and the rest of this document us
 
 ## Storage Structure
 
-All keys are isolated by `createOpaqueKey(clusterKey)`. Topics are also stored as 128-bit opaque keys.
+All `localStorage` keys are isolated by `createOpaqueKey(clusterKey)`. Topics are also stored as 128-bit opaque keys. (IndexedDB is not part of this namespace — see the `replay.persistence` note below.)
 
 BroadcastChannel messages carry topic names, event types, and publication payloads in plaintext. Only the channel name (derived from `clusterKey`) is hashed. If topic names are sensitive, avoid including them as part of the plaintext payload, or use an end-to-end encryption layer on top of the data bus.
 
@@ -169,7 +169,14 @@ The second row is what makes ownership authorization meaningful. `topicKey` is a
 `topic`, so every frame this library builds has the two agreeing; a pair that disagrees is therefore a
 substitution, not a variant — and because ownership is authorized by the route stored under `topicKey`
 while the transport subscription is named by `topic`, an unchecked mismatch lets a frame borrow one
-channel's authorization to name another. The durable route record stores only `topicKey`, never the
+channel's authorization to name another.
+
+The comparison is unconditional, and **a frame that carries no `topicKey` at all is a disagreement of
+the same kind**: the field is required on this message variant, `createOpaqueKey(topic)` is 32 hex
+characters, and `undefined` is not one of them — so a missing field is dropped here rather than read as
+a legacy shape. That is worth stating because the alternative reading is the natural one (the check
+rejects a *mismatch*, so a frame with nothing to mismatch is presumably tolerated), and it was the
+reason one reader of this document kept a guard that let such a frame through until 0.21.42. The durable route record stores only `topicKey`, never the
 plaintext, so the key → name mapping exists only in memory and cannot be injected through the
 coordination records. The storage-event fallback channel is the one path where a frame — and with it
 a key/plaintext pair — does arrive through localStorage; the pairing rule is what makes a frame
@@ -188,8 +195,9 @@ only forwarded into `transport.publish()`, where the receiving side discards a n
 non-finite timestamp when it parses the publication.
 
 **For a non-JS peer or a custom environment:** derive `topicKey` from the topic with
-`createOpaqueKey`, never send a batch with zero items, and expect a frame to be ignored without any
-response if the pair disagrees.
+`createOpaqueKey` and **always send it** (there is no tolerated shape without it), never send a batch
+with zero items, and expect a frame to be ignored without any response if the pair disagrees or the key
+is missing.
 
 ### How `topic`, `topicKey`, `tabId`, `workerId`, and BroadcastChannel relate
 
@@ -242,7 +250,7 @@ Eviction is FIFO (insertion order, Map iteration order). When the cache exceeds 
 
 **Opaque key collision.** `createOpaqueKey` is a non-cryptographic 128-bit hash. The birthday collision bound (~2⁶⁴ for 50% probability) is far beyond the number of topics a single cluster handles (thousands at most). Similarly, `clusterKey` is hashed via `createOpaqueKey` to derive the storage prefix and BroadcastChannel name. In practice, `clusterKey` is always a connection URL or a developer-controlled namespace — naturally unique, so cross-cluster collision is not a concern.
 
-**`clusterKey` isolation.** The `clusterKey` defines the cluster boundary. Two DataBus instances with different `clusterKey` values — even in the same origin — operate on completely isolated storage namespaces and BroadcastChannel names, even if they happen to use the same transport connection. This is how different logical clusters (e.g. market data vs. notifications) coexist without cross-talk.
+**`clusterKey` isolation.** The `clusterKey` defines the cluster boundary. Two DataBus instances with different `clusterKey` values — even in the same origin — operate on completely isolated `localStorage` namespaces and BroadcastChannel names, even if they happen to use the same transport connection. This is how different logical clusters (e.g. market data vs. notifications) coexist without cross-talk. The one surface outside that boundary is the `replay.persistence` opt-in: its IndexedDB object store is keyed by the plaintext Topic and its database name defaults to the storage prefix, so it is not partitioned by `clusterKey` at all — pass `dbName` per cluster when an application runs more than one. See the Storage Data Boundaries section in the configuration guide for the full enumeration.
 
 **`knownTopics` lifecycle.** The cache is populated, read, and cleaned at specific points:
 
