@@ -271,3 +271,92 @@ describe('DedupManager — adaptive TTL', () => {
     expect(manager.getStats().ttlMs).toBe(100);
   });
 });
+
+describe('DedupManager — a clock that returns a non-finite number', () => {
+  it('holds the last finite reading instead of reporting NaN and freezing expiry', () => {
+    // `dedup.now` is a public option, so a host that injects a non-wall-clock
+    // source is inside the documented contract — and a source whose reading is
+    // *missing* rather than merely unusual is exactly what that option is for. Every
+    // comparison in this class is arithmetic on a timestamp, so one non-finite
+    // reading does not degrade one field: measured on the pre-fix class,
+    // `getStats().ttlMs` was `NaN` (which `JSON.stringify` writes as `null`, so a
+    // health summary carried a null where a duration belongs), the adaptive window
+    // never saw `elapsed >= ADAPTIVE_WINDOW_MS`, and the hot path's
+    // `now - timestamp > ttlMs` was `NaN > ttlMs` — false, so nothing expired and a
+    // repeated id stayed suppressed for as long as it stayed in the map.
+    let now = 1_000;
+    const manager = new DedupManager({
+      enabled: true,
+      maxEntries: 1_000,
+      ttlMs: 1_000,
+      adaptiveBounds: { minMs: 100, maxMs: 5_000 },
+      now: () => now,
+      trace: new DataBusTraceReporter({ enabled: false, sink: () => undefined }, () => now)
+    });
+    expect(manager.isDuplicate('a', 'topic')).toBe(false);
+    expect(manager.isDuplicate('a', 'topic'), 'a repeat inside the window is suppressed').toBe(true);
+
+    // The clock breaks. A quiet stretch long enough to close the sampling window
+    // returns the bound to maxMs, which is the value that then has to stand — a
+    // 400 ms pause would not do it (ADAPTIVE_WINDOW_MS is 5,000, and the existing
+    // 'resets the sampling window after the adaptive window elapses' case is the
+    // reference for that leg), so the clock is broken *after* the window closes.
+    now = 1_000 + 6_000;
+    expect(manager.getStats().ttlMs, 'an elapsed window relaxes to maxMs').toBe(5_000);
+
+    now = NaN;
+    const broken = manager.getStats();
+    expect(Number.isFinite(broken.ttlMs), 'a non-finite reading must not reach the diagnostics').toBe(true);
+    expect(broken.ttlMs, 'the last computed window stands').toBe(5_000);
+    // The serialized form matters as much as the value: this is what a diagnostics
+    // log or a health payload carries, and `NaN` becomes `null` there.
+    expect(JSON.parse(JSON.stringify(broken)).ttlMs).not.toBeNull();
+
+    // Time standing still is the degradation, and the measurable part of it is that
+    // the ledger keeps working: an id recorded while the clock is broken is still
+    // suppressed on repeat, and the tracked count stays exactly what was inserted.
+    // (The first draft asserted that the *earlier* id stayed suppressed, which is
+    // false for a reason that is not the clock's — 6,000 ms had already elapsed
+    // before the break, past the 5,000 ms bound, so that entry was genuinely stale.)
+    expect(manager.isDuplicate('b', 'topic'), 'a new id is recorded while the clock is broken').toBe(false);
+    expect(manager.isDuplicate('b', 'topic'), 'and it is still suppressed on repeat').toBe(true);
+    // Exactly the ids recorded since the break: the earlier one was already past
+    // the bound when the clock was still healthy, so its expiry is the ordinary
+    // expiry rather than anything the freeze did.
+    expect(manager.getStats().tracked, 'nothing is mass-expired and nothing leaks').toBe(1);
+
+    // When the clock recovers, expiry resumes from a real baseline rather than a
+    // poisoned one: the id recorded under the frozen clock is now long past the
+    // bound, and is accepted again as a first sighting.
+    now = 100_000;
+    expect(manager.isDuplicate('b', 'topic'), 'a recovered clock expires what the freeze held').toBe(false);
+    // Not `getStats()` here: the window closed on that reading and reset, so the
+    // next call re-derives from a fresh window that already holds one accepted
+    // message — a burst of one in zero elapsed ms legitimately reads as minMs. The
+    // property is that the window *works* again, so the check is a quiet stretch.
+    now = 100_000 + 6_000;
+    expect(manager.getStats().ttlMs, 'a recovered clock relaxes the window again').toBe(5_000);
+  });
+
+  it('starts its window at zero when the very first reading is already non-finite', () => {
+    // The fallback needs a previous finite value and the constructor has none, so
+    // this leg is the one place the choice is visible: zero rather than `NaN`.
+    // Zero is also the safe direction — a window that has not started is one where
+    // every subsequent reading has a real elapsed time to judge, whereas a `NaN`
+    // baseline would make every later `elapsed` non-finite too.
+    const manager = new DedupManager({
+      enabled: true,
+      maxEntries: 1_000,
+      ttlMs: 1_000,
+      // Adaptive bounds are what make `getStats()` report a `ttlMs` at all, so
+      // this leg needs them: without them the field is absent, and `Number.isFinite`
+      // on `undefined` is false for a reason that has nothing to do with the clock.
+      adaptiveBounds: { minMs: 100, maxMs: 5_000 },
+      now: () => Number.NaN,
+      trace: new DataBusTraceReporter({ enabled: false, sink: () => undefined }, () => Number.NaN)
+    });
+    expect(manager.getStats().ttlMs).toBe(5_000);
+    expect(manager.isDuplicate('a', 'topic')).toBe(false);
+    expect(manager.isDuplicate('a', 'topic')).toBe(true);
+  });
+});

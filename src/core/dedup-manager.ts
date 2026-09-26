@@ -80,6 +80,8 @@ export class DedupManager {
   private readonly seenMessageIds = new Map<string, number>();
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private windowStartedAt = 0;
+  /** The most recent finite reading of `now`, and the fallback for a broken one. */
+  private lastFiniteNow = 0;
   private windowAccepted = 0;
   private suppressed = 0;
   private accepted = 0;
@@ -92,7 +94,43 @@ export class DedupManager {
     this.sweepMs = options.sweepMs;
     this.now = options.now;
     this.trace = options.trace;
-    this.windowStartedAt = this.now();
+    // The first read has no previous finite value to fall back to, so a clock that
+    // is already non-finite starts the window at 0 rather than at `NaN` — the one
+    // value that would poison every comparison made against it below.
+    this.lastFiniteNow = Number.isFinite(this.now()) ? this.now() : 0;
+    this.windowStartedAt = this.lastFiniteNow;
+  }
+
+  /**
+   * The injected clock, normalized.
+   *
+   * `dedup.now` is a public option and a non-wall-clock host is exactly the case it
+   * exists for — one whose reading can be *missing* rather than merely unusual. Every
+   * comparison this class makes is arithmetic on a timestamp, so a single non-finite
+   * reading does not degrade one field: `now - timestamp > ttlMs` becomes
+   * `NaN > ttlMs` (false, so nothing expires), the adaptive window's
+   * `elapsed >= ADAPTIVE_WINDOW_MS` never fires, and `getStats().ttlMs` reports
+   * `NaN` — which `JSON.stringify` turns into `null`, so a health summary or a
+   * diagnostics log would carry a null where a duration belongs. Measured on the
+   * pre-fix class: `getStats().ttlMs` → `NaN`, serialized → `null`, and an id
+   * stayed suppressed for as long as it stayed in the map.
+   *
+   * Holding the last finite reading is the degradation that changes least: time
+   * stands still, expiry pauses, and the adaptive window keeps the value it last
+   * computed. Substituting `Date.now()` would be worse — it silently mixes two
+   * clocks — and zeroing would expire the whole map on the next call. This is the
+   * same class of guard `trace.ts` carries on its own public clock, and that
+   * `websocket.ts` and `replay-manager.ts` apply to their numeric options; it is one
+   * helper rather than a condition per site because the broken input is the *clock*,
+   * not any particular comparison.
+   */
+  private nowMs(): number {
+    const reading = this.now();
+    if (Number.isFinite(reading)) {
+      this.lastFiniteNow = reading;
+      return reading;
+    }
+    return this.lastFiniteNow;
   }
 
   /** True when a publication carrying `messageId` was already seen. Records the
@@ -100,7 +138,7 @@ export class DedupManager {
    * always pass through. */
   isDuplicate(messageId: string, topic: string): boolean {
     if (!this.enabled || !messageId) return false;
-    const now = this.now();
+    const now = this.nowMs();
     // Opportunistic expiry on the hot path keeps the map bounded between sweeps.
     // This must use the effective (adaptive) TTL, not the fixed one: otherwise
     // a burst that shrinks the window toward minMs would still retain IDs for
@@ -162,13 +200,13 @@ export class DedupManager {
     this.seenMessageIds.clear();
     this.suppressed = 0;
     this.accepted = 0;
-    this.windowStartedAt = this.now();
+    this.windowStartedAt = this.nowMs();
     this.windowAccepted = 0;
   }
 
   /** Remove IDs whose timestamp predates the effective TTL cutoff. */
   private pruneExpired(): void {
-    const cutoff = this.now() - this.currentTtl();
+    const cutoff = this.nowMs() - this.currentTtl();
     for (const [id, timestamp] of this.seenMessageIds) {
       if (timestamp < cutoff) this.seenMessageIds.delete(id);
     }
@@ -180,7 +218,7 @@ export class DedupManager {
    * every ADAPTIVE_WINDOW_MS. */
   private currentTtl(): number {
     if (!this.adaptiveBounds) return this.ttlMs;
-    const now = this.now();
+    const now = this.nowMs();
     const elapsed = now - this.windowStartedAt;
     if (elapsed >= ADAPTIVE_WINDOW_MS) {
       this.windowStartedAt = now;
