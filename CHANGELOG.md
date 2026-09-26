@@ -1,3 +1,12 @@
+## [0.21.44] - 2026-09-26
+
+`0.21.43` guarded one clock; enumerating the rest found that the same input reached durable state, where the consequence is not a wrong number but a sentinel. No API, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.43`'s.
+
+### Fixed
+
+- **A non-finite environment clock was written into localStorage as `null`, and `null` coerces to `0`.** `ClusterEnvironment.now` is a required field whose documented hazard is a *backwards* step, which every `now - stamped > ttl` site already reads as "not yet expired" — but a missing reading is outside that contract, and it did not degrade one field: the durable worker, route and subscriber records were written with `"updatedAt": null`, because `JSON.stringify(NaN)` is `null`. That is worse than a wrong number rather than merely different, because `null` coerces to `0` in the TTL arithmetic, so **the first tick after the clock recovered would read every record as ancient and prune the whole cluster at once**. A poisoned in-memory comparison heals when the clock recovers; a poisoned record does not. The cluster now holds the last finite reading across its ten read sites, and the bus normalizes once at the single place it binds a clock — which covers its own stamps *and* the dedup manager it hands the same function to, the site `0.21.43` guarded at its own boundary.
+- **Both guards are pinned by cases that had to be rewritten to measure anything.** The cluster case first filtered records with `typeof reading !== 'number'`, and the value this bug leaves is `null`, whose `typeof` is `"object"` — the predicate skipped exactly what it existed to catch, and the guard's own mutation passed it. The bus case only read fields the broken window never touches, so it passed the unguarded binding too; driving a rewrite under the broken clock is what made it a check. Each mutation now dies at one test: `stored a non-finite heartbeatAt`, and `the recovery ledger stamps a finite time`.
+
 ## [0.21.43] - 2026-09-26
 
 Two claims about the storage boundary turned out to be narrower than the storage was, and a public clock could report `NaN` into the health summary. No library behavior, export, option, default, frame or storage key changed beyond the one guard; the coverage floors and the zero-count arm ledger are `0.21.42`'s.
