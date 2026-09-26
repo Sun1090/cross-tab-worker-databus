@@ -9419,6 +9419,33 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Update date:** 2026-09-26
 
 
+## Phase 240 / Every gate this session added now has a measured leg, and the release decision is recorded with its reason
+
+- **Milestone / version:** post-`0.21.42`, unreleased, and **no release is owed for this batch** — a decision, not an omission. Branch `docs/session-closing-record`, off `main` at `d187bad`.
+- **The release decision, with the number that decided it.** Unreleased on `main` right now: two documentation corrections that reach consumers (`docs/configuration.md` and `docs/architecture.md`, each with its zh mirror), one shipped `src/` comment, and five new gates. Of those, only the documentation and the comment are in `files`; the gates are development-only, and the corrections are additive scoping facts rather than errata about a claim a consumer would act on wrongly. `0.21.42` shipped two hours before this batch was written, so the next release would carry three clarifying sentences — the shape of release this repository has already decided against ("do not publish for every small task"). The rule that decides it is the one already in the record: unreleased work rides the next prep for free, and a thin release spends a version number to move nothing a reader is misled by. They live on `main` in the meantime, so a reader on GitHub — the audience a documentation correction actually has — sees them now.
+- **The mutation ledger for everything added since `0.21.41`, because a gate with no recorded leg is an assertion, not a check.** Nine legs, each applied alone with `src/` restored and `git status` confirming the restore:
+  | Gate | Leg | Dies at |
+  |---|---|---|
+  | coordination sweep, plaintext arm (Phase 231) | route record grows a `topic` field | `1 test in 969`, that arm alone |
+  | | plaintext key outside every scanned prefix | that arm + 2 pre-existing cases about something else |
+  | | subscriber record keyed by the topic | 18 (a *functional* break; most of that kill set is convergence) |
+  | storage-writer enumeration (Phase 232) | unlisted writer | `not in the table: expected 12 to deeply equal 11` |
+  | | the same leak admitted without an opt-in marker | `not one of the two documented opt-ins: expected 4 to deeply equal 3` |
+  | | `.put(` dropped / pattern misspelled / declaration filter removed | 9 vs 11 / the row-count floor 6 vs 8 / 12 vs 11 |
+  | record contents (Phase 236) | undeclared `lastTopic` field | the shape case, *and* the writer table, *and* the sweep arm |
+  | | connection URL in a record | the three above plus the URL case |
+  | | a required interface field nothing writes | `a required TopicSubscriberRecord field was never written` |
+  | replay-store scoping (Phase 235) | `dbName` ignored | `a named database must not read the default one` |
+  | dedup pin (Phase 235) | dedup check on the `EVENT` path | `a real publication must not be suppressed by a forged id` |
+  | keyless frame (Phase 233) | tolerance restored | 1 test of 972, the new case |
+- **Two of those legs were wrong before they were right, and both are why the table has a column for the failure message.** The dedup pin passed against its own mutation because the real publication in the scenario carried no `messageId` — an id-less publication is not a duplicate of anything, so the case was measuring nothing. The record-contents case initially read a registry nothing had flushed into (every record write coalesces in a microtask) and then read it *after* `stop()`, which leaves none of the worker's own records, so the boundary would have been empty and the case would have passed for the wrong reason. A gate that is verified only by the tree being green is not verified, and the second of those would have shipped a permanently-passing case.
+- **The surfaces swept, and what each returned.** The library: the coordination plane, the two transports, the adapters, the replay manager and its IndexedDB adapter — the pairing guard produced the session's one behavior change. The shipped docs: an absolutes sweep over the `files` list, which found the two isolation copies (Phase 237) and cleared five claims by measurement (Phase 238). The examples: the radiogroup's roving tabindex, arrow-key handling and `aria-checked` are all correct, the status badge carries `role="status"` with `aria-live="polite"`, and the icon-only button has an `aria-label` — nothing found. The ledger: 46 zero-count arms, none added or removed, aggregates `99.02 / 97.63 / 99.27 / 99.69` over 39 files and 976 tests.
+- **What is blocked, with the numbers rather than a judgement.** `bench:browser` for the seventh consecutive cycle: load average read 141.87, 154.79, 60.83, 52.88 and finally 125.80 on 8 cores across this session, against a bar that the 0.21.15-era poison at 7.7–15.1 already failed, so the archive's newest report is still `browser-2026-09-24T13-40-52-413Z.json` and every tag from `v0.21.23` on (21) has shipped without a sample. TypeScript 7 is upstream-blocked: npm `latest` `7.0.2` against `typescript-eslint`'s published peer range `>=4.8.4 <6.1.0`, both read with `--registry=https://registry.npmjs.org` rather than the configured mirror, and `pnpm audit --registry=https://registry.npmjs.org` reports no known vulnerabilities. And one item is a **product decision rather than a finding**: whether `replay.persistence` should namespace its IndexedDB database by `clusterKey` by default. It is documented and pinned either way; changing it would alter what every existing opt-in reads on upgrade, and that trade-off belongs to the maintainer.
+- **Changed files:** `docs/progress.md` (this record). Nothing else — the closing state of the tree is the tree `d187bad` left, and this is the only commit after it.
+- **Verification:** `pnpm check` exit 0 (**39 test files, 976 tests** + typecheck, build, 5 perf gates) and `pnpm lint` exit 0 on this tree; the documentation gate 25 passed with the entry in place; `git status` clean; `git ls-remote --heads origin` lists only `main`, with no open pull requests and no stale topic branches.
+- **Update date:** 2026-09-26
+
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
