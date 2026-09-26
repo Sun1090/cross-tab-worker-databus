@@ -162,6 +162,7 @@ That leaves exactly one way to add a *third* one — a new `setItem`/`.put`/`wri
 - `knownTopics`' eviction scan skips two candidates, and both are load-bearing for different reasons. A key the worker still owns (`this.assignedTopics.has(candidate)`), because the storage-less fallback path recovers its plaintext only from here; and the key being remembered (`candidate === topicKey`), because a fresh `Map.set` lands at the **back**, so the front-scan reaches it only in the all-owned state above — and there deleting it would discard the mapping the call exists to install. Both are pinned by named cases in `tests/cluster.test.ts`; the second was live and unpinned until 0.21.34, when deleting it was found to leave the whole suite green.
 - `isAssigned()` deliberately recomputes the hash via `createOpaqueKey` rather than calling `rememberTopic()` — it's a read-only query that must not populate the cache.
 - `clusterKey` defines the cluster boundary: different clusterKeys = fully isolated storage and BroadcastChannel namespaces. One exception, in the derivation rather than the hash: `options.clusterKey || '__default__'` means an **empty** key is hashed as the literal `'__default__'`, so `''` and `'__default__'` are the same cluster (pinned by `tests/cluster.test.ts`'s 'treats an empty clusterKey as the default cluster…').
+- A second exception is an opt-in rather than a derivation, and it is outside the coordination plane entirely: `replay.persistence` writes an IndexedDB object store keyed by the **plaintext topic**, in a database whose name defaults to the storage prefix and never sees `clusterKey`. Measured in `tests/replay-persistence.test.ts`'s 'shares one object store across clusterKeys unless the app names the database': two adapters built with default options read each other's rows, and passing `dbName` per cluster is what separates them. So "fully isolated namespaces" is a claim about localStorage keys and the BroadcastChannel name, and an application running two clusters in one origin must namespace the replay store itself.
 
 ## Wildcard topic subscriptions
 
@@ -275,6 +276,21 @@ that other tabs then observe. Do not "harden" `EVENT` with an `isAssigned`/route
 against the same-origin threat and would break the older and newer SDK versions the shape-only check
 exists to tolerate. Reopen this only if `EVENT` payloads gain reach beyond local handlers plus that
 topic's own replay buffer.
+
+**That condition was re-checked on both routes it names, and the decision stands** — the two are worth
+stating because each looked open before it was measured. (1) *Suppression*: the dedup ledger is the one
+place a forged frame could remove a real publication instead of adding one, and that is the only route
+that would carry reach past the replay buffer. `DedupManager.isDuplicate` has exactly one caller,
+`handleTransportMessage`, while an `EVENT` arrives on `onEvent` and dispatches without consulting it —
+so the route is closed structurally, and `tests/data-bus.test.ts`'s 'does not let a forged EVENT suppress
+a later real publication with the same messageId' pins it behaviourally, because a call-graph claim does
+not survive a refactor that moves the check. (2) *Durability*: the "that topic's own replay buffer" half
+is tab-local only while replay history stays in memory. With `replay.persistence` on it is an
+origin-wide IndexedDB store keyed by the plaintext topic (see the `clusterKey` bullet), so a forged
+payload can outlive the tab and be hydrated by a bus in a **different** cluster. That is the opt-in's
+own documented trade-off rather than new `EVENT` reach, and it does not move the verdict, because a
+same-origin script can already publish that payload into any bus it can reach — which is the argument
+the paragraph was making, and it survives the store being wider than the tab.
 
 ## Reconcile loop (3s default)
 

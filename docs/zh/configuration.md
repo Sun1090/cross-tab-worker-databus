@@ -266,7 +266,7 @@ Worker 模式下配置通过 `Worker` / `SharedWorker` 的 `postMessage` 发送�
 这是对**这些键**的约束，不是对浏览器存储整体的约束。有两个开关会把 Topic 明文和 payload 写进去：
 
 - `channelFallback: 'storage-event'` 把每一帧协调消息整体写到 `cross-tab-worker-databus:channel:*` 之下，而一条 `CONTROL/PUBLISH` 帧同时携带它的 Topic 名称与 payload——因此这些数据会留在 `localStorage` 直到该 channel 关闭，若 tab 先退出则无限期保留。
-- `replay.persistence`（如 `createIndexedDbReplayPersistence`）把回放历史存在 IndexedDB 的一个 object store 里，该 store 以 Topic 明文为 key，payload 就在其中的行里。
+- `replay.persistence`（如 `createIndexedDbReplayPersistence`）把回放历史存在 IndexedDB 的一个 object store 里，该 store 以 Topic 明文为 key，payload 就在其中的行里。这个 store 只以 Topic 为 key，别无其他——它的数据库名默认取本包的 storage 前缀——因此它**不**按 `clusterKey` 或 tab 划分作用域：同一 origin 下运行的两个 cluster 会读到彼此在共同 Topic 上的行。当应用运行不止一个 cluster 时，请按 cluster 传入 `dbName`。
 
 这两个就是全部，而且是核对出来的而非声称的：`src/` 中每一处持久化写入都在 `tests/storage-writers.test.ts` 里列成表，新增一处写入——或新增一行不归属于上面两个开关却携带 Topic 的记录——都会让测试失败。
 
