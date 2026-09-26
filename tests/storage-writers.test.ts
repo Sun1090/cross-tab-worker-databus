@@ -20,6 +20,16 @@
  * opt-ins, so a new site that mentions a topic cannot be added quietly even if
  * someone updates the table — the word test and the table have to agree.
  *
+ * ## The other half: what those records hold
+ *
+ * The second `describe` below pins the *contents* of the coordination records,
+ * which is the claim `docs/configuration.md` states as a four-item list of things
+ * they "never hold" (connection URL, topic names, credentials, publication data)
+ * behind a list of what they do. The writers tell you where the bytes go; only a
+ * reader of the written records can say what is in them, and the two opt-ins that
+ * *do* put plaintext there are the reason the difference matters: the same claim,
+ * asserted about the wrong half, would pass.
+ *
  * What the word test is and is not: it is a *pointer*, not the judgment, and it
  * is why the two opt-ins are named in this file rather than discovered by it. A
  * writer that leaks a topic without naming one still passes it, so the table's
@@ -39,6 +49,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { CrossTabDataBus } from '../src/core/data-bus'
+import { createOpaqueKey } from '../src/core/hash'
+import { DEFAULT_STORAGE_PREFIX } from '../src/utils/constants'
+import { ChannelHub, FakeTransport, MemoryStorage, createFakeEnvironment, flushMicrotasks } from './fakes'
 
 /** The call shapes that put something into a store that outlives the call. */
 const WRITE_PATTERNS: readonly RegExp[] = [/\.setItem\(/g, /\.put\(/g, /\bwriteJson\(/g];
@@ -262,5 +276,150 @@ describe('persistent storage writers', () => {
       "channelFallback: 'storage-event'",
       'replay.persistence'
     ]);
+  });
+});
+
+/** The record interfaces, read from `src/core/types.ts` rather than restated here,
+ * so the comparison is between what the code declares and what it writes, not
+ * between two copies of a list. Optional members are reported separately: they
+ * are the ones a scenario has to provoke (`confirmedAt` needs an owner to
+ * acknowledge a handoff), and folding them in would make the test assert that a
+ * hard-to-reach field is always present. */
+function recordFields(interfaceName: string): { required: string[]; optional: string[] } {
+  const types = repoFile('src/core/types.ts');
+  const start = types.indexOf(`export interface ${interfaceName} `);
+  expect(start, `interface ${interfaceName} not found in src/core/types.ts`).toBeGreaterThanOrEqual(0);
+  // The block runs to the first line that closes the interface at column 0.
+  const block = types.slice(start).split('\n').slice(1).join('\n');
+  const end = block.search(/^}/m);
+  const body = end === -1 ? block : block.slice(0, end);
+  const required: string[] = [];
+  const optional: string[] = [];
+  for (const match of body.matchAll(/^\s{2}([A-Za-z][A-Za-z0-9]*)(\??):/gm)) {
+    (match[2] === '?' ? optional : required).push(match[1]!);
+  }
+  return { required, optional };
+}
+
+/** Every persisted record under `prefix`, parsed. */
+function readRecords(storage: MemoryStorage, prefix: string): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  for (const [key, value] of storage.entries()) {
+    if (!key.includes(prefix)) continue;
+    records.push(JSON.parse(value) as Record<string, unknown>);
+  }
+  return records;
+}
+
+describe('coordination record contents', () => {
+  /** One bus, one fake environment, a full lifecycle: subscribe, publish, tick,
+   * hide and show, so every writer in `cluster.ts` has run at least once.
+   *
+   * Async on purpose, and for a reason this repository has already paid for twice:
+   * every record write goes through `BatchingStorageWriter`, which coalesces
+   * same-task writes and flushes in a microtask. A synchronous lifecycle reads a
+   * registry nothing has been flushed into yet, and the "no record was written"
+   * floor below is what catches that — it is the difference between a red case and
+   * a case that passes for the wrong reason. */
+  async function lifecycle(): Promise<{ whileRunning: Array<[string, string]>; afterStop: Array<[string, string]> }> {
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'record-contents' });
+    const bus = new CrossTabDataBus<object, { secret: string }>({
+      // The two strings the shipped list says these records never hold. A URL and
+      // a token are what an application actually puts in here, so the premise is
+      // the real shape rather than a marker chosen to be easy to find.
+      clusterKey: 'record-contents',
+      environment: env.environment,
+      initialConfig: { url: 'wss://example.invalid/connection', token: 'super-secret-credential' },
+      transport: new FakeTransport<{ secret: string }>(),
+      replay: { maxPerTopic: 4 }
+    });
+    bus.start({});
+    await flushMicrotasks();
+    bus.subscribe('orders', () => undefined);
+    await flushMicrotasks();
+    bus.publish('orders', { secret: 'payload-plaintext' });
+    await flushMicrotasks();
+    now += 3_000;
+    env.runIntervals();
+    await flushMicrotasks();
+    env.pageHide();
+    await flushMicrotasks();
+    env.pageShow();
+    await flushMicrotasks();
+    // Snapshot *before* `stop()`, because `stop()` is a teardown and a clean one:
+    // measured on this tree, it leaves the registry holding none of the worker's
+    // own records, so a snapshot taken afterwards reads as an empty boundary and
+    // the case would pass for the wrong reason. The post-stop state is returned
+    // too, and asserted empty below — as a control on the lifecycle rather than as
+    // a second claim, since a teardown that stopped cleaning up would otherwise
+    // leave these cases reading a registry of leftovers.
+    const whileRunning = storage.entries();
+    await bus.stop();
+    await flushMicrotasks();
+    return { whileRunning, afterStop: storage.entries() };
+  }
+
+  const PREFIX = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('record-contents')}`;
+
+  it('writes no field outside the interface each record declares', async () => {
+    // Both directions, because each catches a different mistake. A field that is
+    // written but not declared is the security-relevant one: it is invisible to
+    // every type-level reading of the record, and it is exactly how a `topic` or
+    // a URL would get into a record that still "only holds" identity. A declared
+    // field that is never written is the other: a record silently narrower than
+    // its own type, which is how `confirmedAt` and `throughput` go missing.
+    const { whileRunning, afterStop } = await lifecycle();
+    const storage = new MemoryStorage();
+    for (const [key, value] of whileRunning) storage.setItem(key, value);
+    expect(afterStop, 'the teardown left records behind, so the snapshot above is not what a running tab holds').toEqual([]);
+    for (const [prefix, interfaceName] of [
+      [':worker:', 'WorkerRecord'],
+      [':route:', 'WorkerRoute'],
+      [':subscriber:', 'TopicSubscriberRecord']
+    ] as const) {
+      const records = readRecords(storage, `${PREFIX}${prefix}`);
+      expect(records.length, `no ${interfaceName} was written — the lifecycle stopped short`).toBeGreaterThan(0);
+      const { required, optional } = recordFields(interfaceName);
+      expect(required.length, `${interfaceName} declared no required field`).toBeGreaterThan(0);
+      const declared = new Set([...required, ...optional]);
+      for (const record of records) {
+        const undeclared = Object.keys(record).filter(field => !declared.has(field));
+        expect(
+          undeclared,
+          `a ${interfaceName} carries field(s) its interface does not declare`
+        ).toEqual([]);
+      }
+      // The required fields must all be present in at least one written record,
+      // which also proves the parse above produced real objects.
+      const observed = new Set(records.flatMap(record => Object.keys(record)));
+      expect(
+        required.filter(field => !observed.has(field)),
+        `a required ${interfaceName} field was never written`
+      ).toEqual([]);
+    }
+  });
+
+  it('never writes the connection URL, a credential or a publication payload', async () => {
+    // The other three items of the shipped four-item list. The topic item is the
+    // one the coordination sweep fuzzes after every operation
+    // (`tests/coordination-invariants.test.ts`); this is its deterministic
+    // counterpart for the two values that only exist once a transport config
+    // carries them, and it is the only place in the suite where a URL and a token
+    // are handed to a bus that then runs a lifecycle and has its storage read.
+    const { whileRunning } = await lifecycle();
+    const seen = whileRunning;
+    // A floor, so a lifecycle that persisted nothing reports "clean" below
+    // rather than passing for the right reason.
+    expect(seen.length, 'the lifecycle wrote nothing to storage').toBeGreaterThan(0);
+    for (const [key, value] of seen) {
+      expect(key, 'a coordination key carries the connection URL').not.toContain('example.invalid');
+      expect(key, 'a coordination key carries a credential').not.toContain('super-secret-credential');
+      expect(value, 'a coordination record carries the connection URL').not.toContain('example.invalid');
+      expect(value, 'a coordination record carries a credential').not.toContain('super-secret-credential');
+      expect(value, 'a coordination record carries publication data').not.toContain('payload-plaintext');
+    }
   });
 });
