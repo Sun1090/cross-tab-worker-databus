@@ -275,6 +275,8 @@ That is a boundary around *those keys*, not around browser storage in general. T
 - `channelFallback: 'storage-event'` writes every coordination **frame** whole under `cross-tab-worker-databus:channel:*`, and a `CONTROL/PUBLISH` frame carries its Topic name and payload — so they sit in `localStorage` until the channel is closed, and indefinitely if the tab is killed first.
 - `replay.persistence` (e.g. `createIndexedDbReplayPersistence`) keeps replay history in IndexedDB in an object store keyed by the plaintext Topic, with the payloads in its rows.
 
+Those two are the complete list, and it is checked rather than asserted: every durable write in `src/` is enumerated in `tests/storage-writers.test.ts`, and a new one — or a new row that carries a Topic without naming one of these two options — fails the suite.
+
 Note: BroadcastChannel coordination messages carry topic names, event types, and publication payloads in plaintext (in memory only, unless the fallback above is what is carrying them). Only localStorage metadata is hashed via `createOpaqueKey()`.
 
 ## Security & Trust Model

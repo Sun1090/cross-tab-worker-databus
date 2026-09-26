@@ -96,7 +96,8 @@ tests/
   stability.test.ts             # Owner-handoff ACK validation against the route record
   property.test.ts              # selectActiveWorkers invariants (subset, bound, never throws)
   regression.test.ts            # Locale-independent routing tie-break
-  coordination-invariants.test.ts # Multi-tab seeded fuzz: one owner, no orphan, once-per-publication
+  coordination-invariants.test.ts # Multi-tab seeded fuzz: one owner, no orphan, once-per-publication, no plaintext
+  storage-writers.test.ts      # Every durable write in src/ enumerated, and the topic-bearing ones are the two opt-ins
   lifecycle-invariants.test.ts  # Interleaving sweep over bus/cluster/transport flags
   hooks.test.tsx                # React hooks (jsdom + @testing-library/react)
   vue.test.ts                   # Vue composables (jsdom, app lifecycle, status mirror)
@@ -151,6 +152,8 @@ cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
 `clusterHash` = `createOpaqueKey(clusterKey)`. Topic plaintext never appears in localStorage keys. BroadcastChannel control messages carry topic plaintext in memory only.
 
 Neither does it appear in the coordination plane's own *values*: every key and every record the cluster persists is derived from `topicKey`, which the multi-tab sweep in `tests/coordination-invariants.test.ts` enforces on both sides — it plants a per-seed marker in each topic name and searches the whole registry for it after every step, not only on the quiesced end state, because a record deleted again by the next reconcile would leave the converged state clean while the plaintext was readable in between. Two mutations fix the halves apart, and the numbers say which half had no gate: a route record carrying a `topic` field beside its `topicKey` fails **1 test in 969** (that sweep alone), while a plaintext-bearing key also trips two pre-existing cases that are about something else — a `clusterKey` namespace-containment assertion and the pagehide leftovers assertion. The two documented opt-ins that *do* write plaintext are outside the sweep by construction, since it drives the BroadcastChannel-shaped hub and installs no persistence adapter: `channelFallback: 'storage-event'` (whole frames) and `replay.persistence` (the object store is keyed by the plaintext topic).
+
+That leaves exactly one way to add a *third* one — a new `setItem`/`.put`/`writeJson` in `src/` — and `tests/storage-writers.test.ts` is what makes it a decision rather than an accident: it pins the set of durable write sites to a table, so an unlisted writer fails the build, and it re-derives which of those sites carry a topic, so a row cannot be added quietly. Read that file's `TOPIC_CARRIER` note before extending it: the obvious word test was measured *passing* a leak that travelled through a variable named `topicKey`, which is why the term that carries the weight is `knownTopics`, the one map that turns a hash back into a name.
 
 ## Opaque key design
 

@@ -268,6 +268,8 @@ Worker 模式下配置通过 `Worker` / `SharedWorker` 的 `postMessage` 发送�
 - `channelFallback: 'storage-event'` 把每一帧协调消息整体写到 `cross-tab-worker-databus:channel:*` 之下，而一条 `CONTROL/PUBLISH` 帧同时携带它的 Topic 名称与 payload——因此这些数据会留在 `localStorage` 直到该 channel 关闭，若 tab 先退出则无限期保留。
 - `replay.persistence`（如 `createIndexedDbReplayPersistence`）把回放历史存在 IndexedDB 的一个 object store 里，该 store 以 Topic 明文为 key，payload 就在其中的行里。
 
+这两个就是全部，而且是核对出来的而非声称的：`src/` 中每一处持久化写入都在 `tests/storage-writers.test.ts` 里列成表，新增一处写入——或新增一行不归属于上面两个开关却携带 Topic 的记录——都会让测试失败。
+
 注意：BroadcastChannel 协调消息以明文传输 Topic 名称、事件类型和 publication payload（仅存在于内存中，除非承载它们的是上面那条降级通道）。只有 localStorage 元数据通过 `createOpaqueKey()` 哈希处理。
 
 ## 安全与信任模型
