@@ -47,6 +47,37 @@ describe('createIndexedDbReplayPersistence', () => {
     expect(await persistence.load()).toEqual([message('t', 1), message('t', 2)]);
   });
 
+  it('shares one object store across clusterKeys unless the app names the database', async () => {
+    // The adapter's database name defaults to the storage prefix and its store
+    // name is the constant 'replay', so the store is keyed by the *plaintext
+    // topic* and nothing else — no clusterKey, no tab, no session. Two adapters
+    // built with default options therefore see each other's rows, which is what
+    // this case states rather than asserts as desirable: the `clusterKey`
+    // isolation the coordination plane provides does not extend here, and an
+    // application running two clusters in one origin (two tenants, two
+    // connections) has to pass `dbName` per cluster to get it.
+    //
+    // What makes it worth pinning rather than only documenting: the isolation
+    // claim is a *structural* property of the coordination plane (every key
+    // derives from `createOpaqueKey(clusterKey)`), so it is invisible here by
+    // construction, and a future default that did namespace the store would
+    // change what an application sees on upgrade without any other test failing.
+    const first = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    const second = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4 });
+    await first.append(message('orders', 1));
+    expect(await second.load(), 'a second adapter must see the first adapter\'s rows').toEqual([
+      message('orders', 1)
+    ]);
+
+    // Naming the database is the documented remedy, and it works: a third
+    // adapter pointed at its own database sees an empty store.
+    const other = createIndexedDbReplayPersistence<{ value: number }>({ maxPerTopic: 4, dbName: 'tenant-b' });
+    expect(await other.load(), 'a named database must not read the default one').toEqual([]);
+    await other.append(message('orders', 2));
+    expect(await other.load()).toEqual([message('orders', 2)]);
+    expect(await first.load(), 'the two must now be independent').toEqual([message('orders', 1)]);
+  });
+
   it('rejects invalid configuration', () => {
     expect(() => createIndexedDbReplayPersistence({ maxPerTopic: 0 })).toThrow('maxPerTopic');
     expect(() => createIndexedDbReplayPersistence({ maxPerTopic: 4, pruneStrategy: 'bogus' as 'count' })).toThrow('pruneStrategy');

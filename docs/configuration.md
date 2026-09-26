@@ -273,7 +273,7 @@ Those records never hold:
 That is a boundary around *those keys*, not around browser storage in general. Two opt-ins put Topic plaintext and payloads into it:
 
 - `channelFallback: 'storage-event'` writes every coordination **frame** whole under `cross-tab-worker-databus:channel:*`, and a `CONTROL/PUBLISH` frame carries its Topic name and payload — so they sit in `localStorage` until the channel is closed, and indefinitely if the tab is killed first.
-- `replay.persistence` (e.g. `createIndexedDbReplayPersistence`) keeps replay history in IndexedDB in an object store keyed by the plaintext Topic, with the payloads in its rows.
+- `replay.persistence` (e.g. `createIndexedDbReplayPersistence`) keeps replay history in IndexedDB in an object store keyed by the plaintext Topic, with the payloads in its rows. That store is keyed by the Topic and nothing else — its database name defaults to the package's storage prefix — so it is **not** scoped by `clusterKey` or by tab: two clusters running in one origin read each other's rows for any Topic they share. Pass `dbName` per cluster when an application runs more than one.
 
 Those two are the complete list, and it is checked rather than asserted: every durable write in `src/` is enumerated in `tests/storage-writers.test.ts`, and a new one — or a new row that carries a Topic without naming one of these two options — fails the suite.
 

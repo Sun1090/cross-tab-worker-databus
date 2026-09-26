@@ -5677,7 +5677,10 @@ describe('CrossTabDataBus diagnostics', () => {
 });
 
 describe('CrossTabDataBus cross-tab replay consistency contract', () => {
-  async function makeEventBoundaryBus() {
+  /** Options for the EVENT-boundary bus. `dedup` exists because one case has to
+   * observe the ledger: a suppression can only be provoked when dedup is on, and
+   * the point of that case is what a forged frame does *not* reach. */
+  async function makeEventBoundaryBus(options: { dedup?: boolean } = {}) {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();
     const environment = createFakeEnvironment({
@@ -5698,12 +5701,13 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
       environment: environment.environment,
       tabId: 'tab-boundary',
       workerId: 'worker-boundary',
-      transport
+      transport,
+      ...(options.dedup === true ? { dedup: { maxEntries: 8 } } : {})
     });
     await bus.start({});
     await bus.ready();
     expect(channelName).toBeDefined();
-    return { bus, hub, channelName: channelName! };
+    return { bus, hub, transport, channelName: channelName! };
   }
 
   function postRawEvent(
@@ -5949,6 +5953,44 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
       expect.objectContaining({ data: 'unattributed' })
     ]);
     expect(received[2]!.originTabId).toBeUndefined();
+    await bus.stop();
+  });
+
+  it('does not let a forged EVENT suppress a later real publication with the same messageId', async () => {
+    // The dedup ledger is the one place a forged frame could *remove* a real
+    // publication rather than add one, and that is the only way an `EVENT` frame
+    // could reach past the local handlers and the replay buffer — the condition
+    // `AGENTS.md` sets for reopening the shape-only check on this frame. It does
+    // not: `DedupManager.isDuplicate` has exactly one caller,
+    // `handleTransportMessage`, and an `EVENT` frame arrives on `onEvent`, which
+    // dispatches without consulting it. That is a structural fact about a call
+    // graph, so it is pinned here behaviourally instead — the assertion is about
+    // a delivery that must happen, which survives a future refactor that moves
+    // the check, where a comment saying "one caller" would not.
+    const { bus, hub, transport, channelName } = await makeEventBoundaryBus({ dedup: true });
+    const received: number[] = [];
+    bus.subscribe('topic', message => received.push(message.data));
+
+    // A forger stamps an id it chose, on a topic this tab already subscribes to.
+    postRawEvent(
+      hub,
+      channelName,
+      PUBLICATION_EVENT,
+      { topic: 'topic', data: 1, messageId: 'chosen-id' },
+      'tab-frame'
+    );
+    await Promise.resolve();
+    expect(received, 'the forged frame is still delivered, that is the documented decision').toEqual([1]);
+
+    // The owner's transport now delivers the *real* publication carrying that same
+    // id. A forged frame that had reached the dedup ledger would swallow it — and
+    // the id has to be on *both* frames for the scenario to mean anything: a real
+    // publication with no id is never a duplicate of anything, so the first
+    // version of this case (which emitted one) passed against a mutation that put
+    // the dedup check on the EVENT path, and was measuring nothing.
+    transport.emit('topic', 2, 'chosen-id');
+    await Promise.resolve();
+    expect(received, 'a real publication must not be suppressed by a forged id').toEqual([1, 2]);
     await bus.stop();
   });
 
