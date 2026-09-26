@@ -243,15 +243,17 @@ describe('WorkerClusterRuntime', () => {
     // the same pair — has no such tolerance. So the invariant both handlers were
     // documented to enforce held on one and not the other.
     //
-    // What the tolerance bought, measured rather than argued: the frame reaches
-    // `assignedTopics` under the key `undefined` and `knownTopics` caches its
-    // plaintext, so `getSnapshot().assignedTopics` reports a topic this tab never
-    // subscribed, and `reconcileAssignedTopics()` then dispatches an
-    // `UNSUBSCRIBE` for a channel that was never subscribed. No durable ownership
-    // is minted (there is no route under that key) and nothing reaches storage,
-    // so the window closes on the next reconcile tick — the cost is a public
-    // snapshot that lies plus an attacker-chosen string held in two in-memory
-    // maps until the sweep, not a hole in the routing itself.
+    // What the tolerance bought, measured rather than argued. With the clause
+    // restored and this same frame forged: the dispatch fires, and a probe printed
+    // `getSnapshot().assignedTopics` as `[…, 'no-key-channel']` and `knownTopics`
+    // holding the attacker's plaintext under the key `undefined`, for a topic this
+    // tab never subscribed to. `isAssigned('no-key-channel')` stayed false and no
+    // storage key or value carried the topic, so no durable ownership is minted
+    // (there is no route under that key) and `reconcileAssignedTopics()` sweeps
+    // both entries on the next tick — the cost is a public snapshot that lies plus
+    // an attacker-chosen string held in two in-memory maps until the sweep, not a
+    // hole in the routing itself. The four assertions below are the post-fix
+    // reading of the same frame; the transcript is in `docs/progress.md`.
     //
     // The tolerance had no referent to protect: `topicKey` has been a required
     // field of `WorkerClusterMessage`'s CONTROL variant since the initial commit,
