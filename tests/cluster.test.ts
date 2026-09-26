@@ -304,6 +304,63 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('never writes a non-finite timestamp into a coordination record', async () => {
+    // `ClusterEnvironment.now` is a required field and the documented hazard is a
+    // *backwards* step, which every `now - stamped > ttl` site already reads as "not
+    // yet expired". A non-finite reading is outside that contract, and it does not
+    // degrade one field: measured before the guard, the worker, route and subscriber
+    // records were all written with `"updatedAt": null` — `JSON.stringify(NaN)` is
+    // `null` — and that is *worse* than a wrong number rather than merely different,
+    // because `null` coerces to `0` in the TTL arithmetic, so the first tick after the
+    // clock recovered would read every record as ancient and prune the whole cluster
+    // at once. The durable write is the subject here, not the arithmetic: a poisoned
+    // in-memory comparison heals when the clock recovers, a poisoned record does not.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now: number = Number.NaN;
+    const env = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'nan-clock' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'nan-clock',
+      environment: env.environment,
+      tabId: 'tab-nan',
+      workerId: 'worker-nan',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    runtime.subscribe('topic-a');
+    await Promise.resolve();
+
+    // Named fields, and *not* a generic "every number is finite" scan: the bug leaves
+    // `null` behind (`JSON.stringify(NaN)`), and a filter of the form
+    // `if (typeof reading !== 'number') continue` skips exactly that — the instrument
+    // ignoring the value it exists to catch. The first draft of this case did that and
+    // the guard's own mutation passed it. `Number.isFinite(null)` is false, which is
+    // the property that sees both shapes.
+    const TIMESTAMP_FIELDS = ['updatedAt', 'heartbeatAt', 'registeredAt', 'confirmedAt', 'handoffFromWorkerId'];
+    let stamped = 0;
+    for (const [key, value] of storage.entries()) {
+      const record = JSON.parse(value) as Record<string, unknown>;
+      for (const field of TIMESTAMP_FIELDS) {
+        if (!(field in record)) continue;
+        expect(Number.isFinite(record[field]), `${key} stored a non-finite ${field}`).toBe(true);
+        stamped += 1;
+      }
+    }
+    expect(stamped, 'the lifecycle wrote no timestamped field, so nothing was checked').toBeGreaterThan(0);
+    // And the cluster is still functional rather than wedged: the record it wrote
+    // while the clock was broken is one it can still read back.
+    expect(runtime.getSnapshot().currentWorker.workerId).toBe('worker-nan');
+
+    // When the clock recovers, nothing is mass-pruned — the premise the poisoned
+    // `null` would have violated on the first tick.
+    now = 1_000_000;
+    env.runIntervals();
+    const stillMine = storage.entries().filter(([key]) => key.includes(':worker:'));
+    expect(stillMine.length, 'a recovering clock must not age out every record at once').toBeGreaterThan(0);
+    expect(runtime.isActiveWorker()).toBe(true);
+    runtime.stop();
+  });
+
   it('keeps the topic it is remembering when the cache is full and every older entry is owned', async () => {
     // `rememberTopic()` overflows its cap on a NEW key, which lands at the back of
     // the Map, so the eviction scan walks every older entry before it reaches the

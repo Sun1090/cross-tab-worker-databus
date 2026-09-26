@@ -181,6 +181,10 @@ export class WorkerClusterRuntime {
   private readonly channelName: string;
   /** Adaptive load weighting options; undefined keeps legacy topic-count routing. */
   private readonly loadWeighting: LoadWeightingOptions | undefined;
+  /** The most recent finite reading of the environment's clock, and the fallback for
+   * a broken one — see {@link nowMs}. Seeded to 0 because a clock that has never
+   * produced a finite reading leaves nothing to hold. */
+  private lastFiniteNow = 0;
   /** Rolling traffic accumulator folded into the worker record on writeRecord. */
   private throughputWindow: { startedAt: number; messageCount: number; byteCount: number } = {
     startedAt: 0,
@@ -255,7 +259,7 @@ export class WorkerClusterRuntime {
       : null;
     this.tabId = options.tabId ?? getOrCreateTabId(this.environment, `${prefix}:tab-id`);
     this.workerId = options.workerId ?? `worker-${this.tabId}-${this.environment.randomId()}`;
-    const now = this.environment.now();
+    const now = this.nowMs();
     this.currentRecord = {
       protocolVersion: CLUSTER_PROTOCOL_VERSION,
       workerId: this.workerId,
@@ -267,6 +271,34 @@ export class WorkerClusterRuntime {
       heartbeatAt: now,
       registeredAt: now
     };
+  }
+
+  /**
+   * The environment's clock, normalized.
+   *
+   * `ClusterEnvironment.now` is a required field, and the documented hazard is a
+   * *backwards* step rather than a missing reading — the library's own subtraction
+   * sites tolerate one, since every `now - stamped > ttl` reads a backwards clock as
+   * "not yet expired". A non-finite reading is outside that contract, and it does not
+   * degrade one field: measured before this guard, a `NaN` clock was written straight
+   * into durable state — the worker, route and subscriber records all carried
+   * `"updatedAt": null`, because `JSON.stringify(NaN)` is `null` — and that is worse
+   * than a wrong number rather than merely different, because `null` coerces to `0`
+   * in the TTL arithmetic, so the first tick after the clock recovered would read
+   * every record as ancient and prune the whole cluster at once.
+   *
+   * Holding the last finite reading is the same treatment `data-bus.ts` applies to
+   * `dedup.now` and `DedupManager` applies to its own boundary: a paused clock, not a
+   * poisoned one. It is a helper rather than nine conditions because the broken input
+   * is the clock, not any particular comparison.
+   */
+  private nowMs(): number {
+    const reading = this.environment.now();
+    if (Number.isFinite(reading)) {
+      this.lastFiniteNow = reading;
+      return reading;
+    }
+    return this.lastFiniteNow;
   }
 
   /** Start the cluster: register, listen for lifecycle events, and begin heartbeats. */
@@ -404,7 +436,7 @@ export class WorkerClusterRuntime {
       return;
     }
     this.channel?.addEventListener('message', this.handleMessage);
-    const now = this.environment.now();
+    const now = this.nowMs();
     this.currentRecord = {
       ...this.currentRecord,
       heartbeatAt: now,
@@ -1255,7 +1287,7 @@ export class WorkerClusterRuntime {
    * will never complete — while a fresh unconfirmed route may simply be
    * waiting out its confirmation flush and must be left alone. */
   private isStaleHandoff(route: WorkerRoute): boolean {
-    return this.environment.now() - route.updatedAt > this.workerTtlMs;
+    return this.nowMs() - route.updatedAt > this.workerTtlMs;
   }
 
   /** Full reconciliation cycle: workers, subscriptions, and assigned topics. */
@@ -1547,7 +1579,7 @@ export class WorkerClusterRuntime {
   /** Read all live worker records from storage, pruning stale entries past the TTL. */
   private readWorkers(): WorkerRecord[] {
     if (!this.storage) return [this.currentRecord];
-    const now = this.environment.now();
+    const now = this.nowMs();
     const workers: WorkerRecord[] = [];
     for (const { key, value: worker } of readAllByPrefix<WorkerRecord>(this.storage, this.workerPrefix)) {
       if (worker.workerId !== this.workerId && now - worker.heartbeatAt > this.workerTtlMs) {
@@ -1604,7 +1636,7 @@ export class WorkerClusterRuntime {
       topicKey,
       workerId: this.workerId,
       tabId: this.tabId,
-      updatedAt: this.environment.now(),
+      updatedAt: this.nowMs(),
       generation: 1
     };
   }
@@ -1653,7 +1685,7 @@ export class WorkerClusterRuntime {
       topicKey,
       workerId: owner.workerId,
       tabId: owner.tabId,
-      updatedAt: this.environment.now(),
+      updatedAt: this.nowMs(),
       generation,
       ...(handoffFromWorkerId ? { handoffFromWorkerId } : {})
     };
@@ -1666,7 +1698,7 @@ export class WorkerClusterRuntime {
     if (!route || route.workerId !== this.workerId || route.confirmedAt !== undefined) return;
     writeJson(this.storage, this.routeStorageKey(topicKey), {
       ...route,
-      confirmedAt: this.environment.now()
+      confirmedAt: this.nowMs()
     } satisfies WorkerRoute);
     const topic = this.knownTopics.get(topicKey);
     if (topic) this.handlers.onDiagnostic?.({ operation: RELIABILITY_OPERATION.ROUTE_ACK, topic });
@@ -1675,7 +1707,7 @@ export class WorkerClusterRuntime {
   /** Remove routes whose topic has no subscribers and whose TTL has expired. */
   private cleanupOrphanedRoutes(workers: readonly WorkerRecord[]): void {
     if (!this.storage) return;
-    const now = this.environment.now();
+    const now = this.nowMs();
     for (const { key, value: route } of readAllByPrefix<WorkerRoute>(this.storage, this.routePrefix)) {
       if (now - route.updatedAt <= this.workerTtlMs) continue;
       if (this.readSubscriberTabIds(route.topicKey, workers).length > 0) continue;
@@ -1697,7 +1729,7 @@ export class WorkerClusterRuntime {
     if (!this.storage) return;
     writeJson(this.storage, this.subscriberStorageKey(topicKey, this.tabId), {
       tabId: this.tabId,
-      updatedAt: this.environment.now()
+      updatedAt: this.nowMs()
     } satisfies TopicSubscriberRecord);
   }
 
@@ -1709,7 +1741,7 @@ export class WorkerClusterRuntime {
    *   status, visibility and load changes pass true; the heartbeat tick and a
    *   role change pass false. */
   private writeRecord(notify: boolean): void {
-    const now = this.environment.now();
+    const now = this.nowMs();
     const sample = this.loadWeighting !== undefined ? this.sampleThroughput(now) : undefined;
     this.currentRecord = {
       ...this.currentRecord,
