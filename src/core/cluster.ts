@@ -1074,7 +1074,26 @@ export class WorkerClusterRuntime {
     // authorize ownership and to name the transport subscription — so without
     // this check one frame could keep a topicKey the route already names for us
     // while substituting a different plaintext, renaming our owned channel.
-    if (message.topicKey !== undefined && createOpaqueKey(message.topic) !== message.topicKey) return;
+    //
+    // The check is unconditional, and a frame carrying *no* `topicKey` is a
+    // disagreement: `createOpaqueKey(topic)` is a 32-character hex string and
+    // `undefined` never equals one, so the missing field falls out here rather
+    // than reaching `assignedTopics` under an `undefined` key. That arm used to
+    // read `message.topicKey !== undefined && …`, and it had no referent to
+    // protect — `topicKey` has been a *required* field of this variant since the
+    // initial commit, so no released version ever sent one without it, and the
+    // tolerance arrived in the same commit as the check rather than being
+    // inherited from a legacy-peer concern (which is how the optional
+    // `protocolVersion` above came to be tolerated, and legitimately). Its only
+    // reachable traffic was a forger, and it disagreed with
+    // `handleRouteReleasedMessage`, which never had the tolerance: measured, a
+    // keyless SUBSCRIBE reached the control dispatch and put the attacker's
+    // plaintext into `assignedTopics` and `knownTopics` under the key
+    // `undefined`, so `getSnapshot().assignedTopics` claimed a topic this tab
+    // never subscribed until the next reconcile swept it. The case is
+    // "drops a control frame that carries no topicKey at all" in
+    // `tests/cluster.test.ts`.
+    if (createOpaqueKey(message.topic) !== message.topicKey) return;
     this.rememberTopic(message.topic);
     switch (message.action) {
       case CONTROL_ACTION.SUBSCRIBE: {

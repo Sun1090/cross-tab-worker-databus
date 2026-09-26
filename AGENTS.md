@@ -235,6 +235,22 @@ it belongs to, and pin the forged-frame case — `tests/cluster.test.ts`'s
 "drops a control frame whose topicKey disagrees with its topic" is the shape, and it must fail when the
 guard comes out.
 
+The check is **unconditional on both readers**, and "unconditional" is the part that was wrong until
+0.21.42: `handleControlMessage` read `message.topicKey !== undefined && …`, so a frame carrying *no*
+`topicKey` skipped it, while `handleRouteReleasedMessage` never carried the tolerance — the invariant both
+were documented to enforce held on one reader and not the other. A missing field *is* a disagreement
+(`createOpaqueKey` returns 32 hex characters, and `undefined` is none of them), and the tolerance had no
+referent: `topicKey` has been a required field of this variant since the initial commit, and the clause
+arrived in the same commit as the check rather than being inherited — unlike the optional
+`protocolVersion`, which is a real legacy tolerance. Measured consequence before the fix: the frame
+reached the control dispatch and put the attacker's plaintext into `assignedTopics` and `knownTopics`
+under the key `undefined`, so `getSnapshot().assignedTopics` claimed a topic the tab never subscribed
+until the next reconcile swept it — no durable ownership minted, nothing written to storage, a lying
+public snapshot for one tick. Its pin is "drops a control frame that carries no topicKey at all" in the
+same file, which fails on the tolerant guard and on nothing else in the suite. The general form: a
+tolerance for a missing field is a claim about which peers exist, so read the field's history in the
+protocol type before writing one — this one read as defensive and was reachable only by a forger.
+
 A third check is the *shape* of an optional field rather than its value: a `CONTROL/PUBLISH` frame that
 carries `items` at all must carry a non-empty array of them, because `publishBatch()`'s
 `Array.prototype.map` is the only producer. Both halves of that sentence are load-bearing, and they are

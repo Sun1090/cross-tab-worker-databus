@@ -235,6 +235,73 @@ describe('WorkerClusterRuntime', () => {
     runtime.stop();
   });
 
+  it('drops a control frame that carries no topicKey at all', async () => {
+    // The sibling case above posts a frame whose pair *disagrees*. This one posts
+    // a frame with half the pair missing, and it is the shape the guard as written
+    // let through: `handleControlMessage` skipped the check whenever `topicKey`
+    // was `undefined`, while `handleRouteReleasedMessage` — the other reader of
+    // the same pair — has no such tolerance. So the invariant both handlers were
+    // documented to enforce held on one and not the other.
+    //
+    // What the tolerance bought, measured rather than argued: the frame reaches
+    // `assignedTopics` under the key `undefined` and `knownTopics` caches its
+    // plaintext, so `getSnapshot().assignedTopics` reports a topic this tab never
+    // subscribed, and `reconcileAssignedTopics()` then dispatches an
+    // `UNSUBSCRIBE` for a channel that was never subscribed. No durable ownership
+    // is minted (there is no route under that key) and nothing reaches storage,
+    // so the window closes on the next reconcile tick — the cost is a public
+    // snapshot that lies plus an attacker-chosen string held in two in-memory
+    // maps until the sweep, not a hole in the routing itself.
+    //
+    // The tolerance had no referent to protect: `topicKey` has been a required
+    // field of `WorkerClusterMessage`'s CONTROL variant since the initial commit,
+    // so no released version ever sent a frame without one, and the tolerance was
+    // introduced *with* the check in the same commit rather than inherited from a
+    // legacy-peer concern. Its only reachable traffic is a forger.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const onControl = vi.fn();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'key-absent' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'key-absent',
+      environment: env.environment,
+      tabId: 'tab-key-absent',
+      workerId: 'worker-key-absent',
+      handlers: { onControl, onEvent: vi.fn() }
+    });
+    runtime.start();
+    runtime.subscribe('chat.a');
+    await Promise.resolve();
+    onControl.mockClear();
+
+    const channel = hub.create(`${DEFAULT_STORAGE_PREFIX}:bus:${createOpaqueKey('key-absent')}`);
+    // The forged frame is widened at the call site, not per field: the message
+    // type requires `topicKey`, so a conforming cast here would typecheck and
+    // the case would be testing a frame the compiler believes in.
+    const postForged = (channel.postMessage as (message: unknown) => void).bind(channel);
+    postForged({
+      type: CLUSTER_MESSAGE_TYPE.CONTROL,
+      sourceWorkerId: 'forged-peer',
+      targetWorkerId: 'worker-key-absent',
+      action: CONTROL_ACTION.SUBSCRIBE,
+      topic: 'no-key-channel'
+    });
+    channel.close();
+    await Promise.resolve();
+
+    expect(onControl, 'a keyless frame must not reach the control dispatch').not.toHaveBeenCalled();
+    expect(runtime.getSnapshot().assignedTopics, 'the snapshot must not claim the topic').not.toContain(
+      'no-key-channel'
+    );
+    // The reverse cache is the other half: it is what turns a hash back into a
+    // name, so a frame that never got past the guard must not have planted one.
+    expect(runtime.getSnapshot().knownTopics.map(entry => entry.topic)).not.toContain('no-key-channel');
+    // And the tab keeps exactly the assignment it made for itself.
+    expect(runtime.isAssigned('chat.a')).toBe(true);
+    expect(runtime.getSnapshot().assignedTopics).toEqual(['chat.a']);
+    runtime.stop();
+  });
+
   it('keeps the topic it is remembering when the cache is full and every older entry is owned', async () => {
     // `rememberTopic()` overflows its cap on a NEW key, which lands at the back of
     // the Map, so the eviction scan walks every older entry before it reaches the
