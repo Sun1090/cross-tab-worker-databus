@@ -133,7 +133,7 @@ publish(
 
 运行期 transport 上报 `error` 后发起的发布同样会挂在恢复门之后，等 transport 重新 ready 再发送，因此不会被写进刚刚失败的连接。若恢复预算耗尽，或等待被 `stop()` / 页面隐藏取代，该发布会按文档丢弃而不是无限期延迟（页面挂起仍保持「不延迟、直接丢弃」语义）。干净的 `disconnected` 不会触发后台 DataBus 自动重开，但也不会再吞掉后续操作：干净关闭后发起的 `subscribe()` / `publish()` 会触发一次按需重开，先挂起等待替代连接就绪，随后再 flush。可显式调用 `start()`（或直接发起操作）来重开。
 
-入站消息可携带调用方/服务端提供的 `messageId`。可通过 `dedup: { maxEntries, ttlMs }` 启用有界重复抑制；每个 bus 实例只会忽略其窗口内的重复 ID。该能力默认关闭且属于尽力而为：它不提供端到端的 at-least-once 或 exactly-once 服务端保证。每条被接受的 transport publication 只会扇出一次，每个匹配的本地 handler 至多分发一次；但 transport/服务端仍可能重复投递或丢失，断连或挂起中的 Tab 也可能错过跨 Tab 事件。测试和自定义时钟宿主可传入 `dedup.now`。完整 `stop()` 会清空已记住的 ID 窗口；之后的 `start()` 会开启全新的 dedup 会话。
+入站消息可携带调用方/服务端提供的 `messageId`。可通过 `dedup: { maxEntries, ttlMs }` 启用有界重复抑制；每个 bus 实例只会忽略其窗口内的重复 ID。该能力默认关闭且属于尽力而为：它不提供端到端的 at-least-once 或 exactly-once 服务端保证。每条被接受的 transport publication 只会扇出一次，每个匹配的本地 handler 至多分发一次；但 transport/服务端仍可能重复投递或丢失，断连或挂起中的 Tab 也可能错过跨 Tab 事件。测试和自定义时钟宿主可传入 `dedup.now`；读数不是有限数值时会保持在最近一次有限读数上而不是被传播下去，因此对于时钟可能*缺失*（而不只是数值异常）的主机，退化结果是时间静止——过期暂停、自适应窗口保留上次的值——而不是在 `getDedupStats()` 里报出 `NaN`（序列化后是 `null`）且什么都不过期。完整 `stop()` 会清空已记住的 ID 窗口；之后的 `start()` 会开启全新的 dedup 会话。
 
 传入 `options.messageId` 和 `options.timestamp` 后，元数据会穿过跨 Tab 路由、Worker 边界和支持的 transport。服务端必须回显或以其他方式保留它们，入站去重和 replay retention 才能使用。
 
@@ -170,7 +170,7 @@ clearReplay(): Promise<void>
 
 清空内存 replay 缓冲，并调用持久化适配器可选的 `clear()`。适合留存策略、退出登录或租户切换；普通 `stop()` 仍会保留 durable history。
 
-`clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计，配置了 `dedup.adaptiveTtl` 时还会多一个当前 `ttlMs`；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。为测试或非墙上时钟宿主，可额外提供 `dedup.now`。完整 `stop()` 会清空已记忆的 ID 窗口，之后 `start()` 会开启新的 dedup 会话。
+`clearReplayTopic(topic)` 只清理一个精确 topic。`getDedupStats()` 返回 `enabled`、`tracked`、`accepted`、`suppressed` 四项有界统计，配置了 `dedup.adaptiveTtl` 时还会多一个当前 `ttlMs`；`resetDedup()` 清除已记忆 ID 和计数，不改变 dedup 配置。为测试或非墙上时钟宿主，可额外提供 `dedup.now`；读数不是有限数值时保持在最近一次有限读数上，因此时钟可能缺失的主机退化为时间静止，而不是让统计里出现 `NaN`。完整 `stop()` 会清空已记忆的 ID 窗口，之后 `start()` 会开启新的 dedup 会话。
 
 `clearReplayBefore(timestamp)` 按毫秒时间戳清理带显式 producer timestamp 且早于 cutoff 的记录；实现可选 `clearBefore()` 的持久化适配器由它 `await`，这一路还经过带退避的重试，因此清理不会在同一个任务内同步完成。没有 producer timestamp 的 legacy 消息会为兼容性保留。transport 未提供时间戳时，系统仍会补充 bus timestamp，但该时间戳不会被当作 producer metadata 用于 retention 清理。
 
