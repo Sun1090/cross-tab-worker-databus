@@ -286,7 +286,32 @@ export class CrossTabDataBus<TConfig = unknown, TData = unknown> {
     assertRecoveryOptions(recovery);
     this.recoveryCooldownMs = recovery?.cooldownMs ?? 1000;
     this.recoveryMaxAttempts = recovery?.maxAttempts ?? Number.POSITIVE_INFINITY;
-    this.now = dedup?.now ?? Date.now;
+    // One normalization for the whole instance, because this is the only place the
+    // bus binds a clock: `dedup.now` is a public option documented for "non-wall-clock
+    // hosts", and it feeds this bus's own stamps — the recovery ledger's `errorAt` /
+    // `lastSuccessAt` and the failure record's `at` — *and* the dedup manager handed
+    // the same function below. A source that can be missing rather than merely
+    // unusual would otherwise reach every one of them.
+    //
+    // The two consequences that were *measured* on the unguarded code are one layer
+    // down, and both are recorded at the site that owns them: `getDedupStats().ttlMs`
+    // reported `NaN` (which `JSON.stringify` writes as `null`), and — through the
+    // environment the cluster reads — the durable worker/route/subscriber records were
+    // written with `"updatedAt": null`, which is worse than a wrong number rather than
+    // merely different, because `null` coerces to `0` in the TTL arithmetic, so the
+    // first tick after the clock recovered would read every record as ancient and
+    // prune the whole cluster at once. This bus's own stamps are covered by the same
+    // arithmetic rather than separately measured; an earlier draft of this comment
+    // claimed `getHealthSummary().lastSuccessAt` serialized to `null`, and that was an
+    // artifact of the probe that produced it — `?? null` over a field that is *absent*
+    // until a recovery rewrites it, not a `NaN` that had been written.
+    //
+    // Holding the last finite reading is the treatment `DedupManager` applies on its
+    // own boundary — it keeps its guard because it is constructible directly, and a
+    // class should be robust without a caller arranging it — and it is the one that
+    // changes least: a paused clock, not a poisoned one. Substituting `Date.now()`
+    // would silently mix two clocks; zeroing would age out the cluster.
+    this.now = holdLastFinite(dedup?.now ?? Date.now);
     this.transport = transport;
     this.initialConfig = initialConfig;
     this.hasInitialConfig = 'initialConfig' in options;
@@ -2200,4 +2225,27 @@ function formatWorkerTrace(worker: { workerId: string; status: string; load: num
 /** Format a route for the coordination trace event. */
 function formatRouteTrace(route: { topicKey: string; workerId: string; confirmedAt?: number }): string {
   return `${route.topicKey}@${route.workerId}|confirmed=${route.confirmedAt !== undefined}`;
+}
+
+/**
+ * Wrap a clock so every reading is a finite number.
+ *
+ * The fallback is the last finite reading, seeded from the first reading the source
+ * gives; a source that has *never* produced one is reported as `0`, which is the
+ * value the cluster's TTL comparisons treat as "very old" — a fail-safe direction
+ * for a clock that has no history to hold, and the one case where a caller should
+ * notice something is wrong with its source rather than in this wrapper.
+ */
+function holdLastFinite(source: () => number): () => number {
+  let last = 0;
+  let primed = false;
+  return () => {
+    const reading = source();
+    if (Number.isFinite(reading)) {
+      last = reading;
+      primed = true;
+      return reading;
+    }
+    return primed ? last : 0;
+  };
 }

@@ -155,11 +155,11 @@ const WRITE_SITES: ReadonlyArray<{ site: string; stores: string; optIn?: string 
     stores: 'the route record — a `topicKey`, a worker id, a generation'
   },
   {
-    site: 'src/core/cluster.ts :: writeJson(this.storage, this.routeStorageKey(topicKey), { ...route, confirmedAt: this.environment.now() } satisfies WorkerRoute)',
+    site: 'src/core/cluster.ts :: writeJson(this.storage, this.routeStorageKey(topicKey), { ...route, confirmedAt: this.nowMs() } satisfies WorkerRoute)',
     stores: 'the same route record with a confirmation stamp added'
   },
   {
-    site: 'src/core/cluster.ts :: writeJson(this.storage, this.subscriberStorageKey(topicKey, this.tabId), { tabId: this.tabId, updatedAt: this.environment.now() } satisfies TopicSubscriberRecord)',
+    site: 'src/core/cluster.ts :: writeJson(this.storage, this.subscriberStorageKey(topicKey, this.tabId), { tabId: this.tabId, updatedAt: this.nowMs() } satisfies TopicSubscriberRecord)',
     stores: 'a subscriber marker — the topic is present only as `topicKey`'
   },
   {

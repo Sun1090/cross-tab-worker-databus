@@ -6013,6 +6013,63 @@ describe('CrossTabDataBus cross-tab replay consistency contract', () => {
 });
 
 describe('adaptive dedup TTL', () => {
+  it('keeps every clock-stamped public field numeric when the injected clock breaks', async () => {
+    // `dedup.now` is a public option documented for non-wall-clock hosts, and the bus
+    // binds it as *its own* clock at construction — so one broken source reaches this
+    // instance's stamps and the dedup manager's alike. The bus normalizes once at that
+    // binding, so the assertion is about the public surface rather than any one field:
+    // the recovery ledger's stamps, the dedup stat that is rewritten on demand, and the
+    // serialized form of both, since `NaN` is what `JSON.stringify` turns into `null`.
+    let now: number = 1_000;
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'bus-clock' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'bus-clock',
+      environment: env.environment,
+      initialConfig: {},
+      transport,
+      // The adaptive bounds are what make `getDedupStats()` report a `ttlMs` at all.
+      dedup: { now: () => now, adaptiveTtl: { minMs: 100, maxMs: 5_000 } }
+    });
+    bus.onError(() => undefined);
+    bus.start({});
+    await bus.ready();
+    transport.emit('t', 1);
+    await Promise.resolve();
+    expect(typeof bus.getRecoveryStats().lastSuccessAt, 'a healthy bus already stamps a time').toBe('number');
+
+    // A stamp has to be *rewritten* while the clock is broken to show anything: the
+    // first version of this case only read fields the broken window never touches, and
+    // the guard's own mutation passed it — `lastSuccessAt` keeps the value a healthy
+    // open wrote, and the dedup stat is guarded inside `DedupManager` on its own
+    // boundary. `emitError` is the drivable path: it stamps `errorAt` and
+    // `lastFailure.at` from the bus's clock.
+    now = Number.NaN;
+    transport.emitError(new Error('socket died while the clock was broken'));
+    await Promise.resolve();
+    const recovery = bus.getRecoveryStats();
+    const dedupStat = bus.getDedupStats();
+    const failure = bus.getHealthSummary().lastFailure;
+    expect(Number.isFinite(recovery.errorAt as number), 'the recovery ledger stamps a finite time').toBe(true);
+    expect(Number.isFinite(failure?.at as number), 'the failure record stamps a finite time').toBe(true);
+    expect(Number.isFinite(dedupStat.ttlMs as number), 'the dedup window stays numeric').toBe(true);
+    // The serialized form is what a diagnostics log or a health payload carries, and
+    // `NaN` is what `JSON.stringify` turns into `null`.
+    const wire = JSON.parse(JSON.stringify({ recovery, dedupStat, failure }));
+    expect(wire.recovery.errorAt).not.toBeNull();
+    expect(wire.failure.at).not.toBeNull();
+    expect(wire.dedupStat.ttlMs).not.toBeNull();
+
+    // And a recovered clock resumes from a real baseline: the adaptive window closes
+    // on the new reading and relaxes back to its ceiling, which is only reachable
+    // once the clock is finite again.
+    now = 1_000_000 + 6_000;
+    expect(bus.getDedupStats().ttlMs, 'a recovered clock relaxes the window again').toBe(5_000);
+    await bus.stop();
+  });
+
   it('reports bounded TTL and resets its sampling window', async () => {
     let now = 1_000;
     const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'adaptive' });
