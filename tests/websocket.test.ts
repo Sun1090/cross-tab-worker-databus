@@ -872,6 +872,51 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('applies a 30s handshake budget when none is configured', async () => {
+    // `docs/transports.md` states the default ("exceeds connectTimeoutMs
+    // (default 30000 ms)") and `DEFAULT_CONNECT_TIMEOUT_MS` implements it, but
+    // no test in this file referenced either: every handshake case passes an
+    // explicit budget (25 ms, or 0 / Infinity), so changing the constant would
+    // have left the suite green and the shipped sentence wrong. The value is
+    // user-visible — it is when a slow endpoint's `start()` gives up.
+    //
+    // Bracketed from both sides rather than asserted once, so the pin is the
+    // number and not "some default": a shorter default would have rejected
+    // before 29 999 ms and fail the first assertion, a longer one would still
+    // be pending at 30 000 ms and fail the second.
+    vi.useFakeTimers();
+    try {
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => new FakeWebSocket(url)
+      });
+      const onStatus = vi.fn();
+      const onError = vi.fn();
+      // Tracked through a flag rather than awaited directly: with a *longer*
+      // default the promise would still be pending at 30 000 ms, and awaiting
+      // it would burn the test timeout instead of naming the wrong number.
+      let settled: unknown = 'pending';
+      const rejection = Promise.resolve(
+        transport.start({ url: 'wss://example.test/ws' }, { onMessage: () => {}, onStatus, onError })
+      ).then(
+        () => null,
+        error => error
+      );
+      void rejection.then(value => { settled = value; });
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(onStatus, 'the default budget must not have expired yet').not.toHaveBeenCalledWith('error');
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled, 'the default budget must expire at 30 000ms').toBeInstanceOf(Error);
+      expect((settled as Error).message).toContain('30000ms');
+      expect(onStatus).toHaveBeenCalledWith('error');
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('drops a late error from the socket whose connect timeout already reported one', async () => {
     vi.useFakeTimers();
     try {
@@ -1342,5 +1387,63 @@ describe('createWebSocketDataBus factory', () => {
     expect(workerRecord).toBeDefined();
     expect(JSON.parse(workerRecord![1]).throughput).toMatchObject({ windowMs: 3_000, overrunMs: 0 });
     await bus.stop();
+  });
+
+  it('defaults the cluster key to the connection URL', async () => {
+    // `docs/transports.md` states the factory "should accept the connection
+    // config, cluster key (defaulting to the connection URL)" — and the shipped
+    // factory does exactly that (`clusterKey ?? connection.url`). No test
+    // asserted it: `tests/websocket.test.ts` builds `WebSocketTransport`
+    // directly almost everywhere, and the one factory case above passes its
+    // own key, so changing the default would have left the file green and the
+    // sentence wrong. The key is the cluster's storage and channel namespace,
+    // so a wrong default silently puts two apps in one cluster.
+    //
+    // Observed through the derived key rather than a getter, because that is
+    // what the default is *for*. `cross-tab-worker-databus:{hash}:worker:{id}`
+    // splits on ':' with the hash at index 1 — the prefix itself has no colon.
+    const clusterHashOf = (storage: MemoryStorage): string | undefined =>
+      storage.entries()
+        .map(([key]) => key.split(':')[1])
+        .find(value => value !== undefined);
+
+    async function hashFor(options: { clusterKey?: string; randomId: string }): Promise<string | undefined> {
+      const storage = new MemoryStorage();
+      const now = 1_000;
+      const environment = createFakeEnvironment({ storage, hub: new ChannelHub(), now: () => now, randomId: options.randomId });
+      const socket = new FakeWebSocket('wss://example.test/ws');
+      const bus = createWebSocketDataBus({
+        connection: {
+          url: 'wss://example.test/ws',
+          webSocketFactory: () => socket as unknown as WebSocketLike
+        },
+        environment: environment.environment,
+        ...(options.clusterKey === undefined ? {} : { clusterKey: options.clusterKey })
+      });
+      bus.subscribe('demo.topic', () => undefined);
+      await flushMicrotasks();
+      // The socket has to open. `stop()` awaits the in-flight `start()`, and an
+      // unopened socket leaves that promise waiting out the whole handshake
+      // budget — 30 000 ms by default — so without this the case times out
+      // rather than failing. (The default is pinned by the case above; this is
+      // that number showing up as a hang.)
+      socket.open();
+      await bus.ready();
+      const hash = clusterHashOf(storage);
+      await bus.stop();
+      return hash;
+    }
+
+    const url = 'wss://example.test/ws';
+    const defaulted = await hashFor({ randomId: 'ws-key-default' });
+    const explicit = await hashFor({ clusterKey: url, randomId: 'ws-key-explicit' });
+    const other = await hashFor({ clusterKey: 'wss://other.test/ws', randomId: 'ws-key-other' });
+
+    expect(defaulted, 'a bus with no clusterKey must write a worker record').toBeDefined();
+    // The claim: omitting the key is the same as passing the URL.
+    expect(defaulted).toBe(explicit);
+    // The control: a different key really does produce a different namespace,
+    // so the equality above is not two buses agreeing on a constant.
+    expect(other).not.toBe(defaulted);
   });
 });
