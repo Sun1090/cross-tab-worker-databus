@@ -9590,6 +9590,18 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Update date:** 2026-09-26
 
 
+## Phase 251 / The trace default was argued over for two releases while its value stayed unnamed — the same `??` arm, argued and unmeasured
+
+- **Milestone / version:** post-`0.21.44`, unreleased, no release owed (tests only). Branch `audit/trace-metrics-interval`, off `main` at `721bd75`.
+- **`trace.metricsIntervalMs` is `5000` and nothing observed the number.** Both neighbouring cases in `tests/trace.test.ts` configure `metricsIntervalMs: 1_000` explicitly — so the first one's `advanceTimersByTime(5_000)` is *five of its own windows*, not the default's, and I had read it the other way before checking the constructor — and `5_000` → `1_000` leaves all 26 cases green. Unobserved tier, like the dedup pair and `maxPerTopic`.
+- **The part worth recording is what the code already argued about.** `src/core/trace.ts`'s comment above the `??` in `normalizeInterval` runs twenty lines on what *deleting* that default costs an untyped caller — measured as "2 events → 2 `TypeError`s", with a note about a pass count that went stale twice — and says nothing whatever about the value the arm returns. The arm was measured and the number in it was not. That is the sharpest form of the pattern this audit keeps meeting: a defended guard is not the same as a pinned value, and the file that documents a default best is often the file that leaves it unobserved.
+- **Bracketed on the real timer, so the pin is the number.** No `message_metrics` event at 4 999 ms, exactly one at 5 000. The window carries traffic first, because a reporter that emits nothing still advances its window — the next case's subject, and a bracket that would otherwise pass for the wrong reason.
+- **Changed files:** `tests/trace.test.ts` (one case), `docs/progress.md` (this record). No `src/` change.
+- **Verification:** `pnpm check` exit 0 — **39 test files, 990 tests** + typecheck, build, 5 perf gates — and `pnpm lint` exit 0. One mutant, `src/` restored.
+- **Blockers:** none. **Risk / rollback:** tests only. **Next:** (1) `bench:browser`, tenth deferral, with the host reading 56.62 / 99.44 / 99.59 on 8 cores at the end of the previous phase against a bar the `0.21.15`-era poison at 7.7–15.1 already failed; (2) the ledger is now **eight** documented defaults found unnamed across four files, and the rows left are `recovery.cooldownMs` 1 000 and the four Centrifuge factory rows (`workerMode` \`dedicated\`, `transferable` \`false\`, \`clusterKey\` → the connection URL, `heartbeatIntervalMs` 10 000). The Centrifuge factory is the highest-value of them because it is a near-copy of the WebSocket one, and *its* \`clusterKey\` default was only found unpinned there in Phase 247 — a mirrored implementation is the strongest prior that a sibling's finding reproduces; (3) the one open **product** question, unchanged across four releases: whether `replay.persistence` should namespace its IndexedDB database by `clusterKey` by default, which has an upgrade story, is deliberately undecided, and is the only item on the list that needs the maintainer rather than another mutant.
+- **Update date:** 2026-09-26
+
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
