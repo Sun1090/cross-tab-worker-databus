@@ -203,6 +203,18 @@ class FakeChannel implements ClusterChannel {
 export interface FakeEnvironmentControl {
   environment: ClusterEnvironment;
   runIntervals: () => void;
+  /** The period each live `setInterval` was registered with, in registration
+   * order. `runIntervals()` fires every callback regardless of its period —
+   * the production heartbeat callback is unconditional — so the *cadence* an
+   * owner configured (and the value of a documented default) is invisible
+   * through the clock and only visible here. Added because the cluster's
+   * `heartbeatIntervalMs` default had no explicit pin for exactly that reason.
+   *
+   * `undefined` is a real value, not a gap in the type: `ClusterEnvironment`'s
+   * `setInterval` takes an optional `delayMs`, so a runtime may register a
+   * callback with no period at all, and a fake that reported 0 for that would
+   * be inventing a number. */
+  intervalDelays: () => Array<number | undefined>;
   pageHide: () => void;
   pageShow: () => void;
   setVisibility: (state: (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBILITY]) => void;
@@ -216,6 +228,7 @@ export function createFakeEnvironment(options: {
   visibilityState?: (typeof TAB_VISIBILITY)[keyof typeof TAB_VISIBILITY];
 }): FakeEnvironmentControl {
   const intervals = new Set<() => void>();
+  const intervalDelays = new Map<() => void, number | undefined>();
   const pageHideListeners = new Set<() => void>();
   const pageShowListeners = new Set<() => void>();
   const visibilityListeners = new Set<() => void>();
@@ -227,11 +240,15 @@ export function createFakeEnvironment(options: {
       now: options.now,
       randomId: () => options.randomId,
       createChannel: name => options.hub?.create(name) ?? null,
-      setInterval: callback => {
+      setInterval: (callback, delayMs) => {
         intervals.add(callback);
+        intervalDelays.set(callback, delayMs);
         return callback;
       },
-      clearInterval: handle => intervals.delete(handle as () => void),
+      clearInterval: handle => {
+        intervals.delete(handle as () => void);
+        intervalDelays.delete(handle as () => void);
+      },
       getVisibilityState: () => visibilityState,
       addVisibilityChangeListener: listener => visibilityListeners.add(listener),
       removeVisibilityChangeListener: listener => visibilityListeners.delete(listener),
@@ -243,6 +260,7 @@ export function createFakeEnvironment(options: {
     runIntervals: () => {
       for (const callback of [...intervals]) callback();
     },
+    intervalDelays: () => [...intervalDelays.values()],
     pageHide: () => {
       for (const listener of [...pageHideListeners]) listener();
     },
