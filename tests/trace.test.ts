@@ -84,6 +84,39 @@ describe('DataBusTraceReporter', () => {
     expect(later).toHaveLength(1);
   });
 
+  it('aggregates on the documented 5s window when no interval is configured', () => {
+    // `docs/configuration.md` documents `trace.metricsIntervalMs` as `5000`,
+    // and `DEFAULT_METRICS_INTERVAL_MS` implements it. Nothing observed the
+    // value: both cases above configure `metricsIntervalMs: 1_000` explicitly —
+    // the first one's `advanceTimersByTime(5_000)` is five of *its* windows, not
+    // the default's — and turning the default into 1_000 leaves all 26 cases
+    // here green. That is worth separating from the note beside the `??` in
+    // `normalizeInterval`, which argues about *deleting* the default and says
+    // nothing about the number it returns.
+    //
+    // The window has to carry traffic: a reporter that emits nothing still
+    // advances its window, which is the next case's subject and would leave a
+    // bracket that passes for the wrong reason.
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events) }, () => Date.now());
+    reporter.start();
+    reporter.recordReceived('t');
+    reporter.recordDispatched('t');
+
+    vi.advanceTimersByTime(4_999);
+    expect(
+      events.filter(event => event.type === 'message_metrics'),
+      'the default 5s window must not have flushed yet'
+    ).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(
+      events.filter(event => event.type === 'message_metrics'),
+      'the default window flushes at 5 000ms'
+    ).toHaveLength(1);
+    reporter.stop();
+  });
+
   it('does not emit an all-zero metrics snapshot but keeps the window advancing', () => {
     const events: DataBusTraceEvent[] = [];
     const reporter = new DataBusTraceReporter({ enabled: true, sink: collect(events), metricsIntervalMs: 1_000 });
