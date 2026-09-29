@@ -300,6 +300,61 @@ test.describe('cross-tab databus demo', () => {
     await expect.poll(() => receivedCount(survivorB)).toBe(1);
   });
 
+  test('a publish refused while the bus is stopping is not counted as published', async ({ context }) => {
+    // The demo counted every click before it knew the outcome. `publish()`
+    // returns void and reports a non-delivery through `onError`, so a frame the
+    // SDK refused still incremented 已发布 and drew a 发布 row — one click
+    // during a reconnect showed success and failure at once, and the counter
+    // overstated by the number refused.
+    //
+    // Both clicks run in ONE page task deliberately. applyConnection's handler
+    // suspends at `await state.bus.stop()`, and stop() raises `stopping`
+    // synchronously (beginStop() runs before performStop()'s first await), so
+    // a publish issued in the same task is deterministically inside the
+    // rejecting window. Two separate Playwright clicks would race the teardown
+    // and this test would pass or fail on host speed instead of on behavior.
+    test.setTimeout(60_000);
+    const topic = uniqueTopic('e2e.stopping-publish');
+    const tab = await openDemoTab(context);
+    await connectDemo(tab, 'dedicated', topic);
+
+    const publishedBefore = Number(await tab.locator('#metricPublished').textContent());
+    await tab.evaluate(() => {
+      // Both buttons in one task, in the order a user could produce them:
+      // start the reconnect, then keep publishing.
+      document.querySelector<HTMLButtonElement>('#applyConnection')!.click();
+      document.querySelector<HTMLButtonElement>('#publishJson')!.click();
+      document.querySelector<HTMLButtonElement>('#publishBatch')!.click();
+    });
+
+    // The feed prepends, but a status event from the *replacement* bus lands
+    // asynchronously after these clicks, so the two publish rows are not
+    // necessarily at the top — match them by content instead of position.
+    // Exactly two rows carry 未投递: the single publish and the batch.
+    await expect(tab.locator('#eventBody tr', { hasText: '未投递' })).toHaveCount(2);
+    await expect(tab.locator('#eventBody tr', { hasText: '批量 10 条（未投递）' })).toHaveCount(1);
+    // Neither frame was counted...
+    await expect.poll(() => tab.locator('#metricPublished').textContent()).toBe(String(publishedBefore));
+    // ...and both refusals reached the unified error feed, which is also where
+    // a transport-level (asynchronous) drop still shows up.
+    await expect(tab.locator('#eventBody')).toContainText('is stopping; publishBatch() was not sent');
+    await expect(tab.locator('#eventBody')).toContainText('is stopping; publish() was not sent');
+
+    // The reconnect itself still completes — the refusal is about the two
+    // frames, not about the switch.
+    await expect(tab.locator('#statusBadge')).toHaveText('已连接');
+    // And the other direction: once the bus is healthy again the same button
+    // reports 发布 and counts, so the new label is a verdict and not a blanket.
+    // Match by content, not position — this tab owns the topic, so the echo
+    // comes back and is prepended above the publish row.
+    await tab.click('#publishJson');
+    await expect(tab.locator('#eventBody tr', { hasText: '未投递' })).toHaveCount(2);
+    await expect(tab.locator('#eventBody tr', { hasText: '发布' })).toHaveCount(1);
+    // The echo is the delivery the counted frame actually achieved.
+    await expect(tab.locator('#eventBody tr', { hasText: '回显' }).first()).toBeVisible();
+    await expect.poll(() => tab.locator('#metricPublished').textContent()).toBe(String(publishedBefore + 1));
+  });
+
   test('concurrent multi-publisher burst stays duplicate-free across all tabs', async ({ context }) => {
     test.setTimeout(120_000);
     const topic = uniqueTopic('e2e.burst');

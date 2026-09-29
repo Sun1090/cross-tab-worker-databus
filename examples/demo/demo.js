@@ -350,19 +350,58 @@ function handleReceived(message) {
   renderMetrics();
 }
 
+/**
+ * Run `send` against the current bus and report whether the bus accepted the
+ * frame.
+ *
+ * `publish()`/`publishBatch()` return void, so a frame that is not delivered
+ * is only ever reported through `onError` — and for the *bus-level* rejections
+ * that report happens inside the call, not on a later task. Measured: with a
+ * transport stop gated open, `bus.publish(...)` populates the error list with
+ * "…is stopping; publish() was not sent…" before the next statement runs, with
+ * `transport.publishCalls` still empty (the same sequence
+ * tests/data-bus.test.ts's stopping-health case asserts with no await between
+ * the publish and the read). The `stopping` window is one the demo opens on
+ * every click of 应用连接, with auto-publish still running, so this is reachable
+ * by a user pressing 发布 during a reconnect.
+ *
+ * The scope is deliberately narrow: a *transport-level* drop (a WebSocket that
+ * is not open, a Centrifuge publish promise rejecting) is reported
+ * asynchronously and still arrives as its own 错误 row, so this returns true for
+ * those. The claim is "the bus took the frame", not "a subscriber saw it" —
+ * delivery is at-most-once and belongs to the 收 count, which is measured by
+ * what actually comes back.
+ */
+function sendAndConfirm(send) {
+  const bus = state.bus;
+  let rejected = false;
+  // Bound to the same instance the send targets: 应用连接 can swap state.bus
+  // out from under this call, and a listener on the new bus would never see
+  // the old bus's report.
+  const unsubscribe = bus.onError(() => { rejected = true; });
+  try {
+    send(bus);
+  } finally {
+    unsubscribe();
+  }
+  return !rejected;
+}
+
 function publishPayload(payload, description) {
   if (!state.bus) return;
-  state.published += 1;
-  state.bus.publish(state.topic, payload);
+  const accepted = sendAndConfirm(bus => bus.publish(state.topic, payload));
+  if (accepted) state.published += 1;
   addFeed({
-    direction: '发布',
-    pill: 'publish',
+    direction: accepted ? '发布' : '未投递',
+    pill: accepted ? 'publish' : 'error',
     type: description.type,
     topic: state.topic,
     payload: description.payload,
     source: shortId(state.tabId || '本页')
   });
-  animateFlow('publish');
+  // A frame the bus refused never reached the owner, so the flow animation
+  // would draw a hop that did not happen.
+  if (accepted) animateFlow('publish');
   renderMetrics();
 }
 
@@ -413,16 +452,16 @@ function publishBatch() {
       options: { messageId: `batch-${state.tabId}-${state.seq}-${index}` }
     });
   }
-  state.published += items.length;
-  state.bus.publishBatch(state.topic, items);
+  const accepted = sendAndConfirm(bus => bus.publishBatch(state.topic, items));
+  if (accepted) state.published += items.length;
   addFeed({
-    direction: '发布',
-    pill: 'publish',
+    direction: accepted ? '发布' : '未投递',
+    pill: accepted ? 'publish' : 'error',
     type: 'batch',
     topic: state.topic,
-    payload: `批量 ${items.length} 条（单帧）`
+    payload: accepted ? `批量 ${items.length} 条（单帧）` : `批量 ${items.length} 条（未投递）`
   });
-  animateFlow('publish');
+  if (accepted) animateFlow('publish');
   renderMetrics();
 }
 
