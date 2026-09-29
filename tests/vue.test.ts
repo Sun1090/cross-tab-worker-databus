@@ -351,6 +351,54 @@ describe('useCrossTabHealth edge cases', () => {
     app.unmount();
   });
 
+  it('refreshes the snapshot when the bus reports an error', async () => {
+    // Every health case above drives `onStatus`, and the inline fakes answer
+    // `onError` with a bare no-op — so the composable's error listener was
+    // registered and never called, and `docs/api.md`'s "refreshes immediately
+    // on status changes **and errors**" was pinned on its status half only.
+    // (The shared `fakeBus()` does collect error handlers, but nothing on it
+    // ever emits one, so it cannot stand in either.)
+    let calls = 0;
+    let state = 'healthy';
+    const errorHandlers = new Set<(error: unknown) => void>();
+    const bus = {
+      getHealthSummary: () => { calls += 1; return { healthy: state === 'healthy', state }; },
+      onStatus: () => () => {},
+      onError: (handler: (error: unknown) => void) => {
+        errorHandlers.add(handler);
+        return () => errorHandlers.delete(handler);
+      }
+    } as unknown as CrossTabDataBus<unknown, unknown>;
+    const active = ref(bus) as unknown as Ref<CrossTabDataBus<unknown, unknown> | null>;
+    const host = document.createElement('div');
+    const app = createApp(defineComponent({ setup() {
+      const health = useCrossTabHealth(active, { intervalMs: 0 });
+      return () => h('span', health.value?.state ?? 'none');
+    }}));
+    app.mount(host);
+    await nextTick();
+    expect(host.textContent).toBe('healthy');
+    const callsBefore = calls;
+
+    // The verdict changes so a refresh is visible at all: a snapshot reading
+    // the same before and after would not show the listener ran.
+    state = 'recovering';
+    for (const handler of [...errorHandlers]) handler(new Error('transport refused'));
+    await nextTick();
+    expect(calls).toBe(callsBefore + 1);
+    expect(host.textContent).toBe('recovering');
+
+    // Detaching drops the listener, so a later error cannot move the view.
+    active.value = null;
+    await nextTick();
+    const callsAtDetach = calls;
+    state = 'healthy';
+    for (const handler of [...errorHandlers]) handler(new Error('again'));
+    await nextTick();
+    expect(calls).toBe(callsAtDetach);
+    app.unmount();
+  });
+
   it('defaults the health poll interval to 1s when no options object is supplied', async () => {
     vi.useFakeTimers();
     try {
