@@ -1271,6 +1271,35 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('recovers without limit when no maxAttempts is configured', async () => {
+    // `docs/configuration.md` gives `recovery.maxAttempts` the default
+    // `Infinity`, which is a promise rather than a number: automatic transport
+    // recovery is *unlimited* unless an application caps it. Every recovery
+    // case in this file passes an explicit cap (2, 3, 5), so nothing *named*
+    // the default. One pre-existing case is sensitive to it — turning the
+    // default into 3 fails 'numbers consecutive failed recovery attempts and
+    // resets after success' as well — but it asserts the attempt numbering, not
+    // the budget, so it would not have told a reader the default was unlimited.
+    //
+    // Observed through the public health summary rather than by driving N
+    // failures, because `recovery.maxAttempts` is part of `DataBusHealthSummary`
+    // and is exactly what the demo renders ("恢复 n/max"). A test that
+    // exhausted a real retry budget would prove the same thing much slower.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-unlimited' });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-unlimited',
+      environment: environment.environment,
+      initialConfig: {},
+      transport: new FakeTransport<number>()
+    });
+    await bus.ready();
+
+    const recovery = bus.getHealthSummary().recovery;
+    expect(recovery.maxAttempts, 'the default recovery budget must be unlimited').toBe(Number.POSITIVE_INFINITY);
+    expect(recovery.exhausted, 'an unlimited budget can never be spent').toBe(false);
+    await bus.stop();
+  });
+
   it('defers transport operations while a runtime recovery is in cooldown', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'defer-recovery' });
@@ -4963,6 +4992,86 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
       /replay\.maxPerTopic must be a positive safe integer, got \[unstringifiable object\]/
     );
     expect(build({ pruneStrategy: value })).toThrow(/pruneStrategy must be count, age, or both/);
+  });
+
+  it('applies the documented 60s dedup TTL and 1000-entry cap by default', async () => {
+    // `docs/configuration.md` documents `dedup.maxEntries` `1000` and
+    // `dedup.ttlMs` `60000`. Neither is named by a test, and both are more than
+    // un-named: mutating the binding at data-bus.ts's two `??` sites leaves the
+    // **entire suite green` — 60 000 -> 5 000 (a 12x shorter suppression
+    // window) and 1 000 -> 10 (a 100x smaller ledger) both survive. So unlike
+    // the cluster heartbeat and the recovery budget, these were not even
+    // *sensitive*.
+    //
+    // The public diagnostic is not a route to either, which is why this case is
+    // entirely behavioural. `getStats()` reports `ttlMs` only when adaptive
+    // bounds are configured (`...(this.adaptiveBounds ? { ttlMs: ... } : {})`)
+    // and reports no ledger size at all, so the first draft — which asserted
+    // `getDedupStats().ttlMs === 60_000` — failed with `expected undefined to
+    // be 60000`. Worth keeping in mind when reading 0.21.43's note that the same
+    // field is where a NaN used to surface: that is the adaptive path, not the
+    // default one.
+    let now = 1_000;
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'dedup-defaults' });
+    const transport = new FakeTransport<{ n: number | string }>();
+    const bus = new CrossTabDataBus({
+      clusterKey: 'dedup-defaults',
+      environment: environment.environment,
+      initialConfig: {},
+      // The documented clock option, so the TTL is measured on this fake time
+      // rather than on wall time. Dedup is enabled by the *presence* of this
+      // object — `DataBusDedupOptions` has no `enabled` field, and the DataBus
+      // passes `enabled: dedup !== undefined` — which `tsc` reported and vitest,
+      // not type checking, did not.
+      dedup: { now: () => now },
+      transport
+    });
+    await bus.ready();
+
+    // Driven through the transport, not through `bus.publish()`: dedup is
+    // consulted on the receive path (`DedupManager.isDuplicate` has exactly one
+    // caller, `handleTransportMessage`), so a self-publish would measure
+    // delivery instead. A first draft published from the bus and found
+    // `seen` empty, which is the same finding every existing dedup case
+    // encodes by emitting on the transport.
+    const seen: unknown[] = [];
+    bus.subscribe('topic', message => seen.push(message.data));
+    transport.emit('topic', { n: 1 }, 'dup-1');
+    transport.emit('topic', { n: 2 }, 'dup-1');
+    await Promise.resolve();
+    expect(seen, 'the repeat is suppressed while inside the default TTL').toHaveLength(1);
+
+    // One millisecond short of 60s: still suppressed.
+    now += 59_999;
+    transport.emit('topic', { n: 3 }, 'dup-1');
+    await Promise.resolve();
+    expect(seen, 'an ID inside the default TTL must still suppress').toHaveLength(1);
+
+    // Past it, the same ID is free again — so 60 000 is the boundary and not
+    // merely a number someone could report.
+    now += 2;
+    transport.emit('topic', { n: 4 }, 'dup-1');
+    await Promise.resolve();
+    expect(seen, 'an ID past the default 60 000ms TTL must be free again').toHaveLength(2);
+
+    // The ledger cap, the same way: 1 000 distinct IDs fit, and the 1 001st
+    // evicts the oldest. Every existing eviction case configures
+    // `maxEntries: 2` explicitly, so the documented size had no claim at all.
+    for (let index = 0; index < 1_000; index += 1) transport.emit('topic', { n: index }, `id-${index}`);
+    await Promise.resolve();
+    expect(bus.getDedupStats().tracked, '1 000 distinct IDs fit in the default ledger').toBe(1_000);
+    transport.emit('topic', { n: 'overflow' }, 'id-1000');
+    await Promise.resolve();
+    expect(bus.getDedupStats().tracked, 'the ledger does not grow past its default cap').toBe(1_000);
+    // The oldest was the one evicted, so it no longer suppresses. Counted
+    // relative to the moment: the 1 000 distinct IDs above are all delivered,
+    // so `seen` is over a thousand entries long and only the increment says
+    // anything about the ledger.
+    const beforeReplay = seen.length;
+    transport.emit('topic', { n: 'replay-oldest' }, 'id-0');
+    await Promise.resolve();
+    expect(seen.length, 'the evicted oldest ID no longer suppresses').toBe(beforeReplay + 1);
+    await bus.stop();
   });
 
   it('suppresses duplicate message IDs only when dedup is enabled and evicts oldest entries', async () => {
