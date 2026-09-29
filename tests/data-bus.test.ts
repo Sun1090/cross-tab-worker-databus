@@ -1271,6 +1271,35 @@ describe('CrossTabDataBus', () => {
     await bus.stop();
   });
 
+  it('recovers without limit when no maxAttempts is configured', async () => {
+    // `docs/configuration.md` gives `recovery.maxAttempts` the default
+    // `Infinity`, which is a promise rather than a number: automatic transport
+    // recovery is *unlimited* unless an application caps it. Every recovery
+    // case in this file passes an explicit cap (2, 3, 5), so nothing *named*
+    // the default. One pre-existing case is sensitive to it — turning the
+    // default into 3 fails 'numbers consecutive failed recovery attempts and
+    // resets after success' as well — but it asserts the attempt numbering, not
+    // the budget, so it would not have told a reader the default was unlimited.
+    //
+    // Observed through the public health summary rather than by driving N
+    // failures, because `recovery.maxAttempts` is part of `DataBusHealthSummary`
+    // and is exactly what the demo renders ("恢复 n/max"). A test that
+    // exhausted a real retry budget would prove the same thing much slower.
+    const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'recovery-unlimited' });
+    const bus = new CrossTabDataBus({
+      clusterKey: 'recovery-unlimited',
+      environment: environment.environment,
+      initialConfig: {},
+      transport: new FakeTransport<number>()
+    });
+    await bus.ready();
+
+    const recovery = bus.getHealthSummary().recovery;
+    expect(recovery.maxAttempts, 'the default recovery budget must be unlimited').toBe(Number.POSITIVE_INFINITY);
+    expect(recovery.exhausted, 'an unlimited budget can never be spent').toBe(false);
+    await bus.stop();
+  });
+
   it('defers transport operations while a runtime recovery is in cooldown', async () => {
     vi.useFakeTimers();
     const environment = createFakeEnvironment({ storage: new MemoryStorage(), now: () => 1_000, randomId: 'defer-recovery' });
