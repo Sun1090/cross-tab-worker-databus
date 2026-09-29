@@ -272,26 +272,39 @@ describe('useCrossTabHealth edge cases', () => {
     onError: (handler: (error: unknown) => void) => () => void;
     calls: () => number;
     emitStatus: (value: string) => void;
+    emitError: () => void;
   }
 
   function makeFakeHealthBus(): FakeHealthBus {
     let seq = 0;
     let calls = 0;
+    let state = 'healthy';
     const statusHandlers = new Set<(value: string) => void>();
+    const errorHandlers = new Set<(error: unknown) => void>();
     return {
       getHealthSummary: () => {
         calls += 1;
         seq += 1;
-        return { healthy: true, state: 'healthy', seq };
+        return { healthy: state === 'healthy', state, seq };
       },
       onStatus: handler => {
         statusHandlers.add(handler);
         return () => statusHandlers.delete(handler);
       },
-      onError: () => () => {},
+      onError: handler => {
+        errorHandlers.add(handler);
+        return () => errorHandlers.delete(handler);
+      },
       calls: () => calls,
       emitStatus: value => {
         for (const handler of [...statusHandlers]) handler(value);
+      },
+      emitError: () => {
+        // The verdict has to change for a refresh to be observable at all:
+        // a snapshot that reads the same before and after proves nothing about
+        // whether the listener ran.
+        state = 'recovering';
+        for (const handler of [...errorHandlers]) handler(new Error('transport refused'));
       }
     };
   }
@@ -334,6 +347,40 @@ describe('useCrossTabHealth edge cases', () => {
     });
     expect(bus.calls()).toBe(callsAtUnmount);
     vi.useRealTimers();
+  });
+
+  it('refreshes the snapshot when the bus reports an error', () => {
+    // The cases above only ever drive `onStatus`, and the fake's `onError`
+    // used to be `() => () => {}` — so the hook's error listener was
+    // registered and never called, and `docs/api.md`'s "refreshes immediately
+    // on status changes **and errors**" was pinned on its status half only.
+    //
+    // A separate component, not `HealthDemo`: that one renders the literal
+    // string `healthy:${seq}` and never shows the verdict, so it cannot
+    // distinguish a refresh that saw a new state from one that did not.
+    const bus = makeFakeHealthBus();
+    function HealthStateDemo({ attached }: { attached: FakeHealthBus | null }) {
+      const health = useCrossTabHealth(attached as never, { intervalMs: 1_000 });
+      return <span data-testid="health">{(health as { state: string } | null)?.state ?? 'none'}</span>;
+    }
+    const view = render(<HealthStateDemo attached={bus} />);
+    expect(view.getByTestId('health').textContent).toBe('healthy');
+
+    const callsBefore = bus.calls();
+    act(() => bus.emitError());
+    // The snapshot was re-read (calls) *and* its new verdict is on screen
+    // (text) — a re-read alone would not prove the listener ran, since polling
+    // re-reads too.
+    expect(bus.calls()).toBe(callsBefore + 1);
+    expect(view.getByTestId('health').textContent).toBe('recovering');
+
+    // Detaching drops the listener, so a later error cannot move the view.
+    act(() => view.rerender(<HealthStateDemo attached={null} />));
+    expect(view.getByTestId('health').textContent).toBe('none');
+    const callsAtDetach = bus.calls();
+    act(() => bus.emitError());
+    expect(bus.calls()).toBe(callsAtDetach);
+    view.unmount();
   });
 
   it('defaults the poll interval to 1s when no options object is supplied', async () => {
