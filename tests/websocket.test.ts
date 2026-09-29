@@ -872,6 +872,51 @@ describe('WebSocketTransport', () => {
     }
   });
 
+  it('applies a 30s handshake budget when none is configured', async () => {
+    // `docs/transports.md` states the default ("exceeds connectTimeoutMs
+    // (default 30000 ms)") and `DEFAULT_CONNECT_TIMEOUT_MS` implements it, but
+    // no test in this file referenced either: every handshake case passes an
+    // explicit budget (25 ms, or 0 / Infinity), so changing the constant would
+    // have left the suite green and the shipped sentence wrong. The value is
+    // user-visible — it is when a slow endpoint's `start()` gives up.
+    //
+    // Bracketed from both sides rather than asserted once, so the pin is the
+    // number and not "some default": a shorter default would have rejected
+    // before 29 999 ms and fail the first assertion, a longer one would still
+    // be pending at 30 000 ms and fail the second.
+    vi.useFakeTimers();
+    try {
+      const transport = new WebSocketTransport({
+        url: 'wss://example.test/ws',
+        webSocketFactory: url => new FakeWebSocket(url)
+      });
+      const onStatus = vi.fn();
+      const onError = vi.fn();
+      // Tracked through a flag rather than awaited directly: with a *longer*
+      // default the promise would still be pending at 30 000 ms, and awaiting
+      // it would burn the test timeout instead of naming the wrong number.
+      let settled: unknown = 'pending';
+      const rejection = Promise.resolve(
+        transport.start({ url: 'wss://example.test/ws' }, { onMessage: () => {}, onStatus, onError })
+      ).then(
+        () => null,
+        error => error
+      );
+      void rejection.then(value => { settled = value; });
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(onStatus, 'the default budget must not have expired yet').not.toHaveBeenCalledWith('error');
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled, 'the default budget must expire at 30 000ms').toBeInstanceOf(Error);
+      expect((settled as Error).message).toContain('30000ms');
+      expect(onStatus).toHaveBeenCalledWith('error');
+      transport.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('drops a late error from the socket whose connect timeout already reported one', async () => {
     vi.useFakeTimers();
     try {
