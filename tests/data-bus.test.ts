@@ -4552,6 +4552,43 @@ describe('CrossTabDataBus replay (bounded local history)', () => {
     return { bus, transport };
   }
 
+  it('buffers 100 messages per topic by default', async () => {
+    // `docs/configuration.md` documents `replay.maxPerTopic` as `100`, and
+    // `DEFAULT_REPLAY_MAX_PER_TOPIC` implements it. Nothing observed it: every
+    // replay case in this file and in `tests/replay-manager.test.ts` passes an
+    // explicit size (2, 3, 5), and turning the default into 2 leaves the
+    // **entire suite green**. The bus's own history is what a consumer's
+    // `replay(topic, n)` silently truncates against, so the default is the
+    // answer to "how much history do I get for free".
+    //
+    // Measured through a second, late handler, which is the only way to see the
+    // buffer: a handler attached at publish time has already received the
+    // messages and says nothing about what is still retained.
+    const { bus, transport } = makeReplayBus({});
+    const early: unknown[] = [];
+    bus.subscribe('t', message => early.push(message.data));
+    await bus.ready();
+    for (let index = 0; index < 100; index += 1) transport.emit('t', index);
+    expect(early).toHaveLength(100);
+
+    // A handler joining now must be served the whole documented window, which
+    // is what the `replay` subscribe option is for — a first draft omitted it
+    // and read an empty array, which says nothing about the buffer.
+    const late: unknown[] = [];
+    bus.subscribe('t', message => late.push(message.data), { replay: true });
+    expect(late, 'the default replay window holds 100 messages').toEqual(Array.from({ length: 100 }, (_, index) => index));
+
+    // The 101st evicts the oldest, so the window is a cap and not a floor.
+    transport.emit('t', 100);
+    const afterOverflow: unknown[] = [];
+    bus.subscribe('t', message => afterOverflow.push(message.data), { replay: true });
+    expect(
+      afterOverflow,
+      'the default replay window keeps the newest 100, not the first 100'
+    ).toEqual(Array.from({ length: 100 }, (_, index) => index + 1));
+    await bus.stop();
+  });
+
   it('delivers buffered history to a late-joining handler, marked replayed', async () => {
     const { bus, transport } = makeReplayBus({});
     const early: unknown[] = [];
