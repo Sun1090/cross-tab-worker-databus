@@ -4395,3 +4395,107 @@ describe('WorkerClusterRuntime cluster option validation', () => {
     ).not.toThrow();
   });
 });
+
+describe('WorkerClusterRuntime documented defaults', () => {
+  it('registers a 3s heartbeat interval when none is configured', async () => {
+    // `docs/configuration.md` gives `heartbeatIntervalMs` a default of `3000`
+    // and `DEFAULT_HEARTBEAT_INTERVAL_MS` implements it, but no test *named*
+    // that number: the constant is module-private, 83 of the 84 runtimes in
+    // this file run on the default, and the few that name an interval pass it
+    // explicitly. Two pre-existing cases are sensitive to it (turning it into
+    // 1 000 fails them too), but only incidentally — they assert weighting
+    // behaviour, not the period, so nothing said "the default is 3 000".
+    //
+    // It is not observable through the clock, which is the other half. The
+    // production heartbeat callback is unconditional — it calls
+    // `writeRecord(false)` with no elapsed check — so the *period* is enforced
+    // only by the delay handed to `setInterval`, and the fake environment
+    // discarded that argument. `runIntervals()` fired the callback at any
+    // `now`, which is why a first attempt at this case (advance to 2 999 ms,
+    // expect no write) read a heartbeat at 3 999 ms and failed. The fix is in
+    // the instrument: the fake now records each registration's period.
+    //
+    // The value is not cosmetic — it is the first term of the documented
+    // worst-case dead-owner detection time.
+    const storage = new MemoryStorage();
+    const env = createFakeEnvironment({
+      storage,
+      hub: new ChannelHub(),
+      now: () => 1_000,
+      randomId: 'default-heartbeat'
+    });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'default-heartbeat',
+      environment: env.environment,
+      tabId: 'tab-heartbeat',
+      workerId: 'worker-heartbeat',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    await Promise.resolve();
+
+    expect(env.intervalDelays(), 'the cluster registers exactly one interval').toEqual([3_000]);
+    runtime.stop();
+  });
+
+  it('reaps a silent peer only past a 10s worker TTL when none is configured', async () => {
+    // The same absence on the other term: `workerTtlMs` defaults to `10000` in
+    // both docs and the source and no test named that number — the one case
+    // advancing 10 000 ms passes `workerTtlMs: 10_000` explicitly. Six
+    // pre-existing stranded-recovery and route-pruning cases are sensitive to
+    // the value (10 000 → 30 000 fails them too), but they assert recovery, not
+    // the threshold, so none of them said "the default is 10 000".
+    //
+    // This one *is* observable, because pruning is elapsed-based
+    // (`now - worker.heartbeatAt > workerTtlMs`) rather than cadence-based, so
+    // the bracket is the real thing: the silent peer's record must survive one
+    // millisecond short of the default and be gone one tick past it. A longer
+    // default would still be holding it at the far side.
+    //
+    // The silent runtime gets its OWN environment over the shared storage and
+    // hub, and is never paused. `pause()` is a *graceful* teardown — it removes
+    // the worker record outright — so using it here deleted the record before
+    // any TTL had elapsed and the first run of this case reaped the peer at
+    // 9 999 ms while asserting it should still be alive. What an uncontrolled
+    // exit looks like to a peer is a record that simply stops being refreshed,
+    // and sharing the interval set would have kept refreshing it.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+    const survivorEnv = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'default-ttl-survivor' });
+    const silentEnv = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'default-ttl-silent' });
+    const survivor = new WorkerClusterRuntime({
+      clusterKey: 'default-ttl',
+      environment: survivorEnv.environment,
+      tabId: 'tab-survivor',
+      workerId: 'worker-survivor',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    const silent = new WorkerClusterRuntime({
+      clusterKey: 'default-ttl',
+      environment: silentEnv.environment,
+      tabId: 'tab-silent',
+      workerId: 'worker-silent',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    survivor.start();
+    silent.start();
+    await Promise.resolve();
+    const hasSilent = () => storage.entries().some(([key]) => key.includes(':worker:worker-silent'));
+    expect(hasSilent(), 'the silent worker registers before it goes quiet').toBe(true);
+
+    // Only the survivor ticks. The silent runtime's interval is never fired
+    // again, so its record ages exactly as a crashed tab's would.
+    now += 9_999;
+    survivorEnv.runIntervals();
+    await Promise.resolve();
+    expect(hasSilent(), 'a peer inside the default TTL must not be reaped').toBe(true);
+
+    now += 2;
+    survivorEnv.runIntervals();
+    await Promise.resolve();
+    expect(hasSilent(), 'a peer past the default 10 000ms TTL must be reaped').toBe(false);
+    survivor.stop();
+    silent.stop();
+  });
+});
