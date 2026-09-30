@@ -1,3 +1,10 @@
 overrides:
   nanoid: "^3.3.18"
   glob: "^10.5.0"
+  # brace-expansion 5.0.9, reached only through eslint > minimatch (dev-only, so
+  # no consumer is exposed), carries three advisories: two high (uncontrolled
+  # recursion on nested brace groups / in parseCommaParts, stack exhaustion) and
+  # one moderate (quadratic-time `{a},b}` rewrite). All three are fixed in
+  # 5.0.12, and minimatch 10.2.6 asks for `^5.0.8`, so the override stays inside
+  # its declared range rather than forcing a major.
+  brace-expansion: "^5.0.12"

@@ -8,9 +8,17 @@ export type BenchMetricRow = [label: string, before: number, after: number, ceil
 
 /** Minimal shape of an archived `bench-results/browser-*.json` report. */
 export interface BenchReportLike {
+  generatedAt?: string;
   results?: Array<{ mode: string; perMessageMs: number }>;
   databus?: { timings?: Record<string, number> };
-  host?: { loadavg1m?: number; cpus?: number | null };
+  /**
+   * The host block, as *parsed from a file on disk* rather than as a writer
+   * produces it — these reports are untrusted input, hand-editable and possibly
+   * written by another generator. `null` is therefore a real value here and not
+   * only a type error: `JSON.stringify` writes a non-finite reading as `null`,
+   * which is precisely the "absent" that `reportLoad` must not read as zero.
+   */
+  host?: { loadavg1m?: number | null; cpus?: number | null } | null;
 }
 
 /** Parse CLI args; throws on an invalid `--fail-above-pct` or positional count. */
@@ -49,6 +57,32 @@ export declare const POISON_LOAD_RATIO: number;
 
 /** The finite, non-negative 1-minute load recorded on a report, or `null`. */
 export declare function reportLoad(report: BenchReportLike | undefined): number | null;
+
+/**
+ * The core count recorded beside the load reading, or `null` where the platform
+ * publishes no finite one. The only machine-relative scale available to the
+ * no-baseline leg of `loadVerdict`.
+ */
+export declare function reportCpus(report: BenchReportLike | undefined): number | null;
+
+/**
+ * The archived reports that actually record a load reading, oldest first —
+ * unparseable files and pre-`host` reports skipped, so a caller gating whether to
+ * archive a fresh sample consults the same rule the comparison will.
+ */
+export declare function archiveLoads(resultsDir: string, limit?: number): BenchReportLike[];
+
+/**
+ * Admit a freshly taken sample to the archive, or refuse it before it is
+ * written. A **refusal** is a judgment about the host (`refusal` set, exit
+ * non-zero); a **write failure** is a broken disk (`warning` set, exit zero) and
+ * is deliberately not conflated with the first.
+ */
+export declare function archiveReport(
+  report: BenchReportLike,
+  resultsDir: string,
+  limit?: number
+): { archived: boolean; refusal: string | null; warning: string | null };
 
 /**
  * Why a newest report's host load is too far above the baseline's to trust, or

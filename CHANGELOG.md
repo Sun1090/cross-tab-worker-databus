@@ -20,7 +20,7 @@ A release ten cycles in the making, and the reason it was late is now part of th
 
 - `pnpm check` — 39 test files, **999 tests**, typecheck, build, 5 perf gates; `pnpm lint`; the documentation gate at 25.
 - Twenty-four mutants across the changes above, each applied alone and restored, each with its own named failure recorded in `docs/progress.md`.
-- `pnpm audit --registry=https://registry.npmjs.org` — no known vulnerabilities.
+- `pnpm audit --registry=https://registry.npmjs.org` — reported no known vulnerabilities, and that report was **wrong**: the tree carried `brace-expansion@5.0.9` with three advisories (two high, one moderate) through `eslint > minimatch`. The advisories were published about three hours *before* the audit ran, so this is not publication timing, and the registry named was the right one. Fixed in `0.21.46` by an override, with the finding recorded there rather than softened here.
 - `docs/benchmarks.md` and its zh mirror regenerate byte-identical from the 91-report archive, so the generated tables and their committed copies have not drifted; the archive itself is untracked, which is why that is a run rather than a gate.
 - **The browser benchmark was deferred again, with its load numbers, as the checklist's standing decision requires** — 79.78 / 120.85 / 129.80 / 145.31 across six readings on 8 cores at the end of this cycle. The archive's newest report is still `browser-2026-09-24T13-40-52-413Z.json`, and 24 tags have now shipped without a sample. What this release changes is that a loaded host can no longer *silently* produce the sample that ends that streak: the next run either produces a clean sample or is refused with its numbers.
 
