@@ -7,6 +7,7 @@
  * archive silently poisoned `pnpm bench:compare`.
  */
 import os from 'node:os';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseBenchEnv, readHostLoad } from '../scripts/bench-browser.mjs';
 
@@ -109,5 +110,41 @@ describe('bench-browser host load recording', () => {
     expect(typeof host.cpus === 'number' || host.cpus === null).toBe(true);
     expect(typeof host.platform).toBe('string');
     expect(typeof host.release).toBe('string');
+  });
+
+  it('reads the host before the run does any of its own work', () => {
+    // *When* `readHostLoad` is called is the whole correctness of the reading,
+    // and it is not reachable from a unit test — the call is inside `main()`,
+    // behind a server spawn and a browser launch. So it is pinned as a text gate
+    // over the script, which is decidable rather than vacuous precisely because
+    // it cannot pass by finding nothing: a missing or moved line changes the
+    // index arithmetic and fails.
+    //
+    // The measurement that forced the placement: an 8-core host idle long enough
+    // to read 7.23 was at 11.95 by the time a sample completed, and a second run
+    // traced 11.6 rising to 13.0 mid-run and decaying to 8.96 afterwards. Read
+    // after the work, the guard measures the benchmark and refuses a genuinely
+    // idle machine every time.
+    const source = readFileSync(new URL('../scripts/bench-browser.mjs', import.meta.url), 'utf8');
+    // The negative lookahead is what makes this count *calls*: the export's own
+    // `function readHostLoad() {` also ends in `()`, and counting it made this
+    // case fail against correct code — the first version's mistake, caught by the
+    // gate rather than by a later reader.
+    const calls = [...source.matchAll(/readHostLoad\(\)(?!\s*\{)/g)];
+    // Exactly one call site. More than one means a second, later reading exists
+    // somewhere, and the archive would carry whichever won.
+    expect(calls, 'exactly one readHostLoad() call site').toHaveLength(1);
+    // `calls[0]!` and not `calls[0].index!`: with `noUncheckedIndexedAccess`
+    // the error is on the element, and vitest does not type check this file, so
+    // `pnpm check` is the only thing that can see it.
+    const read = calls[0]!.index!;
+    for (const [what, marker] of [
+      ['the demo server spawn', "spawn(process.execPath, ['scripts/serve-examples.mjs']"],
+      ['the browser launch', 'chromium.launch(']
+    ] as const) {
+      const at = source.indexOf(marker);
+      expect(at, `${what} must still be in the script`).toBeGreaterThan(-1);
+      expect(read, `the host must be read before ${what}`).toBeLessThan(at);
+    }
   });
 });
