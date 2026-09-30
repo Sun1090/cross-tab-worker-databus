@@ -1,3 +1,25 @@
+## [0.21.47] - 2026-09-30
+
+One new option, one guard that could not pass, and the first browser-benchmark sample in twenty-five tags. No existing behavior changed: the option is additive, and the one case that documents how the replay store behaves today is unchanged.
+
+### Added
+
+- **`createIndexedDbReplayPersistence` accepts `clusterKey`, and the IndexedDB store is namespaced by it.** The replay store is the one place in the library where `clusterKey` — documented everywhere else as the boundary for storage keys and the BroadcastChannel namespace — did not apply: its database name defaulted to the package's storage prefix, and the store is keyed by the plaintext Topic, so two clusters in one origin read each other's rows for any Topic they share. Pass the same `clusterKey` the bus gets and the database name is derived exactly as the coordination plane derives its storage keys, so an application running more than one cluster gets one namespace per cluster without naming databases by hand.
+- **Two derivations, both pinned.** The name uses `createOpaqueKey(clusterKey || '__default__')` — the *same* function and the *same* empty-key fallback the coordination plane uses, because `''` and `'__default__'` are one cluster everywhere else in the library; hashing `''` on its own would open a database no bus ever reads, and the symptom would be silently empty replay rather than an error. And an explicit `dbName` still wins over a supplied `clusterKey`, because it is the documented escape hatch for an application that wants its own naming, and silently overriding a name the caller typed would be worse than the inconsistency this option removes.
+- **It is additive, and deliberately not a changed default.** Namespacing by default is the only shape that fixes the hole with no opt-in, and it is the wrong trade: it would move every existing caller's rows into a database no bus opens, surfacing as silently empty replay rather than as an error. Omitting `clusterKey` still shares, so nothing moves for anyone who does not ask for it.
+
+### Fixed
+
+- **The browser benchmark's host-load guard was reading the host _after_ the benchmark had consumed the CPU, so it measured itself and could never pass.** Introduced in `0.21.45`, it compares a sample's load against a ceiling. The reading was taken at archive time — after Chrome launched, the demo server spawned and the whole mode matrix ran — and on an 8-core host that self-inflicted cost exceeds the ceiling: a host idle long enough to read **7.23** was at **11.95** by the time a sample completed, and a second run traced 11.6 rising to 13.0 mid-run and decaying to 8.96. So the guard would have refused a genuinely idle machine on every attempt, turning "wait for a quiet window" into "impossible by construction", with no error anywhere to say so. The reading is now taken before any of the run's own work, which is the only reading that answers the question the guard asks: was this machine busy for something *other* than being benchmarked.
+
+### Verification
+
+- `pnpm check` — 39 test files, **1019 tests**, typecheck, build, 5 perf gates; `pnpm lint`; the bench and documentation gates.
+- Three mutants on the new option, each applied alone and restored, with the applied-line count printed and asserted before the run: accepting and ignoring `clusterKey`, hashing the empty key on its own, and letting `clusterKey` override an explicit `dbName`. Each dies to a distinct case.
+- Two mutants on the guard's reading placement, pinned as a text gate over the script because the call sits inside `main()` behind a server spawn and a browser launch: moving the reading back to archive time, and deleting it.
+- **The first browser-benchmark sample in 25 tags**, and the first of 92 to record host state: `host: { loadavg1m: 7.88, cpus: 8 }` on `darwin`. `pnpm bench:compare --fail-above-pct 50` exits 0 — `publish/dedicated` +11.4 %, `publish/shared` +11.5 %, `wildcardDispatch1000Ms` +13.8 %, `publishBatch1000Ms` +16.3 %, `dedup1000Ms` +0.5 %, `traceAndPublish1000Ms` −8.1 % — and `docs/benchmarks.md` plus its zh mirror regenerate from 92 reports. Those deltas span 25 releases against a single prior sample rather than any change in this release, which is why the gate requires beating the *highest* of the five baseline samples and not merely the median.
+- `pnpm audit` on the public registry, clean and independently re-derived from the installed version against the published advisory ranges rather than from the tool's exit code.
+
 ## [0.21.46] - 2026-09-30
 
 `0.21.45` shipped a guard whose own release note explained why it did not yet work in the case that mattered. This is that case, fixed, plus the dependency the release's audit should have caught and did not. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.45`'s.
