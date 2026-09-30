@@ -12,12 +12,39 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { resolve } from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const DEFAULT_PORT = 4173;
 const DEFAULT_MESSAGES = 100;
 const WORKER_MODES = ['dedicated', 'shared'];
+
+/**
+ * The host's load at the moment the sample was taken, recorded so a poisoned
+ * sample is *distinguishable* in the archive rather than only detectable by
+ * whoever remembers.
+ *
+ * Every archived report predates this field, which is the point: the standing
+ * rule recorded in `docs/progress.md` is to defer `bench:browser` rather than
+ * sample a loaded host, and it has been enforced by a human for ten consecutive
+ * cycles and 24 tags — while `scripts/bench-compare.mjs` can only judge a report
+ * against the previous five, so a fast sample taken under load would enter the
+ * baseline and become the reference for the next five. The rule had no
+ * mechanical guard and the archive no evidence; this supplies the evidence, and
+ * `loadVerdict()` in bench-compare is what reads it.
+ *
+ * `loadavg()` is the 1-minute figure, matching the `uptime` readings the deferral
+ * decisions were taken from. `cpus` is recorded alongside it because a raw load
+ * number is meaningless without the core count, and the archive spans machines.
+ * Returns `null` rather than a fabricated reading if the platform does not
+ * provide one.
+ */
+export function readHostLoad() {
+  const load = os.loadavg?.();
+  if (!Array.isArray(load) || load.length === 0 || !Number.isFinite(load[0])) return null;
+  return { loadavg1m: load[0], cpus: os.cpus?.().length ?? null, platform: os.platform(), release: os.release() };
+}
 
 function parseInteger(raw, fallback, name, min, max) {
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -342,7 +369,7 @@ async function main() {
       const results = [];
       for (const mode of modes) results.push(await runMode(env, browser, mode));
       const databus = await runDatabusMatrix(baseUrl, browser);
-      const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus };
+      const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus, host: readHostLoad() };
       console.log(JSON.stringify(report, null, 2));
       // Archive for trend comparison via scripts/bench-compare.mjs. Failures
       // here must never break the benchmark run itself.

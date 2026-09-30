@@ -15,3 +15,9 @@ export interface BenchEnv {
  * mode. Throws a `TypeError` naming the offending variable.
  */
 export declare function parseBenchEnv(env?: Record<string, string | undefined>): BenchEnv;
+
+/**
+ * The host load recorded with each archived report: `{ loadavg1m, cpus, platform,
+ * release }`, or `null` when the platform provides no finite reading.
+ */
+export declare function readHostLoad(): { loadavg1m: number; cpus: number | null; platform: string; release: string } | null;

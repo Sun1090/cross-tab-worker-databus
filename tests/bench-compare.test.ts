@@ -4,8 +4,11 @@ import {
   compareReports,
   findRegressions,
   findWithinBaseline,
+  loadVerdict,
   median,
-  parseArgs
+  parseArgs,
+  POISON_LOAD_RATIO,
+  reportLoad
 } from '../scripts/bench-compare.mjs';
 import type { BenchMetricRow, BenchReportLike } from '../scripts/bench-compare.mjs';
 
@@ -208,5 +211,60 @@ describe('bench-compare median baseline', () => {
     // A two-report pair has no ceiling to hide behind, so a large swing is never
     // suppressed — the leg cannot invent history that was not passed in.
     expect(findWithinBaseline(compareReports(older, newer), 10)).toEqual([]);
+  });
+});
+
+
+/**
+ * The host-load refusal. Every report in the archive predates the `host` field,
+ * so the standing rule in `docs/progress.md` — defer `bench:browser` rather than
+ * sample a loaded host — was enforced by a human for ten cycles and 24 tags,
+ * while `compareAgainstBaseline` can only judge a report against the previous
+ * five. A *fast* sample taken under load therefore enters the baseline and
+ * becomes the reference for the next five readings, and nothing in the archive
+ * recorded that the host was busy. These cases pin both halves: the reading is
+ * extracted when present, and a sample far above the baseline's own median is
+ * refused with a reason.
+ */
+describe('bench-compare host load', () => {
+  const withLoad = (loadavg1m: number | null): BenchReportLike =>
+    loadavg1m === null ? {} : { host: { loadavg1m, cpus: 8 } };
+
+  it('reads a finite load and treats an absent one as unknown rather than idle', () => {
+    expect(reportLoad(withLoad(3.5))).toBe(3.5);
+    // Every archived report today looks like this. Zero would make 91 idle-host
+    // samples the baseline and every future reading a regression against it.
+    expect(reportLoad(withLoad(null))).toBeNull();
+    expect(reportLoad({ host: { loadavg1m: Number.NaN } })).toBeNull();
+    expect(reportLoad({ host: { loadavg1m: -1 } })).toBeNull();
+    expect(reportLoad(undefined)).toBeNull();
+  });
+
+  it('refuses a sample far above the baseline median and names both figures', () => {
+    const verdict = loadVerdict(withLoad(20), [withLoad(1), withLoad(2), withLoad(2)]);
+    expect(verdict, 'a 10x load must be refused').toBeTypeOf('string');
+    expect(verdict).toContain('20.00');
+    expect(verdict).toContain('(2.00)');
+    // The reason is printed, so a refusal says why rather than just failing.
+    expect(verdict).toContain(String(POISON_LOAD_RATIO));
+  });
+
+  it('accepts a sample within the ratio, with the boundary inclusive', () => {
+    expect(loadVerdict(withLoad(3), [withLoad(1), withLoad(2), withLoad(2)])).toBeNull();
+    // Exactly at the ratio is trusted: the threshold is a refusal to trust, not a
+    // claim that the sample above it is invalid, so the boundary must not reject.
+    expect(loadVerdict(withLoad(2 * POISON_LOAD_RATIO), [withLoad(1), withLoad(2), withLoad(2)])).toBeNull();
+    expect(loadVerdict(withLoad(2 * POISON_LOAD_RATIO + 0.01), [withLoad(1), withLoad(2), withLoad(2)])).toBeTypeOf('string');
+  });
+
+  it('stays silent when there is nothing to judge, rather than refusing blindly', () => {
+    // No reading on the newest report: the archive's own shape.
+    expect(loadVerdict(withLoad(null), [withLoad(1), withLoad(2)])).toBeNull();
+    // No comparable baseline: refusing here would lock the gate out of the very
+    // archive it is meant to protect.
+    expect(loadVerdict(withLoad(50), [withLoad(null), withLoad(null)])).toBeNull();
+    // A median of zero cannot carry a ratio, and is said so rather than refused
+    // on a division by zero.
+    expect(loadVerdict(withLoad(5), [withLoad(0), withLoad(0)])).toContain('not comparable');
   });
 });

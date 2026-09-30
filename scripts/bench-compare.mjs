@@ -139,6 +139,64 @@ export function compareAgainstBaseline(reports) {
 }
 
 /**
+ * The load reading `bench-browser.mjs` records for each report, normalized.
+ *
+ * Reports archived before the field existed have none, and they are the whole
+ * archive today — so this returns `null` for them rather than treating "absent"
+ * as zero, which would make every old sample look like an idle host and every
+ * new sample like a regression against it.
+ */
+export function reportLoad(report) {
+  const load = report?.host?.loadavg1m;
+  return typeof load === 'number' && Number.isFinite(load) && load >= 0 ? load : null;
+}
+
+/**
+ * Judge a newest sample's host load against the baseline samples that recorded
+ * one, and return a verdict string or `null`.
+ *
+ * The reason this exists: `compareAgainstBaseline` can only judge a report
+ * against the previous five, so a sample taken on a loaded host — the *fast*
+ * direction, which is what a warm-but-busy or cached state produces — enters the
+ * baseline and becomes the reference for the next five comparisons. The deferral
+ * rule that prevents that lived only in `docs/progress.md` and in a human
+ * remembering it, and it slipped for ten cycles and 24 tags.
+ *
+ * The threshold is a **ratio against the baseline's own median**, not an
+ * absolute number, because the archive spans machines and a load average means
+ * nothing without its core count: a value that is unremarkable for a 32-core
+ * host is a stall on a 4-core one, and any absolute ceiling would be wrong on one
+ * of them. `POISON_LOAD_RATIO` is deliberately generous — 4× — because the cost
+ * of a false positive is one deferred run and the cost of a false negative is a
+ * corrupted baseline that silently corrupts the next five readings. It is a
+ * refusal to trust, not a claim that the sample is invalid.
+ *
+ * Returns a human-readable reason (so the caller can print *why*) or `null` when
+ * the sample is admissible: no reading on the new report (nothing to judge),
+ * no comparable baseline reading (nothing to judge against), or a reading within
+ * the ratio.
+ */
+export const POISON_LOAD_RATIO = 4;
+
+export function loadVerdict(newest, baselineReports) {
+  const load = reportLoad(newest);
+  if (load === null) return null;
+  const baseline = baselineReports
+    .slice(-BASELINE_SAMPLES)
+    .map(reportLoad)
+    .filter(value => value !== null);
+  if (baseline.length === 0) return null;
+  const reference = median(baseline);
+  if (reference <= 0) return `load ${load.toFixed(2)} with a baseline median of ${reference} — not comparable`;
+  if (load <= reference * POISON_LOAD_RATIO) return null;
+  return (
+    `host load ${load.toFixed(2)} is ${(load / reference).toFixed(1)}x the baseline median ` +
+    `(${reference.toFixed(2)}) over ${baseline.length} recorded sample(s) — above the ` +
+    `${POISON_LOAD_RATIO}x refusal to trust, so this report will not be trusted as a baseline`
+  );
+}
+
+/**
  * Descriptions of every metric that regressed past `failPct` **and** past the
  * largest value its own baseline recorded. Metrics whose baseline is effectively
  * zero are skipped (a percentage change from ~0 is meaningless); `failPct ===
@@ -244,6 +302,20 @@ if (invokedDirectly) {
       `baseline: median of the preceding ${files.length - 1} report(s) per metric; ` +
       'the gate also requires beating the highest of those samples'
     );
+    // Refuse to *trust* a sample taken on a loaded host before its numbers are
+    // compared, because a fast sample under load enters the baseline and becomes
+    // the reference for the next five comparisons. Reports predating the `host`
+    // field have nothing to judge, and so does a newest report with no reading —
+    // both are silent, which is why the standing rule also names the archive's
+    // vintage in `docs/benchmarks.md`.
+    const newest = files.at(-1);
+    const verdict = loadVerdict(load(newest), files.slice(0, -1).map(load));
+    if (verdict !== null) {
+      console.log('');
+      console.log(`[bench] NOT TRUSTED: ${verdict}`);
+      console.log('[bench] the numbers below are printed for diagnosis; re-run on an idle host');
+      process.exit(1);
+    }
   }
   console.log('');
   for (const [metric, before, after, ceiling] of rows) {

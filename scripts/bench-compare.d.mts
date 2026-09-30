@@ -10,6 +10,7 @@ export type BenchMetricRow = [label: string, before: number, after: number, ceil
 export interface BenchReportLike {
   results?: Array<{ mode: string; perMessageMs: number }>;
   databus?: { timings?: Record<string, number> };
+  host?: { loadavg1m?: number; cpus?: number | null };
 }
 
 /** Parse CLI args; throws on an invalid `--fail-above-pct` or positional count. */
@@ -42,3 +43,15 @@ export declare function findWithinBaseline(rows: BenchMetricRow[], failPct: numb
 
 /** The `limit` most recent archived reports in `resultsDir`, oldest first. */
 export declare function latestReports(resultsDir: string, limit?: number): string[];
+
+/** Load ratio, against the baseline's own median, above which a newest sample is refused. */
+export declare const POISON_LOAD_RATIO: number;
+
+/** The finite, non-negative 1-minute load recorded on a report, or `null`. */
+export declare function reportLoad(report: BenchReportLike | undefined): number | null;
+
+/**
+ * Why a newest report's host load is too far above the baseline's to trust, or
+ * `null` when the sample is admissible (or when there is nothing to judge).
+ */
+export declare function loadVerdict(newest: BenchReportLike, baselineReports: BenchReportLike[]): string | null;
