@@ -175,6 +175,126 @@ describe('createCentrifugeDataBus', () => {
     vi.unstubAllGlobals();
   });
 
+  it('defaults the worker mode to dedicated and the heartbeat to 10s', async () => {
+    // Both documented in `docs/configuration.md` and both unobserved:
+    // `workerMode` → `dedicated` and `heartbeatIntervalMs` → `10000` for the
+    // SharedWorker PING. Mutating each to a wrong value leaves all 68 cases in
+    // this file green (`WORKER_MODE.DEDICATED` → `SHARED`, and the constant
+    // 10 000 → 2 000), so both are in the unobserved tier this audit has been
+    // walking.
+    //
+    // The heartbeat is pinned by equivalence rather than by a read, because
+    // `buildInitInput` deliberately **omits** the field when it equals the
+    // default — so the frame cannot report the number. What it can settle is
+    // which value counts as "the default": no option and an explicit 10 000 must
+    // produce the same frame, and any other value must appear in it. Under the
+    // mutant those two diverge, because the unconfigured bus still omits a
+    // field that the explicit 10 000 now has to send. The shared-mode PING case
+    // below cannot see this: it asserts a PING *has* arrived by 10 s, which a
+    // faster cadence satisfies too, and that is why the constant moved freely.
+    const initOf = async (options: { heartbeatIntervalMs?: number; randomId: string }) => {
+      const environment = createFakeEnvironment({
+        storage: new MemoryStorage(),
+        hub: new ChannelHub(),
+        now: () => 1_000,
+        randomId: options.randomId
+      });
+      const worker = new WorkerDouble();
+      const bus = createCentrifugeDataBus({
+        connection: { url: 'wss://example.test/connection/websocket' },
+        environment: environment.environment,
+        workerFactory: () => worker as unknown as Worker,
+        ...(options.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: options.heartbeatIntervalMs })
+      });
+      await bus.ready();
+      // 'INIT' as a literal, the way the neighbouring PING case spells 'PING':
+      // this file does not import the constant and the protocol type is a
+      // discriminated union keyed on it.
+      const init = worker.messages.find(message => message.type === 'INIT');
+      await bus.stop();
+      return init;
+    };
+
+    const byDefault = await initOf({ randomId: 'centrifuge-hb-default' });
+    const explicitDefault = await initOf({ heartbeatIntervalMs: 10_000, randomId: 'centrifuge-hb-explicit' });
+    const other = await initOf({ heartbeatIntervalMs: 5_000, randomId: 'centrifuge-hb-other' });
+
+    expect(byDefault, 'the documented default must be the value the frame treats as default').toEqual(explicitDefault);
+    expect(
+      'heartbeatIntervalMs' in (other ?? {}),
+      'a value other than the default must be sent to the Worker'
+    ).toBe(true);
+    expect(
+      'heartbeatIntervalMs' in (byDefault ?? {}),
+      'the default is not sent — it is the Worker’s own default'
+    ).toBe(false);
+  });
+
+  it('uses a dedicated Worker when no workerMode is configured', async () => {
+    // `workerMode` defaults to `dedicated`, and `options.workerMode ??
+    // WORKER_MODE.DEDICATED` → `SHARED` leaves all 70 cases green. The
+    // observable is which factory the transport reaches for, and the pin needs
+    // **both** factories supplied: a first version provided only
+    // `workerFactory`, and it passed under the mutant for the wrong reason —
+    // with no `sharedWorkerFactory` in scope the selector degrades a requested
+    // SharedWorker to a dedicated one anyway, so the same factory was called
+    // either way and the case could not see the default at all. Supplying both
+    // makes the choice the transport actually made observable.
+    const environment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      hub: new ChannelHub(),
+      now: () => 1_000,
+      randomId: 'centrifuge-mode-default'
+    });
+    const dedicated = new WorkerDouble();
+    const shared = new SharedWorkerDouble();
+    const created: string[] = [];
+    const bus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: environment.environment,
+      workerFactory: () => {
+        created.push('dedicated');
+        return dedicated as unknown as Worker;
+      },
+      sharedWorkerFactory: () => {
+        created.push('shared');
+        return shared as unknown as SharedWorker;
+      }
+    });
+    await bus.ready();
+
+    expect(created, 'the documented default must select the dedicated backend').toEqual(['dedicated']);
+    expect(dedicated.messages.some(message => message.type === 'INIT')).toBe(true);
+    expect(bus.getDiagnostics().transport.backend).toBe('dedicated');
+
+    // And the mode is honoured when asked for, so the assertion above is about
+    // the default rather than about a factory that is simply the only one used.
+    const sharedEnvironment = createFakeEnvironment({
+      storage: new MemoryStorage(),
+      hub: new ChannelHub(),
+      now: () => 1_000,
+      randomId: 'centrifuge-mode-shared'
+    });
+    const sharedOnly: string[] = [];
+    const sharedBus = createCentrifugeDataBus({
+      connection: { url: 'wss://example.test/connection/websocket' },
+      environment: sharedEnvironment.environment,
+      workerFactory: () => {
+        sharedOnly.push('dedicated');
+        return new WorkerDouble() as unknown as Worker;
+      },
+      sharedWorkerFactory: () => {
+        sharedOnly.push('shared');
+        return new SharedWorkerDouble() as unknown as SharedWorker;
+      },
+      workerMode: 'shared'
+    });
+    await sharedBus.ready();
+    expect(sharedOnly, 'an explicit shared mode must reach the shared factory').toEqual(['shared']);
+    await sharedBus.stop();
+    await bus.stop();
+  });
+
   it('defaults the cluster key to the connection URL', async () => {
     // The Centrifuge factory is a near-copy of the WebSocket one, and the mirror
     // prior held: both docs state the default, `createCentrifugeDataBus` does
