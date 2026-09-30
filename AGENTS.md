@@ -82,6 +82,7 @@ tests/
   storage-channel.test.ts       # createStorageEventChannel probes + the frame fallback
   dedup-manager.test.ts         # DedupManager accept/suppress, adaptive TTL, disabled instance
   replay-manager.test.ts        # ReplayManager rings, pruning, retention, suspend
+  replay-pruning.test.ts        # pruneReplayHistory's same-instance contract and per-strategy entries
   replay-persistence.test.ts    # createIndexedDbReplayPersistence round trip + stale-signal teardown
   publication.test.ts           # parseDataBusPublication legacy, envelope, canonical shapes
   error-utils.test.ts           # serializeError/deserializeWorkerError + describeFailure
