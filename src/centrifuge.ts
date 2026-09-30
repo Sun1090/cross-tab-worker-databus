@@ -372,10 +372,28 @@ export class CentrifugeWorkerTransport<TData = unknown>
     // `start()` reaches past its own `if (this.backend) return` guard, and
     // `backend` becomes null only through `stop()` and `onWorkerFailed()` — both
     // of which call `clearHeartbeat()` first. Measured: deleting this line leaves
-    // the whole suite green. It stays because `clearHeartbeat()` can only ever
-    // drop the one handle it holds, so a double-arm would leak an interval that
-    // nothing can clear afterwards — doubled PINGs at the SharedWorker for the
-    // rest of the page, which reads to the reaper as a tab that never goes away.
+    // the whole suite green, and a twelve-leg third-party ledger re-measured it as
+    // dominated rather than unpinned.
+    //
+    // It stays because `clearHeartbeat()` can only ever drop the one handle it
+    // holds, so a double-arm leaks an interval nothing can clear afterwards. **What
+    // that leak costs was mis-stated here until this was re-derived, and the old
+    // wording was wrong twice over:** it claimed "doubled PINGs at the SharedWorker
+    // for the rest of the page, which reads to the reaper as a tab that never goes
+    // away". (1) Not doubled — `clearHeartbeat()` drops one of the two handles, so
+    // the survivor pings once per period, not twice; and after `stop()`,
+    // `resetBackend()` has nulled `worker`, `port` and `localSession`, so it has
+    // no target to ping at all. (2) Backwards — the reaper judges **silence**
+    // (`lastSeenAt`), so a higher PING rate can only delay reaping; it cannot make
+    // a dead tab look alive.
+    //
+    // The real cost is worse than either, and it is why the guard is kept rather
+    // than tidied away: `post()` dispatches to `worker` / `port` / `localSession`
+    // and **throws** when all three are unset, with no backend guard of its own. A
+    // leaked interval therefore raises
+    // `CentrifugeWorkerTransport.start() must be called first.` from inside a
+    // timer callback, once per heartbeat period, for the rest of the page. So the
+    // justification is stronger than the sentence it replaces, not weaker.
     if (this.heartbeatHandle !== null) return;
     // Infinite disables the heartbeat (e.g. for environment where the
     // SharedWorker reaper is not needed).
