@@ -1004,13 +1004,26 @@ describe('WebSocketTransport', () => {
   });
 
   it('never lets the connect timer tear down a handshake that already completed', async () => {
-    // Two protections keep a completed attempt from being timed out: `onopen`
-    // cancels the pending timer, and the callback's own `handshakeCompleted`
-    // term returns if it fires anyway. Either one alone is enough, so this
-    // pins the pair — deleting just the cancel or just the term still passes,
-    // deleting both makes a healthy socket die, which is the failure that
-    // actually reaches a user: a 30-second default budget on a connection that
-    // opened at 29s, reported as an error and aborted.
+    // What keeps a completed attempt from being timed out is **four** things, not
+    // two: the listener's own `clearConnectTimer()`, the cancel inside
+    // `settleConnect()` that it calls, the cancel inside `failConnect()` (reached
+    // only on the failure path), and the callback's own `handshakeCompleted` term
+    // that returns if the timer fires anyway. So this case pins their
+    // conjunction, and the earlier version of this comment — "Either one alone is
+    // enough, so this pins the pair" — was wrong in both halves, which the
+    // measured mutations show rather than argue:
+    //
+    //   term alone removed            -> green  (the listener's own cancel covers)
+    //   listener's cancel removed     -> green  (settleConnect covers)
+    //   term + listener's cancel      -> green  (settleConnect still covers)
+    //   term + both onopen cancels    -> RED, and the socket dies
+    //
+    // The last is the failure that actually reaches a user: a 30-second default
+    // budget on a connection that opened at 29s, reported as an error and aborted.
+    // The point is that a single-operand deletion passing here is **redundancy,
+    // not an unpinned guard** — the term is load-bearing once every cancel that
+    // can mask it is gone, and only that mutation shows it. The source comment at
+    // the guard carries the same measurement.
     vi.useFakeTimers();
     try {
       const sockets: FakeWebSocket[] = [];
