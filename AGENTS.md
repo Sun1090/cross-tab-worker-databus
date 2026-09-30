@@ -420,7 +420,7 @@ The project is feature-complete: follow-up work is verification and deepening of
 
 ### In Scope (library thesis-internal queue)
 
-- 12-arm ledger receiver-trust verification (the batched PUBLISH `message.items` and `ROUTE_RELEASED` key/topic questions are closed as of 0.21.6; what remains is arms whose consequence is a behavior no test names yet)
+- ~~12-arm ledger receiver-trust verification~~ — **closed on `main`, 12 of 12 arms pinned, `src/` unchanged** — deliberately with no version attached, because the repairs are test-only and `tests/` is outside `files`, so no release is owed and naming one would be a forward reference to a version nothing requires. The two survivors were a *vacuous assertion* (a three-argument `not.toHaveBeenCalledWith` that a five-argument call cannot match) and a case written against `assignedTopics`, which the reconcile repair sweeps inside the same call stack; both are now pinned. The framework adapters were measured the same way in the same cycle and needed **no** repairs (12 of 12 already pinned). A ledger that closes is recorded precisely so the next session does not re-audit it
 - Bench baselines and trend-document corrections
 - Transport protocol compatibility fixes (Centrifuge / native WebSocket)
 - Patch releases
