@@ -1,4 +1,5 @@
 import type { DataBusMessage } from './types';
+import { createOpaqueKey } from './hash';
 import { pruneReplayHistory } from './replay-pruning';
 import { DEFAULT_STORAGE_PREFIX, PRUNE_STRATEGY } from '../utils/constants';
 import { assertPositiveFiniteNumber, assertPositiveSafeInteger, assertPruneStrategy } from '../utils/validation';
@@ -18,10 +19,41 @@ export interface DataBusReplayPersistence<TData = unknown> {
 }
 
 export interface IndexedDbReplayPersistenceOptions {
+  /**
+   * Namespace this store by the cluster it belongs to, deriving the database
+   * name the same way the coordination plane derives its storage keys.
+   *
+   * Pass the same value you pass the bus. Omitting it keeps the historical
+   * behavior — one database per origin, shared by every cluster — so this is
+   * additive: no existing caller's rows move.
+   */
+  clusterKey?: string;
   dbName?: string;
   maxPerTopic: number;
   pruneStrategy?: (typeof PRUNE_STRATEGY)[keyof typeof PRUNE_STRATEGY];
   retentionMs?: number;
+}
+
+/**
+ * The database name a store uses for a given cluster.
+ *
+ * `clusterKey` is hashed with the *same* function and the *same* empty-key
+ * fallback the coordination plane uses (`clusterKey || '__default__'`), so a
+ * store built with `clusterKey: ''` lands in the default cluster's namespace
+ * rather than one of its own — an empty key and the default key are the same
+ * cluster everywhere else in the library, and a store is a namespace like any
+ * other. Getting that wrong would produce a database no bus ever opens, which
+ * reads as silently empty replay rather than as an error.
+ *
+ * An explicit `dbName` still wins, and it wins over a supplied `clusterKey`:
+ * it is the documented escape hatch for an app that wants its own naming, and
+ * silently overriding a name the caller typed would be worse than the
+ * inconsistency this option exists to remove.
+ */
+function resolveDbName(options: IndexedDbReplayPersistenceOptions): string {
+  if (options.dbName !== undefined) return options.dbName;
+  if (options.clusterKey === undefined) return DEFAULT_STORAGE_PREFIX;
+  return `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey(options.clusterKey || '__default__')}`;
 }
 
 /** Create a browser IndexedDB-backed replay store. */
@@ -30,7 +62,7 @@ export function createIndexedDbReplayPersistence<TData = unknown>(
 ): DataBusReplayPersistence<TData> {
   const indexedDb = globalThis.indexedDB;
   if (!indexedDb) throw new Error('IndexedDB is unavailable in this environment.');
-  const dbName = options.dbName ?? DEFAULT_STORAGE_PREFIX;
+  const dbName = resolveDbName(options);
   const storeName = 'replay';
   const maxPerTopic = options.maxPerTopic;
   const pruneStrategy = options.pruneStrategy ?? PRUNE_STRATEGY.COUNT;
