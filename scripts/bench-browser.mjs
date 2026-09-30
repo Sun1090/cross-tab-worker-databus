@@ -349,6 +349,11 @@ async function main() {
 
   let server;
   let ownsServer = false;
+  // Set when the sample is refused. It is read *after* both `finally` blocks
+  // rather than acted on inside them, because `process.exit` skips the rest of
+  // the function — including the browser close and the server kill — and a
+  // refusal is not a reason to leak either.
+  let refusal = null;
 
   try {
     try {
@@ -371,15 +376,28 @@ async function main() {
       const databus = await runDatabusMatrix(baseUrl, browser);
       const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus, host: readHostLoad() };
       console.log(JSON.stringify(report, null, 2));
-      // Archive for trend comparison via scripts/bench-compare.mjs. Failures
-      // here must never break the benchmark run itself.
-      try {
-        const { mkdirSync, writeFileSync } = await import('node:fs');
-        mkdirSync(new URL('../bench-results/', import.meta.url), { recursive: true });
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        writeFileSync(new URL(`../bench-results/browser-${stamp}.json`, import.meta.url), JSON.stringify(report, null, 2));
-      } catch (error) {
-        console.warn('[bench] failed to archive results:', error instanceof Error ? error.message : error);
+      // Admission control, and the reason it lives here rather than in the
+      // comparison: a refusal applied after the write labels a sample that has
+      // already entered the archive, and on this archive — no recorded readings
+      // at all — the next comparison *is* the next sample. So the decision and
+      // the write are one call, and a refusal is a file that does not exist.
+      // The rule is imported rather than restated: two copies of a threshold
+      // drift, and this is the copy that decides.
+      const { archiveReport } = await import('./bench-compare.mjs');
+      const outcome = archiveReport(report, fileURLToPath(new URL('../bench-results/', import.meta.url)));
+      if (outcome.refusal !== null) {
+        refusal = outcome.refusal;
+        console.error('');
+        console.error(`[bench] NOT ARCHIVED: ${outcome.refusal}`);
+        console.error('[bench] the numbers above are printed for diagnosis; re-run on an idle host');
+      } else if (outcome.warning !== null) {
+        // A disk that cannot take the file is not a judgment about the host, and
+        // the run has already produced its numbers — so this warns and does not
+        // fail the run, which is the behavior this block had before the refusal
+        // existed and the reason the two outcomes are kept apart.
+        console.warn('[bench] failed to archive results:', outcome.warning);
+      } else {
+        console.log('[bench] archived for trend comparison');
       }
     } finally {
       await browser.close();
@@ -387,6 +405,8 @@ async function main() {
   } finally {
     if (ownsServer) server.kill('SIGTERM');
   }
+
+  if (refusal !== null) process.exitCode = 1;
 }
 
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

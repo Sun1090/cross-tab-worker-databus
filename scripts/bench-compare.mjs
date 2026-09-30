@@ -15,7 +15,7 @@
  * every `pct > NaN` comparison is false, so a typo in the release-gate flag used
  * to silently pass the gate instead of failing loudly.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -152,6 +152,20 @@ export function reportLoad(report) {
 }
 
 /**
+ * The core count `bench-browser.mjs` records beside the load reading, or `null`
+ * where the platform publishes no finite one.
+ *
+ * This is the only *machine-relative* scale available, which is what the
+ * no-baseline leg of `loadVerdict` needs: a load average is not a number
+ * without it, and a ratio against other machines' readings is not available
+ * when no other reading exists.
+ */
+export function reportCpus(report) {
+  const cpus = report?.host?.cpus;
+  return typeof cpus === 'number' && Number.isFinite(cpus) && cpus > 0 ? cpus : null;
+}
+
+/**
  * Judge a newest sample's host load against the baseline samples that recorded
  * one, and return a verdict string or `null`.
  *
@@ -172,9 +186,10 @@ export function reportLoad(report) {
  * refusal to trust, not a claim that the sample is invalid.
  *
  * Returns a human-readable reason (so the caller can print *why*) or `null` when
- * the sample is admissible: no reading on the new report (nothing to judge),
- * no comparable baseline reading (nothing to judge against), or a reading within
- * the ratio.
+ * the sample is admissible: no reading on the new report (nothing to judge), a
+ * reading within the ratio, a reading at or under the core count when nothing
+ * can be compared against it, or genuinely nothing to judge on a platform that
+ * publishes neither a reading nor a core count.
  */
 export const POISON_LOAD_RATIO = 4;
 
@@ -185,7 +200,7 @@ export function loadVerdict(newest, baselineReports) {
     .slice(-BASELINE_SAMPLES)
     .map(reportLoad)
     .filter(value => value !== null);
-  if (baseline.length === 0) return null;
+  if (baseline.length === 0) return idleVerdict(newest, load);
   const reference = median(baseline);
   if (reference <= 0) return `load ${load.toFixed(2)} with a baseline median of ${reference} — not comparable`;
   if (load <= reference * POISON_LOAD_RATIO) return null;
@@ -193,6 +208,44 @@ export function loadVerdict(newest, baselineReports) {
     `host load ${load.toFixed(2)} is ${(load / reference).toFixed(1)}x the baseline median ` +
     `(${reference.toFixed(2)}) over ${baseline.length} recorded sample(s) — above the ` +
     `${POISON_LOAD_RATIO}x refusal to trust, so this report will not be trusted as a baseline`
+  );
+}
+
+/**
+ * The no-baseline leg: what to do when the archive holds no reading to compare
+ * against, which is the archive's *entire current state* — all 91 reports
+ * predate the field.
+ *
+ * Returning `null` here is the one behavior that made the guard inert on the
+ * series it exists to protect, and the reason is worth recording because it
+ * reads like prudence. "No comparable baseline, so refusing would lock the gate
+ * out of the very archive it is meant to protect" is a mechanism argument, and
+ * it does not survive the case that actually occurs: the next sample on a loaded
+ * host finds no baseline, is admitted, and *becomes* the baseline every later
+ * comparison is judged against. The gate was therefore weakest exactly where the
+ * archive is weakest, and a first sample on a busy host is the sample that ends
+ * a twenty-five-tag deferral streak.
+ *
+ * So the fallback is an absolute, machine-relative ceiling instead: a 1-minute
+ * load average above the core count means more runnable work than cores, which
+ * is the definition of oversubscribed and needs no history to establish. The
+ * boundary is inclusive for the same reason the ratio's is — this is a refusal
+ * to trust, not a claim the sample is invalid, and a false positive costs one
+ * deferred run.
+ *
+ * With neither a baseline nor a core count there is genuinely nothing to judge
+ * and this returns `null`: on such a platform the reading is absent rather than
+ * favorable, and refusing blind would be refusing on a premise the record does
+ * not support.
+ */
+function idleVerdict(newest, load) {
+  const cpus = reportCpus(newest);
+  if (cpus === null) return null;
+  if (load <= cpus) return null;
+  return (
+    `host load ${load.toFixed(2)} exceeds the host's ${cpus} core(s) and no archived report ` +
+    `records a reading to compare against — above the ${cpus} that means more runnable work ` +
+    `than cores, so there is no idle reference for this sample and it is refused`
   );
 }
 
@@ -250,13 +303,90 @@ function beyondBaseline([, , after, ceiling]) {
   return ceiling === null || after > ceiling;
 }
 
-/** The `limit` most recent archived reports in `resultsDir`, oldest first. */
+/**
+ * The `limit` most recent archived reports in `resultsDir`, oldest first.
+ *
+ * A directory that cannot be listed is an **empty archive**, not an error, and
+ * that is a correction rather than a convenience: the first `bench:browser` on a
+ * clean checkout has no `bench-results/` at all, so the reader this gates the
+ * write behind would have thrown on the one run that is supposed to create it.
+ * The same tolerance covers a path that is not a directory, which is what a
+ * failed write looks like from here. Both reduce the judgment available — no
+ * baseline to compare against — rather than fail a run whose numbers were
+ * already produced.
+ */
 export function latestReports(resultsDir, limit = 2) {
-  return readdirSync(resultsDir)
+  let names;
+  try {
+    names = readdirSync(resultsDir);
+  } catch {
+    return [];
+  }
+  return names
     .filter(name => name.startsWith('browser-') && name.endsWith('.json'))
     .sort()
     .slice(-limit)
     .map(name => join(resultsDir, name));
+}
+
+/**
+ * Admit a freshly taken sample to the archive, or refuse it, and say which.
+ *
+ * This is the function that closes the gap the comparison-side refusal could not.
+ * `loadVerdict` above refuses to *trust* a loaded report, but a report already on
+ * disk is a report the next comparison reads as its baseline — so a refusal
+ * applied after the write labels a sample that has already entered the archive,
+ * and on this archive (no recorded readings at all) the next comparison is the
+ * very next sample. Hence one function that decides *and* writes, so a refusal
+ * is a file that does not exist rather than a verdict printed about one that does.
+ *
+ * The three outcomes are kept distinct because they mean different things to a
+ * caller: a **refusal** is a judgment about the host and the run should report
+ * failure, while a **write failure** is a broken disk and the benchmark itself
+ * succeeded — the run has already produced its numbers, and conflating the two
+ * would make a full volume fail a release over a sample that was correctly taken
+ * and simply could not be saved.
+ */
+export function archiveReport(report, resultsDir, limit = BASELINE_SAMPLES) {
+  const refusal = loadVerdict(report, archiveLoads(resultsDir, limit));
+  if (refusal !== null) return { archived: false, refusal, warning: null };
+  try {
+    mkdirSync(resultsDir, { recursive: true });
+    // The report's own `generatedAt` rather than a second clock read here: one
+    // timestamp for the sample, so the filename and the body cannot disagree.
+    const stamp = (report.generatedAt ?? new Date().toISOString()).replace(/[:.]/g, '-');
+    writeFileSync(join(resultsDir, `browser-${stamp}.json`), JSON.stringify(report, null, 2));
+    return { archived: true, refusal: null, warning: null };
+  } catch (error) {
+    return { archived: false, refusal: null, warning: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * The archived reports that actually record a load reading, oldest first, so a
+ * caller deciding whether to archive a fresh sample consults the same rule the
+ * comparison will.
+ *
+ * Two filters, and each earns its place. Reports with no reading are dropped
+ * because the whole archive predates the field, and including them would either
+ * fail to parse or read as zero — the `reportLoad` contract already says absent
+ * is unknown rather than idle, and this is where that has to be applied. Files
+ * that no longer parse are skipped rather than thrown, because a truncated write
+ * or a hand-edited report must not take the benchmark run down with it; a
+ * missing baseline is a weaker judgment, never a failed run.
+ */
+export function archiveLoads(resultsDir, limit = BASELINE_SAMPLES) {
+  const reports = [];
+  for (const file of latestReports(resultsDir, limit)) {
+    let report;
+    try {
+      report = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (reportLoad(report) !== null) reports.push(report);
+  }
+  return reports;
 }
 
 const invokedDirectly =
