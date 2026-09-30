@@ -1,4 +1,4 @@
-## [0.21.45] - 2026-09-26
+## [0.21.45] - 2026-09-30
 
 A release ten cycles in the making, and the reason it was late is now part of the tooling: the browser benchmark's deferral rule was enforced by a human remembering it, so it slipped. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.44`'s.
 
