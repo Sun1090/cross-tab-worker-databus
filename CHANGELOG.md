@@ -1,3 +1,29 @@
+## [0.21.45] - 2026-09-26
+
+A release ten cycles in the making, and the reason it was late is now part of the tooling: the browser benchmark's deferral rule was enforced by a human remembering it, so it slipped. No library behavior, export, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.44`'s.
+
+### Added
+
+- **The browser benchmark now records the host it ran on, and `bench:compare` refuses to trust a sample the host cannot support.** Every archived report now carries `host: { loadavg1m, cpus, platform, release }`, or `null` where the platform publishes no finite reading. On the baseline path, a newest sample whose load exceeds four times the baseline's own median is refused before any metric is compared: the tool prints both figures and exits non-zero. This closes a hole with a specific shape — all 91 archived reports recorded `userAgent` and timings and **no host state at all**, while the gate judges a report only against the previous five, so a *fast* sample taken on a loaded host entered the baseline and became the reference for the next five readings, with nothing recording that the host was busy. The threshold is a ratio rather than an absolute ceiling because the archive spans machines and a load average means nothing without its core count; it is a refusal to *trust* rather than a claim that the sample is invalid, so the boundary is inclusive and a false positive costs one deferred run. Reports predating the field have nothing to judge and pass through silently, which is every report currently archived — the guard is inert on the existing series, and taking a sample on a busy host is now refused rather than archived.
+- **The shipped release checklist documents it, in both languages.** `docs/release-checklist.md` step 4 already said to defer the sample with its load numbers; it now also says the rule is enforced rather than remembered, and what the refusal looks like.
+
+### Changed
+
+- **Nine documented defaults were pinned by tests that did not exist before, and the audit that found them is now the reason to trust the option table.** `connectTimeoutMs` (30 000), `createWebSocketDataBus`'s and `createCentrifugeDataBus`'s `clusterKey` default, `heartbeatIntervalMs` (3 000) and `workerTtlMs` (10 000) — the pair the architecture guide summarises as the worst-case dead-owner detection time — plus `recovery.maxAttempts` (`Infinity`), the `dedup` pair (60 000 / 1 000), `replay.maxPerTopic` (100), `trace.metricsIntervalMs` (5 000) and `trace.enabled` (`false`). Each is documented in `docs/configuration.md` or `docs/transports.md`; none was named by a test, and the three tiers are worth distinguishing. `maxActiveWorkers` was already pinned. `transferable`, `recovery.cooldownMs`, `pruneStrategy` and `trace.mode` were checked and found already covered, and are recorded alongside the hits because a ledger that logs only hits overstates how much of a surface it has walked.
+- **The method that found them is the transferable part, and it is a kill set rather than a reading.** For each documented default, one `??`-site mutant run against its own file, because *pinned* (a test names the value), *sensitive but unnamed* (a mutant fails cases asserting something else — 2 cases for `heartbeatIntervalMs`, 6 for `workerTtlMs`, 1 for `recovery.maxAttempts`) and *unobserved* (the whole suite stays green — both `dedup` defaults, `maxPerTopic`, `trace.enabled`) are indistinguishable in the source. Twenty-four mutants were run across these changes, each restored, each with its own kill set recorded in `docs/progress.md`.
+
+### Fixed
+
+- **The demo counted a publication before it knew the frame was delivered.** `publish()` and `publishBatch()` return `void`: a frame that is not delivered is reported **only** through `onError`. The demo counted first and reported after, so a refused frame produced a 发布 row *and* an 错误 row for one click and advanced 已发布 anyway, and `publishBatch()` overstated the counter by ten per refused batch. The window is the demo's own — 应用连接 suspends at `await state.bus.stop()` while auto-publish keeps running — and it now labels refusals 未投递, counts only frames the bus took, and does not animate a hop that never happened.
+
+### Verification
+
+- `pnpm check` — 39 test files, **999 tests**, typecheck, build, 5 perf gates; `pnpm lint`; the documentation gate at 25.
+- Twenty-four mutants across the changes above, each applied alone and restored, each with its own named failure recorded in `docs/progress.md`.
+- `pnpm audit --registry=https://registry.npmjs.org` — no known vulnerabilities.
+- `docs/benchmarks.md` and its zh mirror regenerate byte-identical from the 91-report archive, so the generated tables and their committed copies have not drifted; the archive itself is untracked, which is why that is a run rather than a gate.
+- **The browser benchmark was deferred again, with its load numbers, as the checklist's standing decision requires** — 79.78 / 120.85 / 129.80 / 145.31 across six readings on 8 cores at the end of this cycle. The archive's newest report is still `browser-2026-09-24T13-40-52-413Z.json`, and 24 tags have now shipped without a sample. What this release changes is that a loaded host can no longer *silently* produce the sample that ends that streak: the next run either produces a clean sample or is refused with its numbers.
+
 ## [0.21.44] - 2026-09-26
 
 `0.21.43` guarded one clock; enumerating the rest found that the same input reached durable state, where the consequence is not a wrong number but a sentinel. No API, option, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.43`'s.
