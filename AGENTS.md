@@ -435,12 +435,18 @@ The project is feature-complete: follow-up work is verification and deepening of
 ### Upstream Blocked
 
 - Centrifuge major-version upgrade: unblocks = peer transport protocol change, with regression verification
-- **TypeScript 7.** Measured 2026-09-25: npm's `latest` is `7.0.2`, this repo is on `6.0.3` — which is the
-  newest 6.x published (the 6.x line is `6.0.2, 6.0.3`) — and `pnpm outdated` reports **that one row and
-  nothing else**, so `typescript` is the project's entire outdated-dependency surface. Unblocks =
-  `typescript-eslint` declaring 7: its latest's published peer range is
+- **TypeScript 7.** Measured 2026-09-25 and re-measured 2026-09-30: npm's `latest` is `7.0.2`, this repo
+  is on `6.0.3` — which is the newest 6.x published (the 6.x line is `6.0.2, 6.0.3`). Unblocks =
+  `typescript-eslint` declaring 7; its `8.71.0` peer range is
   `typescript: ">=4.8.4 <6.1.0"`, so 7 is outside what the lint dependency declares, and `pnpm lint` is a
-  separate blocking CI step that `pnpm check` never runs. Re-derive both sides before acting —
+  separate blocking CI step that `pnpm check` never runs. **The "outdated surface" half of this note
+  decayed and was corrected on 2026-09-30**: it claimed `pnpm outdated` reports that one row *and nothing
+  else*, but a second row appeared — `typescript-eslint` 8.70.1 → 8.71.0 — so the claim went stale in the
+  direction that makes a reader think the watch is over. That minor was then taken (Phase 269) and `pnpm
+  outdated` is back to one row, the blocked one. **So "one row" is a property of when you looked, not of
+  the repository**; re-run it rather than reading it here, and expect it to move. The *block* is the durable
+  claim and it held across both readings — quote the peer range from the package, not from this sentence,
+  because a note that says "its latest's range" is a moving target written down once. Re-derive both sides before acting —
   `npm view typescript version --registry=https://registry.npmjs.org` and
   `npm view typescript-eslint peerDependencies --registry=https://registry.npmjs.org` — and do not read
   "7 is latest" as "we can move"; this repository's npm is configured to a mirror, so an unqualified
