@@ -99,6 +99,76 @@ describe('stability: owner handoff ACK validation', () => {
     expect(b.runtime.getSnapshot().routes[0]?.confirmedAt).toBe(1_000);
   });
 
+  it('drops a ROUTE_RELEASED when the route has moved on to another worker', async () => {
+    // The third term of `isStaleRouteRelease`, and the one no test reached: the
+    // other two are exercised by "drops a ROUTE_RELEASED whose source is not the
+    // recorded previous owner" and "confirms a handoff only when the ACK
+    // generation matches the route record", but with **this** worker still named
+    // by the route in both of them. Deleting only the `route.workerId !== this
+    // .workerId` operand leaves the whole suite green — measured, as one of two
+    // survivors of a twelve-arm receiver-trust ledger.
+    //
+    // So the premise is staged to isolate it: the route names `worker-x` while
+    // the ACK is addressed to `worker-c`, and the *other* two terms are made to
+    // pass — `handoffFromWorkerId` really is the sender, and the generation
+    // really is the route's. That combination is what a delayed ACK looks like
+    // after a second handoff round has already re-pointed the route, and it is
+    // the one a same-origin script can assemble by reading localStorage.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const channelNames: string[] = [];
+    const a = makeRuntime({ storage, hub, tabId: 'tab-a', workerId: 'worker-a' });
+    const controlC = vi.fn();
+    const c = makeRuntime({ storage, hub, tabId: 'tab-c', workerId: 'worker-c', onControl: controlC });
+    a.env.environment.createChannel = name => {
+      channelNames.push(name);
+      return hub.create(name);
+    };
+    a.runtime.start();
+    a.runtime.subscribe('topic-a');
+    await Promise.resolve();
+    c.runtime.start();
+    // The route has moved to `worker-x`, and the handoff it records came from
+    // `worker-b` — so `handoffFromWorkerId` matches an ACK sent by `worker-b`,
+    // which is the leg that does have a case.
+    const topicKey = forgeHandoffRoute(storage, {
+      workerId: 'worker-x',
+      tabId: 'tab-x',
+      generation: 3,
+      handoffFromWorkerId: 'worker-b'
+    });
+
+    postRouteReleased(hub, channelNames[0]!, {
+      sourceWorkerId: 'worker-b',
+      targetWorkerId: 'worker-c',
+      topic: 'topic-a',
+      topicKey,
+      generation: 3
+    });
+
+    // The observable is the **transport SUBSCRIBE**, and that choice is the whole
+    // finding. The first version of this case asserted `assignedTopics`, and it
+    // passed *under the mutant* — because `confirmRoute` writes the route, which
+    // broadcasts a REGISTRY nudge, and `ChannelHub` delivers synchronously, so
+    // `reconcile()` runs inside the same call stack and
+    // `reconcileAssignedTopics()` drops an assignment whose route no longer names
+    // this worker. The end state is repaired before an end-state assertion can
+    // look, which is the same repair that makes the frame-level guards look
+    // redundant; deleting the guard's own line changes nothing observable there.
+    //
+    // What the repair does **not** take back is the transport subscription. Once
+    // `onControl(SUBSCRIBE, …)` has run, the transport is holding a live channel
+    // for a topic this worker does not own, and nothing sweeps that — the very
+    // condition AGENTS.md records as unrecoverable, since the dedupe that prevents
+    // double-subscribes reads the very set that carries the entry.
+    expect(
+      controlC.mock.calls.filter(call => call[0] === 'SUBSCRIBE'),
+      'an ACK for a route this worker no longer owns must not subscribe the transport'
+    ).toEqual([]);
+    // And the route confirmation, which the reconcile does not stamp either.
+    expect(c.runtime.getSnapshot().routes[0]?.confirmedAt).toBeUndefined();
+  });
+
   it('drops a ROUTE_RELEASED whose source is not the recorded previous owner', async () => {
     const storage = new MemoryStorage();
     const hub = new ChannelHub();

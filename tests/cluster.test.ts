@@ -2167,7 +2167,19 @@ describe('WorkerClusterRuntime publishBatch', () => {
       { data: { i: 0 }, messageId: 'm0' },
       { data: { i: 1 }, timestamp: 11 }
     ]);
-    expect(controlA).not.toHaveBeenCalledWith('PUBLISH', expect.anything(), expect.anything());
+    // Filtered on the action and asserted empty, and **not**
+    // `not.toHaveBeenCalledWith('PUBLISH', a, b)`. That is a *three*-argument
+    // expectation, while `publicationMetadata` returns a truthy object when
+    // *either* field is set — so both items above carry metadata and the
+    // per-item loop calls `onControl` with *five* arguments, which cannot match a
+    // three-argument expectation. The assertion therefore could not fail for any
+    // batch item carrying a messageId or a timestamp, and deleting the `return`
+    // after `onPublishBatch` — which makes every item go out **twice**, once as a
+    // batch and once individually — left the whole suite green. Measured: this arm
+    // was one of two survivors of a twelve-leg receiver-trust ledger, and this
+    // line is why.
+    const publishCalls = controlA.mock.calls.filter(call => call[0] === 'PUBLISH');
+    expect(publishCalls, 'a batched PUBLISH must not also be dispatched item by item').toEqual([]);
     runtimeA.stop();
     runtimeB.stop();
   });
