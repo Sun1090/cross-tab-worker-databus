@@ -78,6 +78,100 @@ describe('createIndexedDbReplayPersistence', () => {
     expect(await first.load(), 'the two must now be independent').toEqual([message('orders', 1)]);
   });
 
+  it('separates clusters that name one, and leaves the unnamed path untouched', async () => {
+    // `clusterKey` is the option that brings this store in line with the
+    // coordination plane, where *every* key derives from
+    // `createOpaqueKey(clusterKey)` — so two clusters in one origin are two
+    // namespaces everywhere else in the library and one here, which is a
+    // footgun for exactly the multi-tenant case `clusterKey` exists to serve.
+    //
+    // It is **additive** rather than a changed default, and the reason is the
+    // comment on the case above: a default that started namespacing would move
+    // every existing caller's rows to a database no bus opens, which surfaces as
+    // silently empty replay rather than as an error. Omitting `clusterKey`
+    // therefore still shares, and the case above still describes the default.
+    const tenantA = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: 'tenant-a'
+    });
+    const tenantB = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: 'tenant-b'
+    });
+    await tenantA.append(message('orders', 1));
+    expect(
+      await tenantB.load(),
+      'two clusters naming different keys must not read each other\'s rows'
+    ).toEqual([]);
+    await tenantB.append(message('orders', 2));
+    expect(await tenantA.load()).toEqual([message('orders', 1)]);
+    expect(await tenantB.load()).toEqual([message('orders', 2)]);
+
+    // The same key on both sides is the same namespace, which is the property
+    // that makes the derived name a function of the cluster rather than of the
+    // adapter instance.
+    const sameCluster = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: 'tenant-a'
+    });
+    expect(await sameCluster.load()).toEqual([message('orders', 1)]);
+  });
+
+  it('lands an empty clusterKey in the default cluster, as everywhere else', async () => {
+    // The coordination plane hashes `clusterKey || '__default__'`, so `''` and
+    // `'__default__'` are one cluster. A store that hashed `''` on its own would
+    // open a database no bus ever reads, and the symptom is silently empty
+    // replay rather than an error — so this pins the fallback, not just the
+    // happy path.
+    const empty = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: ''
+    });
+    const explicitDefault = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: '__default__'
+    });
+    await empty.append(message('orders', 7));
+    expect(await explicitDefault.load(), "'' must share the default cluster's namespace").toEqual([
+      message('orders', 7)
+    ]);
+  });
+
+  it('lets an explicit dbName win over clusterKey', async () => {
+    // `dbName` is the documented escape hatch for an app that wants its own
+    // naming, and silently overriding a name the caller typed would be worse
+    // than the inconsistency `clusterKey` exists to remove. So precedence is
+    // pinned here rather than left to the reader of the signature.
+    //
+    // Both halves are needed, and comparing only the first would pass against a
+    // `clusterKey`-first implementation whose derived name merely happened to
+    // differ: this asserts both that the literal name is used *and* that the
+    // cluster's derived namespace is not.
+    const named = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: 'tenant-a',
+      dbName: 'shared-store'
+    });
+    const alsoNamed = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      dbName: 'shared-store'
+    });
+    await alsoNamed.append(message('orders', 2));
+    expect(await named.load(), 'the explicit name must be the database that is opened').toEqual([
+      message('orders', 2)
+    ]);
+
+    const tenantA = createIndexedDbReplayPersistence<{ value: number }>({
+      maxPerTopic: 4,
+      clusterKey: 'tenant-a'
+    });
+    await tenantA.append(message('orders', 1));
+    expect(
+      await named.load(),
+      'the clusterKey must be ignored entirely when a name is given'
+    ).toEqual([message('orders', 2)]);
+  });
+
   it('rejects invalid configuration', () => {
     expect(() => createIndexedDbReplayPersistence({ maxPerTopic: 0 })).toThrow('maxPerTopic');
     expect(() => createIndexedDbReplayPersistence({ maxPerTopic: 4, pruneStrategy: 'bogus' as 'count' })).toThrow('pruneStrategy');
