@@ -21,9 +21,32 @@ const DEFAULT_MESSAGES = 100;
 const WORKER_MODES = ['dedicated', 'shared'];
 
 /**
- * The host's load at the moment the sample was taken, recorded so a poisoned
+ * The host's load **as it was before this run started**, recorded so a poisoned
  * sample is *distinguishable* in the archive rather than only detectable by
  * whoever remembers.
+ *
+ * The timing is the whole point, and it was wrong when this first shipped. The
+ * reading used to be taken at archive time — after Chrome had been launched,
+ * the demo server spawned and the whole mode matrix driven — and on an 8-core
+ * host that self-inflicted cost is larger than the ceiling the guard compares
+ * against. Measured: a host that had been idle long enough to read **7.23**
+ * was at **11.95** by the time the sample completed, and a second run traced
+ * 11.6 rising to 13.0 mid-run and decaying to 8.96 afterwards. So the guard was
+ * not measuring the host at all, it was measuring the benchmark, and it refused
+ * a genuinely idle machine on every attempt — which turns "wait for a quiet
+ * window" into "impossible by construction".
+ *
+ * Reading it first removes the benchmark's own contribution and leaves the
+ * question the guard is actually asking: was this machine busy for some reason
+ * other than being benchmarked? The honest limitation is that a host which
+ * becomes busy *during* the run is not seen by a pre-run reading; the ratio leg
+ * in `loadVerdict` is what covers sustained conditions, and the trace above
+ * shows the run's own contribution decaying within the run.
+ *
+ * The definition has to be stable across the archive for the ratio to mean
+ * anything, and changing it now costs nothing: every archived report predates
+ * the field, so there is no earlier sample recorded under the other definition
+ * to disagree with.
  *
  * Every archived report predates this field, which is the point: the standing
  * rule recorded in `docs/progress.md` is to defer `bench:browser` rather than
@@ -346,6 +369,10 @@ async function runDatabusMatrix(baseUrl, browser) {
 async function main() {
   const env = parseBenchEnv();
   const { baseUrl, modes, port } = env;
+  // Taken here, before the demo server is spawned and Chrome is launched, so the
+  // reading describes the host rather than this run's own cost. See the note on
+  // `readHostLoad` for the measurement that forced the placement.
+  const host = readHostLoad();
 
   let server;
   let ownsServer = false;
@@ -374,7 +401,7 @@ async function main() {
       const results = [];
       for (const mode of modes) results.push(await runMode(env, browser, mode));
       const databus = await runDatabusMatrix(baseUrl, browser);
-      const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus, host: readHostLoad() };
+      const report = { benchmark: 'browser-publish', generatedAt: new Date().toISOString(), results, databus, host };
       console.log(JSON.stringify(report, null, 2));
       // Admission control, and the reason it lives here rather than in the
       // comparison: a refusal applied after the write labels a sample that has
