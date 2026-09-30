@@ -84,6 +84,34 @@ describe('DataBusTraceReporter', () => {
     expect(later).toHaveLength(1);
   });
 
+  it('stays off when no enabled flag is given', () => {
+    // `docs/configuration.md` documents `trace.enabled` as `false` — the master
+    // switch — and `options?.enabled ?? false` → `true` leaves all 27 cases
+    // here green, so nothing asserted that a reporter assembled without the
+    // flag stays silent. The other trace defaults in the same table are covered
+    // (`mode: 'all'` → `'metrics'` fails 5), which is what makes this row the
+    // odd one out rather than a general gap.
+    //
+    // It matters more than an ordinary default: trace events carry subscription
+    // and coordination detail, so a reporter that emits without being asked is a
+    // privacy regression rather than a missing assertion. `sink` is a required
+    // member of `DataBusTraceOptions`, so a typed caller always supplies it and
+    // this state is reachable — an integrator who configures metrics and forgets
+    // the switch.
+    const events: DataBusTraceEvent[] = [];
+    const reporter = new DataBusTraceReporter({ sink: collect(events) }, () => Date.now());
+    reporter.start();
+    reporter.recordReceived('t');
+    reporter.recordDispatched('t');
+    vi.advanceTimersByTime(10_000);
+
+    expect(events, 'a reporter with no enabled flag must not emit').toEqual([]);
+    // `metricsActive` is private, so the public snapshot is the observable —
+    // and `tsc` is what said so, since vitest does not type check.
+    expect(reporter.getMetrics(), 'and must report no metrics snapshot').toBeNull();
+    reporter.stop();
+  });
+
   it('aggregates on the documented 5s window when no interval is configured', () => {
     // `docs/configuration.md` documents `trace.metricsIntervalMs` as `5000`,
     // and `DEFAULT_METRICS_INTERVAL_MS` implements it. Nothing observed the
