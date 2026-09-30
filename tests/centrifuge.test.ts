@@ -175,6 +175,70 @@ describe('createCentrifugeDataBus', () => {
     vi.unstubAllGlobals();
   });
 
+  it('defaults the cluster key to the connection URL', async () => {
+    // The Centrifuge factory is a near-copy of the WebSocket one, and the mirror
+    // prior held: both docs state the default, `createCentrifugeDataBus` does
+    // `clusterKey ?? connection.url`, and replacing that with a constant leaves
+    // **all 67 cases in this file green**. The consequence is the cluster
+    // namespace — storage keys and the BroadcastChannel name are derived from
+    // it — so a wrong default merges two applications into one cluster rather
+    // than mislabelling a diagnostic.
+    //
+    // The observable is the same derived key the WebSocket factory's pin uses,
+    // read at index 1 of `cross-tab-worker-databus:{hash}:worker:{id}`, and the
+    // earlier assumption that it was unreachable here was wrong in an
+    // instructive way. The Centrifuge *transport* runs inside the Worker, so
+    // three attempts looked at the main thread's registry and read `undefined`
+    // every time — because the probe was built without a `ChannelHub`, which
+    // leaves the main thread's cluster uncoordinated by construction, so there
+    // was no worker record to find and no default to measure. A `hub` is the
+    // whole difference: the cluster is the DataBus's, on the main thread, in
+    // both factories. What made it look unreachable was the harness, not the
+    // architecture.
+    const clusterHashOf = (storage: MemoryStorage): string | undefined =>
+      storage.entries()
+        .map(([key]) => key.split(':')[1])
+        .find(value => value !== undefined);
+
+    async function hashFor(options: { clusterKey?: string; randomId: string }): Promise<string | undefined> {
+      const storage = new MemoryStorage();
+      const environment = createFakeEnvironment({
+        storage,
+        hub: new ChannelHub(),
+        now: () => 1_000,
+        randomId: options.randomId
+      });
+      const bus = createCentrifugeDataBus({
+        connection: { url: 'wss://example.test/connection/websocket' },
+        environment: environment.environment,
+        workerFactory: () => new WorkerDouble() as unknown as Worker,
+        ...(options.clusterKey === undefined ? {} : { clusterKey: options.clusterKey })
+      });
+      // The cluster registers a worker only once it has a topic to own.
+      bus.subscribe('market.tick', () => undefined);
+      await bus.ready();
+      // Record writes coalesce into a microtask; a tick flushes them.
+      for (let index = 0; index < 3; index += 1) {
+        await Promise.resolve();
+        environment.runIntervals();
+      }
+      const hash = clusterHashOf(storage);
+      await bus.stop();
+      return hash;
+    }
+
+    const url = 'wss://example.test/connection/websocket';
+    const defaulted = await hashFor({ randomId: 'centrifuge-key-default' });
+    const explicit = await hashFor({ clusterKey: url, randomId: 'centrifuge-key-explicit' });
+    const other = await hashFor({ clusterKey: 'wss://other.test/ws', randomId: 'centrifuge-key-other' });
+
+    expect(defaulted, 'a bus with no clusterKey must write a worker record').toBeDefined();
+    expect(defaulted, 'omitting the key must be the same as passing the URL').toBe(explicit);
+    // The control: a different key really does produce a different namespace,
+    // or the equality above would also hold if every key hashed alike.
+    expect(other).not.toBe(defaulted);
+  });
+
   it('derives the cluster, starts automatically and queues an immediate subscription', async () => {
     const worker = new WorkerDouble();
     const environment = createFakeEnvironment({
