@@ -82,6 +82,56 @@ describe('DedupManager — acceptance and suppression', () => {
     expect(manager.getStats()).toMatchObject({ accepted: 2, suppressed: 1 });
   });
 
+  it('keeps an ID whose age is exactly the TTL, and the sweep agrees', () => {
+    // The hot path expires with a strict `now - timestamp > ttlMs` while
+    // `pruneExpired` drops with a strict `timestamp < cutoff`. Those two are the
+    // same boundary written twice, so an ID whose age is *exactly* the TTL is
+    // inside the window on both paths — and a `>=` on either side would silently
+    // deliver a duplicate at exactly the TTL, which is the one age a duplicate
+    // burst is most likely to reach.
+    //
+    // Neither side of the pair had a case at the boundary, so a single-operand
+    // deletion was invisible: the existing case advances 500 then 600 ms, never
+    // landing on 1000. Pinning it needs the age to be *exactly* the TTL, which is
+    // why this case advances in whole TTL steps rather than picking round numbers.
+    const hot = createManager({ ttlMs: 1_000 });
+    expect(hot.manager.isDuplicate('x', 't')).toBe(false);
+    hot.advance(1_000);
+    expect(
+      hot.manager.isDuplicate('x', 't'),
+      'an ID exactly at the TTL is still inside the window'
+    ).toBe(true);
+
+    // And the periodic sweep must reach the same verdict at the same age, or the
+    // two expiry paths disagree about which IDs are live.
+    //
+    // This half needed **both** clocks moved, and the first version moved only
+    // one. `createManager`'s `advance` shifts the injected `now` and fires no
+    // timers, so `start()`'s interval never ran, `pruneExpired` was never
+    // reached, and the sweep assertion passed under a `timestamp <= cutoff`
+    // mutation — a vacuous half dressed as a second one. Reaching the sweep means
+    // advancing the injected clock **and** the timer, in that order, so a single
+    // sweep fires at exactly the TTL age.
+    vi.useFakeTimers();
+    try {
+      const swept = createManager({ ttlMs: 1_000, sweepMs: 50 });
+      swept.manager.start();
+      expect(vi.getTimerCount(), 'the sweep must actually be armed').toBe(1);
+      expect(swept.manager.isDuplicate('y', 't')).toBe(false);
+
+      swept.advance(1_000);
+      vi.advanceTimersByTime(50);
+
+      expect(
+        swept.manager.isDuplicate('y', 't'),
+        'the sweep must not have dropped an ID exactly at the TTL'
+      ).toBe(true);
+      swept.manager.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('evicts the oldest entry first when the map exceeds maxEntries', () => {
     const { manager } = createManager({ maxEntries: 2 });
     expect(manager.isDuplicate('a', 't')).toBe(false);
