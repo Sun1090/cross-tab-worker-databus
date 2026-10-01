@@ -76,6 +76,14 @@ export class BatchingStorageWriter implements StorageLike {
 
   // Reads always see the pending value first (task-local consistency), then
   // fall back to the underlying storage.
+  //
+  // The two operands are **interchangeable formulations of one test**, which is
+  // measured rather than argued: `has(key)` and `get(key) ?? null` each suffice,
+  // because a pending *delete* stores `null` (which `??` passes straight through)
+  // and a key that is not pending yields `undefined` from `get`. So deleting
+  // either one alone is a no-op mutation that the whole suite cannot see, while
+  // deleting the guard as a whole is caught by four cases. Noted so a future edit
+  // does not read the survival of one operand as that of the pair.
   getItem(key: string): string | null {
     if (this.pending.has(key)) return this.pending.get(key) ?? null;
     return this.storage.getItem(key);

@@ -115,6 +115,96 @@ describe('BatchingStorageWriter', () => {
     vi.useRealTimers();
   });
 
+  it('does not let a re-entrant write extend the current flush pass', async () => {
+    // The `Array.from(this.pending)` snapshot is the only thing standing between a
+    // re-entrant adapter and an unbounded pass, and `StorageLike` is a
+    // **consumer-implemented port** — nothing stops an application's storage from
+    // calling back into the writer while a write is in flight. This case is
+    // therefore a *reach* fixture, not a shape check: without it the snapshot is
+    // untested because no existing case re-enters, and the comment above the loop
+    // is a claim with nothing behind it.
+    const storage = new MemoryStorage();
+    const writer = new BatchingStorageWriter(storage);
+    const original = storage.setItem.bind(storage);
+    let reentered = false;
+    storage.setItem = (key: string, value: string) => {
+      original(key, value);
+      if (!reentered) {
+        reentered = true;
+        writer.setItem('late', 'L');
+      }
+    };
+
+    writer.setItem('first', 'A');
+    await Promise.resolve();
+
+    // The entry added *during* the pass must not be visited by it — a live Map
+    // iterator does reach keys added after its position.
+    expect(storage.getItem('late')).toBeNull();
+    expect(writer.pendingSize).toBe(1);
+    // And the flush that re-entrant write scheduled writes it, so nothing is lost.
+    await Promise.resolve();
+    expect(storage.getItem('late')).toBe('L');
+    expect(writer.pendingSize).toBe(0);
+  });
+
+  it('subtracts a pending delete from the enumerated key range', () => {
+    // `keys()` is documented as "union of persisted keys and pending writes, minus
+    // pending deletes". The `minus` clause is the whole reason a delete is visible
+    // to an enumerator *before* the flush lands, and a caller reading the range
+    // would otherwise keep acting on a key it has already asked to remove.
+    const storage = new MemoryStorage();
+    storage.setItem('route:a', '{"owner":"a"}');
+    storage.setItem('route:b', '{"owner":"b"}');
+    const writer = new BatchingStorageWriter(storage);
+
+    expect(writer.length).toBe(2);
+    writer.removeItem('route:a');
+
+    expect(writer.length, 'a pending delete must not keep reporting its key').toBe(1);
+    expect(writer.key(0)).toBe('route:b');
+    expect(writer.key(1)).toBeNull();
+  });
+
+  it('restarts the backoff at the initial delay after a failure episode drains', async () => {
+    // The backoff comment claims "50ms -> 100ms -> ... -> capped at 1600ms". That
+    // schedule only holds for the *first* failure episode if the reset below
+    // works: without it the grown delay persists forever, so an unrelated failure
+    // much later in the page's life would wait 1600ms on its first retry — and
+    // nothing observable says so, because a slow retry still eventually lands.
+    vi.useFakeTimers();
+    const storage = new MemoryStorage();
+    const original = storage.setItem.bind(storage);
+    let failing = true;
+    storage.setItem = (key, value) => {
+      if (failing) throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      original(key, value);
+    };
+    const writer = new BatchingStorageWriter(storage);
+
+    // Episode one: three failures grow the delay 50 -> 100 -> 200, then a drain.
+    writer.setItem('route:a', '1');
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(100);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(writer.pendingSize, 'the first episode must have drained').toBe(0);
+
+    // Episode two: a fresh failure must retry at 50ms, not at the grown delay.
+    let attempts = 0;
+    storage.setItem = () => {
+      attempts += 1;
+      throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+    };
+    writer.setItem('route:b', '2');
+    await Promise.resolve();
+    attempts = 0;
+    await vi.advanceTimersByTimeAsync(50);
+    expect(attempts, 'the backoff must restart at the initial delay').toBe(1);
+    vi.useRealTimers();
+  });
+
   it('clears pending writes and the underlying storage together', () => {
     const storage = new MemoryStorage();
     storage.setItem('existing', 'value');
