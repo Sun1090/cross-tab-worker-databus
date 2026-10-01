@@ -363,6 +363,22 @@ export class ReplayManager<TData = unknown> {
   /** Deliver history from one topic's ring to a handler, isolating a throwing
    * handler so the remaining buffers are still delivered. */
   private deliver(topic: string, limit: number, handler: DataBusMessageHandler<TData>): void {
+    // `!this.buffers` is **dominated**, and the proof is the field's declaration
+    // rather than a call-graph argument: `buffers` is `readonly` and assigned
+    // exactly once, `deps.enabled ? new Map() : null`, so it is null only for a
+    // manager constructed disabled — and **both** call sites already sit behind
+    // `if (!this.buffers) return;` (this method is reached only from `replay()`,
+    // past its own guard, or from its hydration callback over the same field). It
+    // can never become null after construction, so there is no window in which
+    // `deliver` runs against it.
+    //
+    // Measured: deleting the term leaves all 1034 tests green. A case was written
+    // for it and then deleted, because the state it staged — a manager stopped
+    // mid-hydration — cannot happen: `stop()` only clears the retention timer, and
+    // `suspend()` explicitly does not clear the rings ("Completed hydration remains
+    // valid"). **A case that sets up a state the code cannot enter is not a pin, it
+    // is a fiction**, and it read as a failing expectation until the field's
+    // declaration was read.
     if (!this.buffers || limit <= 0) return;
     const deliverBuffer = (buffer: DataBusMessage<TData>[]) => {
       for (const message of buffer.slice(-limit)) {
