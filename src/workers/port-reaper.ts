@@ -153,6 +153,14 @@ export class PortReaper {
       // in configuration.md — so in the shipped SharedWorker this arm is
       // unreachable rather than merely unreached. It stays as the file's statement
       // that a null handle is never handed to `clearTimer`.
+      // The null assignment is what keeps this terminating, and that is a stronger
+      // statement than "correctness": measured, replacing it with *any* re-arm —
+      // including a 0 ms one — produces a mutant that **never terminates**, because
+      // `setTimer(() => this.reap(), 0)` re-enters `reap()`, which reaches this
+      // branch again with the maps still empty, forever. It cost a thirty-minute
+      // harness run and a mutated working tree before the mutant was bounded, so the
+      // measurement is recorded here: a null handle is not merely tidy here, it is
+      // the only thing standing between this branch and an unbounded timer loop.
       if (this.handle !== null) this.clearTimer(this.handle);
       this.handle = null;
       return;
@@ -236,6 +244,16 @@ export class PortReaper {
       reapedAny = true;
     }
     // Recompute the cadence (and clear the interval if the last port was reaped).
+    //
+    // `if (reapedAny)` is **dominated**, and the proof is a pair rather than an
+    // argument: deleting it alone leaves the suite green, because `schedule()` opens
+    // with its own idempotency guard, so a call at an unchanged cadence is a no-op.
+    // Deleting *both* — this condition and that guard — kills three cases. So the
+    // reschedule is redundant with the idempotency check a few lines above it, and
+    // this reads as a leg about avoiding pointless work rather than about
+    // correctness. Kept: it says the intent (recompute only when the sweep did
+    // something) at the point where the sweep happened, where the next reader is
+    // looking.
     if (reapedAny) this.schedule();
   }
 }
