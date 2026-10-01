@@ -142,6 +142,17 @@ export function createStorageEventChannel(options: {
   let sequence = 0;
 
   const onStorage = (event: { key: string | null; newValue: string | null }) => {
+    // `event.newValue === null` is **dominated**, measured three layers deep:
+    // deleting it alone is green, and deleting it *together with* the envelope's
+    // `!parsed` is still green, because `JSON.parse(null)` yields `null` and that
+    // term returns. Only removing all three — this one, `!parsed`, and the `catch`
+    // arm that guards `JSON.parse` — makes anything observable, at which point a
+    // named case in `tests/storage-channel.test.ts` reddens. So the behaviour
+    // (a deletion on this key is not a message) is enforced once, at the outermost
+    // layer, and the two inner checks are redundant with it. It is kept because it
+    // is the cheapest of the three and the clearest statement of intent at the point
+    // the event arrives — but **a single-operand deletion passing here is not
+    // evidence the behaviour is untested.**
     if (event.key !== key || event.newValue === null) return;
     let message: WorkerClusterMessage;
     try {
@@ -180,6 +191,17 @@ export function createStorageEventChannel(options: {
       // accepting primitives the moment the `seq` test is relaxed. The writer of this
       // value is any same-origin script, so the envelope's shape is stated here, not
       // inferred from the sender.
+      // Which of the four a deletion is held against, measured term by term rather
+      // than inferred: `!parsed` and `typeof parsed !== 'object'` are both **cannot-
+      // decide alone** — the first because its deletion is absorbed by the `catch`
+      // below, the second because a JSON primitive reaches the `seq` test and fails
+      // it anyway. Both are kept, and both are *second-order*: the argument in the
+      // comment above is that they hold against a different later edit (splitting the
+      // `try`, or relaxing `seq`) rather than against an input, which is precisely
+      // why deleting one alone shows nothing. `seq`'s number test and `message`'s
+      // presence test each die to a named case in `tests/storage-channel.test.ts`, so
+      // the pair that carries the claim is pinned and the pair that guards the two
+      // named future edits is measured-and-documented rather than pinned.
       if (!parsed || typeof parsed !== 'object' || typeof parsed.seq !== 'number' || !parsed.message) return;
       message = parsed.message;
     } catch {
