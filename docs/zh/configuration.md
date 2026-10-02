@@ -67,6 +67,21 @@ const bus = new CrossTabDataBus({
 | `retentionSweepMs` | `number` | — | 面向安静 topic 的周期性 durable retention sweep；需要 `retentionMs` 与实现 `clearBefore` 的适配器 |
 | `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | 瞬时持久化失败的有界重试；每次失败后延迟翻倍，翻倍值封顶 1600 ms，`backoffMs` 首次按原值等待 |
 
+### 回放持久化选项
+
+`createIndexedDbReplayPersistence<TData>(options)` 后端的选项，作为 `replay.persistence` 传入。
+`maxPerTopic`、`pruneStrategy` 与 `retentionMs` 与上面同名的 bus 选项语义一致，但它们是**各自独立的一份
+副本**：adapter 用传给它的那组值裁剪持久化行，而不是用 bus 的值。这里的 `maxPerTopic` 是必填而非有默认值，
+因此 factory 与 bus 不一致时，持久化历史会按 factory 自己的值裁剪，而内存环形缓冲仍按 bus 的值。
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `clusterKey` | `string` | — | 按 cluster 划分 IndexedDB 数据库，推导方式与协调层推导 storage key 完全一致（传空值时落入默认 cluster，与库中其他各处相同）。传入与 bus 相同的值，同一 origin 下运行多个 cluster 时即可每个 cluster 各得一个数据库。不传时该 origin 下所有 cluster 共用一个数据库 |
+| `dbName` | `string` | `'cross-tab-worker-databus'` | 直接指定数据库名，优先级高于 `clusterKey` |
+| `maxPerTopic` | `number` | 必填 | 持久化每 topic 的行数上限（正安全整数） |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | 语义同 bus 选项，作用于持久化行 |
+| `retentionMs` | `number` | — | 持久化行 `clearBefore` 清理所用的保留窗口 |
+
 ### 去重选项
 
 | 配置 | 类型 | 默认值 | 说明 |

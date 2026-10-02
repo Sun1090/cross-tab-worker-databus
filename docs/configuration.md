@@ -67,6 +67,23 @@ When `replay.retentionMs` is enabled, automatic durable cleanup is coalesced dur
 | `retentionSweepMs` | `number` | — | Periodic durable-retention sweep for quiet topics; requires `retentionMs` and a `clearBefore` adapter |
 | `persistenceRetry` | `{ maxAttempts, backoffMs }` | `1` / `50` | Bounded retry for transient persistence failures; the delay doubles after each attempt and the doubled value is capped at 1600 ms, `backoffMs` being waited verbatim first |
 
+### Replay Persistence Options
+
+Options for the `createIndexedDbReplayPersistence<TData>(options)` backend, passed
+as `replay.persistence`. `maxPerTopic`, `pruneStrategy` and `retentionMs` mirror the
+same-named bus options above, but they are **independent copies**: the adapter prunes
+durable rows with the values the factory was given, not the bus's. `maxPerTopic` is
+required here rather than defaulted, so a factory that disagrees with the bus prunes
+persistent history to its own value and leaves the in-memory ring at the bus's.
+
+| Config | Type | Default | Description |
+|---|---|---|---|
+| `clusterKey` | `string` | — | Namespaces the IndexedDB database by cluster, derived exactly as the coordination plane derives its storage keys (an empty value lands in the default cluster, as everywhere else). Pass the same value the bus gets, so an origin running several clusters gets one database per cluster. Omitted, every cluster in the origin shares one database |
+| `dbName` | `string` | `'cross-tab-worker-databus'` | Database name verbatim, taking precedence over `clusterKey` |
+| `maxPerTopic` | `number` | Required | Durable per-topic row cap (positive safe integer) |
+| `pruneStrategy` | `'count' \| 'age' \| 'both'` | `'count'` | Same semantics as the bus option, applied to persisted rows |
+| `retentionMs` | `number` | — | Retention window for `clearBefore` sweeps of persisted rows |
+
 ### Deduplication Options
 
 | Config | Type | Default | Description |
