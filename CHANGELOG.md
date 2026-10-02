@@ -1,4 +1,4 @@
-## [0.21.48] - 2026-09-30
+## [0.21.48] - 2026-10-02
 
 An option added in `0.21.47` was documented accurately and not at all: it appeared in a prose paragraph, while the surface a reader actually scans — a table — said nothing. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.47`'s.
 
