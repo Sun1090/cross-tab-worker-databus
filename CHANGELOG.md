@@ -1,3 +1,21 @@
+## [0.21.48] - 2026-09-30
+
+An option added in `0.21.47` was documented accurately and not at all: it appeared in a prose paragraph, while the surface a reader actually scans — a table — said nothing. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.47`'s.
+
+### Added
+
+- **An options table for `createIndexedDbReplayPersistence`.** Both transports' factories have one, and each carries a `clusterKey` row with its default; the persistence factory had none, so its `clusterKey` — added in `0.21.47` — and its `dbName` existed only in the storage-boundary prose. The new table lists the factory's real surface in both languages: `clusterKey`, `dbName`, `maxPerTopic`, `pruneStrategy`, `retentionMs`, with types, defaults and the precedence between the first two.
+
+### Corrected
+
+- **`maxPerTopic`, `pruneStrategy` and `retentionMs` are independent copies at the factory, not inherited from the bus.** The adapter prunes durable rows with the values *it* was given, so a factory configured differently from the bus caps persistent history at the factory's value while the in-memory ring stays at the bus's. `maxPerTopic` is required there rather than defaulted — passing nothing throws — so the two must be kept in agreement by the application. The paragraph carrying this was wrong in the first draft of this release, in a way only checking the declaration found: it described a factory "left at the default", a state that cannot exist, because the bus's own default of `100` and the factory's required parameter share a name.
+
+### Verification
+
+- `pnpm check` — 40 test files and **1034 tests** in the parallel step (the 41st, `perf-gate.test.ts`, is excluded from it and runs as the 5 absolute-ms gates in `test:perf`), plus typecheck and build; `pnpm lint`; the documentation gate at 25 in both languages.
+- `pnpm audit` on the public registry, clean and independently re-derived from the installed version against the published advisory ranges rather than from the tool's exit code — the standing rule for the one gate whose evidence lives outside the repository.
+- `verify:compat`, `verify:types` and `verify:pack` all against `v0.21.47`.
+
 ## [0.21.47] - 2026-09-30
 
 One new option, one guard that could not pass, and the first browser-benchmark sample in twenty-five tags. No existing behavior changed: the option is additive, and the one case that documents how the replay store behaves today is unchanged.
