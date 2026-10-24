@@ -1,3 +1,20 @@
+## [0.21.53] - 2026-10-24
+
+The release checklist tells the reader to re-derive the publish-lag series after cutting a release. Until now it never said what the tool's failure words mean, and two of the seven it can print read as "your release did not publish" when the instrument is actually saying "this read is not usable". Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.51`'s.
+
+### Documentation
+
+- **The lag sweep's verdict vocabulary, in both languages.** Four labels — `API-FAIL`, `NO-STEP`, `NO-PUBLISH`, `PENDING-STEP` — are claims about the *read* and say nothing about the publish; `PENDING-STEP` in particular is fixed by re-running, because GitHub backfills per-step metadata after the run row closes, so a series re-derived in the minute after a release cannot see the ack it is measuring. `NEGATIVE` is a real reading in a different regime (the registry stamped before the ack returned). Only `EXCLUDED-NON-SUCCESS` and `NO-RECORD` name genuine absences, and they name two different ones: a run that did not end green, and a version the registry never recorded.
+
+### Added
+
+- **A gate over that vocabulary.** A documentation case now reads the verdict labels out of `scripts/publication-lag.mjs` itself and requires each one to appear in both checklists, with a floor on the script side so an extraction that found nothing cannot pass vacuously. The gap this closes was created by the previous release cycle's own fix, which is the reason the set is derived rather than listed: `0.21.48` established that no check catches an item missing from a set, only a wrong one present in it.
+
+### Verification
+
+- `pnpm check` — 40 files and **1039 tests** (+1 case), plus the 5 perf gates; `pnpm lint`; `tests/documentation.test.ts` at 26 in both languages.
+- Both directions of the new gate were killed by one mutant each — deleting a label from the English checklist, and renaming a verdict in the script — with the inserted-diff count asserted before every run. The added sentences' digit multisets were compared after isolating them from the surrounding paragraph (identical, two tokens each, non-empty on both sides).
+
 ## [0.21.52] - 2026-10-24
 
 `npm publish` has been re-running the entire gate set on every release, and no check in this repository could see it. The finding is an omission rather than a bug — which is why it survived until the question was asked in the inverse direction. No behavior, API shape, export, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.51`'s.
