@@ -45,7 +45,7 @@ Skipping the version instead is not available here, and the repository's own gat
 
 ## Publishing
 
-For a manual release (no `NPM_TOKEN` in the workflow), run `npm publish --access public` from the tagged checkout. A version already present on npm cannot be published again. Historical versions missing from npm must be rebuilt from their exact git tags and reviewed individually; never publish the current tree under an old version.
+For a manual release (no `NPM_TOKEN` in the workflow), run `npm publish --access public` from the tagged checkout. **That path is not unguarded:** `package.json` sets `prepublishOnly` to `pnpm check`, and `npm publish` fires it before packing, so the full typecheck → build → test → test:perf sequence runs a second time inside the publish itself. Measured on release run `40111113635`, where the workflow's own `Publish to npm` step logged a second `> cross-tab-worker-databus@0.21.51 check` with all four sub-steps — ~31 s of that step's 37 s. So a manual publish that takes half a minute before uploading anything is the hook, not a hang, and a tree that does not build cannot be published by hand any more than by CI. Nothing in the workflow files shows this, which is why `tests/workflows.test.ts` pins both the hook and the explanation at the publish step. A version already present on npm cannot be published again. Historical versions missing from npm must be rebuilt from their exact git tags and reviewed individually; never publish the current tree under an old version.
 
 ## After publishing
 

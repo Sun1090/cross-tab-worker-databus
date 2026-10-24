@@ -92,6 +92,46 @@ describe('workflow files', () => {
     expect(workflow, 'release.yml must lint before publishing').toMatch(/run:\s*pnpm lint/);
   });
 
+  it('names the Verify step for every command `pnpm check` actually runs', () => {
+    // The comment above the step used to read "typecheck + build + test" and the
+    // step was named `Verify (typecheck + build + unit tests)`, while the script
+    // runs four commands — `test:perf` was invisible in both places. Same class as
+    // `0.21.36`'s CONTRIBUTING gloss: a summary of a composite command that omits
+    // a member reads as complete and contradicts nothing.
+    //
+    // The comparison is by COUNT, derived from package.json rather than restated
+    // here, so it is the drift that fails and not the wording. Adding a fifth
+    // command to `check` without widening the name reddens this case, and so does
+    // dropping a token from the name while `check` keeps four.
+    const stages = JSON.parse(readFileSync('package.json', 'utf8')).scripts.check.split('&&');
+    const stepName = readWorkflow('release.yml')
+      .split('\n')
+      .find(line => /^\s*- name: Verify \(/.test(line)) ?? '';
+    const named = (stepName.match(/\(([^)]*)\)/)?.[1] ?? '').split('+');
+    expect(named.length, `the step must name one token per command in pnpm check (${stages.length})`).toBe(stages.length);
+    // A name whose parentheses do not exist would split to [''], a one-token list
+    // that could still match a one-command `check`; the floor says the step really
+    // carries a list.
+    expect(named.filter(token => token.trim().length > 0).length).toBe(named.length);
+  });
+
+  it('explains that `npm publish` re-runs the whole gate set through prepublishOnly', () => {
+    // The publish step takes ~30 s, not the 5 s an upload costs, because the
+    // package's `prepublishOnly` lifecycle hook is `pnpm check` — a second full
+    // typecheck/build/test/test:perf run that no `run: pnpm …` line shows. The
+    // existing quick-reference gate scans `run:` commands and cannot see an
+    // implicit hook, which is the 0.21.48 lesson that an omission is invisible to
+    // every check this repository has. Measured on run 40111113635: a second
+    // `> cross-tab-worker-databus@0.21.51 check` with all four sub-steps inside the
+    // `Publish to npm` step's own log.
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    expect(pkg.scripts.prepublishOnly).toBe('pnpm check');
+    expect(
+      readWorkflow('release.yml'),
+      'the publish step must say that the hook re-runs the gate set'
+    ).toMatch(/prepublishOnly[\s\S]{0,400}second/i);
+  });
+
   it('keeps enough published-consumer retry budget for npm propagation', () => {
     // The ceiling is a sum of two measured lags, not a comfort number. (1) The
     // registry records the publish *minutes* after `npm publish` returns — for every

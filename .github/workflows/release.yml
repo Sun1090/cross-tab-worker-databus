@@ -54,9 +54,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # pnpm check = typecheck + build + test; build must precede test because
-      # tests/dual-format.test.ts imports the dist artifacts.
-      - name: Verify (typecheck + build + unit tests)
+      # pnpm check = typecheck -> build -> test -> test:perf; build must precede
+      # test because tests/dual-format.test.ts imports the dist artifacts. The
+      # step name is asserted to match the command list in package.json by
+      # tests/workflows.test.ts, because this comment used to read "typecheck +
+      # build + test" and so omitted the perf gates the same step runs.
+      - name: Verify (typecheck + build + unit + perf gates)
         run: pnpm check
 
       - name: Lint
@@ -100,6 +103,16 @@ jobs:
             gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md
           fi
 
+      # `npm publish` fires the package's `prepublishOnly` lifecycle hook before
+      # it packs, and this package sets it to `pnpm check` — so the full
+      # typecheck/build/test/test:perf sequence runs a SECOND time inside this
+      # step. Measured on release run 40111113635: the step's own log carries a
+      # second `> cross-tab-worker-databus@0.21.51 check` with all four sub-steps
+      # (16:21:33Z onward, ~31 s of the step's 37 s), which is why the publish step
+      # is not the 5 s an upload costs. It is not redundant: the explicit Verify
+      # step above can be skipped by a manual publish (the checklist's no-token
+      # path), and the hook is what stops that path from shipping a tree that does
+      # not build. Do not read a publish that takes ~30 s as hung.
       - name: Publish to npm
         # Skipped when no token is configured (e.g. the release was published
         # manually) so tagging an already-published version still goes green.
