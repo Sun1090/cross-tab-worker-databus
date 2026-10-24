@@ -1,3 +1,22 @@
+## [0.21.52] - 2026-10-24
+
+`npm publish` has been re-running the entire gate set on every release, and no check in this repository could see it. The finding is an omission rather than a bug — which is why it survived until the question was asked in the inverse direction. No behavior, API shape, export, default, frame or storage key changed; the coverage floors and the zero-count arm ledger are `0.21.51`'s.
+
+### Added
+
+- **Two gates over the release automation's implicit surface.** The `Verify` step's name is now asserted to carry one token per command `pnpm check` actually runs, derived by splitting `package.json` rather than restated, so the gate fails on drift and passes on rewording. And `prepublishOnly` — the package's own lifecycle hook — is asserted to exist and to be explained at the publish step. Neither was catchable before: `tests/workflows.test.ts` already required every `run: pnpm …` command in the workflows to appear in the quick reference, and that case was green throughout, because a lifecycle hook is injected through a manifest field and is not a `run:` line.
+
+### Corrected
+
+- **`release.yml` described `pnpm check` as "typecheck + build + test"** in both its comment and its step name, omitting the perf gates the same step runs — the same class as the `0.21.36` `CONTRIBUTING.md` gloss. The old step name is left alone in the dated `0.21.33` reading in the progress log, kept as written like a published release note.
+- **The manual publish path is now documented as guarded.** The checklist tells a reader without an `NPM_TOKEN` to run `npm publish --access public`; without the hook, that path would ship an unbuildable tree, because the CI `Verify` step belongs to the workflow rather than to `npm publish`. Measured on release run `40111113635`: the workflow's own `Publish to npm` step logs a second `check` with all four sub-steps, ~31 s of that step's 37 s. A publish that takes half a minute before uploading is the hook, not a hang — a fact now written at the step, in `AGENTS.md`'s quick reference, and in both checklists.
+
+### Verification
+
+- `pnpm check` — 40 files and **1037 tests** (+2 cases), plus the 5 perf gates; `pnpm lint`; documentation gate 25 in both languages.
+- Both new gates verified to bite, each by one mutant: the step-name revert (`applied=2`) reddens the name case; deleting the hook comment (`applied=10`) reddens the hook case. The first attempt at the second mutant was a multi-line regex that matched nothing — `applied=0` with a green suite, the recorded failure where an uninserted mutant reports as a survivor — and had to be redone as a literal splice.
+- en/zh `Publishing` section digit multisets compared in **both directions with a non-empty control on each side** (five tokens each), so an empty difference means agreement rather than a failed extraction.
+
 ## [0.21.51] - 2026-10-24
 
 Three shipped sentences were refuted by the two releases before this one, and neither refutation showed up in a green CI check. `0.21.50` recorded its publish at 56.5 s after the ack, which widened the floor that three copies of the docs had quoted as a bound; and the progress log's record of that release's benchmark sample claimed a metric had landed inside its five-report range when the tool's printed column shows it did not. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.49`'s.
