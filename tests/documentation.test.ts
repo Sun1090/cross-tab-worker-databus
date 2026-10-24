@@ -934,7 +934,21 @@ describe('public documentation', () => {
     const labels = new Set<string>();
     for (const file of sources) {
       const text = readFileSync(file, 'utf8');
-      for (const match of text.matchAll(/console\.(?:log|error|warn)\(\s*(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)) {
+      // Both channels a verdict reaches a reader through. Anchoring on `console.*` alone was a
+      // real under-coverage rather than a theoretical one: four of `bench-browser.mjs`'s
+      // reader-facing strings arrive via `throw new Error`, so a case named "every verdict the
+      // tools can print" was deriving its set from the smaller channel and checking the prose
+      // against that — a gate that passes because it looked at less than its name claims.
+      //
+      // A `throw` counts only when its message carries the `[bench]` marker, which is the rule
+      // that separates a verdict from a control-flow signal: `throw new Error('unhealthy')` two
+      // lines inside a probe is caught by its own `catch` and never reaches anyone, so requiring
+      // prose for it would make the gate demand documentation of what no reader can see. The
+      // four labelled throws adopt the convention `[release]`'s completeness failure already
+      // follows — a user-facing string carries its prefix wherever it is delivered — and that
+      // convention, not the channel, is what makes the derivation complete.
+      const channel = /(?:console\.(?:log|error|warn)|throw new Error)\(\s*(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g;
+      for (const match of text.matchAll(channel)) {
         const raw = match[2]!;
         if (!raw.includes('[bench]')) continue;
         const body = raw.slice(raw.indexOf('[bench]') + '[bench]'.length);
@@ -944,8 +958,9 @@ describe('public documentation', () => {
     }
     const list = [...labels].sort();
     // The floor is the instrument half, for the reason the lag gate records: an extraction that
-    // matched nothing would pass every membership check below.
-    expect(list.length, 'the bench tools must print a named verdict per outcome').toBeGreaterThanOrEqual(8);
+    // matched nothing would pass every membership check below. Twelve, because the four
+    // throw-delivered verdicts are now in scope; a drop to eight means a channel went blind.
+    expect(list.length, 'the bench tools must print a named verdict per outcome').toBeGreaterThanOrEqual(12);
     for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
       const text = readFileSync(file, 'utf8');
       const missing = list.filter(label => !text.includes(label));
