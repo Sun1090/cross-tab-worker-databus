@@ -46,7 +46,7 @@
 
 ## 发布（手动场景）
 
-未在工作流配置 `NPM_TOKEN` 时，从对应 tag 的工作树手动运行 `npm publish --access public`。已经存在于 npm 的版本不能重复发布；npm 缺失的历史版本必须从对应 git tag 重建并逐个审阅，不能把当前工作树伪装成旧版本发布。
+未在工作流配置 `NPM_TOKEN` 时，从对应 tag 的工作树手动运行 `npm publish --access public`。**这条路径并非无守门：** `package.json` 把 `prepublishOnly` 设为 `pnpm check`，而 `npm publish` 会在打包前触发它，于是完整的 typecheck → build → test → test:perf 序列会在发布动作自身内部再跑一遍。在发布运行 `40111113635` 上实测：工作流自己的 `Publish to npm` 步骤记录了第二个 `> cross-tab-worker-databus@0.21.51 check`，四个子步骤齐全——该步骤 37 秒里约 31 秒都是它。所以一次手动发布在上传之前先花半分钟，那是钩子而不是卡死；不能构建的工作树，手动也无法发布，正如 CI 不能。这件事在工作流文件里看不到，这就是 `tests/workflows.test.ts` 同时在发布步骤钉住这个钩子与这段解释的原因。已经存在于 npm 的版本不能重复发布；npm 缺失的历史版本必须从对应 git tag 重建并逐个审阅，不能把当前工作树伪装成旧版本发布。
 
 ## 发布后
 
