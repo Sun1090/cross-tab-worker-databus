@@ -1,3 +1,19 @@
+## [0.21.51] - 2026-10-24
+
+Three shipped sentences were refuted by the two releases before this one, and neither refutation showed up in a green CI check. `0.21.50` recorded its publish at 56.5 s after the ack, which widened the floor that three copies of the docs had quoted as a bound; and the progress log's record of that release's benchmark sample claimed a metric had landed inside its five-report range when the tool's printed column shows it did not. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.49`'s.
+
+### Corrected
+
+- **The publish-lag floor is a bound in one direction only.** The release checklist and `AGENTS.md` said every release from `0.20.92` on was recorded at least `74.8 s` after its ack, and quoted the range `74.8–310.0 s`; `0.21.50` recorded at `56.5 s`, widening the *low* end. The consumer-verification budget is built from the *maximum* (310 s, unchanged since `0.21.30`), so no derivation moved — the re-run sweep still prints `ceiling contribution unchanged if max <= 310.0: true`. The copies now name which end the conclusion depends on and point at the sweep's own printed `modern floor:` line rather than a number copied into prose.
+- **"Inside its own five-report range" is a property of the report being judged, not of the archive.** The checklist's example list (`publish/dedicated`, `publish/shared`, `publishBatch`, all inside their ranges) was measured on one report and read as a standing fact about the archive; the `0.21.50` sample printed that exemption list empty with two metrics beyond their ceilings. Both languages date the reading to `0.21.17` and name the `[max N]` column beside every row as the only signal separating "inside its own resolution" from "beyond it, and under the 50% ceiling" — failing the gate requires both legs at once.
+
+### Verification
+
+- `npx vitest run tests/documentation.test.ts` — 25 in both languages (the block-paired en/zh digit sweep sees the new `57` / `56.5` / `310.0` in both mirrors); `pnpm lint`; `git diff --check`; the lag series re-derived from the instrument rather than from arithmetic: `node scripts/publication-lag.mjs`, 57 releases from `0.20.92`, gap `56.5–310.0 s`, zero over 310 s.
+- `pnpm check` (1035 tests + 5 perf gates), `pnpm test:coverage` (99.03 / 97.65 / 99.27 / 99.69, `0.21.50`'s aggregate), `pnpm bench` and `pnpm bench:compare --fail-above-pct 50`, `verify:pack` / `verify:compat` / `verify:types`, and `pnpm audit` on the public registry.
+- `pnpm test:e2e` — **38 passed in 29.9 s**, after two loaded-host readings in which a *different* case failed each time (`hydrates IndexedDB replay history after a reload`, then `concurrent multi-publisher burst`) while both passed in 1–4 s when run alone, at host load averages 42–62 on 8 cores. The moving failure is the scheduling signature the checklist names for the shared runner, not two findings; the fast full pass is the control that says so.
+- The lag series re-derived from the instrument rather than from arithmetic: `node scripts/publication-lag.mjs`, 57 releases from `0.20.92`, gap `56.5–310.0 s`, zero over 310 s.
+
 ## [0.21.50] - 2026-10-24
 
 The benchmark trend the last release shipped was built from one release-sample, because its second run was deferred under the loaded-host rule. That second sample is now taken, and the shipped trend reflects an archive two reports deep rather than one. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.49`'s.
