@@ -1,3 +1,25 @@
+## [0.21.49] - 2026-10-24
+
+A release the advisory database forced and the benchmark archive was owed: five October advisories made the blocking `pnpm audit` step fail on every pull request (dev toolchain only — no shipped code path changed), and the browser benchmark trend doc carried numbers 24 days and twenty-one releases old. The one source change is behavior-identical by construction and measured; the coverage floors are unchanged and the zero-count arm ledger lost its last unadjudicated member.
+
+### Changed
+
+- **`holdLastFinite`'s `primed` flag is deleted.** The flag was set exactly when the held value was assigned a finite reading, and the held value is initialized to the same `0` the flag's other arm returned — so the conditional it gated was equal to the plain held value for every input, and no test could have distinguished the arm from its deletion. The wrapper's output is byte-identical; what is new is the pin beneath the seed: a clock that has never produced a finite reading stamps `0` (the value the cluster's TTL comparisons read as "very old") and survives `JSON.stringify` where `NaN` would have become `null`.
+
+### Fixed
+
+- **The blocking audit step is green again.** Four dev-toolchain dependencies are pinned at their patched versions for advisories published after `0.21.48`'s release run: `source-map-js` <1.2.2 (high, event-loop DoS, reached through the coverage adapter's magicast dependency), `vite` <=7.3.6 (five advisories), the Vitest mocker <5.0.3, and `undici` <8.12.2 (through jsdom). Three are pinned by `pnpm-workspace.yaml` overrides inside their declared ranges; `vite` is pinned as a direct devDependency because an override does not reach an auto-installed peer resolution, which was measured with the override in place and the lockfile still resolving the vulnerable version.
+
+### Documentation
+
+- **The browser benchmark trend is refreshed in both languages** from the 93rd archived report (2026-10-24), 24 days after its predecessor; the comparison gate is clean with the worst mover at +19.4% against a 50% ceiling. A second release-sample run was deferred under the standing loaded-host rule (load average 16–21 on 8 cores; the sample was moved out of the archive rather than allowed to become the next baseline's median).
+
+### Verification
+
+- `pnpm check` — **1035 tests** (+1: the clock-seed pin) plus the 5 perf gates; `pnpm lint`; the documentation gate at 25 in both languages.
+- `pnpm test:e2e` **38 passed**; `pnpm verify:pack`; `pnpm test:coverage` with the branch aggregate up 0.05 because an arm that could never light no longer exists.
+- `pnpm audit` on the public registry, clean.
+
 ## [0.21.48] - 2026-10-02
 
 An option added in `0.21.47` was documented accurately and not at all: it appeared in a prose paragraph, while the surface a reader actually scans — a table — said nothing. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.47`'s.
