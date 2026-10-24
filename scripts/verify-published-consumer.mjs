@@ -89,7 +89,7 @@ async function main() {
         await sleep(delayMs);
       }
     }
-    if (!packJson) throw lastError ?? new Error(`Unable to download ${packageName}@${version}`);
+    if (!packJson) throw lastError ?? new Error(`[npm] Unable to download ${packageName}@${version}`);
     const [{ filename }] = JSON.parse(packJson);
     const packageDir = join(tempRoot, 'package');
     execFileSync('tar', ['-xzf', join(tempRoot, filename), '-C', tempRoot]);
@@ -98,7 +98,7 @@ async function main() {
     symlinkSync(packageDir, join(nodeModules, packageName), 'dir');
     for (const dependency of ['react', 'vue', 'centrifuge']) {
       const source = join(workspace, 'node_modules', dependency);
-      if (!existsSync(source)) throw new Error(`Missing workspace dependency required by published consumer: ${dependency}`);
+      if (!existsSync(source)) throw new Error(`[npm] Missing workspace dependency required by published consumer: ${dependency}`);
       symlinkSync(source, join(nodeModules, dependency), 'dir');
     }
 

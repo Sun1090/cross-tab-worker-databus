@@ -34,11 +34,11 @@ const DUAL_FORMAT_SUBPATHS = ['.', './hooks', './vue', './centrifuge'];
  */
 export function collectExportTargets(manifest) {
   const entries = Object.entries(manifest.exports ?? {});
-  if (entries.length === 0) throw new Error('packed manifest declares no exports');
+  if (entries.length === 0) throw new Error('[pack] packed manifest declares no exports');
   const targets = [];
   for (const [subpath, entry] of entries) {
     const values = typeof entry === 'string' ? [entry] : Object.values(entry ?? {});
-    if (values.length === 0) throw new Error(`export ${subpath} declares no target`);
+    if (values.length === 0) throw new Error(`[pack] export ${subpath} declares no target`);
     for (const target of values) targets.push({ subpath, target });
   }
   return targets;
@@ -46,16 +46,16 @@ export function collectExportTargets(manifest) {
 
 /** Assert the packed manifest promises a complete, resolvable export surface. */
 export function assertPackedExports(packedManifest, exists) {
-  if (packedManifest.version === undefined) throw new Error('packed manifest declares no version');
+  if (packedManifest.version === undefined) throw new Error('[pack] packed manifest declares no version');
   for (const { subpath, target } of collectExportTargets(packedManifest)) {
-    if (!exists(target)) throw new Error(`missing export target ${target} for ${subpath}`);
+    if (!exists(target)) throw new Error(`[pack] missing export target ${target} for ${subpath}`);
   }
   // The dual-format contract is separate from existence: these four must keep
   // offering both a `require` and an `import` condition.
   for (const subpath of DUAL_FORMAT_SUBPATHS) {
     const entry = packedManifest.exports?.[subpath];
     if (!entry?.import || !entry?.require) {
-      throw new Error(`missing dual-format export for ${subpath}`);
+      throw new Error(`[pack] missing dual-format export for ${subpath}`);
     }
   }
 }
@@ -76,12 +76,12 @@ async function main() {
     const packedManifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
     const workspaceVersion = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8')).version;
     if (packedManifest.version !== workspaceVersion) {
-      throw new Error(`packed version mismatch: ${packedManifest.version} !== ${workspaceVersion}`);
+      throw new Error(`[pack] packed version mismatch: ${packedManifest.version} !== ${workspaceVersion}`);
     }
     assertPackedExports(packedManifest, target => existsSync(join(packageDir, target)));
 
     for (const declaration of ['dist/index.d.ts', 'dist/hooks.d.ts', 'dist/vue.d.ts', 'dist/centrifuge.d.ts']) {
-      if (!existsSync(join(packageDir, declaration))) throw new Error(`missing declaration ${declaration}`);
+      if (!existsSync(join(packageDir, declaration))) throw new Error(`[pack] missing declaration ${declaration}`);
     }
 
     const consumerNodeModules = join(tempRoot, 'node_modules');

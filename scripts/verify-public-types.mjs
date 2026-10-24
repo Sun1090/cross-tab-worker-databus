@@ -60,7 +60,7 @@ const entries = Object.entries(pkg.exports ?? {})
 const missing = entries.filter(entry => !existsSync(entry.declaration));
 if (missing.length) {
   throw new Error(
-    `declaration missing for ${missing.map(e => e.subpath).join(', ')}; ` +
+    `[types] declaration missing for ${missing.map(e => e.subpath).join(', ')}; ` +
     '`pnpm build` must run before `pnpm verify:types`'
   );
 }
@@ -71,10 +71,10 @@ function exportedNamesFromSourceText(text, fileName) {
   for (const statement of sourceFile.statements) {
     if (ts.isExportDeclaration(statement)) {
       if (statement.exportClause == null) {
-        throw new Error(`${fileName} uses 'export *', which this gate cannot reason about`);
+        throw new Error(`[types] ${fileName} uses 'export *', which this gate cannot reason about`);
       }
       if (ts.isNamespaceExport(statement.exportClause)) {
-        throw new Error(`${fileName} uses 'export * as', which this gate cannot reason about`);
+        throw new Error(`[types] ${fileName} uses 'export * as', which this gate cannot reason about`);
       }
       // `element.name` is what the consumer writes, so `export { A as B }`
       // contributes B — the alias is the contract, the target is not.
@@ -107,7 +107,7 @@ if (!baseTag) {
     .map(tag => tag.trim())
     .filter(Boolean);
   if (tags.length === 0) {
-    throw new Error('no version tag found to use as the type baseline; set COMPAT_BASE_TAG');
+    throw new Error('[types] no version tag found to use as the type baseline; set COMPAT_BASE_TAG');
   }
   const headTags = execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' })
     .split('\n')
@@ -135,7 +135,7 @@ for (const entry of entries) {
     // git failure (detached worktree, shallow clone) must not read as "clean".
     const reason = error instanceof Error ? error.message : String(error);
     if (!/does not have any files|fatal: path .* exists on disk/i.test(reason)) {
-      throw new Error(`unable to read ${relative(workspace, entry.source)} at ${baseTag}: ${reason}`, { cause: error });
+      throw new Error(`[types] unable to read ${relative(workspace, entry.source)} at ${baseTag}: ${reason}`, { cause: error });
     }
     continue;
   }
@@ -188,7 +188,7 @@ const importableNames = new Map();
 for (const entry of entries) {
   const declarationFile = program.getSourceFile(entry.declaration);
   const moduleSymbol = checker.getSymbolAtLocation(declarationFile);
-  if (!moduleSymbol) throw new Error(`no module symbol for ${entry.declaration}`);
+  if (!moduleSymbol) throw new Error(`[types] no module symbol for ${entry.declaration}`);
   for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
     importableNames.set(symbol.getName(), entry.subpath);
   }

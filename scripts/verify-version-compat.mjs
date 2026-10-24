@@ -15,7 +15,7 @@ if (!baseTag) {
     .map(tag => tag.trim())
     .filter(Boolean);
   if (tags.length === 0) {
-    throw new Error('no version tag found to use as compatibility baseline; set COMPAT_BASE_TAG');
+    throw new Error('[compat] no version tag found to use as compatibility baseline; set COMPAT_BASE_TAG');
   }
   const headTag = execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' })
     .split('\n')
@@ -28,7 +28,7 @@ try {
   baseline = JSON.parse(execFileSync('git', ['show', `${baseTag}:package.json`], { encoding: 'utf8' }));
 } catch (error) {
   throw new Error(
-    `unable to read compatibility baseline ${baseTag}: ${error instanceof Error ? error.message : String(error)}`,
+    `[compat] unable to read compatibility baseline ${baseTag}: ${error instanceof Error ? error.message : String(error)}`,
     { cause: error }
   );
 }
@@ -44,7 +44,7 @@ function hasUnconditionalExportTarget(entry) {
 function assertExportCompatibility(baselineEntry, currentEntry, exportKey, conditionPath = []) {
   if ((typeof baselineEntry === 'string' || Array.isArray(baselineEntry)) &&
       hasUnconditionalExportTarget(baselineEntry) && !hasUnconditionalExportTarget(currentEntry)) {
-    throw new Error(`removed default availability from export ${exportKey} since ${baseTag}`);
+    throw new Error(`[compat] removed default availability from export ${exportKey} since ${baseTag}`);
   }
   if (baselineEntry == null || typeof baselineEntry !== 'object' || Array.isArray(baselineEntry)) return;
 
@@ -53,7 +53,7 @@ function assertExportCompatibility(baselineEntry, currentEntry, exportKey, condi
     if (currentEntry == null || typeof currentEntry !== 'object' ||
         Array.isArray(currentEntry) || currentEntry[field] == null) {
       const condition = [...conditionPath, field].join('.');
-      throw new Error(`removed ${condition} condition from export ${exportKey} since ${baseTag}`);
+      throw new Error(`[compat] removed ${condition} condition from export ${exportKey} since ${baseTag}`);
     }
     assertExportCompatibility(
       baselineEntry[field], currentEntry[field], exportKey, [...conditionPath, field]
@@ -64,18 +64,18 @@ function assertExportCompatibility(baselineEntry, currentEntry, exportKey, condi
 const currentExports = current.exports ?? {};
 const baselineExports = baseline.exports ?? {};
 for (const key of Object.keys(baselineExports)) {
-  if (!(key in currentExports)) throw new Error(`removed public export ${key} since ${baseTag}`);
+  if (!(key in currentExports)) throw new Error(`[compat] removed public export ${key} since ${baseTag}`);
   const baselineEntry = baselineExports[key];
   const currentEntry = currentExports[key];
   if (baselineEntry != null && currentEntry == null) {
-    throw new Error(`disabled public export ${key} since ${baseTag}`);
+    throw new Error(`[compat] disabled public export ${key} since ${baseTag}`);
   }
   assertExportCompatibility(baselineEntry, currentEntry, key);
 }
 
 for (const field of ['types', 'typesVersions']) {
   if (field in baseline && (!(field in current) || (baseline[field] != null && current[field] == null))) {
-    throw new Error(`removed package field ${field} since ${baseTag}`);
+    throw new Error(`[compat] removed package field ${field} since ${baseTag}`);
   }
   // Keep the metadata container compatible as well as present. A non-null
   // object (notably `typesVersions`) cannot be replaced by a scalar without
@@ -83,7 +83,7 @@ for (const field of ['types', 'typesVersions']) {
   if (field in baseline && baseline[field] != null && current[field] != null) {
     const shape = value => Array.isArray(value) ? 'array' : typeof value;
     if (shape(baseline[field]) !== shape(current[field])) {
-      throw new Error(`changed package field ${field} shape since ${baseTag}`);
+      throw new Error(`[compat] changed package field ${field} shape since ${baseTag}`);
     }
   }
 }

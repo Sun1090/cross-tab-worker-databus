@@ -908,6 +908,100 @@ describe('public documentation', () => {
     ).toEqual([]);
   });
 
+  it('prefixes every parent-scope throw in a script that uses a verdict marker', () => {
+    // The derived-vocabulary gates read the marker to know what a verdict *is*, so an
+    // inconsistently applied marker makes those derivations silently miss real messages — the
+    // same under-coverage Phase 294 fixed for `bench-browser.mjs`, found here by asking that
+    // question of every script. `0.21.54`'s release note cites `throw new Error('[release] …')`
+    // as the convention while the same file carried five un-prefixed parent throws: true of the
+    // example it quoted, false of the rule it described.
+    //
+    // Two exemptions are decided **structurally**, not by a hand-kept list, because a list is
+    // what a reader quietly forgets to update:
+    //  - **Child-program templates.** A `new Error` inside a template handed to a child process
+    //    cannot carry the parent's prefix — its message surfaces *inside* the parent's own
+    //    `[npm] consumer import failed` / `[pack] …` diagnostic, and prefixing it would
+    //    double-label one line and blame the wrong side of the process boundary. Such regions
+    //    are masked out of the scan entirely, which also means the braces inside a child
+    //    program cannot perturb the depth walk below.
+    //  - **Swallowed throws.** `throw new Error('unhealthy')` in a probe whose own `catch`
+    //    replaces it with a spawned server is control flow, not a verdict; Phase 294 records
+    //    the decision to leave it unmarked. The test is that the block the throw exits closes
+    //    with `} catch` — the message never reaches a reader.
+    //
+    // Scanned over the whole file, not per line: a `new Error(\n  \`message\`)` split across
+    // lines is invisible to a line-anchored walk, and one of the six `verify-public-types.mjs`
+    // messages is shaped that way — the same instrument-narrower-than-its-name class again.
+    const tagged = readdirSync('scripts')
+      .filter(name => name.endsWith('.mjs'))
+      .map(name => [`scripts/${name}`, readFileSync(`scripts/${name}`, 'utf8')] as const)
+      .filter(([, text]) => /['"`]\[[a-z]+\]/.test(text))
+      .map(([name, text]) => {
+        const tag = /['"`]\[([a-z]+)\]/.exec(text)![1]!;
+        const childRegions = [...text.matchAll(/const (\w+) = `[\s\S]*?`;/g)]
+          .map(match => {
+            const start = text.indexOf(match[0]);
+            return { start, end: start + match[0].length };
+          });
+        const insideChild = (index: number) => childRegions.some(r => r.start <= index && index < r.end);
+        // A copy of the file with child-program bytes blanked (newlines kept) so brace counting
+        // sees only the parent's structure.
+        const blanked = (() => {
+          const chars = text.split('');
+          for (const region of childRegions) {
+            for (let i = region.start; i < region.end; i += 1) {
+              if (chars[i] !== '\n') chars[i] = ' ';
+            }
+          }
+          return chars.join('');
+        })();
+        const swallowedAt = (index: number): boolean => {
+          let depth = 0;
+          for (let i = index; i < blanked.length; i += 1) {
+            const c = blanked[i];
+            if (c === '{') depth += 1;
+            else if (c === '}') {
+              depth -= 1;
+              if (depth < 0) return /^\}\s*catch\b/.test(blanked.slice(i, i + 12));
+            }
+          }
+          return false;
+        };
+        const offenders: string[] = [];
+        let seen = 0;
+        let checked = 0;
+        for (const match of text.matchAll(/new Error\(\s*(['"`])((?:(?!\1)[^\\]|\\.){2,140})\1/g)) {
+          seen += 1;
+          const index = match.index!;
+          if (insideChild(index)) continue;
+          checked += 1;
+          const head = match[2]!.split('${')[0]!.trim();
+          if (head.startsWith(`[${tag}]`)) continue;
+          if (swallowedAt(index)) continue;
+          offenders.push(`${(text.slice(0, index).split('\n').length)}: ${head.slice(0, 52)}`);
+        }
+        return { name, tag, seen, checked, offenders };
+      });
+    // Controls, in aggregate rather than per file. A per-file floor failed the first time it
+    // ran: `bench-compare.mjs` is legitimately in scope and throws only `TypeError`, so
+    // demanding a measurable count of `new Error` messages asked a file for strings it has no
+    // reason to produce. The witness that the walk is not blind is the aggregate — a regex that
+    // stopped matching takes the total to zero, and so does a scan that never left line scope.
+    const totalSeen = tagged.reduce((sum, e) => sum + e.seen, 0);
+    const totalChecked = tagged.reduce((sum, e) => sum + e.checked, 0);
+    expect(tagged.length, 'several shipped scripts use a verdict marker').toBeGreaterThanOrEqual(6);
+    expect(totalSeen, 'the message walk must find the messages it claims to check').toBeGreaterThanOrEqual(25);
+    // A child-program exemption that swallowed the whole corpus would satisfy `totalSeen` and
+    // still check nothing, so the parent-scope count is floored separately.
+    expect(totalChecked, 'parent-scope messages actually compared').toBeGreaterThanOrEqual(20);
+    for (const { name, tag, checked, offenders } of tagged) {
+      expect(
+        offenders,
+        `${name} delivers reader-facing verdicts without its [${tag}] marker (${checked} messages checked)`
+      ).toEqual([]);
+    }
+  });
+
   it('names every verdict the browser-bench tools can print, in both checklists', () => {
     // The lag sweep gate above covers one script; this covers the pair that decides whether a
     // sample entered the release baseline. `NOT ARCHIVED` (refusal *before* the write) and
