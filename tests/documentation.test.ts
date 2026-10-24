@@ -908,6 +908,29 @@ describe('public documentation', () => {
     ).toEqual([]);
   });
 
+  it('names every verdict the publication-lag sweep can print, in both checklists', () => {
+    // A reader re-deriving the lag series right after cutting a release meets a label the
+    // shipped prose never names, and two of them (`NO-PUBLISH`, `PENDING-STEP`) read as
+    // "this release did not publish" when the instrument means "this read is not usable".
+    // That is the 0.21.48 lesson in the other direction — not an option missing from a
+    // table but a verdict missing from the vocabulary a procedure tells you to run — and
+    // like every omission it is invisible until something enumerates the set.
+    //
+    // The set is derived from the script's own print sites, not restated here: adding a
+    // verdict without writing it into both checklists fails this case, and rewording the
+    // prose cannot pass it vacuously because the assertion names which labels are missing
+    // from which file.
+    const script = readFileSync('scripts/publication-lag.mjs', 'utf8');
+    const labels = [...new Set([...script.matchAll(/console\.log\(`([A-Z][A-Z-]+)\s/g)].map(m => m[1]!))].sort();
+    // The floor is the instrument half: an empty `labels` list would pass every check below.
+    expect(labels.length, 'the sweep must print a named verdict per skip path').toBeGreaterThanOrEqual(6);
+    for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
+      const text = readFileSync(file, 'utf8');
+      const missing = labels.filter(label => !text.includes(label));
+      expect(missing, `${file} is missing verdict labels`).toEqual([]);
+    }
+  });
+
   it('leaves no empty section in the shipped documentation', () => {
     // A heading immediately followed by another heading of the same or higher
     // level renders as an empty section. (Found: docs/zh/roadmap.md's
