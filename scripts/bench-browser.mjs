@@ -134,7 +134,7 @@ async function waitForServer(baseUrl) {
     }
     await delay(100);
   }
-  throw new Error(`Timed out waiting for ${baseUrl}`);
+  throw new Error(`[bench] Timed out waiting for ${baseUrl}`);
 }
 
 async function openTab({ baseUrl, wsUrl }, context, mode, topic) {
@@ -257,7 +257,7 @@ async function runDatabusMatrix(baseUrl, browser) {
       timings.wildcardDispatch1000Ms = Number((performance.now() - start).toFixed(2));
       // Guard: the measurement is only meaningful if every emission actually
       // reached the handler (otherwise the bus was measuring a no-op path).
-      if (dispatched !== 1000) throw new Error(`wildcard dispatch mis-measured: ${dispatched}/1000`);
+      if (dispatched !== 1000) throw new Error(`[bench] wildcard dispatch mis-measured: ${dispatched}/1000`);
       await bus.stop();
     }
 
@@ -282,7 +282,7 @@ async function runDatabusMatrix(baseUrl, browser) {
       timings.publishBatch1000Ms = Number((performance.now() - start).toFixed(2));
       // The echo stub round-trips each item back into the bus, so exactly 1000
       // items must reach the handler for the measurement to be meaningful.
-      if (dispatched !== 1000) throw new Error(`publishBatch mis-measured: ${dispatched}/1000 dispatched`);
+      if (dispatched !== 1000) throw new Error(`[bench] publishBatch mis-measured: ${dispatched}/1000 dispatched`);
       await bus.stop();
     }
 
@@ -307,7 +307,7 @@ async function runDatabusMatrix(baseUrl, browser) {
       }
       timings.dedup1000Ms = Number((performance.now() - start).toFixed(2));
       // 500 unique IDs each emitted twice: dedup must deliver exactly 500.
-      if (dispatched !== 500) throw new Error(`dedup mis-measured: ${dispatched}/500 delivered`);
+      if (dispatched !== 500) throw new Error(`[bench] dedup mis-measured: ${dispatched}/500 delivered`);
       await bus.stop();
     }
 
