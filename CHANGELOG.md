@@ -1,3 +1,16 @@
+## [0.21.50] - 2026-10-24
+
+The benchmark trend the last release shipped was built from one release-sample, because its second run was deferred under the loaded-host rule. That second sample is now taken, and the shipped trend reflects an archive two reports deep rather than one. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.49`'s.
+
+### Documentation
+
+- **The browser benchmark trend is regenerated from the 94-report archive** (both languages). The added report is the release-sample `0.21.49` deferred when its host read load average 16–21 on 8 cores; the retake landed on a quiet host and the comparison gate passed with the worst mover at +46.2% against the 50% ceiling. One metric the deferred run had flagged — the batch-publish figure at +54.5% — reads +25.0% here and sits inside its own five-report range, which is the fast/slow alternation the release checklist documents rather than a regression.
+
+### Verification
+
+- `pnpm bench:browser` (archived), `pnpm bench:compare --fail-above-pct 50` and `pnpm bench:trend` all clean; the documentation gate at 25 in both languages.
+- `pnpm check`, `pnpm lint`, `pnpm test:coverage` (99.03 / 97.65 / 99.27 / 99.69, `0.21.49`'s aggregate), `verify:pack` / `verify:compat` / `verify:types`, and `pnpm audit` on the public registry.
+
 ## [0.21.49] - 2026-10-24
 
 A release the advisory database forced and the benchmark archive was owed: five October advisories made the blocking `pnpm audit` step fail on every pull request (dev toolchain only — no shipped code path changed), and the browser benchmark trend doc carried numbers 24 days and twenty-one releases old. The one source change is behavior-identical by construction and measured; the coverage floors are unchanged and the zero-count arm ledger lost its last unadjudicated member.
