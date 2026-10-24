@@ -1,3 +1,22 @@
+## [0.21.54] - 2026-10-24
+
+The release checklist tells its reader to take two browser benchmark samples and re-derive a lag series at release step 4, and until now it never said what those tools' failure words mean. Two of them — `NOT ARCHIVED` and `NOT TRUSTED` — describe opposite states of the one artifact the loaded-host rule protects, and a reader who cannot tell them apart does exactly the wrong thing. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.51`'s.
+
+### Documentation
+
+- **The browser-bench verdict vocabulary, in both languages**, keyed on what each verdict did to `bench-results/` rather than glossed: `archived for trend comparison` means the sample **is** now part of the baseline the next five comparisons are judged against; `NOT ARCHIVED` fires *before* the write, so the archive is unchanged and the numbers printed are diagnosis; `NOT TRUSTED` fires *after* it, so the offending report is the baseline until someone moves it out — which is the difference between re-running and removing, and the reason the rule says to move suspect samples aside; `failed to archive results` is a write failure deliberately not treated as a refusal; and four harness self-checks (`Timed out waiting for`, the dispatch, batch and dedup `mis-measured` cases at targets of 1000, 1000 and 500) mean the measurement never completed at all, fired before the report is built, so there is nothing to excuse or defer and no sample to move.
+- **The lag sweep's seven verdict labels** were named in the previous release; this one completes the pair of tools a release actually runs.
+
+### Fixed
+
+- **Four user-facing messages that reached readers with no marker at all.** `bench-browser.mjs` delivered its timeout and three self-check failures through `throw new Error` without the `[bench]` prefix, so they appeared in no shipped documentation and were invisible to the new gate that claims to enumerate the vocabulary. They now carry the prefix, following the convention `verify-release-version.mjs` already sets with `throw new Error('[release] …')`: a user-facing string carries its prefix wherever it is delivered. A probe that throws and is caught two lines later (`'unhealthy'`, the demo-server check) deliberately stays unmarked — it is control flow, never a verdict anyone reads.
+
+### Verification
+
+- `pnpm check` — 40 files and **1040 tests**, plus the 5 perf gates; `pnpm lint`; `tests/documentation.test.ts` at 27 in both languages.
+- The vocabulary gate's set is **derived from the scripts**, not restated: it reads both delivery channels and its floor moved 8 → 12 so that a channel going blind is a failure rather than a pass. Two mutants, each with the inserted-diff count asserted before the run — a new `console` verdict (`applied=1`) and a renamed *thrown* one (`applied=2`) — each fail the named case; the second is the proof the new channel feeds the set.
+- Every line number, matrix target and before-or-after-the-write claim above was read off the source and the archive path this cycle, not carried from a previous reading.
+
 ## [0.21.53] - 2026-10-24
 
 The release checklist tells the reader to re-derive the publish-lag series after cutting a release. Until now it never said what the tool's failure words mean, and two of the seven it can print read as "your release did not publish" when the instrument is actually saying "this read is not usable". Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.51`'s.
