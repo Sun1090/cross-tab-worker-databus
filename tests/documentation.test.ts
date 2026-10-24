@@ -908,6 +908,51 @@ describe('public documentation', () => {
     ).toEqual([]);
   });
 
+  it('names every verdict the browser-bench tools can print, in both checklists', () => {
+    // The lag sweep gate above covers one script; this covers the pair that decides whether a
+    // sample entered the release baseline. `NOT ARCHIVED` (refusal *before* the write) and
+    // `NOT TRUSTED` (refusal *after* it) are opposite claims about the same archive, and
+    // `no metric in … has a baseline sample` exits 1 for a metric-label mismatch rather than a
+    // regression — verdicts a reader meets at step 4 of a release, with nothing in the shipped
+    // procedure to say which of them touched `bench-results/`. Naming them in prose was not
+    // enough either: the vocabulary drifted after the docs were written, so the set is derived.
+    //
+    // Three extractor rules, each learned the hard way on this file:
+    //  - **Anchor at the call site.** Scanning source for quoted spans without anchoring at
+    //    `console.*(` walks a regex through alternating backticks, and it returned a 300-char
+    //    block of *code* as if it were a message — a gate built on that would have demanded a
+    //    fragment of `bench-compare.mjs` in both checklists.
+    //  - **Cut at the first interpolation and require the longest static prefix.** Labels are
+    //    templates whose embedded values (`<reason>`, `<n>`) vary, and `no metric in …` is
+    //    concatenated from two literals, so the tail past its first `${…}` is not visible here
+    //    at all. This is a known limit of the design, stated rather than hidden: the gate
+    //    catches a **new or removed label** (its prefix appears or vanishes) and does not catch
+    //    a change to a label's wording *after* the first substitution.
+    //  - **Trim the literal `\n` escape.** Several verdicts are prefixed with an escape that
+    //    exists in source text but not in what the reader sees.
+    const sources = ['scripts/bench-browser.mjs', 'scripts/bench-compare.mjs', 'scripts/bench-trend.mjs'];
+    const labels = new Set<string>();
+    for (const file of sources) {
+      const text = readFileSync(file, 'utf8');
+      for (const match of text.matchAll(/console\.(?:log|error|warn)\(\s*(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)) {
+        const raw = match[2]!;
+        if (!raw.includes('[bench]')) continue;
+        const body = raw.slice(raw.indexOf('[bench]') + '[bench]'.length);
+        const prefix = body.split('${')[0]!.replace(/^\s+|\s+$/g, '');
+        if (prefix) labels.add(prefix);
+      }
+    }
+    const list = [...labels].sort();
+    // The floor is the instrument half, for the reason the lag gate records: an extraction that
+    // matched nothing would pass every membership check below.
+    expect(list.length, 'the bench tools must print a named verdict per outcome').toBeGreaterThanOrEqual(8);
+    for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
+      const text = readFileSync(file, 'utf8');
+      const missing = list.filter(label => !text.includes(label));
+      expect(missing, `${file} is missing [bench] verdict labels`).toEqual([]);
+    }
+  });
+
   it('names every verdict the publication-lag sweep can print, in both checklists', () => {
     // A reader re-deriving the lag series right after cutting a release meets a label the
     // shipped prose never names, and two of them (`NO-PUBLISH`, `PENDING-STEP`) read as
