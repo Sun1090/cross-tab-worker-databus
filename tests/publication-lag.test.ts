@@ -37,8 +37,20 @@ const runs = [
   { id: 13, head_branch: 'v0.3.0', conclusion: 'success', run_attempt: 1 },
   { id: 14, head_branch: 'v0.4.0', conclusion: 'failure', run_attempt: 1 },
   // Green, but with no `time[]` entry: the registry side is missing rather than negative.
-  { id: 15, head_branch: 'v0.5.0', conclusion: 'success', run_attempt: 1 }
+  { id: 15, head_branch: 'v0.5.0', conclusion: 'success', run_attempt: 1 },
+  // Green, recorded, and its publish step still shows `completed_at: null` — the shape a
+  // read taken seconds after the run closes has, because GitHub backfills per-step
+  // metadata after the run row. It is a member of the series, not a tag that never
+  // published.
+  { id: 16, head_branch: 'v0.6.0', conclusion: 'success', run_attempt: 1 }
 ];
+
+const pendingStep = {
+  name: 'Publish to npm',
+  started_at: '2026-01-01T10:00:00Z',
+  completed_at: null,
+  conclusion: null
+};
 
 const step = (name: string, started: string, completed: string) => ({
   name,
@@ -59,14 +71,16 @@ const jobs: Record<string, unknown[]> = {
     step('Verify published npm consumers', '2026-01-01T11:00:10Z', '2026-01-01T11:00:11Z')],
   // The registry stamped this one *before* the ack returned: a regime, not a failed read.
   '13/1': [step('Publish to npm', '2026-01-01T10:00:00Z', '2026-01-01T10:00:18Z')],
-  '15/1': [step('Publish to npm', '2026-01-01T10:00:00Z', '2026-01-01T10:00:17Z')]
+  '15/1': [step('Publish to npm', '2026-01-01T10:00:00Z', '2026-01-01T10:00:17Z')],
+  '16/1': [pendingStep]
 };
 
 const times = {
   '0.1.0': '2026-01-01T10:03:40Z',
   '0.2.0': '2026-01-01T10:05:10Z',
   '0.3.0': '2026-01-01T09:59:59Z',
-  '0.4.0': '2026-01-01T10:04:00Z'
+  '0.4.0': '2026-01-01T10:04:00Z',
+  '0.6.0': '2026-01-01T10:05:00Z'
 };
 
 function runTool(): { stdout: string; stderr: string; status: number } {
@@ -155,9 +169,27 @@ describe('publication-lag sweep', () => {
     expect(line('NO-RECORD 0.5.0')).toBeDefined();
   });
 
+  it('reports a step whose metadata has not landed as pending, not as a missing publish', () => {
+    // The failure mode this leg exists to prevent is reporting a real publish as an
+    // absence: a shorter, cleaner-looking `measured=` line produced by a read taken
+    // before GitHub backfills `completed_at`. Measured on release run 40116662533, where
+    // the jobs endpoint answered `Publish to npm` with `{completed_at: null,
+    // conclusion: null}` and answered `17:35:04Z` / `success` a minute later.
+    expect(line('PENDING-STEP 0.6.0'), 'the tag is a member whose reading is not ready').toContain('run=16');
+    expect(result.stdout, 'a pending reading must not be called a missing step').not.toContain('NO-STEP 0.6.0');
+    expect(result.stdout, 'and must not be called NO-PUBLISH either').not.toContain('NO-PUBLISH 0.6.0');
+    expect(result.stdout, 'no gap row for a reading that has no ack instant yet').not.toContain('\n0.6.0\t');
+    // The witness that the pending tag was actually walked, not skipped earlier in the
+    // loop for a different reason — the same per-tag line the denominator floor uses.
+    expect(result.stderr.split('\n').filter(l => l === 'reading 0.6.0')).toHaveLength(1);
+  });
+
   it('counts the measured rows against every green tag it considered', () => {
-    // Four green tags (0.1.0/0.2.0/0.3.0/0.5.0), two of which produce a non-negative reading.
-    expect(line('measured=')).toContain('measured=2 of 4 tags');
+    // Five green tags (0.1.0/0.2.0/0.3.0/0.5.0/0.6.0), two of which produce a non-negative
+    // reading. `0.6.0` widens the denominator and must NOT widen the measured count: a
+    // pending reading is a member that is not yet resolvable, and folding it into either
+    // number would misreport the series — into the count, or out of the denominator.
+    expect(line('measured=')).toContain('measured=2 of 5 tags');
   });
 
   // The summary line prints only min/p50/max, so the convention behind `p50` is readable
@@ -191,6 +223,13 @@ describe('publication-lag sweep', () => {
 
   it('prints a progress line before each tag so a stopped run names where it stopped', () => {
     expect(result.stderr).toContain('reading 0.2.0');
-    expect(result.stderr.split('\n').filter(l => l.startsWith('reading ')).length).toBe(4);
+    // Derived from the fixture rather than restated: the sweep walks exactly the green
+    // tags, so adding a fixture run moves this number on its own instead of leaving a
+    // hand-kept count that silently stops matching the table above it.
+    const green = runs.filter(r => r.conclusion === 'success').length;
+    expect(
+      result.stderr.split('\n').filter(l => l.startsWith('reading ')).length,
+      'one progress line per green tag'
+    ).toBe(green);
   });
 });
