@@ -6216,6 +6216,38 @@ describe('adaptive dedup TTL', () => {
     await bus.stop();
   });
 
+  it('seeds a clock that has never produced a finite reading at 0', async () => {
+    // The never-primed half of `holdLastFinite`: every earlier case starts the
+    // source healthy and breaks it later, so the seed value itself had no pin —
+    // and the `primed ? last : 0` arm this test replaces could not decide
+    // anything anyway, because `last` is initialized to the same `0` the arm
+    // returns. The seed is the claim under test: a source with no history
+    // reports `0` (which the cluster's TTL comparisons read as "very old"),
+    // never `NaN` (which `JSON.stringify` turns into `null` and which froze
+    // expiry outright before 0.21.43).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'bus-clock-seed' });
+    const transport = new FakeTransport<number>();
+    const bus = new CrossTabDataBus<object, number>({
+      clusterKey: 'bus-clock-seed',
+      environment: env.environment,
+      initialConfig: {},
+      transport,
+      dedup: { now: () => Number.NaN, adaptiveTtl: { minMs: 100, maxMs: 5_000 } }
+    });
+    bus.onError(() => undefined);
+    bus.start({});
+    await bus.ready();
+    transport.emitError(new Error('first failure on a clock that never ticked'));
+    await Promise.resolve();
+    expect(bus.getRecoveryStats().errorAt, 'a never-finite clock stamps the 0 seed').toBe(0);
+    expect(bus.getHealthSummary().lastFailure?.at, 'the failure record carries the same seed').toBe(0);
+    const wire = JSON.parse(JSON.stringify({ recovery: bus.getRecoveryStats() }));
+    expect(wire.recovery.errorAt, 'the seed survives serialization where NaN would not').not.toBeNull();
+    await bus.stop();
+  });
+
   it('reports bounded TTL and resets its sampling window', async () => {
     let now = 1_000;
     const env = createFakeEnvironment({ storage: new MemoryStorage(), now: () => now, randomId: 'adaptive' });
