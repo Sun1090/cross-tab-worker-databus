@@ -129,6 +129,7 @@ for (const version of versions) {
   if (!record) { console.log(`NO-RECORD ${version}`); continue; }
   let best = null;
   let negative = null;
+  let pending = false;
   for (let attempt = 1; attempt <= tagRun.run_attempt; attempt++) {
     const jobsRaw = gh(['api', `repos/${repo}/actions/runs/${tagRun.id}/attempts/${attempt}/jobs`,
       '--jq', '[.jobs[]|.steps[]?|select(.name|test("publish to npm|verify published npm consumers";"i"))'
@@ -136,7 +137,24 @@ for (const version of versions) {
     if (jobsRaw === null) { console.log(`API-FAIL ${version} attempt=${attempt} run=${tagRun.id}`); break; }
     const steps = JSON.parse(jobsRaw);
     const publish = steps.find(s => /publish to npm/i.test(s.name) && s.conclusion === 'success');
-    if (!publish) { console.log(`NO-STEP ${version} attempt=${attempt} run=${tagRun.id}`); continue; }
+    if (!publish) {
+      // Two different states reach this line and they must not print alike. Read seconds
+      // after a release finished, the step exists with `completed_at` and `conclusion` both
+      // null — GitHub backfills per-step metadata after the run row closes (measured on run
+      // 40116662533: `Publish to npm` answered `{completed_at: null, conclusion: null}` and
+      // the same endpoint returned `17:35:04Z / success` a minute later). Calling that
+      // `NO-STEP` reports a *real* publish as a missing one, the same class of bias this
+      // script was fixed for once already: it turns a member into an absence and prints a
+      // shorter, cleaner-looking series as the result.
+      const unwritten = steps.find(s => /publish to npm/i.test(s.name) && s.completed_at === null);
+      if (unwritten) {
+        pending = true;
+        console.log(`PENDING-STEP ${version} attempt=${attempt} run=${tagRun.id} (re-run later)`);
+        continue;
+      }
+      console.log(`NO-STEP ${version} attempt=${attempt} run=${tagRun.id}`);
+      continue;
+    }
     const gap = (new Date(record) - new Date(publish.completed_at)) / 1000;
     const consumer = steps.find(s => /verify published npm consumers/i.test(s.name));
     const duration = consumer ? (new Date(consumer.completed_at) - new Date(consumer.started_at)) / 1000 : null;
@@ -154,7 +172,12 @@ for (const version of versions) {
     console.log(`NEGATIVE ${version}\tattempt=neg${negative.attempt}\t${fmt(negative)}`);
     continue;
   }
-  if (!best) { console.log(`NO-PUBLISH ${version} run=${tagRun.id} attempts=${tagRun.run_attempt}`); continue; }
+  // A pending tag already printed its own line; calling it `NO-PUBLISH` as well would report
+  // the same tag as both "not ready yet" and "never published".
+  if (!best) {
+    if (!pending) console.log(`NO-PUBLISH ${version} run=${tagRun.id} attempts=${tagRun.run_attempt}`);
+    continue;
+  }
   rows.push({ version, attempts: tagRun.run_attempt, ...best });
 }
 
