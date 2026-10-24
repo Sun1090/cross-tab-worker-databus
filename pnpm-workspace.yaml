@@ -8,3 +8,16 @@ overrides:
   # 5.0.12, and minimatch 10.2.6 asks for `^5.0.8`, so the override stays inside
   # its declared range rather than forcing a major.
   brace-expansion: "^5.0.12"
+  # source-map-js 1.2.1 (every copy reached through @vitest/coverage-v8 >
+  # magicast) allows event-loop denial of service through indexed source-map
+  # section offsets (GHSA-68fv-2mgg-jv7q, high, fixed in 1.2.2). magicast asks
+  # for ^1.0.0, so the override stays inside its declared range.
+  source-map-js: "^1.2.2"
+  # @vitest/mocker 5.0.1 (through vitest) carries two moderate advisories,
+  # fixed in 5.0.3; undici (through jsdom) three (high/moderate, fixed in
+  # 8.12.2). Both stay inside their dependents declared ranges. vite's five
+  # advisories (fixed in 7.3.7) are covered by the direct devDependency, which
+  # an override does not reach because pnpm resolves vitest's auto-installed
+  # peer from the lockfile first.
+  "@vitest/mocker": "^5.0.3"
+  undici: "^8.12.2"
