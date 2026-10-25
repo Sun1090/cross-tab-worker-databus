@@ -36,7 +36,13 @@ interface PendingTokenRequest {
 /** Centrifuge client options for token-bridge mode: the structured-clone-safe
  * subset plus the function-valued credential hooks this session installs.
  * Against the pinned SDK (5.7.4) `getToken` is the only one that is a real
- * client option (`build/types.d.ts:126`, and the same hook serves renewal);
+ * client option (the constructor of `centrifuge.js` copies it off the config — the
+ * assignment is greppable in the shipped bundle as
+ * `e.getToken&&(this._getToken=e.getToken)`, and the same hook serves renewal) —
+ * cited by that substring rather than a file and
+ * line: the installed package ships no `.d.ts` at all and the string
+ * `build/types.d.ts` appears nowhere inside it, so a generated-file line number could
+ * not be checked by a reader here at all;
  * `getChannelToken` appears nowhere in the package's types or build, and
  * subscriptions are created with `newSubscription(topic)` and no per-
  * subscription options — so that hook is never invoked, and the `'channelToken'`

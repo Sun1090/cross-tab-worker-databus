@@ -1339,15 +1339,31 @@ describe('line-number citations in procedural docs', () => {
       .filter(name => name.endsWith('.md') && !name.includes('progress'))
       .map(name => `docs/${name}`);
     const procedure = ['AGENTS.md', 'CONTRIBUTING.md', 'README.md', 'README.zh.md', ...files];
+    // src/ is added because the rule itself is about *comments* (AGENTS.md:341 cleaned nine
+    // `:NNN` citations out of `src/`), and a `src/` comment ships through the `.d.ts` and the
+    // bundle sourcemap — so an uncheckable line there reaches consumers. #433's gate scanned only
+    // the procedural docs and was narrower than the rule it enforces; the last survivor, a line
+    // into centrifuge's `build/types.d.ts`, is removed this cycle and the ban now covers it.
+    const sources = readdirSync('src', { recursive: true })
+      .map(name => String(name))
+      .filter(name => name.endsWith('.ts'))
+      .map(name => `src/${name}`);
+    const scanned = [...procedure, ...sources];
     // The bullet that is allowed to quote a line number, found by its opening words.
     const agents = readFileSync('AGENTS.md', 'utf8');
     const lessonStart = agents.indexOf('- **A line-number citation inside a comment decays');
     expect(lessonStart, 'the line-number decay lesson must still exist in AGENTS.md').toBeGreaterThan(-1);
     const lessonEnd = agents.indexOf('\n- ', lessonStart + 10);
     const lesson = agents.slice(lessonStart, lessonEnd === -1 ? agents.length : lessonEnd);
+    // The alternation is our-tree extensions only. `.js:NNN` was tried and rejected: the only
+    // such citations are dependency line numbers inside the lesson that warns they decay
+    // (`build/index.js:762` in AGENTS.md:350 and roadmap.md:117, both narrating how the number
+    // matched nothing). Policing them would rewrite a dated release record, and the lesson's own
+    // conclusion is the opposite of a ban: for a *dependency*, cite the quoted comment string,
+    // because a line into a package you don't grep at read-time cannot be pinned at all.
     const ref = /[a-z][a-z0-9-]*\.(?:ts|tsx|mjs):\d+(?:-\d+)?/g;
     const offenders: string[] = [];
-    for (const file of procedure) {
+    for (const file of scanned) {
       const text = readFileSync(file, 'utf8');
       for (const match of text.matchAll(ref)) {
         // Only the decay-lesson bullet in AGENTS.md may carry a live `:NNN`; elsewhere it is a
@@ -1364,6 +1380,8 @@ describe('line-number citations in procedural docs', () => {
     // nothing. The corpus itself is asserted non-empty for the same reason the layout gate floors.
     const historical = readFileSync('docs/progress.md', 'utf8');
     expect(ref.test(historical), 'the citation regex must catch a known historical citation').toBe(true);
-    expect(procedure.length, 'the procedural corpus must be non-trivial').toBeGreaterThan(6);
+    expect(scanned.length, 'the scanned corpus must be non-trivial').toBeGreaterThan(40);
+    // The src/ half must actually be read, or a citation there would pass by never being seen.
+    expect(sources.some(f => /export|class|function/.test(readFileSync(f, 'utf8'))), 'the scan must include real src files').toBe(true);
   });
 });
