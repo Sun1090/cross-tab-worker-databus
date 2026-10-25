@@ -1351,12 +1351,43 @@ describe('dependency-pinned claims', () => {
       if (text.includes('getChannelToken')) channelTokenHits += 1;
     }
     expect(channelTokenHits, 'if a bumped SDK asks getChannelToken, the shipped table claim and the Worker protocol both need review').toBe(0);
-    // The prose pin itself must exist in both languages, or a rename here silently orphans
-    // the gate above.
-    for (const file of ['docs/configuration.md', 'docs/zh/configuration.md']) {
+    // The prose pin itself must exist wherever a live claim states it, or a rename silently
+    // orphans the gate. The file set is DERIVED from the shipped corpus, not hand-kept: this
+    // case first shipped checking only docs/configuration.md (both languages), and README.md
+    // line 25 carries the same pinned claim ("With `centrifuge@5.7.4` … that SDK never requests
+    // `getChannelToken`") with nothing watching it — a gate narrower than the claim set it
+    // protects, found by asking the derived-set question one more time.
+    //
+    // `docs/roadmap*.md` and `CHANGELOG.md` are exempt as dated ledgers: their `centrifuge@`
+    // mentions are release-history narratives that legitimately name old versions ("at 748 in
+    // the 5.7.0 copy"), the same procedure-versus-history split the citation gates use for
+    // docs/progress.md.
+    // `docs/progress.md` joins them: it is the session ledger (and outside `files`), and its
+    // entries legitimately cite the historical versions a probe measured — the first draft of
+    // this scan missed the exemption and passed only because today's entries happen to cite the
+    // current pin. Found by probing the derived set, not by the test going red.
+    const datedLedgers = new Set(['docs/roadmap.md', 'docs/zh/roadmap.md', 'CHANGELOG.md', 'docs/progress.md']);
+    const shippedDocs = readdirSync('docs', { recursive: true })
+      .map(name => String(name))
+      .filter(name => name.endsWith('.md'))
+      .map(name => `docs/${name}`)
+      .concat(['README.md', 'README.zh.md'])
+      .filter(name => !datedLedgers.has(name));
+    const liveFilesWithPin: string[] = [];
+    for (const file of shippedDocs) {
       const text = readFileSync(file, 'utf8');
-      expect(text, `${file} must still name the pinned SDK version`).toContain(`centrifuge@${PIN}`);
+      const pins = [...text.matchAll(/centrifuge@(\d+\.\d+\.\d+)/g)].map(m => m[1]!);
+      if (pins.length === 0) continue;
+      liveFilesWithPin.push(file);
+      const wrong = [...new Set(pins)].filter(v => v !== PIN);
+      expect(
+        wrong,
+        `${file} pins ${JSON.stringify(wrong)} but ${PIN} is installed; a live claim naming an SDK must name the one the reader has`
+      ).toEqual([]);
     }
+    // Non-vacuity: the derived scan must actually find the live claim set, or a rename of the
+    // @-mention shape would silence every check above while the corpus keeps the claims.
+    expect(liveFilesWithPin.length, 'shipped docs must still carry the pinned claim').toBeGreaterThanOrEqual(2);
   });
 });
 
