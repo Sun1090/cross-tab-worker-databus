@@ -1,3 +1,20 @@
+## [0.21.56] - 2026-10-25
+
+A benchmark-trend release that also carries one shipped-comment correction. No behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.55`'s.
+
+### Documentation
+
+- **The browser benchmark trend is refreshed in both languages** from the 95th archived report (2026-10-25), the first sample since `0.21.50`'s retake cycle. The comparison gate is clean — the worst mover is `publish/dedicated` at +21.7% against a 50% ceiling, with `dedup` −26.3% and everything else within ±8% — and the sample was admitted by the archive's own loaded-host guard, not taken in defiance of it.
+
+### Fixed
+
+- **A shipped comment cited a line number into a file the installed package does not contain.** `centrifuge-session.ts` proved "which token hook is real" with `build/types.d.ts:126`; the installed `centrifuge@5.7.4` ships no `.d.ts` at all and that path appears nowhere inside it, so the citation named a file a reader cannot open. The comment now cites a substring of the shipped bundle itself — `e.getToken&&(this._getToken=e.getToken)`, grep-verified present — which survives a rebuild because it is the artifact a reader actually has. This comment reaches consumers through the bundle source maps, which is why it rides a release rather than living in the repository only.
+
+### Verification
+
+- `pnpm check` — 40 files and **1044 tests**, plus the 5 perf gates; `pnpm lint`; `pnpm typecheck`; the documentation gate at 30 in both languages; `pnpm bench` + `bench:compare --fail-above-pct 50` clean on the new sample.
+- The shipped-comment change is verified at the artifact level: the new sentence is present in the built `dist/centrifuge.shared.worker.js.map` and zero copies of the old `build/types.d.ts:126` remain anywhere under `dist/`.
+
 ## [0.21.55] - 2026-10-25
 
 The release checklist told a reader to re-derive the publish-lag series and, in the same breath, printed the count that re-derivation returns — "42 of its 45 measurements land inside 300–310 s" — in present tense, while its own neighbouring paragraph says that set gains a member at every release. The number had already been overtaken (the sweep now reports the in-band count from a denominator of 63, not 45), so the published checklist was pointing at a stale reading. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.54`'s.

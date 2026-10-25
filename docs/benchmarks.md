@@ -2,19 +2,19 @@
 
 # Browser Benchmark Trend
 
-> Data through 2026-10-24, from the 94 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
+> Data through 2026-10-25, from the 95 archived `bench-results/browser-*.json` reports (run `pnpm bench:browser` to add one; regenerate this doc with `node scripts/bench-trend.mjs`).
 
 The comparison baseline for release gating is `pnpm bench:compare --fail-above-pct 50`, which compares the newest report against the median of the same metric in the preceding reports *and* requires the new value to exceed the highest of those samples (50% ceiling absorbs shared-runner noise; a single previous report was a fragile baseline because the in-page hot-path metrics alternate between a fast and a slow mode on identical code — and a median over an alternating sample is only stable while the modes are mixed, so a percentage alone can still fail on nothing but a mode shift. Metrics excused by that second leg are listed as "within-baseline, not gated" rather than passing silently). This doc records the long-run picture: values are per-metric latencies where lower is better, and the last column is the best run inside the most recent 5 reports — not an all-time record, because the in-page matrix changed measurement semantics in early September 2026 and older reports are not comparable.
 
 <!-- BENCH-TREND:BEGIN (machine-generated table) -->
 | Metric | Previous (ms) | Latest (ms) | Δ | Best of last 5 runs (ms) |
 |---|---|---|---|---|
-| publish per-message (ms, lower is better) — dedicated | 42.4834 | 40.396 | -2.09 | 40.1172 |
-| publish per-message (ms, lower is better) — shared | 33.8229 | 36.1461 | +2.32 | 33.8229 |
-| wildcard dispatch ×1000 (ms, lower is better) | 6 | 9.5 | +3.50 | 6 |
-| publishBatch ×1000 (ms, lower is better) | 3.9 | 5.5 | +1.60 | 3.9 |
-| dedup ×1000 (ms, lower is better) | 17.9 | 14.6 | -3.30 | 14.6 |
-| trace + publish ×1000 (ms, lower is better) | 7.4 | 5.2 | -2.20 | 4.6 |
+| publish per-message (ms, lower is better) — dedicated | 40.396 | 50.3047 | +9.91 | 40.396 |
+| publish per-message (ms, lower is better) — shared | 36.1461 | 36.1657 | +0.02 | 33.8229 |
+| wildcard dispatch ×1000 (ms, lower is better) | 9.5 | 6.2 | -3.30 | 6 |
+| publishBatch ×1000 (ms, lower is better) | 5.5 | 4.9 | -0.60 | 3.9 |
+| dedup ×1000 (ms, lower is better) | 14.6 | 13.2 | -1.40 | 13.2 |
+| trace + publish ×1000 (ms, lower is better) | 5.2 | 5.5 | +0.30 | 5.2 |
 | first-packet cold dispatch (ms, lower is better) | 0 | 0 | +0.00 | 0 |
 <!-- BENCH-TREND:END -->
 
