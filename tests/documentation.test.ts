@@ -1316,3 +1316,54 @@ describe('AGENTS.md directory layout', () => {
     expect(tracked.length, 'the layout gate must actually see the source tree').toBeGreaterThan(50);
   });
 });
+
+describe('line-number citations in procedural docs', () => {
+  it('forbids file:line pointers outside the lesson that warns they decay', () => {
+    // AGENTS.md:341 states the rule — "A line-number citation inside a comment decays on
+    // every edit above it, and decays silently" — and it is the rule this repository applies
+    // when cleaning `src/` comments. But four `file.ts:NNN` citations sat *in AGENTS.md's own
+    // prose* (data-bus.ts:1432, websocket.ts:145, replay-manager.ts:288, storage-batch.ts:79-82)
+    // and, measured this cycle, **all four pointed at the wrong place** — the constructs had
+    // drifted to 1574 / 167 / 159 / 87-90. The file used its own rule to fix src and left it
+    // broken in itself, because reading the number cannot detect the drift and `tsc` never will.
+    // They are now de-numbered to a greppable construct; this case keeps them that way. The one
+    // survivor is the lesson's *own* counter-example ("`storage-batch.ts:79-82`" does not" ),
+    // so the allow-list is anchored on the stable sentence, not on a memorised line number —
+    // pinning this gate to a number would make it decay exactly like the citations it bans.
+    //
+    // Scope is procedure, not history: `docs/progress.md` is a dated ledger whose whole job is to
+    // record what a probe measured at a moment, and it is not in package.json `files`, so a
+    // historical number there is a record, not a live pointer.
+    const files = readdirSync('docs', { recursive: true })
+      .map(name => String(name))
+      .filter(name => name.endsWith('.md') && !name.includes('progress'))
+      .map(name => `docs/${name}`);
+    const procedure = ['AGENTS.md', 'CONTRIBUTING.md', 'README.md', 'README.zh.md', ...files];
+    // The bullet that is allowed to quote a line number, found by its opening words.
+    const agents = readFileSync('AGENTS.md', 'utf8');
+    const lessonStart = agents.indexOf('- **A line-number citation inside a comment decays');
+    expect(lessonStart, 'the line-number decay lesson must still exist in AGENTS.md').toBeGreaterThan(-1);
+    const lessonEnd = agents.indexOf('\n- ', lessonStart + 10);
+    const lesson = agents.slice(lessonStart, lessonEnd === -1 ? agents.length : lessonEnd);
+    const ref = /[a-z][a-z0-9-]*\.(?:ts|tsx|mjs):\d+(?:-\d+)?/g;
+    const offenders: string[] = [];
+    for (const file of procedure) {
+      const text = readFileSync(file, 'utf8');
+      for (const match of text.matchAll(ref)) {
+        // Only the decay-lesson bullet in AGENTS.md may carry a live `:NNN`; elsewhere it is a
+        // pointer that will rot with the next unrelated edit above it.
+        if (file === 'AGENTS.md' && lesson.includes(match[0]!)) continue;
+        const line = text.slice(0, match.index).split('\n').length;
+        offenders.push(`${file}:${line} ${match[0]}`);
+      }
+    }
+    expect(offenders, `procedural docs cite line numbers outside the decay lesson: ${offenders.join(', ')}`).toEqual([]);
+    // Non-vacuity: the ban is only meaningful if the regex actually catches citations, so it is
+    // run against `docs/progress.md`, where dated `file.ts:NNN` citations are expected — a ledger
+    // that keeps them is the point, and finding one proves the scan is not silently matching
+    // nothing. The corpus itself is asserted non-empty for the same reason the layout gate floors.
+    const historical = readFileSync('docs/progress.md', 'utf8');
+    expect(ref.test(historical), 'the citation regex must catch a known historical citation').toBe(true);
+    expect(procedure.length, 'the procedural corpus must be non-trivial').toBeGreaterThan(6);
+  });
+});
