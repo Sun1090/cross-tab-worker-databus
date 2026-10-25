@@ -1317,6 +1317,49 @@ describe('AGENTS.md directory layout', () => {
   });
 });
 
+describe('dependency-pinned claims', () => {
+  it('keeps the shipped SDK-pin honest: the pinned version is installed and the hook claims still hold', () => {
+    // `docs/configuration.md` (both languages) ships a live behavioural claim about a
+    // dependency: "In practice that ask is `getToken`, the only credential hook
+    // `centrifuge@5.7.4` exposes". AGENTS.md records that this claim class produced four
+    // defects in one pass precisely because nothing in our tree can verify a sentence about
+    // another library — and the claim's trigger is *routine*: dependabot bumps the
+    // dependency weekly. A bump to a SDK that exposes `getChannelToken` would leave the
+    // shipped table telling an integrator the opposite of what the installed package does,
+    // with no gate, test or build failure anywhere in between. The pin is correct *because*
+    // it names the version; this case makes the pin load-bearing by checking it.
+    //
+    // Resolution detail, measured: `require('centrifuge/package.json')` fails with
+    // ERR_PACKAGE_PATH_NOT_EXPORTED — the package's `exports` does not expose its manifest —
+    // so the probe reads the file off the filesystem instead of through the resolver, and
+    // reads the shipped bundle at its real path (`dist/centrifuge.js`) rather than via an
+    // import that a future `exports` change could break.
+    const PIN = '5.7.4';
+    const manifest = JSON.parse(readFileSync('node_modules/centrifuge/package.json', 'utf8'));
+    expect(manifest.version, 'the shipped docs pin this SDK version; a bump must re-verify the credential-hook claims').toBe(PIN);
+    // The two behavioural claims the table makes, checked against the installed artifact:
+    // `getToken` is read off the config (present in the shipped bundle), `getChannelToken`
+    // is asked by nothing (absent from the whole installed package).
+    const bundle = readFileSync('node_modules/centrifuge/dist/centrifuge.js', 'utf8');
+    expect(bundle.includes('getToken'), 'getToken must still be read off the config in the shipped bundle').toBe(true);
+    const packageFiles = readdirSync('node_modules/centrifuge', { recursive: true })
+      .map(name => String(name))
+      .filter(name => name.endsWith(('.js')));
+    let channelTokenHits = 0;
+    for (const file of packageFiles) {
+      const text = readFileSync(`node_modules/centrifuge/${file}`, 'utf8');
+      if (text.includes('getChannelToken')) channelTokenHits += 1;
+    }
+    expect(channelTokenHits, 'if a bumped SDK asks getChannelToken, the shipped table claim and the Worker protocol both need review').toBe(0);
+    // The prose pin itself must exist in both languages, or a rename here silently orphans
+    // the gate above.
+    for (const file of ['docs/configuration.md', 'docs/zh/configuration.md']) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, `${file} must still name the pinned SDK version`).toContain(`centrifuge@${PIN}`);
+    }
+  });
+});
+
 describe('line-number citations in procedural docs', () => {
   it('forbids file:line pointers outside the lesson that warns they decay', () => {
     // AGENTS.md:341 states the rule — "A line-number citation inside a comment decays on
