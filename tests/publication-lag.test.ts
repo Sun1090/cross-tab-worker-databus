@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -202,6 +202,39 @@ describe('publication-lag sweep', () => {
   // any change in registry behaviour — and `docs/progress.md` quotes that figure across
   // releases. If this fixture ever gains a third measured tag the derivation stops
   // holding and the `n` expect below says so rather than passing vacuously.
+  it('every output label the release checklists cite is still printed by some script', () => {
+    // The shipped procedure points a reader at lines the tools print: `modern floor:`,
+    // `verify inside 300-310s:`, `within-baseline, not gated:`, the `mis-measured:` self-checks.
+    // A pointer is worth exactly what its target is — if a script renames or drops the label,
+    // the checklist sends people looking for output that no longer exists, and nothing in the
+    // suite or CI compares the two artifacts. This case walks **from the prose to the scripts**,
+    // the direction where prose can rot alone: every backticked token in either checklist that
+    // starts lowercase and ends in `:` or `=` (the shape the tools print — env assignments like
+    // `PUBLISHED_VERIFY_ATTEMPTS=96` end in a digit and cache headers like `max-age=300` do not,
+    // so neither is mistaken for a label) must appear, verbatim, in some file under `scripts/`.
+    // The empty-list failure mode is pinned on each side: the citation set must be non-trivial,
+    // and the scanned scripts must contain at least one such label.
+    const scripts = readdirSync(join(__dirname, '..', 'scripts')).filter(n => n.endsWith('.mjs'));
+    const scriptText = scripts
+      .map(n => readFileSync(join(__dirname, '..', 'scripts', n), 'utf8'))
+      .join('\n');
+    let cited = 0;
+    for (const file of ['docs/release-checklist.md', 'docs/zh/release-checklist.md']) {
+      const text = readFileSync(join(__dirname, '..', file), 'utf8');
+      const labels = [...new Set(
+        [...text.matchAll(/`([a-z][^`\n]{1,60}[=:])`/g)].map(m => m[1]!)
+      )].sort();
+      expect(labels.length, `${file} must cite tool labels for this case to mean anything`).toBeGreaterThanOrEqual(2);
+      const orphaned = labels.filter(l => !scriptText.includes(l));
+      expect(orphaned, `${file} cites labels no script prints: ${JSON.stringify(orphaned)}`).toEqual([]);
+      cited += labels.length;
+    }
+    expect(cited, 'both mirrors must carry the label citations').toBeGreaterThanOrEqual(4);
+    // The scripts side of the same instrument: the walk above can pass vacuously only if the
+    // scripts print nothing label-shaped, so assert they do.
+    expect(/`[a-z][^`\n]{1,60}[=:]/.test(scriptText), 'the scripts must print label-shaped verdicts').toBe(true);
+  });
+
   it('reports p50 as the upper-middle element rather than the mean of the middle two', () => {
     const rows = result.stdout.split('\n').filter(l => /^(gap|verify) n=\d+ min=/.test(l));
     expect(rows.map(r => r.split(' ')[0]).sort()).toEqual(['gap', 'verify']);
