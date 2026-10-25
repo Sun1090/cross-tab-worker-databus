@@ -1,3 +1,20 @@
+## [0.21.55] - 2026-10-25
+
+The release checklist told a reader to re-derive the publish-lag series and, in the same breath, printed the count that re-derivation returns — "42 of its 45 measurements land inside 300–310 s" — in present tense, while its own neighbouring paragraph says that set gains a member at every release. The number had already been overtaken (the sweep now reports the in-band count from a denominator of 63, not 45), so the published checklist was pointing at a stale reading. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.54`'s.
+
+### Corrected
+
+- **The copied count became a pointer.** Both release checklists now send the reader to the sweep's own `verify inside 300-310s:` line and say the number on it is deliberately not quoted, because a count copied out of a series that grows every release is stale the moment it is written — the `42 … of … 45` this sentence carried had already been overtaken by the time it was re-read. What is stable and stays in prose is the *structure*, re-checked against a live run rather than asserted from the sentence: `0.21.30`'s 364 s budget exhaustion is the only outlier above the band, the two 1.0 s rows are `0.20.86`/`0.20.87` — the only pre-`0.20.92` releases the sweep measures at all — and the other four of that window print as `NEGATIVE`.
+
+### Added
+
+- **A gate over the pointer.** A documentation case now walks from each shipped checklist *back to the scripts*: every backticked label the procedure cites must still be printed by some tool, so renaming `verify inside 300-310s:` or `modern floor:` in the code cannot leave the published instructions pointing at output nothing produces. Floors on both sides keep an empty extraction from passing vacuously.
+
+### Verification
+
+- `pnpm check` — 40 files and **1042 tests**, plus the 5 perf gates; `pnpm lint`; `pnpm typecheck`; the documentation gate at 28 in both languages, and the new label-pointer case verified in both directions by mutants (rename a label in the tool, strip the citations from a mirror) each with the inserted-diff count asserted first.
+- The band structure above was confirmed against the captured live run's four `NEGATIVE` lines and its `verify inside 300-310s: 60 of 63` line — the counting that Phase 297 had to correct was done from the tool's output, not from the sentence.
+
 ## [0.21.54] - 2026-10-24
 
 The release checklist tells its reader to take two browser benchmark samples and re-derive a lag series at release step 4, and until now it never said what those tools' failure words mean. Two of them — `NOT ARCHIVED` and `NOT TRUSTED` — describe opposite states of the one artifact the loaded-host rule protects, and a reader who cannot tell them apart does exactly the wrong thing. Documentation only; no behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.51`'s.
