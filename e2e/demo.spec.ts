@@ -20,7 +20,11 @@ declare global {
   interface Window {
     __bus?: {
       getHealthSummary: () => { healthy: boolean; state: string };
-      getClusterSnapshot: () => { assignedTopics: string[] };
+      getClusterSnapshot: () => {
+        assignedTopics: string[];
+        currentWorker: { workerId: string; tabId: string };
+        workers: Array<{ workerId: string; tabId: string }>;
+      };
       publishBatch: (topic: string, items: ReadonlyArray<{ data: unknown; options?: { messageId?: string; timestamp?: number } }>) => void;
     };
     __replayBus?: { stop: () => Promise<void> };
@@ -1291,5 +1295,65 @@ test.describe('cross-tab databus demo — accessibility contracts', () => {
     await expect(badge).toHaveAttribute('role', 'status');
     await expect(badge).toHaveAttribute('aria-live', 'polite');
     await expect(badge).toHaveText('已连接');
+  });
+});
+
+test.describe('cross-tab databus demo — tab identity', () => {
+  test('a tab whose session storage was copied takes its own identity, and a reload keeps its own', async ({
+    context
+  }) => {
+    // The opener guard covers `window.open()`; the browser's own Duplicate tab
+    // copies sessionStorage into a document with *no* opener, which is the case
+    // only the cluster's live Worker records can settle. Replaying that copy
+    // here — a second page pre-seeded with the first page's stored id, before
+    // any of its scripts run — is the closest a headless browser gets to the UI
+    // action, and it exercises the real probe rather than a fake storage.
+    const original = await openDemoTab(context);
+    const originalTabId = await original.evaluate(
+      () => window.__bus?.getClusterSnapshot().currentWorker.tabId ?? null
+    );
+    expect(originalTabId, 'the demo reports its tab identity').toBeTruthy();
+
+    const copy = await context.newPage();
+    await copy.addInitScript(
+      ([key, value]) => {
+        try {
+          window.sessionStorage.setItem(key, value);
+        } catch {
+          // about:blank has an opaque origin; the demo navigation is the run
+          // that matters and it inherits this page's origin.
+        }
+      },
+      ['cross-tab-worker-databus:tab-id', originalTabId as string] as const
+    );
+    await copy.goto(DEMO_URL);
+    await expect(copy.locator('#statusBadge')).toHaveText('已连接');
+
+    const copyTabId = await copy.evaluate(() => window.__bus?.getClusterSnapshot().currentWorker.tabId ?? null);
+    expect(copyTabId, 'the copy must not answer to the original id').toBeTruthy();
+    expect(copyTabId).not.toBe(originalTabId);
+
+    // Both documents are live in one cluster, so the two identities have to be
+    // distinct *and* visible to each other — a copy that had silently fallen out
+    // of coordination would satisfy the assertion above for the wrong reason.
+    await expect
+      .poll(
+        async () =>
+          copy.evaluate(
+            id => window.__bus?.getClusterSnapshot().workers.some(worker => worker.tabId === id) ?? false,
+            originalTabId
+          ),
+        { message: 'the original tab is a live peer of the copy' }
+      )
+      .toBe(true);
+
+    // A refresh is the other half of the rule: same document, same session, no
+    // live peer record left behind by the departing page, so the id survives.
+    await original.reload();
+    await expect(original.locator('#statusBadge')).toHaveText('已连接');
+    expect(
+      await original.evaluate(() => window.__bus?.getClusterSnapshot().currentWorker.tabId ?? null),
+      'a reload keeps the tab identity'
+    ).toBe(originalTabId);
   });
 });
