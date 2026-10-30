@@ -4721,6 +4721,40 @@ describe('sibling runtimes in one tab', () => {
     peer.stop();
   });
 
+  it('writes a subscriber record an older peer can still read', async () => {
+    // The key shape changed in 0.21.57 (per Runtime, not per Tab). What keeps
+    // that compatible in *both* directions is the `tabId` field inside the
+    // record: an older peer enumerates by prefix and prunes records whose
+    // `tabId` is not among its active tabs, so a record that dropped the field
+    // would be read as "that tab is gone" and deleted on the peer's next pass.
+    // This version never reads `tabId` for liveness, which is exactly why the
+    // field needs a pin here rather than a coverage number.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'compat' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'older-peer-reads',
+      environment: env.environment,
+      tabId: 'tab-compat',
+      workerId: 'worker-compat',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    await Promise.resolve();
+    runtime.subscribe('compat-topic');
+    await Promise.resolve();
+
+    const entry = storage.entries().find(([key]) => key.includes(':subscriber:'));
+    expect(entry, 'the subscription wrote a subscriber record').toBeTruthy();
+    const [key, value] = entry as [string, string];
+    expect(key.endsWith(':worker-compat'), 'the key names the Runtime, not the Tab').toBe(true);
+    const record = JSON.parse(value) as { tabId?: string; workerId?: string };
+    expect(record.tabId, "an older peer's sweep reads this to decide the record is live").toBe('tab-compat');
+    expect(record.workerId).toBe('worker-compat');
+
+    runtime.stop();
+  });
+
   it('prunes a subscriber record whose Runtime is gone even while its tab lives', async () => {
     // The rule the key change buys: liveness is per Runtime. A record naming a
     // `workerId` that no longer has a Worker record is stale even though its

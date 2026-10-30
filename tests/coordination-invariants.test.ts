@@ -184,12 +184,21 @@ function subscriberRecordProblems(
   for (const [key, value] of storage.entries()) {
     if (!key.includes(':subscriber:')) continue;
     examined += 1;
-    let record: { workerId?: string };
+    let record: { tabId?: string; workerId?: string };
     try {
-      record = JSON.parse(value) as { workerId?: string };
+      record = JSON.parse(value) as { tabId?: string; workerId?: string };
     } catch {
       problems.push(`${key} is not readable JSON`);
       continue;
+    }
+    // The compatibility field, and the only reason the 0.21.57 key change is
+    // safe in both directions: an older peer's tab-level sweep prunes a record
+    // whose `tabId` is not among its active tabs, so a record that dropped this
+    // field would be read as "that tab is gone" and deleted on the peer's next
+    // pass. Nothing else in the suite would notice, because this version never
+    // reads it for liveness.
+    if (typeof record.tabId !== 'string' || record.tabId === '') {
+      problems.push(`${key} carries no tabId`);
     }
     if (record.workerId === undefined) {
       problems.push(`${key} carries no workerId`);
@@ -587,15 +596,23 @@ describe('cross-tab coordination invariants', () => {
     // A key that disagrees with the record it holds — a partial revert, which is
     // the form the Phase 307 change could regress into.
     const mismatched = new MemoryStorage();
-    mismatched.setItem(keyFor('worker-a'), JSON.stringify({ workerId: 'worker-b', updatedAt: 1_000 }));
+    mismatched.setItem(keyFor('worker-a'), JSON.stringify({ tabId: 'tab-a', workerId: 'worker-b', updatedAt: 1_000 }));
     expect(subscriberRecordProblems(mismatched, live).problems).toEqual([
       `${keyFor('worker-a')} is keyed by worker-a but names worker-b`
     ]);
 
+    // A record that dropped the field an older peer reads. `tabId` earns its
+    // keep in the *other* direction from every other check here: nothing in
+    // this version reads it for liveness, so its removal is invisible to us and
+    // fatal to a mixed-version cluster.
+    const noTab = new MemoryStorage();
+    noTab.setItem(keyFor('worker-a'), JSON.stringify({ workerId: 'worker-a', updatedAt: 1_000 }));
+    expect(subscriberRecordProblems(noTab, live).problems).toEqual([`${keyFor('worker-a')} carries no tabId`]);
+
     // A record whose owner is gone: the state a crashed sibling Runtime leaves
     // when its tab outlives it, which the tab-level sweep could not see.
     const orphaned = new MemoryStorage();
-    orphaned.setItem(keyFor('worker-gone'), JSON.stringify({ workerId: 'worker-gone', updatedAt: 1_000 }));
+    orphaned.setItem(keyFor('worker-gone'), JSON.stringify({ tabId: 'tab-gone', workerId: 'worker-gone', updatedAt: 1_000 }));
     expect(subscriberRecordProblems(orphaned, live).problems).toEqual([
       `${keyFor('worker-gone')} names a Runtime that is not live (worker-gone)`
     ]);
