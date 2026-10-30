@@ -161,6 +161,13 @@ export interface WorkerRoute {
 export interface TopicSubscriberRecord {
   /** The tab that holds this subscription. */
   tabId: string;
+  /** The Runtime that holds it. A document may run several (the market +
+   * notice pattern), and they share one `tabId` on purpose — so a record keyed
+   * and pruned by `tabId` alone is owned by all of them at once, and the first
+   * one to unsubscribe deletes the others' intent. Optional because records
+   * written before this field existed are still honoured while their tab
+   * lives. */
+  workerId?: string;
   /** Timestamp (ms) of the last subscriber write. */
   updatedAt: number;
 }

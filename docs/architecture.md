@@ -108,10 +108,10 @@ BroadcastChannel messages carry topic names, event types, and publication payloa
 ```text
 cross-tab-worker-databus:{clusterHash}:worker:{workerId}
 cross-tab-worker-databus:{clusterHash}:route:{topicKey}
-cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
+cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{workerId}
 ```
 
-Unlike the old single-JSON route table, subscribers use per-Tab independent keys. When Tab A and Tab B subscribe/unsubscribe concurrently, they do not perform a read-modify-write on the same `subscribers[]`, structurally reducing the probability of lost updates.
+Unlike the old single-JSON route table, subscribers use one independent key per *Runtime* — the `workerId`, not the `tabId`, because a document may run several Runtimes that share one tab. When Tab A and Tab B subscribe/unsubscribe concurrently, they do not perform a read-modify-write on the same `subscribers[]`, structurally reducing the probability of lost updates; and when one of two Runtimes in the *same* tab unsubscribes, only its own record goes, so the sibling's route and transport subscription survive.
 
 ### Worker Record
 
@@ -217,7 +217,7 @@ topic
   └─ createOpaqueKey(topic) → topicKey
        ├─ route:{topicKey}
        │    └─ workerId / tabId / generation / confirmedAt
-       └─ subscriber:{topicKey}:{tabId}
+       └─ subscriber:{topicKey}:{workerId}
 
 BroadcastChannel CONTROL
   └─ topic + topicKey + sourceWorkerId + targetWorkerId + action
@@ -288,7 +288,7 @@ sequenceDiagram
 
   App->>RuntimeA: subscribe(topic, handler)
   RuntimeA->>RuntimeA: derive topicKey
-  RuntimeA->>Storage: write subscriber:{topicKey}:{tabId}
+  RuntimeA->>Storage: write subscriber:{topicKey}:{workerId}
   RuntimeA->>Storage: read or create route:{topicKey}
   RuntimeA->>Channel: CONTROL/SUBSCRIBE(topic, topicKey, targetWorkerId)
   Channel->>RuntimeB: deliver control message
@@ -300,7 +300,7 @@ sequenceDiagram
   RuntimeA->>App: invoke handler(payload)
 ```
 
-A second Tab subscribing to the same Topic adds only its own subscriber record; it does not create another transport subscription while the existing owner is alive. Unsubscribe removes the current Tab's subscriber record and, when that was the last one, the same Tab deletes the route and sends `CONTROL/UNSUBSCRIBE` to the worker the route named, which then drops its assignment and releases the transport subscription.
+A second Tab subscribing to the same Topic adds only its own subscriber record; it does not create another transport subscription while the existing owner is alive. Unsubscribe removes the current Runtime's subscriber record and, when that was the last one, the same Runtime deletes the route and sends `CONTROL/UNSUBSCRIBE` to the worker the route named, which then drops its assignment and releases the transport subscription.
 
 ### Console diagnostics
 
@@ -350,7 +350,7 @@ Every keyed piece of state in the system — the full picture of what the previo
 | `knownTopics` | `WorkerClusterRuntime` | `topicKey` | Plaintext `topic` | FIFO scan capped at 500 that skips owned keys and the key being remembered, so an all-owned cache lets the cap slip | The reverse-lookup cache; also the only source of plaintext in storage-less mode |
 | Storage `worker:` | persisted | `clusterHash:…:worker:{workerId}` | JSON `WorkerRecord` | Heartbeat refresh; pruned after `workerTtlMs` | Cross-tab liveness discovery |
 | Storage `route:` | persisted | `clusterHash:…:route:{topicKey}` | JSON `WorkerRoute` | Created/stamped by subscriber; pruned when no subscribers + TTL expired | Cross-tab owner mapping |
-| Storage `subscriber:` | persisted | `clusterHash:…:subscriber:{topicKey}:{tabId}` | JSON `TopicSubscriberRecord` | Written per Tab subscription; pruned when the Tab dies | Cross-tab subscriber intent |
+| Storage `subscriber:` | persisted | `clusterHash:…:subscriber:{topicKey}:{workerId}` | JSON `TopicSubscriberRecord` | Written per Runtime subscription; pruned when that Runtime dies (a legacy tab-keyed record is pruned with its Tab) | Cross-tab subscriber intent |
 
 **How the three in-memory topic forms relate** (`knownTopics` ↔ `assignedTopics` ↔ the four plaintext sets):
 
@@ -394,7 +394,7 @@ The owning Worker filters every publication it receives with `isAssigned(topic)`
 2. If a visible Tab exists, visible Workers are preferred when choosing an owner for a new Topic; when all Tabs are hidden, hidden Workers remain eligible.
 3. Sorted by `registeredAt, workerId`, up to 3 active Workers are selected as new-route candidates.
 4. An existing route remains sticky as long as its owner Worker record is alive, regardless of load, visibility, or whether the owner remains in the new-route candidate set.
-5. A second Tab subscribing to an existing Topic only writes its subscriber record. It does not modify the route or call its own transport `subscribe`.
+5. A second Tab — or a second Runtime in the same Tab — subscribing to an existing Topic only writes its own subscriber record. It does not modify the route or call a transport `subscribe`.
 6. Only a Topic without a route, or a route whose owner has departed or expired by heartbeat TTL, is assigned to the least-loaded candidate Worker.
 7. A new route is considered unconfirmed until the owner writes `confirmedAt`; the subscriber will automatically resend the control message.
 
@@ -450,7 +450,7 @@ sequenceDiagram
 
   App->>Bus: subscribe(topic, handler)
   Bus->>Bus: First handler in this Tab?
-  Bus->>Route: Write subscriber:{topicKey}:{tabId}
+  Bus->>Route: Write subscriber:{topicKey}:{workerId}
   Route-->>Bus: Current owner
   alt Owner does not exist or is invalid
     Bus->>Route: Write lowest-load owner
@@ -478,7 +478,7 @@ The system maintains four independent subscription-tracking sets. Understanding 
 Application: subscribe(topic, handler)
   → topicHandlers 0→1
     → cluster.subscribe(topic) → subscribedTopics.add(topic)
-      → write subscriber:{topicKey}:{tabId}
+      → write subscriber:{topicKey}:{workerId}
       → readRoute(topicKey)
         → if no route: selectLeastLoadedWorker, writeRoute, sendControl(SUBSCRIBE)
           → owner receives CONTROL/SUBSCRIBE
@@ -514,7 +514,7 @@ A publication travels publisher → current Topic owner → transport/server →
 2. The owner runs `transport.publish(topic, data)`. Because only the owner holds a real transport subscription to the topic, the server delivers the resulting publication back to exactly one Worker.
 3. The owner accepts a publication only while `isAssigned(topic)` still holds. Stale messages from an expired owner are discarded — keeping the fan-out single-sourced.
 4. The owner broadcasts `EVENT/DATABUS_PUBLICATION` over the BroadcastChannel and, if its own Tab also has a local subscription, dispatches once directly. BroadcastChannel never echoes to the sender, so there is no duplicate dispatch.
-5. Every other Tab receives the `EVENT` but invokes its local handlers only when it holds a `subscriber:{topicKey}:{tabId}` record for that topic; Tabs without a local subscription drop the message.
+5. Every other Tab receives the `EVENT` but invokes its local handlers only when its own subscription intent covers that topic — the gate reads the in-memory subscription set, while the `subscriber:{topicKey}:{workerId}` record is what tells peers that intent exists; Tabs without a local subscription drop the message.
 
 Optional publication metadata (`messageId` and `timestamp`) follows the same path as the payload: `CONTROL/PUBLISH` → transport/server → `DataBusMessage` → `EVENT` fan-out. It is never written to coordination storage. Transports normalize legacy payloads and the canonical `DataBusPublicationEnvelope` before the three dispatch gates.
 
@@ -562,7 +562,7 @@ After the optional `messageId` deduplication gate, every accepted publication fr
 
 2. **`broadcastEvent('DATABUS_PUBLICATION', message)`** — called only after `isAssigned` passes. The owning Worker fans the message out to all tabs via BroadcastChannel `EVENT`. Each tab receives the event but does not dispatch yet — it must pass the inner gate.
 
-3. **`hasLocalSubscriber(topic)`** — called on each tab receiving the `EVENT`. Only tabs that have a local subscriber record for this topic invoke the registered handler. Tabs without a local subscription drop the message silently.
+3. **`hasLocalSubscriber(topic)`** — called on each tab receiving the `EVENT`. It reads the in-memory subscription set (including wildcard patterns), not the durable subscriber record; only tabs whose own subscription covers this topic invoke the registered handler. Tabs without a local subscription drop the message silently.
 
 These three checks provide **at-most-once fan-out per accepted transport publication**:
 - The outer gate (`isAssigned`) prevents duplicate broadcasts from a stale owner.
@@ -583,8 +583,8 @@ Transport message → isAssigned(topic)? → Yes → broadcastEvent(EVENT)
 
 Cluster convergence is driven on two timelines:
 
-- **Heartbeat + reconcile loop** (default `3000 ms`, `heartbeatIntervalMs`). On every tick each Worker refreshes its own record and runs a reconcile pass: prunes Workers past `workerTtlMs`, orphaned subscribers whose Tab is no longer active, and orphaned routes that have no subscribers and exceed the TTL; repairs a confirmed route that names this Worker after its assignment was cleared (see the invariant below); recomputes its own active/standby role; re-writes its subscriber records; and re-sends `CONTROL/SUBSCRIBE` for any route that still lacks `confirmedAt` — which also recovers control messages lost on the channel.
-- **`REGISTRY` nudge**. Writes to Worker records and routes broadcast a `REGISTRY` message so every peer reconciles immediately rather than waiting for the next heartbeat. A subscriber-only write does not: `subscribe()` on a topic whose owner is still live writes this Tab's subscriber record and returns.
+- **Heartbeat + reconcile loop** (default `3000 ms`, `heartbeatIntervalMs`). On every tick each Worker refreshes its own record and runs a reconcile pass: prunes Workers past `workerTtlMs`, orphaned subscribers whose Runtime (or, for a legacy record, whose Tab) is no longer active, and orphaned routes that have no subscribers and exceed the TTL; repairs a confirmed route that names this Worker after its assignment was cleared (see the invariant below); recomputes its own active/standby role; re-writes its subscriber records; and re-sends `CONTROL/SUBSCRIBE` for any route that still lacks `confirmedAt` — which also recovers control messages lost on the channel.
+- **`REGISTRY` nudge**. Writes to Worker records and routes broadcast a `REGISTRY` message so every peer reconciles immediately rather than waiting for the next heartbeat. A subscriber-only write does not: `subscribe()` on a topic whose owner is still live writes this Runtime's subscriber record and returns.
 
 Heartbeat writes are not announced, so a stale record is only noticed within one heartbeat interval. The worst case for failing to detect a dead owner is `heartbeatIntervalMs + workerTtlMs` (default about 13 s); see [TTL Message-Loss Window](./configuration.md#ttl-message-loss-window) for the trade-offs.
 
@@ -594,7 +594,7 @@ On normal close or entry into BFCache, `pagehide` pauses the Runtime: it deletes
 
 #### Tab identity: refreshes, `window.open`, and duplicated tabs
 
-Each Runtime stores its `tabId` in `sessionStorage` so refreshes retain identity; every Runtime gets a random-suffixed `workerId`. Two kinds of new document inherit that stored value, and only one of them may keep it. A refresh re-enters the *same* tab, so the value is unclaimed and is reused. A browser-duplicated tab (`window.open()`, or the browser's own Duplicate tab) is a *second* live document holding a copy, and two of them must not present one identity: subscriber records are keyed by `tabId`, so a copy would overwrite the original's records and delete them on unsubscribe.
+Each Runtime stores its `tabId` in `sessionStorage` so refreshes retain identity; every Runtime gets a random-suffixed `workerId`. Two kinds of new document inherit that stored value, and only one of them may keep it. A refresh re-enters the *same* tab, so the value is unclaimed and is reused. A browser-duplicated tab (`window.open()`, or the browser's own Duplicate tab) is a *second* live document holding a copy, and two of them must not present one identity: `tabId` is the identity the public snapshot reports and one half of the key the diagnostic records use, so a copy would speak for the original. (Subscriber records are keyed per Runtime, so the coordination plane no longer *depends* on that uniqueness — the guard exists so that the identity itself is true.)
 
 The two sources of evidence are different in kind. `window.open()` is visible as `window.opener`, so the SDK discards a copied `sessionStorage` id when an opener is present and generates a fresh one; applications are still encouraged to use `noopener`. The browser's Duplicate tab carries no opener at all, so the SDK probes this cluster's Worker records instead — they live in `localStorage` under a random `workerId` and cannot be copied with the session. A heartbeat-live record carrying the inherited id means another live document is using it, and the duplicate mints a fresh id that is persisted for later Runtimes in the same document.
 

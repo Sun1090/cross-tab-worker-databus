@@ -159,7 +159,7 @@ const WRITE_SITES: ReadonlyArray<{ site: string; stores: string; optIn?: string 
     stores: 'the same route record with a confirmation stamp added'
   },
   {
-    site: 'src/core/cluster.ts :: writeJson(this.storage, this.subscriberStorageKey(topicKey, this.tabId), { tabId: this.tabId, updatedAt: this.nowMs() } satisfies TopicSubscriberRecord)',
+    site: 'src/core/cluster.ts :: writeJson(this.storage, this.subscriberStorageKey(topicKey, this.workerId), { tabId: this.tabId, workerId: this.workerId, updatedAt: this.nowMs() } satisfies TopicSubscriberRecord)',
     stores: 'a subscriber marker — the topic is present only as `topicKey`'
   },
   {

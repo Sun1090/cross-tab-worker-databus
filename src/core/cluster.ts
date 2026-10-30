@@ -633,12 +633,12 @@ export class WorkerClusterRuntime {
     if (topicKey && !this.assignedTopics.has(topicKey)) this.knownTopics.delete(topicKey);
   }
 
-  /** Remove this tab's subscriber record and, when it was the last one, delete
+  /** Remove this Runtime's subscriber record and, when it was the last one, delete
    * the route. Returns the topicKey (so callers like `unsubscribe` can reuse
    * it instead of re-hashing the topic to evict the reverse cache). */
   private releaseSubscription(topic: string, notifyOwner = true): string {
     const topicKey = this.rememberTopic(topic);
-    this.removeStorage(this.subscriberStorageKey(topicKey, this.tabId));
+    this.removeStorage(this.subscriberStorageKey(topicKey, this.workerId));
     const route = this.readRoute(topicKey);
     if (!route) return topicKey;
     const subscribers = this.readSubscriberTabIds(topicKey, this.readWorkers());
@@ -1650,18 +1650,35 @@ export class WorkerClusterRuntime {
       return topic && this.subscribedTopics.has(topic) ? [this.tabId] : [];
     }
     const activeTabIds = new Set(workers.map(worker => worker.tabId));
+    const activeWorkerIds = new Set(workers.map(worker => worker.workerId));
     const subscribers = new Set<string>();
     for (const { key, value: record } of readAllByPrefix<TopicSubscriberRecord>(
       this.storage,
       `${this.subscriberPrefix}${topicKey}:`
     )) {
-      if (!activeTabIds.has(record.tabId)) {
+      if (!this.isSubscriberRecordLive(record, activeTabIds, activeWorkerIds)) {
         this.removeStorage(key);
         continue;
       }
       subscribers.add(record.tabId);
     }
     return Array.from(subscribers);
+  }
+
+  /** Whether a subscriber record still belongs to a live Runtime.
+   *
+   * A record written by this version names its `workerId`, so liveness is the
+   * Worker set the reconcile pass already prunes by — which is what keeps two
+   * Runtimes in one tab independent. A record from an older version carries no
+   * `workerId`; it is honoured while its *tab* lives, the finest identity it
+   * has, and each Runtime replaces its own with a worker-keyed record on its
+   * next write. */
+  private isSubscriberRecordLive(
+    record: TopicSubscriberRecord,
+    activeTabIds: ReadonlySet<string>,
+    activeWorkerIds: ReadonlySet<string>
+  ): boolean {
+    return record.workerId === undefined ? activeTabIds.has(record.tabId) : activeWorkerIds.has(record.workerId);
   }
 
   /** Read the current route for `topicKey`. With a storage layer this returns
@@ -1764,20 +1781,32 @@ export class WorkerClusterRuntime {
     }
   }
 
-  /** Remove subscriber records for tabs that are no longer active. */
+  /** Remove subscriber records whose owning Runtime (or, for a legacy record,
+   * whose tab) is no longer active. */
   private cleanupOrphanedSubscribers(workers: readonly WorkerRecord[]): void {
     if (!this.storage) return;
     const activeTabIds = new Set(workers.map(worker => worker.tabId));
+    const activeWorkerIds = new Set(workers.map(worker => worker.workerId));
     for (const { key, value: record } of readAllByPrefix<TopicSubscriberRecord>(this.storage, this.subscriberPrefix)) {
-      if (!activeTabIds.has(record.tabId)) this.removeStorage(key);
+      if (!this.isSubscriberRecordLive(record, activeTabIds, activeWorkerIds)) this.removeStorage(key);
     }
   }
 
-  /** Persist a subscriber record for this tab on `topicKey`. */
+  /** Persist a subscriber record for this Runtime on `topicKey`.
+   *
+   * Keyed by `workerId`, not `tabId`. A document may run several Runtimes that
+   * share one `tabId` on purpose (the market + notice pattern), and a tab-keyed
+   * record belonged to all of them at once: whichever unsubscribed first deleted
+   * the others' intent, the route then looked orphaned, and the owner dropped a
+   * transport subscription its surviving sibling still needed — a delivery gap
+   * until that sibling's next reconcile tick re-elected an owner. Duplicated
+   * tabs get the same protection even when the identity probe cannot see them,
+   * which is why the fix is here as well as in `isTabIdLiveElsewhere()`. */
   private writeSubscriber(topicKey: string): void {
     if (!this.storage) return;
-    writeJson(this.storage, this.subscriberStorageKey(topicKey, this.tabId), {
+    writeJson(this.storage, this.subscriberStorageKey(topicKey, this.workerId), {
       tabId: this.tabId,
+      workerId: this.workerId,
       updatedAt: this.nowMs()
     } satisfies TopicSubscriberRecord);
   }
@@ -1895,8 +1924,9 @@ export class WorkerClusterRuntime {
     return `${this.routePrefix}${topicKey}`;
   }
 
-  private subscriberStorageKey(topicKey: string, tabId: string): string {
-    return `${this.subscriberPrefix}${topicKey}:${tabId}`;
+  /** `ownerId` is the Runtime's `workerId`; older versions used the `tabId`. */
+  private subscriberStorageKey(topicKey: string, ownerId: string): string {
+    return `${this.subscriberPrefix}${topicKey}:${ownerId}`;
   }
 
   private removeStorage(key: string): void {
