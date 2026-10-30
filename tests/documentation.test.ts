@@ -1321,7 +1321,7 @@ describe('dependency-pinned claims', () => {
   it('keeps the shipped SDK-pin honest: the pinned version is installed and the hook claims still hold', () => {
     // `docs/configuration.md` (both languages) ships a live behavioural claim about a
     // dependency: "In practice that ask is `getToken`, the only credential hook
-    // `centrifuge@5.7.4` exposes". AGENTS.md records that this claim class produced four
+    // `centrifuge@5.8.0` exposes". AGENTS.md records that this claim class produced four
     // defects in one pass precisely because nothing in our tree can verify a sentence about
     // another library — and the claim's trigger is *routine*: dependabot bumps the
     // dependency weekly. A bump to a SDK that exposes `getChannelToken` would leave the
@@ -1334,7 +1334,7 @@ describe('dependency-pinned claims', () => {
     // so the probe reads the file off the filesystem instead of through the resolver, and
     // reads the shipped bundle at its real path (`dist/centrifuge.js`) rather than via an
     // import that a future `exports` change could break.
-    const PIN = '5.7.4';
+    const PIN = '5.8.0';
     const manifest = JSON.parse(readFileSync('node_modules/centrifuge/package.json', 'utf8'));
     expect(manifest.version, 'the shipped docs pin this SDK version; a bump must re-verify the credential-hook claims').toBe(PIN);
     // The two behavioural claims the table makes, checked against the installed artifact:
@@ -1354,7 +1354,7 @@ describe('dependency-pinned claims', () => {
     // The prose pin itself must exist wherever a live claim states it, or a rename silently
     // orphans the gate. The file set is DERIVED from the shipped corpus, not hand-kept: this
     // case first shipped checking only docs/configuration.md (both languages), and README.md
-    // line 25 carries the same pinned claim ("With `centrifuge@5.7.4` … that SDK never requests
+    // line 25 carries the same pinned claim ("With `centrifuge@5.8.0` … that SDK never requests
     // `getChannelToken`") with nothing watching it — a gate narrower than the claim set it
     // protects, found by asking the derived-set question one more time.
     //

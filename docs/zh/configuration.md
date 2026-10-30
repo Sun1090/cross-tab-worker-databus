@@ -173,7 +173,7 @@ const bus = createCentrifugeDataBus({
 | `heartbeatIntervalMs` | `number` | `10000` | SharedWorker PING 心跳间隔（见下方 SharedWorker 会话回收）；传 `Infinity` 完全禁用心跳，该端口也因此豁免于回收。与 Core 集群心跳（默认 3000 ms，通过 localStorage 跟踪 worker 存活）相互独立 |
 | `workerFactory` | `() => Worker` | 内置 Worker | 测试或自定义 Worker 加载方式 |
 | `sharedWorkerFactory` | `() => SharedWorker` | 内置 SharedWorker | 测试或自定义 SharedWorker 加载方式 |
-| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token，由该 provider 从应用上下文提供。实践中这一问只发生在 `getToken` 上——它是 `centrifuge@5.7.4` 暴露的唯一凭证钩子；类型里保留着 `getChannelToken`，Worker 协议也保留该请求种类，以便未来的 SDK 无需改动本侧，但今天没有任何代码会问它。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
+| `credentialProvider` | `{ getToken?, getChannelToken? }` | `undefined` | 异步凭证刷新桥：Worker 向主线程请求每个新 token，由该 provider 从应用上下文提供。实践中这一问只发生在 `getToken` 上——它是 `centrifuge@5.8.0` 暴露的唯一凭证钩子；类型里保留着 `getChannelToken`，Worker 协议也保留该请求种类，以便未来的 SDK 无需改动本侧，但今天没有任何代码会问它。必要原因：函数型 Centrifuge 选项无法 structured-clone 进 Worker |
 | 其他 Core 配置 | 对应类型 | Core 默认值 | `storagePrefix`、心跳、TTL 等 |
 
 ```ts

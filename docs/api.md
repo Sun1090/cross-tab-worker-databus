@@ -147,6 +147,8 @@ When supplied, `options.messageId` and `options.timestamp` are propagated throug
 }
 ```
 
+Incoming frames are normalized with a fixed precedence: a frame's own string `topic` field wins over the fallback channel the transport subscribed, and a nested `publication.data` is unwrapped only when the frame is an envelope (`{ publication: { … } }`), arrives on a direct transport (no fallback topic), or carries metadata (`messageId`/`timestamp`). A payload published through a fallback-channel transport that itself carries a top-level string `topic` is therefore re-routed to that value.
+
 ### `publishBatch(topic, items)`
 
 ```ts
@@ -496,6 +498,8 @@ Creates a default browser environment adapter, including storage, BroadcastChann
 ### `getOrCreateTabId(environment, key?, options?)`
 
 Returns the stable identity of the current page/tab instance, reading it from session storage and creating one (`tab-<random>`) on first call, so a reloaded tab reclaims its routes instead of looking like a brand new one.
+
+The memo is module-global and first-call-only: the `key` parameter selects the storage slot for the *first* call in the document, and every later call — a different `key`, or a different `environment` object — returns that same id and does not write the new key. This is deliberate: the SDK calls it once per cluster prefix so every Runtime in one document shares one tab identity.
 
 The stored value is deliberately *not* reused when `window.opener` is present: `window.open()` clones the opener's `sessionStorage` into the child, so a blind reuse would make two live tabs share one identity. When storage is unavailable or throws, a fresh ID is generated instead.
 
