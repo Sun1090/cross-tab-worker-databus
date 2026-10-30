@@ -163,10 +163,15 @@ function plaintextLeaks(storage: MemoryStorage, markerText: string): string[] {
  * The record is keyed by the Runtime that wrote it — `subscriber:{topicKey}:{workerId}`
  * — and names that Runtime in its value. Both halves are asserted here because
  * the key is what Phase 307 changed and **no behavioural arm in this file can see
- * a revert to tab-keyed records**: two Runtimes that share a tab still fan out
- * correctly until one of them leaves, and the sweep's three tabs each have their
- * own identity, so the old shape behaves identically for every delivery the sweep
- * checks. The shape has to be asserted as a shape.
+ * a revert to tab-keyed records**. The reason is sharper than "the tabs are
+ * independent", and it is the opposite: the sweep's three buses share **one**
+ * `tabId` (the identity guard caches a document's id in module scope, so three
+ * fresh `sessionStorage` objects still resolve to the first one's id — pinned by
+ * the case below), i.e. they are the supported sibling-Runtime pattern at scale.
+ * With tab-keyed records the first unsubscribe would delete the shared record and
+ * release the route, and the sweep would still pass, because every behavioural
+ * arm here is a statement about a *quiesced* cluster and the next reconcile tick
+ * re-elects and re-subscribes. The shape has to be asserted as a shape.
  *
  * Derived from storage and the final snapshots rather than from internals: the
  * key's suffix is compared with the recorded `workerId`, and the `workerId` with
@@ -571,6 +576,24 @@ describe('cross-tab coordination invariants', () => {
     // is not a hex digit and `createOpaqueKey` emits hex only. Measured here
     // rather than asserted by reading, because the whole arm rests on it.
     expect(createOpaqueKey(topic).includes('z'), 'a hashed key must not contain a non-hex marker').toBe(false);
+  });
+
+  it('runs its three buses as three Runtimes under one Tab identity', () => {
+    // The premise of every arm in this file, measured rather than assumed: the
+    // identity guard caches a document's id in module scope, so three buses whose
+    // environments each get a fresh `sessionStorage` still resolve to the first
+    // one's id. That is the supported sibling pattern at scale, and it is why a
+    // tab-keyed record would be *shared* between them rather than merely
+    // duplicated (see `subscriberRecordProblems`).
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const clock = { now: 1_000 };
+    const tabs = ['a', 'b', 'c'].map(label => createTab(label, storage, hub, clock));
+    const identity = tabs.map(tab => tab.bus.getClusterSnapshot().currentWorker);
+
+    expect(new Set(identity.map(worker => worker.tabId)).size, 'one Tab identity').toBe(1);
+    expect(new Set(identity.map(worker => worker.workerId)).size, 'three Runtimes').toBe(3);
+    for (const tab of tabs) void tab.bus.stop().catch(() => undefined);
   });
 
   it('attributes every subscriber record to a live Runtime, and reports the shapes that break it', () => {
