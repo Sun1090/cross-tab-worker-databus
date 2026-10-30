@@ -10296,6 +10296,16 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Changed files:** `tests/coordination-invariants.test.ts` (docstring, the premise case), `AGENTS.md`, `docs/progress.md` (this record and the correction in Phase 310).
 - **No release is owed** — `tests/`, `AGENTS.md` and `progress.md` are all outside `files`. The small debt from Phase 315 (one operand in `src/core/environment.ts`) still stands and still rides the next patch.
 
+## Phase 317 / Five dependabot bumps landed as one batch — and the react PR was red for a reason worth naming
+
+- **Milestone / version:** post-`0.21.57`, unreleased. Branch `chore/deps-batch-2026-10`. No release owed (devDependencies do not ship).
+- **Why one branch instead of five merges.** Five dependabot PRs had sat open since 2026-10-25 (#440–#444), every one touching `pnpm-lock.yaml`; merging them one by one serialises five lockfile reconciliations and forces a dependabot rebase between each. The four that are patch/minor are mechanically safe, so they were applied together on one branch and verified as a set, then the five single-package PRs are closed pointing at this one.
+- **The react PR was red, and not by flake.** #442 bumped `react` to 19.3.1 alone and `pnpm check`'s `verify` job failed at `tests/hooks.test.tsx` with `Incompatible React versions: The "react" and "react-dom" packages must have the exact same version` — dependabot moved `react` without its twin. `react-dom` was bumped to 19.3.1 with it here; that is the whole fix, and it is the reason a "green except one job" dependabot PR must be read rather than retried. Verified before the bump: `react` and `react-dom` were both `^19.3.0`, so the pair was simply out of step.
+- **The major bump was checked, not waved through.** #440 moves `vite` 7.3.7 → **8.3.5**. `vite` is only a root devDependency with no `vite.config` and no direct import anywhere (`pnpm examples` builds vendor bundles with esbuild and serves with a plain node script, not a vite dev server) — its consumers are `vitest`, whose own `peerDependencies.vite` is `^6.4.0 || ^7.0.0 || ^8.0.0`, so `^8` is in-range rather than a peer break. With that established, the full suite (including e2e against the built artifacts) is the acceptance test, and it is green.
+- **The rest of the batch:** `vue` 3.5.43→3.5.44, `@playwright/test` 1.63.0→1.64.1 (its browsers resolved without a re-download — e2e ran), `fake-indexeddb` 6.2.5→6.2.6.
+- **Verification on the batch tree (all local, before the PR):** `pnpm check` 0 — 40 files / **1059 tests** + 5/5 perf; `pnpm lint` 0; `pnpm test:coverage` 0 at **99.03 / 97.67 / 99.28 / 99.69** (branches/lines each up one hundredth from `0.21.57`, the expected denominator move after #455 removed the dead opener term); `pnpm test:e2e` **39 passed (52.9 s)**; `verify:compat` ("0.21.57 preserves public exports and type metadata from v0.21.57") / `verify:types` / `verify:pack` all 0; `pnpm audit --registry=https://registry.npmjs.org` clean; `git diff --check` clean.
+- **Changed files:** `package.json`, `pnpm-lock.yaml` (+ this record). **Follow-up:** #440–#444 closed as superseded by this batch.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
