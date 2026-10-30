@@ -3319,6 +3319,122 @@ describe('WorkerClusterRuntime resilience', () => {
     expect(controlB).not.toHaveBeenCalledWith('SUBSCRIBE', 'topic-handoff-recovery', undefined);
   });
 
+  it('re-elects into a Tab whose sibling Runtime left a subscriber record behind', async () => {
+    // The stranded-handoff recovery stands down when the elected owner looks
+    // like it is already subscribed, because an owner with no local subscription
+    // never reconciles the topic itself. That question used to be answered per
+    // *Tab*, so a leftover record from a sibling Runtime in the owner's Tab — a
+    // lost removal while that sibling stayed alive, which is the shape a failed
+    // storage flush leaves and the sweep cannot prune because its owner lives —
+    // read as "the owner subscribes". The peer stood down, no Runtime ever
+    // recovered the route, and the unconfirmed handoff sat there for good.
+    //
+    // The record cannot prove which Runtime wrote it unless it carries a
+    // `workerId`, so the two shapes are asserted separately: a worker-keyed
+    // record naming the sibling does not speak for the owner, and a legacy
+    // tab-keyed record does not answer the question at all (one redundant
+    // CONTROL/SUBSCRIBE is cheaper than a stalled topic).
+    const run = async (shape: 'worker-keyed' | 'legacy') => {
+      const storage = new MemoryStorage();
+      const hub = new ChannelHub();
+      let now = 1_000;
+      const controlFirst = vi.fn();
+      const diagnostics: Array<{ operation: string; topic: string }> = [];
+      // Ids decide the election: equal loads fall back to `workerId`, and
+      // `worker-first` sorts before every other live Worker here.
+      const previous = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-old', workerId: 'worker-old' });
+      const first = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-shared', workerId: 'worker-first', onControl: controlFirst });
+      const sibling = makeRuntime({ storage, hub, now: () => now, tabId: 'tab-shared', workerId: 'worker-sibling' });
+      const tester = makeRuntime({
+        storage,
+        hub,
+        now: () => now,
+        tabId: 'tab-tester',
+        workerId: 'worker-tester',
+        onDiagnostic: event => diagnostics.push(event)
+      });
+
+      previous.runtime.start();
+      now = 1_001;
+      first.runtime.start();
+      now = 1_002;
+      sibling.runtime.start();
+      now = 1_003;
+      tester.runtime.start();
+      previous.runtime.subscribe('stranded-sibling-topic');
+      await Promise.resolve();
+      tester.runtime.subscribe('stranded-sibling-topic');
+      await Promise.resolve();
+      expect(previous.runtime.isAssigned('stranded-sibling-topic')).toBe(true);
+
+      // Strand the handoff mid-flight: the route names the elected successor,
+      // the previous owner is credited as the handoff source, and no ACK will
+      // ever arrive.
+      const routeEntry = storage.entries().find(([key]) => key.includes(':route:'))!;
+      const route = JSON.parse(routeEntry[1]) as Record<string, unknown>;
+      delete route.confirmedAt;
+      // Back-date the route instead of advancing the clock: the handoff must
+      // look stuck for longer than a worker TTL, while every Worker record stays
+      // fresh — an aging clock would also prune the two Writers in the shared
+      // Tab and change the election under test.
+      storage.setItem(
+        routeEntry[0],
+        JSON.stringify({
+          ...route,
+          workerId: 'worker-first',
+          tabId: 'tab-shared',
+          generation: 2,
+          handoffFromWorkerId: 'worker-old',
+          updatedAt: now - 10_001
+        })
+      );
+
+      const base = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('resilience')}`;
+      const topicKey = createOpaqueKey('stranded-sibling-topic');
+      storage.setItem(
+        `${base}:subscriber:${topicKey}:${shape === 'legacy' ? 'tab-shared' : 'worker-sibling'}`,
+        JSON.stringify(
+          shape === 'legacy'
+            ? { tabId: 'tab-shared', updatedAt: now }
+            : { tabId: 'tab-shared', workerId: 'worker-sibling', updatedAt: now }
+        )
+      );
+
+      previous.runtime.stop();
+      await Promise.resolve();
+
+      // Only the surviving subscriber ticks: the decision under test is its
+      // re-election, and every Worker record is still fresh.
+      tester.env.runIntervals();
+      await Promise.resolve();
+
+      const recovered = JSON.parse(storage.getItem(routeEntry[0]) ?? '{}') as Record<string, unknown>;
+      previous.runtime.stop();
+      first.runtime.stop();
+      sibling.runtime.stop();
+      tester.runtime.stop();
+      return { recovered, controlFirst, diagnostics };
+    };
+
+    const workerKeyed = await run('worker-keyed');
+    expect(workerKeyed.recovered, 'the route moves to the elected successor').toMatchObject({
+      workerId: 'worker-first',
+      generation: 3
+    });
+    expect(workerKeyed.recovered).not.toHaveProperty('handoffFromWorkerId');
+    expect(workerKeyed.controlFirst).toHaveBeenCalledWith('SUBSCRIBE', 'stranded-sibling-topic', undefined);
+    expect(workerKeyed.diagnostics).toContainEqual({
+      operation: 'route_migration_recovery',
+      topic: 'stranded-sibling-topic'
+    });
+
+    const legacy = await run('legacy');
+    expect(legacy.recovered, 'a legacy record cannot speak for the owner either').toMatchObject({
+      workerId: 'worker-first',
+      generation: 3
+    });
+  });
+
   it('recovers a real pagehide handoff whose ROUTE_RELEASED is lost on the wire', async () => {
     // End-to-end version of the stranded-handoff regression: a genuine
     // pageHide() writes the handoff route, but the ACK itself is dropped in
