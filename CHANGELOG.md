@@ -1,3 +1,19 @@
+## [0.21.58] - 2026-10-30
+
+A small patch that clears the one debt `0.21.57` left behind, plus the dependency batch. No public API, export, default, frame or storage key changes; the only emitted-code delta is the removal of a guard term that could never decide anything, so behaviour is unchanged. The coverage denominators move by that one removed branch and nothing else.
+
+### Fixed
+
+- **A guard term added by `0.21.57` could not decide anything.** The identity probe's `claimedByPeer` guard carried `!hasOpener` on top of the `if` immediately below, whose first disjunct is already `hasOpener` — so the term never changed the outcome, and deleting it left the whole suite green (measured: **1058 passed**). That is the "a redundant re-read is load-bearing in the wrong direction" shape `AGENTS.md` records: a term that cannot decide anything has no defensive reading to keep. Removed, with the measurement recorded beside the guard and the three remaining terms each pinned by a named case (`existing` → the create path, `!tabIdentityInitialized` → the probe landing once per document, and the probe itself → the duplicated-tab case). The opener half is still checked where it actually decides. No runtime behaviour changes; the branch denominator is one smaller (`1931/1977`).
+
+### Changed
+
+- **The comment explaining why the coordination fuzz's shape arm exists was wrong, and is corrected.** It said "three Tabs have independent identities, so the old shape delivers consistently"; a 20-line probe printing the ids showed `['tab-coord-a', 'tab-coord-a', 'tab-coord-a']` — `getOrCreateTabId()`'s module-level cache resolves three fresh `sessionStorage`s to the first document's id, so the harness actually drives the documented *one-Tab-many-Runtimes* shape (×3). The honest reason is stronger: with records keyed per Tab the first unsubscribe can drop the shared record and release the route, and the fuzz still passes because every behavioural arm is about the *quiesced* cluster and the next reconcile re-elects. The loss is momentary and the assertions only see the end state — which is also why the `0.21.57` behavioural cases had to be unit tests that assert *immediately after* unsubscribe. A new case pins the harness premise (one `tabId`, three `workerId`s) so a future "fix" that seeds distinct ids hits a test rather than silently invalidating the reason.
+
+### Dependencies
+
+- Dev-dependency batch merged as one PR (all touch the lockfile): `vite` 7.3.7 → **8.3.5** (a major, admitted because `vitest` 5's `peerDependencies.vite` is `^6.4.0 || ^7.0.0 || ^8.0.0`, and `vite` is a root devDependency with no `vite.config` and no direct import — examples build with esbuild), `react` + `react-dom` 19.3.0 → **19.3.1** (paired: dependabot's react-only bump failed `hooks.test.tsx` with "Incompatible React versions"), `vue` 3.5.43 → 3.5.44, Playwright Test 1.63.0 → 1.64.1, `fake-indexeddb` 6.2.5 → 6.2.6. Dev dependencies do not ship.
+
 ## [0.21.57] - 2026-10-30
 
 Three coordination fixes found by asking what still depends on a Tab's identity being unique. One is the browser's own **Duplicate tab**, which the opener guard could not see; the other two were already reachable in the documented one-document-many-DataBuses pattern and in a stranded handoff. The public surface gains one *optional* argument on `getOrCreateTabId()` and no new export; the subscriber record's key changes shape, and both directions stay compatible with older peers.
