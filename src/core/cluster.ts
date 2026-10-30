@@ -1438,11 +1438,19 @@ export class WorkerClusterRuntime {
           // directly (assigning without a local subscription is exactly what
           // the graceful handoff and the crash path already do).
           if (owner.workerId !== this.workerId) {
-            const subscriberTabIds = new Set(this.readSubscriberTabIds(topicKey, workers));
-            const ownerSubscribed = workers.some(
-              worker => worker.workerId === owner.workerId && subscriberTabIds.has(worker.tabId)
-            );
-            if (ownerSubscribed) continue;
+            // Ask about the *Runtimes*, not the Tabs. A leftover record from a
+            // sibling Runtime in the owner's Tab — a lost removal while that
+            // sibling stayed alive, which is the shape a failed storage flush
+            // leaves and the sweep cannot prune because its owner is alive —
+            // answered the old tab-level test yes, the peer stood down, and no
+            // Runtime ever recovered the route: the elected owner never
+            // reconciles a topic it does not subscribe, so the unconfirmed
+            // handoff sat there for good. A legacy record cannot name the
+            // Runtime that wrote it, so it does not answer this question at
+            // all: sending one redundant `CONTROL/SUBSCRIBE` to a peer that is
+            // already subscribed costs a frame and confirms the route, while
+            // standing down on that record can cost the topic.
+            if (this.readSubscriberIds(topicKey, workers).workerIds.has(owner.workerId)) continue;
           }
           this.writeRoute(topicKey, owner, undefined, route.generation + 1);
           this.sendControl(owner.workerId, CONTROL_ACTION.SUBSCRIBE, topic, topicKey);
@@ -1643,15 +1651,44 @@ export class WorkerClusterRuntime {
 
   /** Enumerate all tab IDs that have a subscriber record for `topicKey`. */
   private readSubscriberTabIds(topicKey: string, workers: readonly WorkerRecord[]): string[] {
+    return Array.from(this.readSubscriberIds(topicKey, workers).tabIds);
+  }
+
+  /**
+   * One scan of `topicKey`'s subscriber records, answering the two questions
+   * callers ask: which Tabs hold a subscription (emptiness checks, orphan-route
+   * pruning) and which **Runtimes** do (the stranded-handoff re-election).
+   *
+   * The second answer is the finer one and the reason this is one method rather
+   * than two scans: a tab-level answer lets a leftover record from a sibling
+   * Runtime speak for a Worker that never subscribed to the topic, and standing
+   * down on that proof stalls the recovery forever (see the call site).
+   *
+   * A legacy record — written before records carried `workerId` — proves only
+   * that *some* Runtime in its tab subscribes, so it contributes to the tab set
+   * and **not** to the worker set. Treating it as the whole tab, which is what
+   * the tab-level reader effectively did, is the conservative-looking choice
+   * that can stall; the cost of the other direction is one redundant
+   * `CONTROL/SUBSCRIBE` to a peer that is about to confirm anyway.
+   */
+  private readSubscriberIds(
+    topicKey: string,
+    workers: readonly WorkerRecord[]
+  ): { tabIds: Set<string>; workerIds: Set<string> } {
+    const tabIds = new Set<string>();
+    const workerIds = new Set<string>();
     if (!this.storage) {
       // Degraded mode: only this tab can be a subscriber. Recover the plaintext
       // topic to check local interest — without it we cannot know if we care.
       const topic = this.knownTopics.get(topicKey);
-      return topic && this.subscribedTopics.has(topic) ? [this.tabId] : [];
+      if (topic && this.subscribedTopics.has(topic)) {
+        tabIds.add(this.tabId);
+        workerIds.add(this.workerId);
+      }
+      return { tabIds, workerIds };
     }
     const activeTabIds = new Set(workers.map(worker => worker.tabId));
     const activeWorkerIds = new Set(workers.map(worker => worker.workerId));
-    const subscribers = new Set<string>();
     for (const { key, value: record } of readAllByPrefix<TopicSubscriberRecord>(
       this.storage,
       `${this.subscriberPrefix}${topicKey}:`
@@ -1660,9 +1697,10 @@ export class WorkerClusterRuntime {
         this.removeStorage(key);
         continue;
       }
-      subscribers.add(record.tabId);
+      tabIds.add(record.tabId);
+      if (record.workerId !== undefined) workerIds.add(record.workerId);
     }
-    return Array.from(subscribers);
+    return { tabIds, workerIds };
   }
 
   /** Whether a subscriber record still belongs to a live Runtime.
