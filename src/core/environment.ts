@@ -372,14 +372,20 @@ export function getOrCreateTabId(
     // `noopener` is still recommended by applications, but this guard keeps
     // the SDK safe when an opener is present.
     const hasOpener = typeof window !== 'undefined' && Boolean(window.opener);
-    // The same conclusion for a copy the opener check cannot see. Both are
-    // first-lookup-only, and neither runs once this document has an identity:
-    // a sibling Runtime created later in the same document shares it.
+    // The same conclusion for a copy the opener check cannot see, first-lookup
+    // only, because a sibling Runtime created later in the same document shares
+    // the identity this one is issued. The opener half is *not* repeated in this
+    // conjunction: it is already the first disjunct below, so a copy of it here
+    // could never decide — whenever `hasOpener` is false the `if` rejects
+    // regardless, and whenever it is true the term passes. Measured on this tree
+    // by deleting it: the suite stayed green at 1058, which is what a dead
+    // operand looks like. The three terms that remain each die to a named case —
+    // `existing` to the create path, `!tabIdentityInitialized` to the probe
+    // landing once per document, and the probe itself to the duplicated-tab case.
     const claimedByPeer =
       existing !== null &&
       existing !== undefined &&
       existing !== '' &&
-      !hasOpener &&
       !tabIdentityInitialized &&
       options?.isIdentityClaimedByPeer?.(existing) === true;
     if (existing && (!hasOpener || tabIdentityInitialized) && !claimedByPeer) {
