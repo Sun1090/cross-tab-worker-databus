@@ -492,11 +492,13 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 
 创建默认浏览器环境适配器，包含 storage、BroadcastChannel、定时器和页面生命周期事件。
 
-### `getOrCreateTabId(environment, key?)`
+### `getOrCreateTabId(environment, key?, options?)`
 
 返回当前页面/标签页实例的稳定标识：优先从 sessionStorage 读取，首次调用时创建（`tab-<random>`）并写回，因此刷新后的标签页会认领原有 route，而不是被当成一个全新标签页。
 
 存在 `window.opener` 时**刻意不**复用已存储的值：`window.open()` 会把 opener 的 `sessionStorage` 克隆给子页面，盲目复用会让两个存活的标签页共用一个身份。storage 不可用或抛错时改为生成新 ID。
+
+浏览器自带的**复制标签页（Duplicate tab）**同样会复制 `sessionStorage`，而且复制出来的页面**没有** opener，因此 opener 检查看不到它。`options.isIdentityClaimedByPeer(candidate)` 就是调用方对这一情形的证据：`WorkerClusterRuntime` 用本集群存活的 Worker 记录来回答，若存在一条心跳仍新鲜、且带着被继承 id 的记录，复制出的标签页就改领一个新 ID（并写回，同一 document 内后续 Runtime 共用）。该探测只在一个 document 的首次查找时执行，opener 已给出结论时也不执行——刷新会在 `pause()` 里删除并 flush 自己的 Worker 记录，因此保留原身份；异常退出留下的记录会存活至多一个 `workerTtlMs`，在这个窗口内刷新则会领到新 ID。
 
 ### `selectWorkerBackend(mode, availability?)`
 

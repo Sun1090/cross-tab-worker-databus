@@ -523,11 +523,13 @@ Transport 消息 → isAssigned(topic)? → 是 → broadcastEvent(EVENT)
 
 正常关闭或进入 BFCache 时，`pagehide` 暂停 Runtime：删除 Worker 和 subscriber 记录、让出实际 owner、关闭底层 transport，但在内存中保留业务订阅意图。`pageshow` 恢复页面后，DataBus 重建 Worker/连接，Runtime 自动重新注册、恢复 subscriber 记录并协调 Topic，业务无需重新调用 `subscribe`。
 
-#### Tab 身份与 `window.open`
+#### Tab 身份：刷新、`window.open` 与复制标签页
 
-每个 Runtime 使用 `sessionStorage` 保存 `tabId`，刷新页面时保持稳定；`workerId` 则在每次 Runtime 创建时使用随机后缀生成。浏览器通过 `window.open()` 打开页面时，可能先复制 opener 的 `sessionStorage`，导致两个物理 Tab 暂时拿到相同 `tabId`，进而发生 subscriber key 和诊断记录覆盖。
+每个 Runtime 使用 `sessionStorage` 保存 `tabId`，刷新页面时保持稳定；`workerId` 则在每次 Runtime 创建时使用随机后缀生成。继承这份存储值的新 document 有两种，但只有一种应当保留它。刷新是**同一个** Tab 重新进入页面，值无人占用，因此复用。浏览器复制出的标签页（`window.open()` 或浏览器自带的 Duplicate tab）则是**第二个**存活 document 持有一份副本，两者不能呈现同一个身份：subscriber 记录以 `tabId` 为键，副本会在每次写入时覆盖原标签页的记录、并在退订时把它们删掉。
 
-应用打开新 Tab 时应使用 `noopener`。SDK 也会在检测到 opener 时丢弃被复制的 sessionStorage tab id，并生成新的 id，作为应用侧遗漏 `noopener` 时的兜底。诊断记录按 `tabId + workerId` 保存，避免 Worker 重启或 handoff 窗口内的新旧快照互相覆盖。
+两种线索性质不同。`window.open()` 会留下 `window.opener`，SDK 因此在检测到 opener 时丢弃被复制的 `sessionStorage` id 并重新生成；应用侧仍建议使用 `noopener`。浏览器自带的 Duplicate tab 完全没有 opener，SDK 改为探测本集群的 Worker 记录——它们以随机的 `workerId` 存在 `localStorage` 中，不会随 session 一起被复制。若存在一条心跳仍新鲜、且带着被继承 id 的记录，说明另一个存活 document 正在使用它，复制出的标签页就改领一个新 id，并写回以供水同 document 内后续 Runtime 共用。
+
+该探测每个 document 只执行一次，位置在构造函数中。刷新之所以能被识别，是因为 `pause()` 会删除离开的 document 的 Worker 记录并在页面消失前 flush 这次删除；异常退出留下的记录会存活至多一个 `workerTtlMs`，在这个窗口内刷新会领到新 id（随后由正常的 TTL 路径清理该陈旧记录）。诊断记录按 `tabId + workerId` 保存，避免 Worker 重启或 handoff 窗口内的新旧快照互相覆盖。
 
 `visibilitychange` 不删除业务订阅，也不迁移已经建立的 route。隐藏 Tab 继续持有自己已有的 Topic，也仍能收到其他 owner 广播的数据。可见性只影响全新 Topic 首次选择 owner 时的候选集合。
 
