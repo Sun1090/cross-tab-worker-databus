@@ -27,7 +27,11 @@
  *      sweep contains a topic's plaintext — the one arm whose subject is a
  *      security property rather than a convergence property, so it is checked
  *      on every step instead of only on the quiesced end state (see
- *      `plaintextLeaks`).
+ *      `plaintextLeaks`);
+ *   5. every persisted subscriber record is attributable to a live Runtime —
+ *      keyed by the `workerId` that wrote it and naming that same Runtime —
+ *      the one arm whose subject is a record *shape*. No delivery assertion can
+ *      see it (see `subscriberRecordProblems`).
  *
  * What each arm was proved against — each mutation applied alone, `src/`
  * restored and verified clean afterwards: dropping the transport unsubscribe
@@ -35,6 +39,13 @@
  * subscribe kills arm 1 (no holder at all), dispatching a topic's handlers
  * twice kills arm 3, never pruning orphan routes kills arm 2, and emptying
  * `reconcileAssignedTopics`' sweep kills arms 1 and 2 together.
+ *
+ * Arm 5 was measured in both directions. A source mutation that reverts the
+ * subscriber key to `tabId` (write and removal together, so the pair stays
+ * consistent) fails it on six consecutive seeds, naming the offending keys; and
+ * the helper's own case stages four shapes — clean, tab-keyed, key/value
+ * disagreement, and a record whose Runtime is gone — with one mutation per arm
+ * of the reading so an empty result cannot be an empty scan.
  *
  * Arm 4 was measured on three mutations, and the three kill sets are three
  * different claims — the first draft of this paragraph said "both die at the new
@@ -145,6 +156,55 @@ function plaintextLeaks(storage: MemoryStorage, markerText: string): string[] {
   return leaks;
 }
 
+
+/**
+ * Report every subscriber record that cannot be attributed to a live Runtime.
+ *
+ * The record is keyed by the Runtime that wrote it — `subscriber:{topicKey}:{workerId}`
+ * — and names that Runtime in its value. Both halves are asserted here because
+ * the key is what Phase 307 changed and **no behavioural arm in this file can see
+ * a revert to tab-keyed records**: two Runtimes that share a tab still fan out
+ * correctly until one of them leaves, and the sweep's three tabs each have their
+ * own identity, so the old shape behaves identically for every delivery the sweep
+ * checks. The shape has to be asserted as a shape.
+ *
+ * Derived from storage and the final snapshots rather than from internals: the
+ * key's suffix is compared with the recorded `workerId`, and the `workerId` with
+ * the Workers the cluster still advertises. Returns the number of records
+ * examined beside the findings, so a caller can tell "nothing is wrong" from
+ * "nothing was there" — the same control `plaintextLeaks`'s cases provide by
+ * planting a record.
+ */
+function subscriberRecordProblems(
+  storage: MemoryStorage,
+  liveWorkerIds: ReadonlySet<string>
+): { examined: number; problems: string[] } {
+  const problems: string[] = [];
+  let examined = 0;
+  for (const [key, value] of storage.entries()) {
+    if (!key.includes(':subscriber:')) continue;
+    examined += 1;
+    let record: { workerId?: string };
+    try {
+      record = JSON.parse(value) as { workerId?: string };
+    } catch {
+      problems.push(`${key} is not readable JSON`);
+      continue;
+    }
+    if (record.workerId === undefined) {
+      problems.push(`${key} carries no workerId`);
+      continue;
+    }
+    const suffix = key.slice(key.lastIndexOf(':') + 1);
+    if (record.workerId !== suffix) {
+      problems.push(`${key} is keyed by ${suffix} but names ${record.workerId}`);
+    }
+    if (!liveWorkerIds.has(record.workerId)) {
+      problems.push(`${key} names a Runtime that is not live (${record.workerId})`);
+    }
+  }
+  return { examined, problems };
+}
 
 const pick = <T,>(random: () => number, values: readonly T[]): T =>
   values[Math.floor(random() * values.length)] as T;
@@ -504,8 +564,48 @@ describe('cross-tab coordination invariants', () => {
     expect(createOpaqueKey(topic).includes('z'), 'a hashed key must not contain a non-hex marker').toBe(false);
   });
 
+  it('attributes every subscriber record to a live Runtime, and reports the shapes that break it', () => {
+    // The sweep's subjects are its own tabs, which each hold one identity — so a
+    // detector that reads the wrong field reports nothing on every seed and the
+    // arm is decoration. Pinned on fabricated input, one case per way the reading
+    // can be wrong, because those are the shapes a future edit would introduce.
+    const live = new Set(['worker-a', 'worker-b']);
+    const base = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('coordination-invariants')}`;
+    const topicKey = createOpaqueKey('alpha');
+    const keyFor = (suffix: string) => `${base}:subscriber:${topicKey}:${suffix}`;
+
+    // What the cluster writes today: the key's suffix is the owner's Runtime.
+    const clean = new MemoryStorage();
+    clean.setItem(keyFor('worker-a'), JSON.stringify({ tabId: 'tab-a', workerId: 'worker-a', updatedAt: 1_000 }));
+    expect(subscriberRecordProblems(clean, live)).toEqual({ examined: 1, problems: [] });
+
+    // The previous shape: keyed by the tab, no Runtime named at all.
+    const tabKeyed = new MemoryStorage();
+    tabKeyed.setItem(keyFor('tab-a'), JSON.stringify({ tabId: 'tab-a', updatedAt: 1_000 }));
+    expect(subscriberRecordProblems(tabKeyed, live).problems).toEqual([`${keyFor('tab-a')} carries no workerId`]);
+
+    // A key that disagrees with the record it holds — a partial revert, which is
+    // the form the Phase 307 change could regress into.
+    const mismatched = new MemoryStorage();
+    mismatched.setItem(keyFor('worker-a'), JSON.stringify({ workerId: 'worker-b', updatedAt: 1_000 }));
+    expect(subscriberRecordProblems(mismatched, live).problems).toEqual([
+      `${keyFor('worker-a')} is keyed by worker-a but names worker-b`
+    ]);
+
+    // A record whose owner is gone: the state a crashed sibling Runtime leaves
+    // when its tab outlives it, which the tab-level sweep could not see.
+    const orphaned = new MemoryStorage();
+    orphaned.setItem(keyFor('worker-gone'), JSON.stringify({ workerId: 'worker-gone', updatedAt: 1_000 }));
+    expect(subscriberRecordProblems(orphaned, live).problems).toEqual([
+      `${keyFor('worker-gone')} names a Runtime that is not live (worker-gone)`
+    ]);
+  });
+
   it('keeps one owner, one transport subscription and exactly-once fan-out per live topic across randomized multi-tab interleavings', async () => {
     const failures: string[] = [];
+    /** Subscriber records inspected across asserted seeds — the control for the
+     * shape arm below, which would otherwise pass on a sweep that wrote none. */
+    let subscriberRecordsExamined = 0;
     // Kept apart from `failures` because the two are different claims with
     // different evidence, and a shared array reports the wrong one first: a
     // plaintext write trips the loop's stop condition within a seed or two, so
@@ -691,6 +791,10 @@ describe('cross-tab coordination invariants', () => {
         const state = tabs.map(tab => ({ tab, cluster: tab.bus.getClusterSnapshot() }));
         const trace = ops.join(',');
         const labels = (list: Tab[]) => `[${list.map(tab => tab.label).join(' ')}]`;
+        // Union of what every tab still advertises, which is the only authority
+        // the records can be checked against without reaching into the cluster.
+        const liveWorkerIds = new Set<string>();
+        for (const entry of state) for (const worker of entry.cluster.workers) liveWorkerIds.add(worker.workerId);
         for (const topic of aborted ? [] : topics) {
           const topicKey = createOpaqueKey(topic);
           const expecters = tabs.filter(tab => tab.handlers.has(topic));
@@ -739,6 +843,15 @@ describe('cross-tab coordination invariants', () => {
                   `${tab.label}, expected ${expected}`
               );
             }
+          }
+        }
+        // Once per seed, not per topic: a record shape is a fact about the
+        // registry, and the per-topic loop above cannot see it (see the helper).
+        if (!aborted) {
+          const reading = subscriberRecordProblems(storage, liveWorkerIds);
+          subscriberRecordsExamined += reading.examined;
+          if (reading.problems.length > 0) {
+            failures.push(`seed=${seed} ops=${trace}: ${reading.problems.join('; ')}`);
           }
         }
       } finally {
@@ -812,9 +925,19 @@ describe('cross-tab coordination invariants', () => {
     // assertion that fires and the finding would read as "the sweep stopped
     // early" rather than "the cluster wrote a topic into localStorage".
     expect(leaks).toEqual([]);
+    // Findings before the depth floor, for the same reason `leaks` comes first:
+    // the loop stops after six failures, so a *systematic* defect ends the sweep
+    // early and the floor would otherwise be the assertion that fires — reporting
+    // "explored only 8 seeds" about a bug it had already named six times. The
+    // floor is still the control for the other direction (a runner too slow to
+    // clear it), and it is only meaningful once nothing was found.
+    expect(failures).toEqual([]);
+    // The shape arm's non-vacuity: every seed that converged has at least one
+    // subscriber record, so a sweep that examined none proves nothing about the
+    // shape and must not report clean.
+    expect(subscriberRecordsExamined, 'no subscriber record was ever examined').toBeGreaterThan(0);
     // A budget that always fires early would let the suite go quiet on a slow
     // runner without anyone noticing, so depth is floored as well as capped.
     expect(completed, `explored only ${completed} seeds`).toBeGreaterThanOrEqual(MIN_SEEDS);
-    expect(failures).toEqual([]);
   }, 120_000);
 });
