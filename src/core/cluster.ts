@@ -257,7 +257,23 @@ export class WorkerClusterRuntime {
     this.storage = canUseStorage(this.environment.storage, `${baseKey}:probe`)
       ? new BatchingStorageWriter(this.environment.storage)
       : null;
-    this.tabId = options.tabId ?? getOrCreateTabId(this.environment, `${prefix}:tab-id`);
+    this.tabId =
+      options.tabId ??
+      getOrCreateTabId(this.environment, `${prefix}:tab-id`, {
+        // A browser-duplicated tab inherits sessionStorage without an opener, so
+        // `getOrCreateTabId()`'s opener guard cannot see it. A live Worker
+        // record carrying that id is the evidence the copy cannot carry: it
+        // lives in localStorage under a random `workerId`, and this probe runs
+        // in the constructor, before this Runtime has written a record of its
+        // own — so every match belongs to a different live document. A refresh
+        // removes its record in `pause()` and flushes that removal before the
+        // document goes away, so the refresh path keeps the stored id. The one
+        // case that does not is an abnormal exit, whose record survives for up
+        // to `workerTtlMs`; a reload inside that window takes a fresh identity,
+        // which costs one observer a changed `tabId` and nothing else — the
+        // stale record is pruned by the normal TTL path.
+        isIdentityClaimedByPeer: candidate => this.isTabIdLiveElsewhere(candidate)
+      });
     this.workerId = options.workerId ?? `worker-${this.tabId}-${this.environment.randomId()}`;
     const now = this.nowMs();
     this.currentRecord = {
@@ -1574,6 +1590,39 @@ export class WorkerClusterRuntime {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Whether any other live Worker record already carries `tabId`.
+   *
+   * Used once per document, from the constructor, to tell a browser-duplicated
+   * tab from this tab's own refresh: the copy inherits `sessionStorage` but not
+   * the opener, so the identity stored there is the only shared state and the
+   * Worker records are the only evidence that another live document holds it.
+   * Liveness is the same heartbeat window `readWorkers()` prunes by, so a record
+   * left behind by an abnormal exit is reported as live until it expires — the
+   * only false positive, and it re-mints one identity instead of letting two
+   * live tabs share one.
+   *
+   * The `!this.storage` leg is the degraded mode, and it earns its line for two
+   * reasons rather than one. It is what narrows the field for the scan below
+   * (`StorageLike | null` is rejected by `readAllByPrefix`), so the compiler
+   * holds it; and it is *not* what decides the verdict, because `listKeys()`
+   * catches its own failure and returns no records either way — measured by
+   * emptying this consequent, which leaves the suite green. What the inverted
+   * return does prove is the behaviour, not the deletion: returning `true` here
+   * fails 'keeps the inherited id when there is no storage to probe', since
+   * without `localStorage` there is no second document to collide with.
+   */
+  private isTabIdLiveElsewhere(tabId: string): boolean {
+    if (!this.storage) return false;
+    const now = this.nowMs();
+    for (const { value: worker } of readAllByPrefix<WorkerRecord>(this.storage, this.workerPrefix)) {
+      if (worker.tabId !== tabId) continue;
+      if (now - worker.heartbeatAt > this.workerTtlMs) continue;
+      return true;
+    }
+    return false;
   }
 
   /** Read all live worker records from storage, pruning stale entries past the TTL. */

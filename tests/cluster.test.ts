@@ -5,6 +5,7 @@ import type { WorkerControlAction, WorkerRecord } from '../src/core/types';
 import type { WorkerClusterMessage } from '../src/core/types';
 import { createOpaqueKey } from '../src/core/hash';
 import { CLUSTER_MESSAGE_TYPE, CONTROL_ACTION, DEFAULT_STORAGE_PREFIX } from '../src/utils/constants';
+import type { ClusterEnvironment, StorageLike } from '../src/core/environment';
 import { ChannelHub, createFakeEnvironment, MemoryStorage } from './fakes';
 
 describe('WorkerClusterRuntime', () => {
@@ -4509,5 +4510,146 @@ describe('WorkerClusterRuntime documented defaults', () => {
     expect(hasSilent(), 'a peer past the default 10 000ms TTL must be reaped').toBe(false);
     survivor.stop();
     silent.stop();
+  });
+});
+
+describe('duplicated-tab identity', () => {
+  const TAB_ID_KEY = 'cross-tab-worker-databus:tab-id';
+
+  /** A separate sessionStorage object whose *contents* were copied, which is
+   * what the browser hands a duplicated tab. */
+  function copySession(source: StorageLike | null): MemoryStorage {
+    const copy = new MemoryStorage();
+    copy.setItem(TAB_ID_KEY, source?.getItem(TAB_ID_KEY) ?? '');
+    return copy;
+  }
+
+  /** Load the cluster as a *new document*. The identity guard's "this document
+   * was already issued an id" state lives in module scope, so a reset import is
+   * what makes a second document real rather than a second Runtime in one. */
+  async function openDocument(environment: ClusterEnvironment, clusterKey = 'duplicate-tab') {
+    vi.resetModules();
+    const module = await import('../src/core/cluster');
+    return new module.WorkerClusterRuntime({
+      clusterKey,
+      environment,
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+  }
+
+  it('gives a browser-duplicated tab its own identity, and keeps the stored id across a refresh', async () => {
+    // The two identity sources the SDK can see are different in kind. A tab
+    // opened with `window.open()` carries `window.opener`; a tab the user
+    // duplicates from the browser UI carries only a *copy* of the opener's
+    // sessionStorage and no opener at all, so the guard in `getOrCreateTabId()`
+    // cannot see it. What that copy cannot carry is the Worker records in
+    // localStorage, which are keyed by a random `workerId` — that is the probe.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+
+    const originalEnv = createFakeEnvironment({ storage, hub, now, randomId: 'original' });
+    const original = await openDocument(originalEnv.environment);
+    original.start();
+    await Promise.resolve();
+    const originalTabId = original.tabId;
+    const originalSession = originalEnv.environment.sessionStorage;
+    expect(originalSession?.getItem(TAB_ID_KEY), 'the original tab owns the stored id').toBe(originalTabId);
+    expect(
+      storage.entries().some(([key, value]) => key.includes(':worker:') && value.includes(originalTabId)),
+      'the original tab has a live Worker record to be found by the probe'
+    ).toBe(true);
+
+    // Document 2 — the duplicated tab: copied sessionStorage contents, no opener.
+    const copiedEnv = createFakeEnvironment({ storage, hub, now, randomId: 'duplicate' });
+    copiedEnv.environment.sessionStorage = copySession(originalSession);
+    const copy = await openDocument(copiedEnv.environment);
+
+    expect(copy.tabId, 'two live tabs must not share one identity').not.toBe(originalTabId);
+    expect(copiedEnv.environment.sessionStorage?.getItem(TAB_ID_KEY), 'the copy persists the id it was issued').toBe(
+      copy.tabId
+    );
+    expect(copy.workerId).not.toBe(original.workerId);
+
+    // Document 3 — the original tab reloaded. `pause()` removed its Worker
+    // record and flushed that removal before the document went away, so the
+    // stored id is unclaimed and identity survives the refresh.
+    original.stop();
+    const reloadedEnv = createFakeEnvironment({ storage, hub, now: () => 2_000, randomId: 'reloaded' });
+    reloadedEnv.environment.sessionStorage = originalSession;
+    const reloaded = await openDocument(reloadedEnv.environment);
+
+    expect(reloaded.tabId, 'a refresh keeps the id the tab already had').toBe(originalTabId);
+    reloaded.stop();
+  });
+
+  it('does not treat an expired Worker record as a live claim', async () => {
+    // The one false positive this probe can have, kept as an assertion rather
+    // than a paragraph: a document that died without running `pause()` leaves a
+    // record until the TTL prunes it, and a reload inside that window re-mints.
+    // Past the TTL the record is no evidence at all, so the id is kept.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    let now = 1_000;
+
+    const originalEnv = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'original' });
+    const original = await openDocument(originalEnv.environment);
+    original.start();
+    await Promise.resolve();
+    const originalSession = originalEnv.environment.sessionStorage;
+    const originalTabId = original.tabId;
+
+    // Past the default 10 000 ms TTL, and no tick lands to rewrite it.
+    now += 20_000;
+    const copiedEnv = createFakeEnvironment({ storage, hub, now: () => now, randomId: 'stale' });
+    copiedEnv.environment.sessionStorage = copySession(originalSession);
+    const copy = await openDocument(copiedEnv.environment);
+
+    expect(copy.tabId, 'a stale record does not force a new identity').toBe(originalTabId);
+    original.stop();
+  });
+
+  it("does not treat another tab's live record as a claim", async () => {
+    // The probe must answer a question about *this* value. A live record whose
+    // tabId differs proves the loop keeps reading instead of taking the first
+    // record it finds.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const now = () => 1_000;
+
+    const neighbourEnv = createFakeEnvironment({ storage, hub, now, randomId: 'neighbour' });
+    const neighbour = await openDocument(neighbourEnv.environment);
+    neighbour.start();
+    await Promise.resolve();
+    expect(neighbourEnv.environment.sessionStorage?.getItem(TAB_ID_KEY)).toBe(neighbour.tabId);
+
+    // `copy-random` is deliberately different from the inherited value: a minted
+    // id is `tab-${randomId}`, so passing the same `randomId` here would make a
+    // re-mint satisfy this assertion and let a probe that ignores the tabId
+    // comparison survive (measured: it did).
+    const copiedEnv = createFakeEnvironment({ storage, hub, now, randomId: 'copy-random' });
+    const unrelated = new MemoryStorage();
+    unrelated.setItem(TAB_ID_KEY, 'tab-inherited-unrelated');
+    copiedEnv.environment.sessionStorage = unrelated;
+    const copy = await openDocument(copiedEnv.environment);
+
+    expect(copy.tabId, "a neighbour's identity says nothing about this one").toBe('tab-inherited-unrelated');
+    neighbour.stop();
+  });
+
+  it('keeps the inherited id when there is no storage to probe', async () => {
+    // Degraded mode: without localStorage there are no Worker records to
+    // collide with, so the identity is inherited as before.
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage: new MemoryStorage(), hub, now: () => 1_000, randomId: 'degraded' });
+    env.environment.storage = null;
+    const session = new MemoryStorage();
+    session.setItem(TAB_ID_KEY, 'tab-inherited');
+    env.environment.sessionStorage = session;
+
+    const runtime = await openDocument(env.environment);
+
+    expect(runtime.tabId).toBe('tab-inherited');
+    runtime.stop();
   });
 });
