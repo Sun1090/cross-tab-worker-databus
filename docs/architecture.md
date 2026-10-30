@@ -592,11 +592,13 @@ Heartbeat writes are not announced, so a stale record is only noticed within one
 
 On normal close or entry into BFCache, `pagehide` pauses the Runtime: it deletes Worker and subscriber records, yields the actual owner, and closes the underlying transport, but retains the business subscription intent in memory. After the page is restored via `pageshow`, DataBus rebuilds the Worker/connection, and the Runtime automatically re-registers, restores subscriber records, and reconciles Topics, without requiring the business to re-call `subscribe`.
 
-#### Tab identity and `window.open`
+#### Tab identity: refreshes, `window.open`, and duplicated tabs
 
-Each Runtime stores its `tabId` in `sessionStorage` so refreshes retain identity; every Runtime gets a random-suffixed `workerId`. Browsers may clone the opener's `sessionStorage` when `window.open()` creates a page, causing two physical tabs to share a `tabId` and collide on subscriber or diagnostic keys.
+Each Runtime stores its `tabId` in `sessionStorage` so refreshes retain identity; every Runtime gets a random-suffixed `workerId`. Two kinds of new document inherit that stored value, and only one of them may keep it. A refresh re-enters the *same* tab, so the value is unclaimed and is reused. A browser-duplicated tab (`window.open()`, or the browser's own Duplicate tab) is a *second* live document holding a copy, and two of them must not present one identity: subscriber records are keyed by `tabId`, so a copy would overwrite the original's records and delete them on unsubscribe.
 
-Applications should use `noopener` when opening a new tab. As a safety net, the SDK discards a copied sessionStorage id when an opener is detected and generates a fresh one. Inspection records are keyed by `tabId + workerId`, preventing Worker restart or handoff snapshots from overwriting one another.
+The two sources of evidence are different in kind. `window.open()` is visible as `window.opener`, so the SDK discards a copied `sessionStorage` id when an opener is present and generates a fresh one; applications are still encouraged to use `noopener`. The browser's Duplicate tab carries no opener at all, so the SDK probes this cluster's Worker records instead — they live in `localStorage` under a random `workerId` and cannot be copied with the session. A heartbeat-live record carrying the inherited id means another live document is using it, and the duplicate mints a fresh id that is persisted for later Runtimes in the same document.
+
+That probe runs once per document, from the constructor. A refresh is recognised because `pause()` removes the departing document's Worker record and flushes that removal before the page goes away; after an abnormal exit the record survives for up to `workerTtlMs`, so a reload inside that window takes a fresh id (the stale record is then pruned by the normal TTL path). Inspection records are keyed by `tabId + workerId`, preventing Worker restart or handoff snapshots from overwriting one another.
 
 `visibilitychange` does not remove business subscriptions or migrate established routes. A hidden Tab keeps the Topics it already owns and can still receive data broadcast by other owners. Visibility only affects candidate selection when a new Topic needs its first owner.
 

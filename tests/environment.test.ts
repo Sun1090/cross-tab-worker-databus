@@ -254,6 +254,64 @@ describe('getOrCreateTabId', () => {
     expect(get(env)).toBe('tab-fresh-1');
   });
 
+  it('discards an id another live document claims, once per document', async () => {
+    // A browser "Duplicate tab" copies sessionStorage into a document with no
+    // opener, so `hasOpener` cannot see it. The caller's probe is the only
+    // evidence that a second live document holds the inherited value.
+    const { getOrCreateTabId: get } = await freshModule();
+    const sessionStorage = new MemoryStorage();
+    const key = 'cross-tab-worker-databus:tab-id';
+    sessionStorage.setItem(key, 'tab-duplicated');
+    const probes: string[] = [];
+    const env = { sessionStorage, randomId: (() => { let n = 0; return () => `copy-${++n}`; })() } as never;
+    const probe = (candidate: string): boolean => {
+      probes.push(candidate);
+      return true;
+    };
+
+    expect(get(env, key, { isIdentityClaimedByPeer: probe })).toBe('tab-copy-1');
+    expect(sessionStorage.getItem(key)).toBe('tab-copy-1');
+    // A second Runtime in the same document keeps the identity this document
+    // was issued, and does not re-run the probe.
+    expect(get(env, key, { isIdentityClaimedByPeer: probe })).toBe('tab-copy-1');
+    expect(probes).toEqual(['tab-duplicated']);
+  });
+
+  it('keeps an unclaimed id, which is the refresh path', async () => {
+    const { getOrCreateTabId: get } = await freshModule();
+    const sessionStorage = new MemoryStorage();
+    const key = 'cross-tab-worker-databus:tab-id';
+    sessionStorage.setItem(key, 'tab-kept');
+    const env = { sessionStorage, randomId: () => 'unused' } as never;
+
+    expect(get(env, key, { isIdentityClaimedByPeer: () => false })).toBe('tab-kept');
+    expect(sessionStorage.getItem(key)).toBe('tab-kept');
+  });
+
+  it('does not probe for an id it is about to create', async () => {
+    const { getOrCreateTabId: get } = await freshModule();
+    const sessionStorage = new MemoryStorage();
+    const env = { sessionStorage, randomId: () => 'first' } as never;
+    const probe = (): boolean => {
+      throw new Error('nothing is stored, so nothing can be claimed');
+    };
+
+    expect(get(env, 'cross-tab-worker-databus:tab-id', { isIdentityClaimedByPeer: probe })).toBe('tab-first');
+  });
+
+  it('does not probe when an opener already settles the identity', async () => {
+    vi.stubGlobal('window', { opener: {} });
+    const { getOrCreateTabId: get } = await freshModule();
+    const sessionStorage = new MemoryStorage();
+    sessionStorage.setItem('cross-tab-worker-databus:tab-id', 'tab-cloned-from-opener');
+    const env = { sessionStorage, randomId: () => 'post-opener' } as never;
+    const probe = (): boolean => {
+      throw new Error('the opener check already decided this');
+    };
+
+    expect(get(env, 'cross-tab-worker-databus:tab-id', { isIdentityClaimedByPeer: probe })).toBe('tab-post-opener');
+  });
+
   it('keeps one in-memory id when sessionStorage is write-only', async () => {
     const { getOrCreateTabId: get } = await freshModule();
     const sessionStorage = new MemoryStorage();

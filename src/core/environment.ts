@@ -335,10 +335,31 @@ export function canUseStorage(storage: StorageLike | null, probeKey: string): st
  * sessionStorage is scoped to the tab and survives refresh, so the same tab
  * retains its identity across the page lifecycle without coordination overhead.
  * Falls back to a random ID when sessionStorage is unavailable.
+ *
+ * A stored value is inherited by two different kinds of new document, and only
+ * one of them should keep it. A refresh (or a session restore) re-enters the
+ * *same* tab: nothing else is using the value, so it is reused. A tab the
+ * browser opened or duplicated is a *second* live document holding a copy, and
+ * two of them must not present one identity — subscriber records are keyed by
+ * `tabId`, so the copy would overwrite the original's records on every write
+ * and delete them on unsubscribe.
+ *
+ * `window.open()` is visible (`window.opener`), but the browser's own
+ * "Duplicate tab" is not: it copies sessionStorage with no opener at all. That
+ * half needs evidence from outside the document, which `options` supplies; the
+ * caller's probe is consulted only on a document's first lookup, because later
+ * runtimes in the same document must keep the identity this document was issued
+ * (see `tabIdentityInitialized`).
  */
 export function getOrCreateTabId(
   environment: ClusterEnvironment,
-  key = TAB_ID_STORAGE_KEY
+  key = TAB_ID_STORAGE_KEY,
+  options?: {
+    /** Reports whether another live document already uses the inherited value.
+     * The cluster answers from its Worker records, which a duplicated tab cannot
+     * copy: they live in `localStorage` under a random `workerId`. */
+    isIdentityClaimedByPeer?: (candidate: string) => boolean;
+  }
 ): string {
   const storage = environment.sessionStorage;
   try {
@@ -349,7 +370,17 @@ export function getOrCreateTabId(
     // `noopener` is still recommended by applications, but this guard keeps
     // the SDK safe when an opener is present.
     const hasOpener = typeof window !== 'undefined' && Boolean(window.opener);
-    if (existing && (!hasOpener || tabIdentityInitialized)) {
+    // The same conclusion for a copy the opener check cannot see. Both are
+    // first-lookup-only, and neither runs once this document has an identity:
+    // a sibling Runtime created later in the same document shares it.
+    const claimedByPeer =
+      existing !== null &&
+      existing !== undefined &&
+      existing !== '' &&
+      !hasOpener &&
+      !tabIdentityInitialized &&
+      options?.isIdentityClaimedByPeer?.(existing) === true;
+    if (existing && (!hasOpener || tabIdentityInitialized) && !claimedByPeer) {
       tabIdentityInitialized = true;
       cachedTabId = existing;
       return existing;

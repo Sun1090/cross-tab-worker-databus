@@ -493,11 +493,13 @@ Generates a stable 128-bit hexadecimal opaque key. Used to avoid writing raw con
 
 Creates a default browser environment adapter, including storage, BroadcastChannel, timers, and page lifecycle events.
 
-### `getOrCreateTabId(environment, key?)`
+### `getOrCreateTabId(environment, key?, options?)`
 
 Returns the stable identity of the current page/tab instance, reading it from session storage and creating one (`tab-<random>`) on first call, so a reloaded tab reclaims its routes instead of looking like a brand new one.
 
 The stored value is deliberately *not* reused when `window.opener` is present: `window.open()` clones the opener's `sessionStorage` into the child, so a blind reuse would make two live tabs share one identity. When storage is unavailable or throws, a fresh ID is generated instead.
+
+The browser's own **Duplicate tab** copies `sessionStorage` too, and gives the copy *no* opener, so the opener check cannot see it. `options.isIdentityClaimedByPeer(candidate)` is the caller's evidence for that case: `WorkerClusterRuntime` answers it from this cluster's live Worker records, and a heartbeat-live record carrying the inherited value makes the duplicate take a fresh ID (persisted, so later Runtimes in the same document share it). The probe runs on a document's first lookup only, and never when an opener already settled the question — a refresh removes and flushes its own Worker record, so it keeps its identity; after an abnormal exit the stale record lives for up to `workerTtlMs`, and a reload inside that window takes a fresh ID instead.
 
 ### `selectWorkerBackend(mode, availability?)`
 
