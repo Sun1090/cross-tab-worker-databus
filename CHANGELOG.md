@@ -1,3 +1,28 @@
+## [0.21.57] - 2026-10-30
+
+Three coordination fixes found by asking what still depends on a Tab's identity being unique. One is the browser's own **Duplicate tab**, which the opener guard could not see; the other two were already reachable in the documented one-document-many-DataBuses pattern and in a stranded handoff. The public surface gains one *optional* argument on `getOrCreateTabId()` and no new export; the subscriber record's key changes shape, and both directions stay compatible with older peers.
+
+### Fixed
+
+- **A browser-duplicated tab took the original's identity.** `getOrCreateTabId()` discarded an inherited `sessionStorage` id only when `window.opener` was present, which covers `window.open()` and not the browser's Duplicate tab — that copy carries the same session and no opener at all. `WorkerClusterRuntime` now answers an optional `isIdentityClaimedByPeer` probe from this cluster's live Worker records, which a duplicated tab cannot copy (they live in `localStorage` under a random `workerId`), and the copy mints and persists a fresh id. The probe runs on a document's first lookup only, so later Runtimes in the same document keep sharing it, and a refresh still keeps its id because `pause()` removes and flushes the departing record. After an abnormal exit that record survives for up to `workerTtlMs`, so a reload inside that window takes a fresh id — recorded at the probe and in both architecture references.
+- **Two Runtimes in one Tab shared one subscriber record.** The documented pattern of several DataBuses in one document (market + notice) means several `workerId`s under one `tabId`, and a tab-keyed subscriber record belonged to all of them: whichever unsubscribed first deleted the others' intent, the route then looked orphaned, and the owner dropped its transport subscription — up to one heartbeat of genuinely lost publications, because the transport was no longer subscribed. Records are now keyed by `workerId` and carry it, and liveness is per Runtime, so a crashed sibling's record is pruned while its tab is still alive.
+- **A stranded handoff could be stalled forever by a leftover record.** `reconcileSubscriptions()` stands down when the elected owner looks subscribed, because an owner with no local subscription never reconciles the topic itself. It asked whether the owner's *tab* had a subscriber record, so a leftover record from a live sibling Runtime in that tab — what a lost removal leaves — read as "the owner subscribes": the peer stood down, nobody ever wrote the route, and the unconfirmed handoff sat there for good. The decision now asks the Runtime set. A legacy tab-keyed record cannot name the Runtime that wrote it, so it does not answer the question at all: sending one redundant `CONTROL/SUBSCRIBE` to a peer that is about to confirm costs a frame, while standing down on that record can cost the topic.
+
+### Changed
+
+- **Subscriber records are keyed per Runtime**: `{clusterHash}:subscriber:{topicKey}:{workerId}`, with the record carrying its `workerId`. A record written by an older version carries none; it is honoured by the finest identity it has (its tab) and pruned with it, so a mixed-version cluster keeps working in both directions — old readers enumerate by prefix and read `tabId`, old sweeps keep the new records because that field is still present. The `docs/configuration.md` boundary list and both architecture references state the new shape.
+
+### Documentation
+
+- The inner dispatch gate is described accurately in both languages: `hasLocalSubscriber()` reads the in-memory subscription set (wildcard patterns included), not the durable subscriber record, whose job is to tell peers the intent exists.
+- The tab-identity paragraphs state what a shared `tabId` now costs — a false identity in the public snapshot and the diagnostics — instead of the record collision, which per-Runtime keys removed.
+
+### Verification
+
+- `pnpm check` — 40 files and **1057 tests**, plus the 5 perf gates; `pnpm lint`; `pnpm typecheck`; `pnpm test:coverage` **99.03 / 97.67 / 99.28 / 99.69**; `pnpm test:e2e` **39 passed**; `pnpm verify:pack` / `verify:compat` / `verify:types`; `pnpm bench` + `bench:compare --fail-above-pct 50`; `pnpm audit --registry=https://registry.npmjs.org` clean; `npm pack --dry-run` 109 files; `git diff --check` clean.
+- The duplicate-tab path is exercised in a real browser: a second page whose init script seeds the first page's stored id before any page script runs takes its own identity, stays a live peer of the original, and a reload of the original keeps its id. Deleting the probe wiring and rebuilding fails exactly that assertion.
+- Every fix was mutation-checked with the mutant's own failing case named, including the one that survived a vacuous assertion first (an expected value minted by the same `randomId` as the code under test) and the one classified rather than repaired (a `!this.storage` leg the compiler holds and `listKeys()`'s catch makes undecidable).
+
 ## [0.21.56] - 2026-10-25
 
 A benchmark-trend release that also carries one shipped-comment correction. No behavior, API shape, export, default, frame or storage key changed, and the coverage floors and the zero-count arm ledger are `0.21.55`'s.
