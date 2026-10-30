@@ -1459,3 +1459,49 @@ describe('line-number citations in procedural docs', () => {
     expect(sources.some(f => /export|class|function/.test(readFileSync(f, 'utf8'))), 'the scan must include real src files').toBe(true);
   });
 });
+
+describe('zero-count ledgers', () => {
+  it('keeps each ledger-covered module at the revision its ledger was verified against', () => {
+    // Phase 305's rule, made standing: a recorded ledger verdict is only true for the bytes it
+    // was measured against, and a module edited afterward can silently invalidate it. Phase 305
+    // closed that question by *counting* commits per file by hand; this pins it so the next edit
+    // cannot slip past a human who forgets to count.
+    //
+    // The pin is the file's blob hash at HEAD (`git rev-parse HEAD:<path>`), not a commit SHA:
+    // a commit SHA does not survive a squash-merge (the PR's commits vanish, the squash is a new
+    // object), whereas a blob hash is content-addressed — identical across squash, rebase and any
+    // machine. It also sidesteps working-tree line-ending filters, which `git hash-object <path>`
+    // would apply. To update after an intentional edit: re-derive the ledger (or confirm it still
+    // holds), then set the pin to `git rev-parse HEAD:<that file>`.
+    //
+    // Scope is the six files the repository keeps zero-count ledgers for. `cluster.ts` and
+    // `data-bus.ts` are deliberately excluded: they change routinely, so a blob pin would be noise,
+    // and their ledgers are re-derived on a schedule recorded in docs/progress.md instead.
+    const LEDGERS: Record<string, string> = {
+      'src/core/storage-batch.ts': 'a7c91d40c0ddfced0f05c6351008c632515c311b',
+      'src/core/replay-manager.ts': 'a4891657bad14472e4504408d75e8b322af7d073',
+      'src/core/environment.ts': 'e73d4349108ffc4cbce3ce6e43f4a7b64bb94c7b',
+      'src/workers/port-reaper.ts': 'd889c5fed0526e0b5d1c3a6c35e55cfe2245946b',
+      'src/websocket.ts': 'd243b9749974a662bd7e395acaee3d2c8e43e7ce',
+      'src/core/trace.ts': 'b14c35e52175e0e8b47bad4686e2f833deb5e102',
+    };
+    const stale: string[] = [];
+    for (const [file, blob] of Object.entries(LEDGERS)) {
+      const atHead = execFileSync('git', ['rev-parse', `HEAD:${file}`], { encoding: 'utf8' }).trim();
+      if (atHead !== blob) stale.push(`${file} (pinned ${blob.slice(0, 10)}, HEAD ${atHead.slice(0, 10)})`);
+    }
+    expect(
+      stale,
+      `a ledger-covered module changed since its zero-count ledger was verified; re-derive the ledger (or record why it still holds) and update its blob pin: ${stale.join('; ')}`,
+    ).toEqual([]);
+    // Non-vacuity: each listed module must still carry a ledger comment. If a ledger moves out of
+    // its file the pin would guard the wrong bytes while looking healthy.
+    for (const file of Object.keys(LEDGERS)) {
+      expect(readFileSync(file, 'utf8'), `${file} must still carry a zero-count ledger comment`).toMatch(
+        /zero-count|ledger|measured|verdict|surviv/i,
+      );
+    }
+    // The set is exactly these six; widening it is a deliberate act that must edit this table.
+    expect(Object.keys(LEDGERS)).toHaveLength(6);
+  });
+});
