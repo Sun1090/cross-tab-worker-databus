@@ -147,6 +147,8 @@ publish(
 }
 ```
 
+入站帧按固定优先级归一化：帧自身的字符串 `topic` 字段优先于 transport 订阅的兜底 channel；嵌套的 `publication.data` 只有在帧是 envelope（`{ publication: { … } }`）、来自直连 transport（无兜底 topic）或携带元数据（`messageId`/`timestamp`）时才被解包。因此，经兜底 channel transport 发布、且 payload 自身带顶层字符串 `topic` 的消息会被改路由到该值。
+
 ### `publishBatch(topic, items)`
 
 ```ts
@@ -495,6 +497,8 @@ useVueCrossTabSubscription(bus, 'chat.*', message => console.log(message.data));
 ### `getOrCreateTabId(environment, key?, options?)`
 
 返回当前页面/标签页实例的稳定标识：优先从 sessionStorage 读取，首次调用时创建（`tab-<random>`）并写回，因此刷新后的标签页会认领原有 route，而不是被当成一个全新标签页。
+
+该记忆是模块级且只认首次调用：`key` 参数仅为 document 内的**第一次**调用选择存储槽位，之后任何调用——不同的 `key`、甚至不同的 `environment` 对象——都返回同一个 id，且不会写入新的 key。这是刻意设计：SDK 按集群前缀只调用一次，使同一 document 内的所有 Runtime 共用一个 tab 身份。
 
 存在 `window.opener` 时**刻意不**复用已存储的值：`window.open()` 会把 opener 的 `sessionStorage` 克隆给子页面，盲目复用会让两个存活的标签页共用一个身份。storage 不可用或抛错时改为生成新 ID。
 

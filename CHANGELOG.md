@@ -1,3 +1,15 @@
+## [0.21.59] - 2026-10-30
+
+A patch that ships the two `docs/api.md` clarifications logged since `0.21.58`, and re-bases the Centrifuge integration's measured claims onto the upgraded SDK. No public API, export, default, frame or storage key changes; the emitted code is unchanged apart from source-map comments.
+
+### Changed
+
+- **`docs/api.md` now states two behaviours that were true but undocumented.** `getOrCreateTabId`'s entry omits that the memo is module-global and first-call-only — the `key` parameter selects the storage slot for the *first* call in the document, and every later call (a different `key`, or a different `environment`) returns that same id without writing the new key; that is deliberate, so every Runtime in one document shares one tab identity, and the doc now says so in both languages rather than leaving a reader to "fix" it into a per-key map. The publication-metadata section now states the incoming-frame precedence: a frame's own string `topic` wins over the fallback channel, and a nested `publication.data` is unwrapped only for an envelope, a direct transport, or a metadata-carrying frame — so a payload published through a fallback-channel transport that itself carries a top-level string `topic` is re-routed to that value.
+
+### Dependencies
+
+- **`centrifuge` 5.7.4 → 5.8.0** (a dev/test-side bump; the optional peer range stays `^5.5.3`). 5.8.0 is a reliability minor with no API removals. The claims the shipped docs pin were re-verified against the installed 5.8.0 before the pin moved: `getToken` is still the only client-level credential hook and `getChannelToken` still appears nowhere in the package (the gate in `tests/documentation.test.ts` enforces both against the new pin), and the token-shape argument in `CentrifugeSession`'s listener note holds unchanged (`_canSubscribeWithoutGettingToken` reads `!_usesToken() || !!_token`, option handling is `if (options.token)`, `_refresh` assigns whatever `getToken` resolved with). What did change is re-derived at the site: `BaseSubscription`'s body now holds **eight** `emit('error')` sites (was twelve), `Subscription.emit` catches an escaping throw and routes it to `_handlerFailed` — so a listener-less emit is a client-stopping handler failure rather than an unhandled exception — and the SDK now ships its original source in `dist/centrifuge.js.map`'s `sourcesContent`, which the note cites instead of build substrings, because it is the artifact a reader can actually open.
+
 ## [0.21.58] - 2026-10-30
 
 A small patch that clears the one debt `0.21.57` left behind, plus the dependency batch. No public API, export, default, frame or storage key changes; the only emitted-code delta is the removal of a guard term that could never decide anything, so behaviour is unchanged. The coverage denominators move by that one removed branch and nothing else.

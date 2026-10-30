@@ -35,7 +35,7 @@ interface PendingTokenRequest {
 
 /** Centrifuge client options for token-bridge mode: the structured-clone-safe
  * subset plus the function-valued credential hooks this session installs.
- * Against the pinned SDK (5.7.4) `getToken` is the only one that is a real
+ * Against the pinned SDK (5.8.0) `getToken` is the only one that is a real
  * client option (the constructor of `centrifuge.js` copies it off the config — the
  * assignment is greppable in the shipped bundle as
  * `e.getToken&&(this._getToken=e.getToken)`, and the same hook serves renewal) —
@@ -173,51 +173,54 @@ export class CentrifugeSession<TData = unknown> {
     // Scoped to the three events this method wires, so the client's own `state`
     // wiring is untouched — but `error` is NOT internal-listener-free: a no-op
     // `error` listener is installed on every subscription precisely
-    // "to avoid unhandled exception in EventEmitter for non-set error handler",
+    // "Avoid unhandled exception in EventEmitter for non-set error handler.",
     // and not by `Subscription` itself — that class body contains no `on('error')`
     // call at all (measured on the pinned copy), so the guard runs in the
     // `BaseSubscription` constructor every subscription reaches through `super`.
-    // (centrifuge 5.7.4, `build/index.js`. The line number this used to cite — 762
-    // — matches neither the pinned copy, where the guard sits at 763-764, nor the
-    // 5.7.0 copy in the store, where it is at 748; whether it drifted or was
-    // mis-copied is not recoverable from here. That is the argument for quoting
-    // the dependency's own comment as the locator instead of a number), and the
-    // bundled emitter throws on an `error` emit with no listener
-    // (`throw er; // Unhandled 'error' event` in the same file).
-    // This call removes that guard,
-    // and the `subscription.on('error', …)` re-installation below puts one back for
-    // as long as this session holds the subscription — three statements later (the
-    // `unsubscribed` removal, the `subscriptions` set, the `publication` wiring), all
-    // of them inside this same synchronous task, so no emit can land in between.
+    // (centrifuge 5.8.0. Line numbers here are read off the ORIGINAL source the
+    // package now ships: `node_modules/centrifuge/dist/centrifuge.js.map`'s
+    // `sourcesContent` carries `../src/subscription.ts` verbatim, so a reader can
+    // open it — the built `dist/centrifuge.js` is mangled, and 5.7.4 shipped no
+    // sources at all, which is why the previous copy quoted build substrings.)
+    // `BaseSubscription`'s body is lines 25–2858 of that file and holds **eight**
+    // `emit('error')` sites (5.7.4 had twelve): `_emitError` (1314), which every
+    // guarded caller reaches through; `_subscribeError`'s expired-token emit (1330),
+    // behind the `_isSubscribing()` test that opens the method; `_getSubscriptionToken`'s
+    // `getToken === null` emit (1491), the one site with no state test of its own; and
+    // five `untrack`-failure emits (1799, 1933, 2019, 2156, 2193) sitting in `.catch()`
+    // continuations of `_sendUntrackRequest` — a shared-poll feature path this session
+    // never enables, because `newSubscription(topic)` constructs a plain `Subscription`
+    // with no options. A second change matters for what a listener-less emit costs:
+    // `Subscription.emit` (1002) now wraps the emitter in try/catch and routes an
+    // escaping throw to `this._centrifuge._handlerFailed(e)` — "An exception escaping a
+    // handler stops the client", its own doc comment says — so the failure mode is no
+    // longer an unhandled exception but a client-stopping handler failure. The
+    // re-installation below puts a listener back for as long as this session holds the
+    // subscription — three statements later (the `unsubscribed` removal, the
+    // `subscriptions` set, the `publication` wiring), all inside this same synchronous
+    // task, so no emit can land in between.
     // `unsubscribe()` removes both — this handler and the constructor's no-op — and
-    // adds nothing back, which is settled rather than open. All twelve `emit('error')`
-    // sites in `BaseSubscription` (its class body is lines 667-2673 of that file, and
-    // the twelve were counted in it) sit behind a
-    // `_isSubscribing()`/`_isSubscribed()` test except one: the `getToken === null`
-    // emit in `_getSubscriptionToken`. Calling it "the `badConfiguration` emit" is
-    // ambiguous and this note used to — that code is shared with the guarded
-    // `_handleGetDataError` emit, so it identifies neither site on its own. And after
-    // `_setUnsubscribed` has moved `state` to `Unsubscribed` no path re-enters it
-    // — the resubscribe timer's callback re-tests `_isSubscribing()` before it
-    // does anything, the client's reconnect pass (`_sendSubscribeCommands`)
-    // drives only subscriptions whose state is already `Subscribing`, and
+    // adds nothing back, which is settled rather than open. After `_setUnsubscribed`
+    // has moved `state` to `Unsubscribed` no path re-enters the token-null emit: the
+    // resubscribe timer's callback re-tests `_isSubscribing()` before it does anything
+    // (1302), the client's reconnect pass drives only subscriptions whose state is
+    // already `Subscribing` (`src/centrifuge.ts` in the same sourcemap, 2298), and
     // `_refresh()` is reachable only through `_refreshTimeout`, which
-    // `_setUnsubscribed` clears via `_clearSubscribedState()`. What singles
-    // `_refresh()` out among the four `_getSubscriptionToken()` call sites is *not*
-    // the absence of a state test — an earlier draft of this note said "the one entry
-    // with no state test of its own", and `_subscribe()`, `_loadStreamState()`'s
-    // `_getState().then(…)` continuation and `_mapSubscribe()` reach their calls with
-    // none above them either. It is the `if` each of those three is the `else` of:
-    // `_canSubscribeWithoutGettingToken()` reads `!_usesToken() || !!_token`, so
-    // entering the else needs `_usesToken()` true with a falsy `_token`; every falsy
+    // `_setUnsubscribed` clears via `_clearSubscribedState()` (1066 → 472).
+    // The 1491 exclusion still runs through the token, not the state: the three
+    // `_getSubscriptionToken()` call sites that have no state test above them
+    // (`_subscribe()`, `_loadStreamState()`'s `_getState().then(…)` continuation and
+    // `_mapSubscribe()`) reach their calls as the `else` of
+    // `_canSubscribeWithoutGettingToken()` (741), which reads `!_usesToken() || !!_token`,
+    // so entering the else needs `_usesToken()` true with a falsy `_token`; every falsy
     // value the class itself writes there is `''` (its option handling is
-    // `if (options.token)`), and for `''` the `_usesToken()` half is exactly
+    // `if (options.token)`, 1391), and for `''` the `_usesToken()` half is exactly
     // `_getToken !== null`, which the emit's own `if (getToken === null)` refutes. So
     // the exclusion runs through the token, not the state — and through one of the
-    // token's writers: `_refresh` assigns `self._token = token` whatever an application
-    // `getToken` resolved with, so a falsy value that is not `''` would put a wrapped
-    // call back in reach of the emit. A throw still needs the listeners gone while the
-    // object is still live, and `unsubscribe()` does not leave it live.
+    // token's writers: `_refresh` assigns `self._token = token` (1523) whatever an
+    // application `getToken` resolved with, so a falsy value that is not `''` would put
+    // a wrapped call back in reach of the emit. A throw still needs the listeners gone
+    // while the object is still live, and `unsubscribe()` does not leave it live.
     // `MapSubscription` and
     // `SharedPollSubscription` have their own emit sites but never carry this
     // session's listeners — `newSubscription` constructs a plain `Subscription`.

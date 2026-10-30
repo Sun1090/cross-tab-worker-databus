@@ -1,6 +1,6 @@
 {
   "name": "cross-tab-worker-databus",
-  "version": "0.21.58",
+  "version": "0.21.59",
   "description": "Framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering and Centrifuge support.",
   "type": "module",
   "license": "MIT",
@@ -132,7 +132,7 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.5",
-    "centrifuge": "^5.7.4",
+    "centrifuge": "^5.8.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "fake-indexeddb": "^6.2.6",
