@@ -10211,6 +10211,17 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Changed files:** `src/core/cluster.ts`, `tests/cluster.test.ts` (+1 case), `AGENTS.md`, `docs/progress.md` (this record).
 - **A release is owed**: `src/` ships; `AGENTS.md` and `progress.md` do not, but the same commit rides the batch with Phase 306/307.
 
+## Phase 309 / The duplicate-tab guard ran in a browser for the first time, and the reload half with it
+
+- **Milestone / version:** post-`0.21.56`, unreleased. Branch `test/e2e-duplicated-tab-identity`.
+- **Why it was owed.** Phases 306 and 307 are pinned with fake environments and injected `tabId`s, and the probe's whole premise is browser state: a copied `sessionStorage`, **no** opener, and a live `localStorage` Worker record that the copy cannot carry. Headless Chromium cannot perform the UI's Duplicate tab, but it can replay it faithfully — a second page whose `addInitScript` seeds the first page's stored id *before any page script runs*.
+- **The case asserts three things, and the second exists so the first cannot pass for the wrong reason.** (a) The copy's `currentWorker.tabId` differs from the original's; (b) the original is a **live peer** in the copy's cluster snapshot, so the difference is coordination rather than isolation — a copy that had silently fallen out of coordination would satisfy (a) trivially; (c) `reload()` of the original keeps its id, which is the refresh half of the rule (`pause()` removes and flushes the departing record, so the stored value is unclaimed).
+- **Mutant.** Deleting the `isIdentityClaimedByPeer` wiring from the constructor and rebuilding — the E2E runs against `dist/`, so a source-only mutant would test the previous bundle — fails exactly `expect(copyTabId).not.toBe(originalTabId)`, with the original's id in the message. Restored, rebuilt, and `git status` left holding only the spec.
+- **One local red, kept with its name and its numbers.** The first full-suite run failed `concurrent multi-publisher burst stays duplicate-free across all tabs` (expected 9, received 8, 45 s predicate) at load averages **11.4 / 15.0 / 16.0** — the exact spec this file already records as the shared-runner flake. It passed `--repeat-each=2` twice in isolation (4.2 s / 3.8 s), and the next full-suite run passed **39/39 (29.4 s)** at 9.3 / 14.1 / 15.6. Adjudication belongs to CI's `browser` job on this commit, per the standing rule, not to a third local run.
+- **Verification:** `pnpm check` 0 — 40 files / **1056 tests**, 5/5 perf; `pnpm lint` 0; `pnpm test:e2e` **39 passed** (was 38); `git diff --check` clean.
+- **Changed files:** `e2e/demo.spec.ts` (one case plus the snapshot fields its `Window` type needed), `docs/progress.md` (this record).
+- **No release is owed by this change** — `e2e/` is outside `files`. The batch's release debt remains Phases 306–308.
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
