@@ -148,7 +148,7 @@ examples/                       # demo/ (vanilla), react/, vue/ — `pnpm build:
 ```
 cross-tab-worker-databus:{clusterHash}:worker:{workerId}
 cross-tab-worker-databus:{clusterHash}:route:{topicKey}
-cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
+cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{workerId}
 ```
 
 `clusterHash` = `createOpaqueKey(clusterKey)`. Topic plaintext never appears in localStorage keys. BroadcastChannel control messages carry topic plaintext in memory only.

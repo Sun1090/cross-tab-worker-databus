@@ -264,11 +264,11 @@ Worker 模式下配置通过 `Worker` / `SharedWorker` 的 `postMessage` 发送�
 
 ## storage 数据边界
 
-本库亲自写入的协调记录——`{clusterHash}:worker:{workerId}`、`{clusterHash}:route:{topicKey}`、`{clusterHash}:subscriber:{topicKey}:{tabId}` 以及 tab-id 键——只保存：
+本库亲自写入的协调记录——`{clusterHash}:worker:{workerId}`、`{clusterHash}:route:{topicKey}`、`{clusterHash}:subscriber:{topicKey}:{workerId}` 以及 tab-id 键——只保存：
 
 - Worker 与 Tab 身份、角色、状态、可见性、代表持有 Topic 数量的 `load`、可选的滚动吞吐样本、广播出去的协议版本，以及心跳与首次注册的时间戳
 - Topic 的不透明 key、其 owner 的 Worker 与 Tab 身份、最后更新时间与 generation，以及优雅交接期间的上一任 owner 和 owner 的确认时间
-- subscriber 记录的 Tab ID 与它的最后更新时间
+- subscriber 记录的 Tab ID、该 Runtime 的 Worker ID（旧版本写入的记录没有这一项）与它的最后更新时间
 - Tab 自己的持久化 id——正是它让刷新后的页面能认领回自己的 route；它写在 `sessionStorage`，不在本集群的 `localStorage` 命名空间里
 
 这些记录里永远不会出现：

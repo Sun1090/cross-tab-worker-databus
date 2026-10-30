@@ -340,9 +340,11 @@ export function canUseStorage(storage: StorageLike | null, probeKey: string): st
  * one of them should keep it. A refresh (or a session restore) re-enters the
  * *same* tab: nothing else is using the value, so it is reused. A tab the
  * browser opened or duplicated is a *second* live document holding a copy, and
- * two of them must not present one identity — subscriber records are keyed by
- * `tabId`, so the copy would overwrite the original's records on every write
- * and delete them on unsubscribe.
+ * two of them must not present one identity. The coordination plane does not
+ * distinguish them by subscriber *keys* (those are per Runtime, see
+ * `writeSubscriber()`), so a shared id does not lose a subscription — it makes
+ * a false one: the public snapshot, the diagnostics and the tab-level
+ * subscriber aggregation all report two documents as one.
  *
  * `window.open()` is visible (`window.opener`), but the browser's own
  * "Duplicate tab" is not: it copies sessionStorage with no opener at all. That

@@ -98,10 +98,10 @@ BroadcastChannel 消息以明文传输 Topic 名称、事件类型和 publicatio
 ```text
 cross-tab-worker-databus:{clusterHash}:worker:{workerId}
 cross-tab-worker-databus:{clusterHash}:route:{topicKey}
-cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{tabId}
+cross-tab-worker-databus:{clusterHash}:subscriber:{topicKey}:{workerId}
 ```
 
-与旧的单 JSON 路由表不同，subscriber 使用按 Tab 独立的 key。当 Tab A 和 Tab B 并发订阅/退订时，它们不会对同一个 `subscribers[]` 做读-改-写，从结构上降低丢失更新的概率。
+与旧的单 JSON 路由表不同，subscriber 使用**每个 Runtime** 一条独立 key——是 `workerId` 而不是 `tabId`，因为一个 document 可以运行多个共享同一 Tab 的 Runtime。当 Tab A 和 Tab B 并发订阅/退订时，它们不会对同一个 `subscribers[]` 做读-改-写，从结构上降低丢失更新的概率；同一 Tab 内两个 Runtime 之一退订时，删除的也只是它自己的记录，兄弟 Runtime 的 route 与 transport 订阅继续有效。
 
 ### Worker 记录
 
@@ -182,7 +182,7 @@ topic
   └─ createOpaqueKey(topic) → topicKey
        ├─ route:{topicKey}
        │    └─ workerId / tabId / generation / confirmedAt
-       └─ subscriber:{topicKey}:{tabId}
+       └─ subscriber:{topicKey}:{workerId}
 
 BroadcastChannel CONTROL
   └─ topic + topicKey + sourceWorkerId + targetWorkerId + action
@@ -252,7 +252,7 @@ sequenceDiagram
 
   App->>RuntimeA: subscribe(topic, handler)
   RuntimeA->>RuntimeA: 计算 topicKey
-  RuntimeA->>Storage: 写 subscriber:{topicKey}:{tabId}
+  RuntimeA->>Storage: 写 subscriber:{topicKey}:{workerId}
   RuntimeA->>Storage: 读取或创建 route:{topicKey}
   RuntimeA->>Channel: CONTROL/SUBSCRIBE(topic, topicKey, targetWorkerId)
   Channel->>RuntimeB: 投递控制消息
@@ -266,7 +266,7 @@ sequenceDiagram
   RuntimeA->>App: 调用 handler(payload)
 ```
 
-第二个 Tab 订阅同一 Topic 时，只新增自己的 `subscriber:{topicKey}:{tabId}`；只要现有 route 的 owner 仍存活，就不会再次建立一条 transport 订阅。退订时删除当前 Tab 的 subscriber 记录；若它已是最后一条，同一个 Tab 顺带删除 route，并向 route 记录的 worker 发出 `CONTROL/UNSUBSCRIBE`——收到的一方就此放弃 ownership 并释放 transport 订阅。
+第二个 Tab 订阅同一 Topic 时，只新增自己的 `subscriber:{topicKey}:{workerId}`；只要现有 route 的 owner 仍存活，就不会再次建立一条 transport 订阅。退订时删除当前 Runtime 的 subscriber 记录；若它已是最后一条，同一个 Runtime 顺带删除 route，并向 route 记录的 worker 发出 `CONTROL/UNSUBSCRIBE`——收到的一方就此放弃 ownership 并释放 transport 订阅。
 
 ### 控制台排查
 
@@ -313,7 +313,7 @@ console.table(__bus.getClusterSnapshot().routes)
 | `knownTopics` | `WorkerClusterRuntime` | `topicKey` | 明文 `topic` | FIFO 扫描上限 500，会跳过持有的 key 与本次正在记忆的 key，因此所有条目都被持有时上限会失守 | 反查缓存；也是无 storage 模式下明文的唯一来源 |
 | 存储 `worker:` | 持久化 | `clusterHash:…:worker:{workerId}` | JSON `WorkerRecord` | 心跳刷新；超过 `workerTtlMs` 被清理 | 跨 Tab 存活发现 |
 | 存储 `route:` | 持久化 | `clusterHash:…:route:{topicKey}` | JSON `WorkerRoute` | 由订阅方创建/盖章；无订阅者且 TTL 过期时清理 | 跨 Tab owner 映射 |
-| 存储 `subscriber:` | 持久化 | `clusterHash:…:subscriber:{topicKey}:{tabId}` | JSON `TopicSubscriberRecord` | 每次 Tab 订阅写入；Tab 死亡时清理 | 跨 Tab 订阅意图 |
+| 存储 `subscriber:` | 持久化 | `clusterHash:…:subscriber:{topicKey}:{workerId}` | JSON `TopicSubscriberRecord` | 每次 Runtime 订阅写入；该 Runtime 死亡时清理（旧版按 Tab 落键的记录随 Tab 清理） | 跨 Tab 订阅意图 |
 
 **三种内存 Topic 形态的关系**（`knownTopics` ↔ `assignedTopics` ↔ 四个明文集合）：
 
@@ -388,7 +388,7 @@ sequenceDiagram
 
   App->>Bus: subscribe(topic, handler)
   Bus->>Bus: 当前 Tab 第一个 handler？
-  Bus->>Route: 写 subscriber:{topicKey}:{tabId}
+  Bus->>Route: 写 subscriber:{topicKey}:{workerId}
   Route-->>Bus: 当前 owner
   alt owner 不存在或无效
     Bus->>Route: 写最低负载 owner
@@ -416,7 +416,7 @@ sequenceDiagram
 应用层: subscribe(topic, handler)
   → topicHandlers 0→1
     → cluster.subscribe(topic) → subscribedTopics.add(topic)
-      → 写 subscriber:{topicKey}:{tabId}
+      → 写 subscriber:{topicKey}:{workerId}
       → readRoute(topicKey)
         → 无 route: 选择最低负载 Worker，写 route，sendControl(SUBSCRIBE)
           → owner 收到 CONTROL/SUBSCRIBE
@@ -452,7 +452,7 @@ sequenceDiagram
 2. owner 执行 `transport.publish(topic, data)`。由于只有 owner 持有该 Topic 的真实 transport 订阅，服务器只会把这条 publication 回推给唯一一个 Worker。
 3. owner 仅当 `isAssigned(topic)` 仍成立时才接受该 publication；过期 owner 的陈旧消息被丢弃——保证扇出路径只有单一消息源。
 4. owner 通过 BroadcastChannel 广播 `EVENT/DATABUS_PUBLICATION`；自身 Tab 也有本地订阅时直接分发一次。BroadcastChannel 从不把消息回传给发送者，因此不会重复分发。
-5. 其余每个 Tab 收到 `EVENT` 后，仅当自己持有该 Topic 的 `subscriber:{topicKey}:{tabId}` 记录时才调用本地 handler；没有本地订阅的 Tab 直接丢弃。
+5. 其余每个 Tab 收到 `EVENT` 后，仅当自己的订阅意图覆盖该 Topic 时才调用本地 handler——这道门读的是内存中的订阅集合，而 `subscriber:{topicKey}:{workerId}` 记录只是告诉其他 peer 这份意图存在；没有本地订阅的 Tab 直接丢弃。
 
 可选的 publication 元数据（`messageId` 与 `timestamp`）与 payload 走同一条路径：`CONTROL/PUBLISH` → transport/服务器 → `DataBusMessage` → `EVENT` 扇出。它不会写入协调存储。各 transport 会在三处分发门之前，把旧 payload 格式与标准 `DataBusPublicationEnvelope` 统一规范化。
 
@@ -493,7 +493,7 @@ SDK 当前刻意不在 Service Worker 中承载实时 transport。Service Worker
 
 1. **`isAssigned(topic)`** — 在 owner Worker 上检查（`handleTransportMessage`）。如果该 topic 已不再分配给此 worker（比如前一个 ownership 窗口的过期消息），立即丢弃。这是外层关卡：防止非 owner 广播。
 2. **`broadcastEvent('DATABUS_PUBLICATION', message)`** — 仅当 `isAssigned` 通过后调用。owner Worker 通过 BroadcastChannel `EVENT` 将消息扇出到所有 Tab。每个 Tab 收到事件但暂不分发——必须通过内层关卡。
-3. **`hasLocalSubscriber(topic)`** — 在收到 `EVENT` 的每个 Tab 上检查。仅当该 Tab 有该 topic 的本地 subscriber 记录时才调用已注册的 handler。无本地订阅的 Tab 静默丢弃。
+3. **`hasLocalSubscriber(topic)`** — 在收到 `EVENT` 的每个 Tab 上检查。它读的是内存中的订阅集合（含通配 pattern），不是持久化的 subscriber 记录；仅当自己的订阅覆盖该 topic 时才调用已注册的 handler。无本地订阅的 Tab 静默丢弃。
 
 这三道关卡提供的是**每次已接受的 transport publication 至多扇出一次**：
 - 外层关卡（`isAssigned`）防止过期 owner 重复广播。

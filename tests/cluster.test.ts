@@ -4513,6 +4513,133 @@ describe('WorkerClusterRuntime documented defaults', () => {
   });
 });
 
+describe('sibling runtimes in one tab', () => {
+  it('keeps the other runtime subscribed when one of them unsubscribes', async () => {
+    // A document may create more than one DataBus (the documented market +
+    // notice pattern), and both Runtimes share one `tabId` on purpose. A
+    // subscriber record keyed by that tab therefore belongs to *both* of them:
+    // whichever unsubscribes first deletes the other's record, the route looks
+    // orphaned, and the owner drops its transport subscription — a delivery gap
+    // that lasts until the survivor's next reconcile tick re-elects an owner.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'siblings' });
+    const handlers = () => ({ onControl: vi.fn(), onEvent: vi.fn() });
+    const market = new WorkerClusterRuntime({
+      clusterKey: 'sibling-runtimes',
+      environment: env.environment,
+      tabId: 'tab-sibling',
+      workerId: 'worker-market',
+      handlers: handlers()
+    });
+    const notice = new WorkerClusterRuntime({
+      clusterKey: 'sibling-runtimes',
+      environment: env.environment,
+      tabId: 'tab-sibling',
+      workerId: 'worker-notice',
+      handlers: handlers()
+    });
+    const subscriberKeys = () =>
+      storage.entries().filter(([key]) => key.includes(':subscriber:')).map(([key]) => key);
+    const routeKeys = () => storage.entries().filter(([key]) => key.includes(':route:')).map(([key]) => key);
+
+    market.start();
+    notice.start();
+    await Promise.resolve();
+    market.subscribe('shared-topic');
+    notice.subscribe('shared-topic');
+    await Promise.resolve();
+    expect(subscriberKeys(), 'both runtimes register a subscriber').toHaveLength(2);
+
+    market.unsubscribe('shared-topic');
+    await Promise.resolve();
+
+    expect(subscriberKeys(), "the sibling's subscriber record must survive").toHaveLength(1);
+    expect(routeKeys(), 'and so must the route it keeps alive').toHaveLength(1);
+
+    market.stop();
+    notice.stop();
+  });
+
+  it('honours a legacy tab-keyed subscriber record while its tab lives', async () => {
+    // Records written before the per-Runtime key existed carry no `workerId`.
+    // The sweep still honours them by the finest identity they have — the tab —
+    // so an older peer keeps its subscriptions across an upgrade, and they are
+    // pruned as soon as that tab is gone.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'legacy' });
+    const handlers = () => ({ onControl: vi.fn(), onEvent: vi.fn() });
+    const local = new WorkerClusterRuntime({
+      clusterKey: 'legacy-subscriber',
+      environment: env.environment,
+      tabId: 'tab-local',
+      workerId: 'worker-local',
+      handlers: handlers()
+    });
+    const peer = new WorkerClusterRuntime({
+      clusterKey: 'legacy-subscriber',
+      environment: env.environment,
+      tabId: 'tab-peer',
+      workerId: 'worker-peer',
+      handlers: handlers()
+    });
+    local.start();
+    peer.start();
+    await Promise.resolve();
+
+    const base = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('legacy-subscriber')}`;
+    const peerRecord = `${base}:subscriber:${createOpaqueKey('legacy-topic')}:tab-peer`;
+    const deadRecord = `${base}:subscriber:${createOpaqueKey('legacy-topic')}:tab-dead`;
+    storage.setItem(peerRecord, JSON.stringify({ tabId: 'tab-peer', updatedAt: 1_000 }));
+    storage.setItem(deadRecord, JSON.stringify({ tabId: 'tab-dead', updatedAt: 1_000 }));
+
+    env.runIntervals();
+    await Promise.resolve();
+
+    const keys = storage.entries().map(([key]) => key);
+    expect(keys, 'a legacy record whose tab is still live survives the sweep').toContain(peerRecord);
+    expect(keys, 'a legacy record whose tab is gone is pruned').not.toContain(deadRecord);
+
+    local.stop();
+    peer.stop();
+  });
+
+  it('prunes a subscriber record whose Runtime is gone even while its tab lives', async () => {
+    // The rule the key change buys: liveness is per Runtime. A record naming a
+    // `workerId` that no longer has a Worker record is stale even though its
+    // `tabId` is still active — which is exactly the state a crashed sibling
+    // Runtime leaves, and the state that used to be invisible when the sweep
+    // only asked about tabs.
+    const storage = new MemoryStorage();
+    const hub = new ChannelHub();
+    const env = createFakeEnvironment({ storage, hub, now: () => 1_000, randomId: 'worker-sweep' });
+    const runtime = new WorkerClusterRuntime({
+      clusterKey: 'worker-keyed-sweep',
+      environment: env.environment,
+      tabId: 'tab-survivor',
+      workerId: 'worker-survivor',
+      handlers: { onControl: vi.fn(), onEvent: vi.fn() }
+    });
+    runtime.start();
+    await Promise.resolve();
+
+    const base = `${DEFAULT_STORAGE_PREFIX}:${createOpaqueKey('worker-keyed-sweep')}`;
+    const orphan = `${base}:subscriber:${createOpaqueKey('swept-topic')}:worker-gone`;
+    storage.setItem(orphan, JSON.stringify({ tabId: 'tab-survivor', workerId: 'worker-gone', updatedAt: 1_000 }));
+
+    env.runIntervals();
+    await Promise.resolve();
+
+    expect(
+      storage.entries().map(([key]) => key),
+      "a dead Runtime's record goes even though its tab is alive"
+    ).not.toContain(orphan);
+
+    runtime.stop();
+  });
+});
+
 describe('duplicated-tab identity', () => {
   const TAB_ID_KEY = 'cross-tab-worker-databus:tab-id';
 

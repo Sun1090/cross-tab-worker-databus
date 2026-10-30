@@ -273,11 +273,11 @@ When non-clonable data is passed, `CentrifugeWorkerTransport` will throw a clear
 
 ## Storage Data Boundaries
 
-The coordination records this library writes itself — `{clusterHash}:worker:{workerId}`, `{clusterHash}:route:{topicKey}`, `{clusterHash}:subscriber:{topicKey}:{tabId}`, and the tab-id key — hold only:
+The coordination records this library writes itself — `{clusterHash}:worker:{workerId}`, `{clusterHash}:route:{topicKey}`, `{clusterHash}:subscriber:{topicKey}:{workerId}`, and the tab-id key — hold only:
 
 - Worker and Tab identity, role, status, visibility, the owned-topic `load` figure, an optional rolling throughput sample, the advertised protocol version, and the heartbeat / first-registration timestamps
 - The opaque Topic key, its owner's Worker and Tab identity, the last-update and generation numbers, and — during a graceful handoff — the previous owner and the owner's confirmation timestamp
-- A subscriber record's Tab ID and its last-update timestamp
+- A subscriber record's Tab ID, the Runtime's Worker ID (absent in a record written by an older version), and its last-update timestamp
 - The tab's own persisted id, which is what lets a reload reclaim its routes — written to `sessionStorage`, not to the cluster's `localStorage` namespace
 
 Those records never hold:
