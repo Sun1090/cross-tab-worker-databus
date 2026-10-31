@@ -22,9 +22,9 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { DependencyList } from 'react';
-import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
-import type { DataBusMessage, WorkerStatus } from './core/types';
-import { WORKER_STATUS } from './utils/constants';
+import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus.js';
+import type { DataBusMessage, WorkerStatus } from './core/types.js';
+import { WORKER_STATUS } from './utils/constants.js';
 
 /**
  * Create a CrossTabDataBus for the component's lifetime.

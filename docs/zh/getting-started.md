@@ -26,6 +26,8 @@ pnpm add cross-tab-worker-databus
 
 包同时发布 ESM 与 CommonJS 双格式：`import` 与 `require()`（`dist/cjs`）均可直接使用，CJS bundler 配置无需额外处理。
 
+TypeScript 声明覆盖这两种格式，且每次发布都会用打包产物在三种解析模式下实测：`bundler`，以及 `node16`/`nodenext` 下分别由 ESM 消费者和 CommonJS 消费者各测一次，全部使用 `skipLibCheck: false`——也就是说严格项目无需假设「库的类型会被跳过」即可解析。后两种模式正是声明内部相对导入必须带显式 `.js` 扩展名的原因。
+
 在浏览器中以 CommonJS 使用 Centrifuge 入口时，如果 bundler 不保留 `import.meta.url`，请显式提供 `workerFactory`（或 `sharedWorkerFactory`）；默认的模块相对 Worker URL 仅在 ESM 产物中可用。
 
 ```ts

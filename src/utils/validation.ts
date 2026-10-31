@@ -15,10 +15,10 @@ import type {
   DataBusDedupOptions,
   DataBusPersistenceRetryOptions,
   DataBusReplayOptions
-} from '../core/data-bus';
-import type { LoadWeightingOptions } from '../core/types';
-import { describeFailure } from './error-utils';
-import { PRUNE_STRATEGY } from './constants';
+} from '../core/data-bus.js';
+import type { LoadWeightingOptions } from '../core/types.js';
+import { describeFailure } from './error-utils.js';
+import { PRUNE_STRATEGY } from './constants.js';
 
 // The three numeric predicates below share one guard shape — a `typeof` test first,
 // then a type-checking `Number.is*` predicate, then the sign — and each operand was

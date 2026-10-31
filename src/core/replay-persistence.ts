@@ -1,8 +1,8 @@
-import type { DataBusMessage } from './types';
-import { createOpaqueKey } from './hash';
-import { pruneReplayHistory } from './replay-pruning';
-import { DEFAULT_STORAGE_PREFIX, PRUNE_STRATEGY } from '../utils/constants';
-import { assertPositiveFiniteNumber, assertPositiveSafeInteger, assertPruneStrategy } from '../utils/validation';
+import type { DataBusMessage } from './types.js';
+import { createOpaqueKey } from './hash.js';
+import { pruneReplayHistory } from './replay-pruning.js';
+import { DEFAULT_STORAGE_PREFIX, PRUNE_STRATEGY } from '../utils/constants.js';
+import { assertPositiveFiniteNumber, assertPositiveSafeInteger, assertPruneStrategy } from '../utils/validation.js';
 
 /** Optional persistence backend for replay history. */
 export interface DataBusReplayPersistence<TData = unknown> {

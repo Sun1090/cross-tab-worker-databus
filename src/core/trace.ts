@@ -6,7 +6,7 @@
  * error) and periodic metrics summaries. The sink is decoupled from the hot
  * message path — errors in the sink are isolated to console.warn.
  */
-import type { WorkerStatus } from './types';
+import type { WorkerStatus } from './types.js';
 import type {
   PERSISTENCE_OPERATION,
   RECOVERY_OUTCOME,
@@ -14,12 +14,12 @@ import type {
   SUBSCRIPTION_ACTION,
   TRACE_ERROR_SOURCE,
   TRACE_LIFECYCLE_ACTION
-} from '../utils/constants';
+} from '../utils/constants.js';
 import {
   DEFAULT_STORAGE_PREFIX,
   TRACE_EVENT_TYPE,
   TRACE_MODE
-} from '../utils/constants';
+} from '../utils/constants.js';
 
 /** Trace reporting mode: record only events, only metrics, or both. */
 /** Selects which trace categories the reporter emits.

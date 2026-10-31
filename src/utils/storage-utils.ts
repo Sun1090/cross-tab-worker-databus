@@ -5,7 +5,7 @@
  * listKeys/readAllByPrefix 四处搬到此文件，协调层与快照逻辑共用同一套
  * 容错语义（损坏 JSON 视为不存在、写失败不抛出）。
  */
-import type { StorageLike } from '../core/environment';
+import type { StorageLike } from '../core/environment.js';
 
 /** Parse a JSON value from storage, returning null on malformed or missing data.
  * Never throws — a corrupt record is treated as absent so the reconcile cycle

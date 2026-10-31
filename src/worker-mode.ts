@@ -8,7 +8,7 @@
  * The literal values are derived from `utils/constants.ts` so the preference and
  * resolved-backend strings referenced across the transport stay in one place.
  */
-import { WORKER_BACKEND, WORKER_MODE } from './utils/constants';
+import { WORKER_BACKEND, WORKER_MODE } from './utils/constants.js';
 
 /** Preferred Worker mode.
  * - `dedicated` → try Dedicated Worker first (one WebSocket per tab).

@@ -20,14 +20,14 @@
  * that is `suspend()` alone, see the field's own note — and is swallowed by the
  * DataBus's persistence error sink so teardown never surfaces noise.
  */
-import { isWildcardTopic, topicMatchesPattern } from './routing';
-import { pruneReplayHistory } from './replay-pruning';
-import type { DataBusReplayPersistence } from './replay-persistence';
-import type { DataBusTraceReporter } from './trace';
-import type { DataBusMessage, DataBusMessageHandler } from './types';
-import { approximatePayloadBytes } from './routing';
-import { PERSISTENCE_OPERATION, RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';
-import type { PRUNE_STRATEGY } from '../utils/constants';
+import { isWildcardTopic, topicMatchesPattern } from './routing.js';
+import { pruneReplayHistory } from './replay-pruning.js';
+import type { DataBusReplayPersistence } from './replay-persistence.js';
+import type { DataBusTraceReporter } from './trace.js';
+import type { DataBusMessage, DataBusMessageHandler } from './types.js';
+import { approximatePayloadBytes } from './routing.js';
+import { PERSISTENCE_OPERATION, RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants.js';
+import type { PRUNE_STRATEGY } from '../utils/constants.js';
 
 /** Thrown when a lifecycle transition cancels an in-flight persistence retry. */
 export class PersistenceRetryCancelledError extends Error {

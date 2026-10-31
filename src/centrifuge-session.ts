@@ -6,7 +6,7 @@
  * a SharedWorker port, or directly on the main thread as a local fallback.
  */
 import { Centrifuge } from 'centrifuge';
-import { parseDataBusPublication } from './core/publication';
+import { parseDataBusPublication } from './core/publication.js';
 import type {
   PublicationContext,
   StateContext,
@@ -17,10 +17,10 @@ import type {
   CentrifugeWorkerConfig,
   CentrifugeWorkerInput,
   CentrifugeWorkerOutput
-} from './centrifuge-protocol';
-import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, WORKER_STATUS } from './utils/constants';
-import { publicationMetadata } from './utils/metadata';
-import { deserializeWorkerError, serializeError } from './utils/error-utils';
+} from './centrifuge-protocol.js';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, WORKER_STATUS } from './utils/constants.js';
+import { publicationMetadata } from './utils/metadata.js';
+import { deserializeWorkerError, serializeError } from './utils/error-utils.js';
 
 /** Callback interface for posting messages back to the transport layer. */
 export interface CentrifugeSessionSink<TData = unknown> {

@@ -20,10 +20,10 @@
  *   above silently drops those — see `scripts/demo-ws-server.mjs`, which
  *   implements both directions.
  */
-import { CrossTabDataBus } from './core/data-bus';
-import { parseDataBusPublication } from './core/publication';
-import type { CrossTabDataBusOptions } from './core/data-bus';
-import { WS_OP, WORKER_STATUS } from './utils/constants';
+import { CrossTabDataBus } from './core/data-bus.js';
+import { parseDataBusPublication } from './core/publication.js';
+import type { CrossTabDataBusOptions } from './core/data-bus.js';
+import { WS_OP, WORKER_STATUS } from './utils/constants.js';
 import type {
   DataBusTransport,
   DataBusTransportHandlers,
@@ -32,7 +32,7 @@ import type {
   DataBusMessage,
   MaybePromise,
   WorkerStatus
-} from './core/types';
+} from './core/types.js';
 
 /** Minimal WebSocket surface used by the transport. Matches the browser
  * `WebSocket` subset the transport touches; injectable for tests and runtimes. */

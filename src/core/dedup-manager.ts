@@ -15,8 +15,8 @@
  * "no state, no timer", not "no instance" — one empty Map is still allocated by
  * the field initialiser.
  */
-import type { DataBusTraceReporter } from './trace';
-import { RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants';
+import type { DataBusTraceReporter } from './trace.js';
+import { RELIABILITY_OPERATION, TRACE_EVENT_TYPE } from '../utils/constants.js';
 
 /** Opt-in bounded duplicate suppression for publications carrying `messageId`. */
 export interface DataBusDedupOptions {

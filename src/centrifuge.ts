@@ -14,27 +14,27 @@
  * `transferable` option is enabled, avoiding structured-clone overhead.
  */
 
-import { CrossTabDataBus } from './core/data-bus';
-import type { CrossTabDataBusOptions } from './core/data-bus';
-import type { DataBusTransport, DataBusTransportHandlers } from './core/types';
-import { CentrifugeSession } from './centrifuge-session';
-import { selectWorkerBackend } from './worker-mode';
-import type { WorkerBackend, WorkerMode } from './worker-mode';
+import { CrossTabDataBus } from './core/data-bus.js';
+import type { CrossTabDataBusOptions } from './core/data-bus.js';
+import type { DataBusTransport, DataBusTransportHandlers } from './core/types.js';
+import { CentrifugeSession } from './centrifuge-session.js';
+import { selectWorkerBackend } from './worker-mode.js';
+import type { WorkerBackend, WorkerMode } from './worker-mode.js';
 import type {
   CentrifugeCredentialProvider,
   CentrifugeWorkerConfig,
   CentrifugeWorkerInput,
   CentrifugeWorkerOutput
-} from './centrifuge-protocol';
-import type { DataBusPublishOptions } from './core/types';
-import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol';
-import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, DEFAULT_STORAGE_PREFIX, WORKER_BACKEND, WORKER_MODE, WORKER_STATUS } from './utils/constants';
-import { deserializeWorkerError, serializeError } from './utils/error-utils';
-import { publicationMetadata } from './utils/metadata';
-import { assertHeartbeatInterval, assertStructuredCloneable } from './utils/validation';
+} from './centrifuge-protocol.js';
+import type { DataBusPublishOptions } from './core/types.js';
+import { DEFAULT_HEARTBEAT_INTERVAL_MS } from './centrifuge-protocol.js';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE, DEFAULT_STORAGE_PREFIX, WORKER_BACKEND, WORKER_MODE, WORKER_STATUS } from './utils/constants.js';
+import { deserializeWorkerError, serializeError } from './utils/error-utils.js';
+import { publicationMetadata } from './utils/metadata.js';
+import { assertHeartbeatInterval, assertStructuredCloneable } from './utils/validation.js';
 
-export type { CentrifugeCredentialProvider, CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol';
-export type { WorkerBackend, WorkerMode } from './worker-mode';
+export type { CentrifugeCredentialProvider, CentrifugeWorkerConfig, SerializedWorkerError } from './centrifuge-protocol.js';
+export type { WorkerBackend, WorkerMode } from './worker-mode.js';
 
 /** WebSocket connection parameters passed to the Centrifuge Worker. */
 export interface CentrifugeDataBusConfig {

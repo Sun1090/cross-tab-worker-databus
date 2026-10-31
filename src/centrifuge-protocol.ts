@@ -11,11 +11,11 @@
  * values and can never drift apart.
  */
 import type { Options } from 'centrifuge';
-import type { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from './utils/constants';
-import type { WorkerStatus } from './core/types';
-import type { SerializedWorkerError } from './utils/error-utils';
+import type { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from './utils/constants.js';
+import type { WorkerStatus } from './core/types.js';
+import type { SerializedWorkerError } from './utils/error-utils.js';
 
-export type { SerializedWorkerError } from './utils/error-utils';
+export type { SerializedWorkerError } from './utils/error-utils.js';
 
 /**
  * Default interval between main-thread PING heartbeats to a SharedWorker. The
