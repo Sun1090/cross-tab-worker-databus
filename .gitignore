@@ -18,3 +18,11 @@ bench-results/
 # `pnpm test:coverage` deletes `coverage/` — both have cost the only copy of a
 # failing run. Untracked and unlinted on purpose; never a commit input.
 .gate-logs/
+
+# WorkBuddy project data: session notes live here and are written by an agent,
+# not by a human editing the repository. It reached a public commit once — via a
+# `git add -A` inside PR #476, which is exactly how it would happen again — and
+# notes are not part of what this package publishes (`files` is a whitelist and
+# never listed it). Untracked on purpose: the directory is still read and
+# written locally, it just is not a commit input.
+.workbuddy/
