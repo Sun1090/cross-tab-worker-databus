@@ -28,7 +28,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Perf gates | `pnpm test:perf` (own step — absolute-ms ceilings need an unscheduled core) |
 | Watch tests | `pnpm test:watch` |
 | E2E test | `pnpm test:e2e` (Playwright, requires `pnpm build` first) |
-| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:pack` (imports every entry from the tarball) |
+| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:types:sensitivity` (mutates the tree in the two ways `verify:types` exists to catch and requires a failure each time — a clean run proves nothing on its own), `pnpm verify:pack` (imports every entry from the tarball) |
 | Dependency audit | `pnpm audit` — a blocking step in CI's verify job, after `bench`. Locally it needs `--registry=https://registry.npmjs.org`: the mirror this repository's npm is configured to serves no audit endpoint, so an unqualified run answers nothing and reads like a clean tree. `pnpm-workspace.yaml` overrides pin the patched ranges; read its output rather than assuming a pass, and note which registry produced it |
 | Micro-bench | `pnpm bench` (vitest bench; CI runs it in the verify job, so a non-zero exit does fail the build, but it asserts no thresholds — the thresholds live in `test:perf` and `bench:compare`) |
 | Browser bench + its gate | `pnpm bench:browser` (builds, then drives a real browser and appends to the untracked `bench-results/` archive) → `pnpm bench:compare --fail-above-pct 50`. Deliberately **local-only**: `bench-results/` is not in git, so no CI step can see the archive. `pnpm bench:trend` regenerates `docs/benchmarks.md` + its zh mirror from that archive |
@@ -462,6 +462,10 @@ The project is feature-complete: follow-up work is verification and deepening of
   in-process object API" — that port is now shipped: `scripts/type-surface.mjs` classifies the installed
   compiler and the two checks drive either the object API or 7's snapshot/handle API through one facade,
   with identical verdicts measured on both (same clean-tree summary, same leak line, same removal line).
+  That agreement is now a gate rather than a claim: `pnpm verify:types:sensitivity` runs in both the 6.x
+  and the 7.x CI job, and it was itself regressed — reverting the alias resolution to the original
+  `getExportSymbol()` makes it exit 1 with "the gate exited 0 on a mutated tree", which is the only
+  evidence that a sensitivity check has any.
   So the only remaining blocker is the peer range above. Do not re-derive it from this paragraph either.
 
 ### Boundary Review Signals

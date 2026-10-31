@@ -48,6 +48,12 @@ jobs:
         # package.json field comparison above can see one dropped from the
         # barrel — or a public signature naming a type no entry exports.
         run: pnpm verify:types
+      - name: Public type surface is still sensitive
+        # A clean run proves nothing by itself: both compiler backends print the
+        # same success line whether they walked the surface or missed it. This
+        # mutates the tree in the two ways the gate exists to catch, requires a
+        # failure each time, and restores the files.
+        run: pnpm verify:types:sensitivity
       - name: Packed consumer smoke
         # Packs the tarball and imports every public subpath as both ESM and
         # CJS, so a broken `files`/`exports` mapping fails here, not on npm.
@@ -122,6 +128,12 @@ jobs:
       - name: Public type surface on TypeScript 7
         # Must print the same summary line as the 6.x run in `verify`.
         run: pnpm verify:types
+      - name: Public type surface is still sensitive on TypeScript 7
+        # The same two mutations as the 6.x job. This is the leg that would have
+        # caught the handle adapter's first alias resolution, which returned the
+        # alias itself and so missed a deliberately leaked type while both trees
+        # reported `surface closed`.
+        run: pnpm verify:types:sensitivity
 
   browser:
     runs-on: ubuntu-latest
