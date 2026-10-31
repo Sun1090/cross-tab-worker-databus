@@ -10591,6 +10591,14 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Two deferrals now stand on their own evidence rather than on a rule.** The browser benchmark was skipped a third time at load averages **14.79 / 22.09 / 20.00 over 8 cores**; the guard that makes this checkable rather than remembered already exists — `readHostLoad()` reads the 1-minute figure *before* the run starts and `loadVerdict()` refuses to trust a report above the ceiling, which is why `docs/benchmarks.md` is still unchanged rather than silently poisoned. TypeScript 7's final move is still blocked on `typescript-eslint` (`8.72.1` peer `>=4.8.4 <6.1.0`), unchanged from the last check.
 - **Changed files:** `docs/progress.md` (this record) only.
 
+## Phase 344 / Session notes were in a public commit, and nothing stopped the next one
+
+- **What was true:** `.workbuddy/memory/2026-10-31.md` — this file's own working notes, written by an agent rather than by a human editing the repository — was **tracked and pushed to a public repository**. It entered through `git add -A` inside PR #476, where the intent was a consumer-type gate; a `-A` cannot tell a source change from a session note. `.gitignore` had no entry for the directory, so the next `-A` would have done it again.
+- **Why it is worth a commit rather than a shrug.** The package never published it (`files` is a whitelist and never listed `.workbuddy`), so no npm consumer was affected — but the repository is public, and working notes contain decisions, dead ends and internal addresses that the shipped docs deliberately do not. The exposure is one-directional: a public commit cannot be un-published by a later one.
+- **Fix:** `.gitignore` gains `.workbuddy/` with the reason inline, and `git rm -r --cached` drops it from the index while the directory stays on disk and stays writable — the notes are still read and written locally, they are just not a commit input. The `.gate-logs/` entry directly above it is the same shape of decision, recorded the same way.
+- **Deliberately not rewritten:** purging the blob from history means rewriting every commit behind **174 tags** of a published package, and the content holds no credential (scanned for tokens, keys, passwords and addresses; the single hit is prose about `git show`). History keeps it; the rule keeps it from growing.
+- **Verification:** `npx vitest run tests/documentation.test.ts tests/publication.test.ts` **39 passed** — the layout gate and the publish-set gate both still pass with the file untracked, which is the pair that would have objected. **Changed files:** `.gitignore`, `.workbuddy/memory/2026-10-31.md` (now untracked), `docs/progress.md` (this record).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
