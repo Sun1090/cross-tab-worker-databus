@@ -1478,12 +1478,12 @@ describe('zero-count ledgers', () => {
     // `data-bus.ts` are deliberately excluded: they change routinely, so a blob pin would be noise,
     // and their ledgers are re-derived on a schedule recorded in docs/progress.md instead.
     const LEDGERS: Record<string, string> = {
-      'src/core/storage-batch.ts': 'a7c91d40c0ddfced0f05c6351008c632515c311b',
-      'src/core/replay-manager.ts': 'a4891657bad14472e4504408d75e8b322af7d073',
-      'src/core/environment.ts': 'e73d4349108ffc4cbce3ce6e43f4a7b64bb94c7b',
-      'src/workers/port-reaper.ts': 'd889c5fed0526e0b5d1c3a6c35e55cfe2245946b',
-      'src/websocket.ts': 'd243b9749974a662bd7e395acaee3d2c8e43e7ce',
-      'src/core/trace.ts': 'b14c35e52175e0e8b47bad4686e2f833deb5e102',
+      'src/core/storage-batch.ts': '80ad0d76749c14b4dc4ff6ba47bc1e7cef635855',
+      'src/core/replay-manager.ts': '5b627287723c2868f4c4867f02a876fd7eafef98',
+      'src/core/environment.ts': 'cd0eb14f870bffb401e6f40e52352c251ca11ef1',
+      'src/workers/port-reaper.ts': '44ec56a1a2fe3b6fc5532ab2da6ccbedf8bed63a',
+      'src/websocket.ts': 'c19fb3cfff0d3cb0779d9c624a895a253516e64a',
+      'src/core/trace.ts': '5e050f0becac5c74020aa24934b69054071e6a0e',
     };
     const stale: string[] = [];
     for (const [file, blob] of Object.entries(LEDGERS)) {
