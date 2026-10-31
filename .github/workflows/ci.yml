@@ -73,25 +73,23 @@ jobs:
 
   typescript-7:
     # `verify:types` has two backends: TypeScript 6's in-process object API and
-    # 7's snapshot/handle API (scripts/type-surface.mjs). Which one runs is
-    # decided by what `import('typescript')` resolves to, and in this repository
-    # that is the 6.0.x alias that typescript-eslint's peer range requires —
-    # `typescript` is `npm:@typescript/typescript6`, while `@typescript/native`
-    # is the 7 package that supplies `tsc` (docs/progress.md Phase 334). So
+    # 7's snapshot/handle API (scripts/type-surface.mjs). The `verify` job runs
+    # the first, because the package named `typescript` is the 6.0.x alias that
+    # typescript-eslint's peer range requires (docs/progress.md Phase 334). So
     # without this job the handle backend is never executed — and a backend that
     # is never executed is a comment, not a gate. That matters concretely: the
     # handle facade's first alias-resolution implementation was wrong in a way
     # that made the closure check miss a deliberately leaked type while the clean
     # tree stayed green on both compilers (docs/progress.md Phase 330).
     #
-    # The compiler is replaced in place rather than installed as a second copy,
-    # because the gate resolves `typescript` as a bare specifier from its own
-    # directory. The swap is scoped to that directory: it does **not** make
-    # typescript-eslint see 7, because pnpm resolves that peer inside its own
-    # virtual store (`typescript-eslint@8.72.1_@typescript+typescript6@6.0.2_…`).
-    # Measured, not assumed — `pnpm lint` still passes after the swap. So this job
-    # is not a rehearsal of the endgame where the alias is dropped entirely; that
-    # one still dies in `pnpm lint` (Phase 334 has the refusal).
+    # This job used to *replace* node_modules/typescript with a real 7 package
+    # built from an `npm install` in a scratch directory, including the
+    # per-platform sibling package. That was fragile twice over — the first run
+    # failed on the missing platform package, and the swap silently left
+    # typescript-eslint on 6 because pnpm resolves that peer per package. Since
+    # Phase 335 the gate takes `--compiler=<specifier>` and the handle facade
+    # imports its three `unstable/*` subpaths through it, so the 7 compiler is
+    # simply the lockfile alias and no directory is mutated.
     runs-on: ubuntu-latest
     needs: verify
     steps:
@@ -110,45 +108,22 @@ jobs:
       - name: Build declarations
         # Emitted by TypeScript 7 here *and* in `verify`: the alias supplies `tsc`
         # 7 in both jobs, so "built on 6.x" is no longer the difference between
-        # them. Kept as its own step because both gates below read `dist/*.d.ts`.
+        # them. Kept as its own step because the gate below reads `dist/*.d.ts`.
         run: pnpm build
-      - name: Swap in TypeScript 7
-        # 7.0.2 is distributed per platform: the `typescript` package alone is
-        # not the compiler, and it resolves `@typescript/typescript-<platform>`
-        # as a sibling. Replacing only node_modules/typescript therefore leaves
-        # the handle API unresolvable — this job's first run failed exactly
-        # there, and the gate's own diagnosis named the missing package instead
-        # of reporting a surface it had not walked.
-        #
-        # npm is used in a scratch directory so it resolves the platform package
-        # itself, and only the two directories are copied into the repository:
-        # running `npm install` against pnpm's node_modules would let npm
-        # recompute an ideal tree over it.
-        run: |
-          mkdir -p "$RUNNER_TEMP/ts7"
-          cd "$RUNNER_TEMP/ts7"
-          npm init -y > /dev/null
-          npm install typescript@7.0.2 --silent
-          cd "$GITHUB_WORKSPACE"
-          rm -rf node_modules/typescript node_modules/@typescript
-          cp -R "$RUNNER_TEMP/ts7/node_modules/typescript" node_modules/typescript
-          cp -R "$RUNNER_TEMP/ts7/node_modules/@typescript" node_modules/@typescript
-          node -p "require('typescript').version"
-          ls node_modules/@typescript
-      - name: Public type surface on TypeScript 7
-        # Must print the same summary line as the 6.x run in `verify`.
-        run: pnpm verify:types
-      - name: Public type surface is still sensitive on TypeScript 7
-        # The same two mutations as the 6.x job. This is the leg that would have
-        # caught the handle adapter's first alias resolution, which returned the
-        # alias itself and so missed a deliberately leaked type while both trees
-        # reported `surface closed`.
-        run: pnpm verify:types:sensitivity
+      - name: Public type surface and its sensitivity, on the 7 backend
+        # One command, two legs: the surface check and the two mutations. Both
+        # must print the same counts as the 6.x run in `verify` — `6 entries, 90
+        # importable names` — while naming their own compiler in the
+        # parenthetical, so a log cannot be attributed to the wrong backend. This
+        # is the leg that would have caught the handle adapter's first alias
+        # resolution, which returned the alias itself and so missed a deliberately
+        # leaked type while both trees reported `surface closed`.
+        run: pnpm verify:types:handle
       - name: Consumer type check, both compiler versions
         # The gates above check the declarations with this repository's compiler
         # and import the tarball at runtime; neither answers "can a consumer's
         # compiler build against these declarations". Both versions run here
-        # because this job is already the one that installs a compiler, and a
+        # because this is the job that already pays for a second compiler, and a
         # consumer on 6.x is still the common case.
         run: |
           pnpm verify:consumer-types 6.0.3

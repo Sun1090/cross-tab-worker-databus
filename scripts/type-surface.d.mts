@@ -16,11 +16,17 @@ export interface DetectedCompiler {
   version: string;
 }
 
+/** The module specifier the gate loads when `--compiler=` is absent. */
+export declare const DEFAULT_COMPILER: string;
+
 /** Classify an already-loaded compiler module. Pure. */
 export declare function classify(ts: unknown): DetectedCompiler;
 
-/** Load `typescript` and classify it. */
-export declare function detectCompiler(): DetectedCompiler;
+/** Load the named compiler module (default `typescript`) and classify it. */
+export declare function detectCompiler(specifier?: string): DetectedCompiler & { specifier: string };
+
+/** Read `--compiler=<specifier>` out of an argv tail. Pure. */
+export declare function specifierFromArgv(argv: readonly string[]): string;
 
 /**
  * The diagnosis for a compiler that exposes neither surface. Pure, so its
@@ -33,5 +39,6 @@ export declare function openSurface(options: {
   ts: unknown;
   kind: CompilerKind;
   version: string;
+  specifier?: string;
   entryPaths: string[];
 }): Promise<unknown>;

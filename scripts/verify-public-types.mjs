@@ -45,7 +45,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { assertCompilerApi } from './compiler-api.mjs';
-import { detectCompiler, openSurface } from './type-surface.mjs';
+import { DEFAULT_COMPILER, detectCompiler, openSurface, specifierFromArgv } from './type-surface.mjs';
 
 const workspace = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8'));
@@ -70,7 +70,12 @@ if (missing.length) {
   );
 }
 
-const compiler = detectCompiler();
+// `--compiler=<specifier>` selects which compiler's surface is driven; the
+// default is the package named `typescript`, which since Phase 334 is the 6.0
+// compatibility shim. Point this at the 7 alias to exercise the handle surface
+// without replacing node_modules (Phase 335).
+const specifier = specifierFromArgv(process.argv.slice(2));
+const compiler = detectCompiler(specifier);
 // Only the object surface is asserted member-by-member. A compiler without it is
 // not automatically a failure any more — it may be TypeScript 7, whose handle
 // surface lives on a subpath and is checked by `openSurface` when it imports it.
@@ -80,6 +85,7 @@ const surface = await openSurface({
   ts: compiler.ts,
   kind: compiler.kind,
   version: compiler.version,
+  specifier,
   entryPaths: entries.map(entry => entry.declaration)
 });
 const syntax = surface.syntax;
@@ -309,7 +315,12 @@ if (removed.length || leakLines.length) {
   );
   process.exit(1);
 }
+// The counts are the verdict; the parenthetical names the surface that produced
+// them, because two backends now print this line and a log that cannot tell them
+// apart is how a run gets attributed to the wrong compiler.
+const via = specifier === DEFAULT_COMPILER ? '' : ` via ${specifier}`;
 console.log(
   `[types] ${entries.length} entries, ${importableNames.size} importable names, ` +
-  `surface closed and nothing dropped since ${baseTag}`
+  `surface closed and nothing dropped since ${baseTag} ` +
+  `(typescript ${compiler.version}, ${compiler.kind} surface${via})`
 );

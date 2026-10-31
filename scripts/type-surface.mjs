@@ -43,6 +43,39 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 /**
+ * The module specifier the gate loads by default.
+ *
+ * This is not "the compiler that builds the package" — since Phase 334 that is
+ * a second alias that supplies `tsc`, while the package *named* `typescript` is
+ * the 6.0 compatibility shim that `typescript-eslint`'s peer range accepts and
+ * that carries the object API these checks drive. `--compiler=<specifier>`
+ * overrides it so the handle surface can be exercised locally, which used to
+ * require replacing `node_modules/typescript` (Phase 335).
+ */
+export const DEFAULT_COMPILER = 'typescript';
+
+/**
+ * Reads `--compiler=<specifier>` out of a process argv tail.
+ *
+ * Pure so the parsing is testable without a second compiler installed, and
+ * strict on purpose: an empty specifier is a mistake that would otherwise be
+ * reported by `detectCompiler` as "unable to load", several layers from the flag
+ * that caused it.
+ *
+ * @param {readonly string[]} argv
+ * @returns {string}
+ */
+export function specifierFromArgv(argv) {
+  const flag = (argv ?? []).filter(argument => argument.startsWith('--compiler=')).pop();
+  if (flag === undefined) return DEFAULT_COMPILER;
+  const specifier = flag.slice('--compiler='.length).trim();
+  if (specifier === '') {
+    throw new Error('[types] --compiler= needs a module specifier, e.g. --compiler=typescript');
+  }
+  return specifier;
+}
+
+/**
  * Classifies a loaded compiler module. Pure, so the shapes can be exercised
  * without installing the compiler they describe.
  *
@@ -58,17 +91,18 @@ export function classify(ts) {
 }
 
 /**
- * @returns {{ ts: unknown, kind: 'object' | 'handle', version: string }}
+ * @param {string} [specifier]
+ * @returns {{ ts: unknown, kind: 'object' | 'handle', version: string, specifier: string }}
  */
-export function detectCompiler() {
+export function detectCompiler(specifier = DEFAULT_COMPILER) {
   let ts;
   try {
-    ts = require('typescript');
+    ts = require(specifier);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`[types] unable to load the installed typescript: ${reason}`, { cause: error });
+    throw new Error(`[types] unable to load the compiler ${specifier}: ${reason}`, { cause: error });
   }
-  return classify(ts);
+  return { ...classify(ts), specifier };
 }
 
 /**
@@ -93,17 +127,18 @@ export function unavailableSurfaceMessage(version, reason) {
   );
 }
 
-export async function openSurface({ ts, kind, version, entryPaths }) {
+export async function openSurface({ ts, kind, version, entryPaths, specifier = DEFAULT_COMPILER }) {
   if (kind === 'object') {
     const { createObjectSurface } = await import('./type-surface.object.mjs');
     return createObjectSurface(ts, { entryPaths, version });
   }
   try {
     const { createHandleSurface } = await import('./type-surface.handle.mjs');
-    return await createHandleSurface({ entryPaths, version });
+    return await createHandleSurface({ entryPaths, version, specifier });
   } catch (error) {
-    throw new Error(unavailableSurfaceMessage(version, error instanceof Error ? error.message : String(error)), {
-      cause: error
-    });
+    throw new Error(
+      unavailableSurfaceMessage(version, error instanceof Error ? error.message : String(error)),
+      { cause: error }
+    );
   }
 }

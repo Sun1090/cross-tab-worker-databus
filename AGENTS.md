@@ -28,7 +28,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Perf gates | `pnpm test:perf` (own step — absolute-ms ceilings need an unscheduled core) |
 | Watch tests | `pnpm test:watch` |
 | E2E test | `pnpm test:e2e` (Playwright, requires `pnpm build` first) |
-| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:types:sensitivity` (mutates the tree in the two ways `verify:types` exists to catch and requires a failure each time — a clean run proves nothing on its own), `pnpm verify:consumer-types [version]` (packs the tarball and has that compiler build a consumer against it — a different question from either of the above), `pnpm verify:pack` (imports every entry from the tarball) |
+| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types [--compiler=<specifier>]` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:types:sensitivity [--compiler=<specifier>]` (mutates the tree in the two ways `verify:types` exists to catch and requires a failure each time — a clean run proves nothing on its own), `pnpm verify:types:handle` (both of the above against the 7 backend, through the `@typescript/native` alias — the one command CI uses for the second surface), `pnpm verify:consumer-types [version]` (packs the tarball and has that compiler build a consumer against it — a different question from either of the above), `pnpm verify:pack` (imports every entry from the tarball) |
 | Dependency audit | `pnpm audit` — a blocking step in CI's verify job, after `bench`. Locally it needs `--registry=https://registry.npmjs.org`: the mirror this repository's npm is configured to serves no audit endpoint, so an unqualified run answers nothing and reads like a clean tree. `pnpm-workspace.yaml` overrides pin the patched ranges; read its output rather than assuming a pass, and note which registry produced it |
 | Micro-bench | `pnpm bench` (vitest bench; CI runs it in the verify job, so a non-zero exit does fail the build, but it asserts no thresholds — the thresholds live in `test:perf` and `bench:compare`) |
 | Browser bench + its gate | `pnpm bench:browser` (builds, then drives a real browser and appends to the untracked `bench-results/` archive) → `pnpm bench:compare --fail-above-pct 50`. Deliberately **local-only**: `bench-results/` is not in git, so no CI step can see the archive. `pnpm bench:trend` regenerates `docs/benchmarks.md` + its zh mirror from that archive |
@@ -495,8 +495,12 @@ The project is feature-complete: follow-up work is verification and deepening of
   (2) pnpm resolves the `typescript` peer **per package** in its virtual store
   (`typescript-eslint@8.72.1_@typescript+typescript6@6.0.2_…`), so replacing the root
   `node_modules/typescript` with the real 7 package does *not* change what `typescript-eslint` sees —
-  `pnpm lint` still passes after that swap. So the `typescript-7` CI job exercises the handle backend and
-  is **not** a rehearsal of removing the alias; do not read its green run as one.
+  `pnpm lint` still passes after that swap. So a swap-based job is **not** a rehearsal of removing the
+  alias; do not read its green run as one. Phase 335 removed the swap for the same reason it was fragile:
+  the gate now takes `--compiler=<specifier>` and the handle facade imports its three `unstable/*`
+  subpaths through it, so `pnpm verify:types:handle` runs the second backend from the lockfile alias with
+  no directory mutated. `--compiler` is also what makes the local run possible at all — the package named
+  `typescript` has no `unstable/*` to import.
   (3) The public docs deliberately do not name those two specifiers — `docs/roadmap.md` and the release
   checklists describe them by function instead. That is not sloppiness: `tests/documentation.test.ts`
   forbids `@scope/` in `README.md`, `CHANGELOG.md` and everything under `docs/` except `progress.md`, and
