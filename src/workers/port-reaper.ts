@@ -19,7 +19,7 @@ import {
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   DEFAULT_SESSION_TIMEOUT_MS,
   DEFAULT_SESSION_TIMEOUT_MULTIPLIER
-} from '../centrifuge-protocol';
+} from '../centrifuge-protocol.js';
 
 /** The three teardown steps `reap()` runs on a silent port, in that order:
  * `notify` posts the loss to the main thread, `close` withdraws the port, `stop`

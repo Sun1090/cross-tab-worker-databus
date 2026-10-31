@@ -9,10 +9,10 @@
  * ```
  */
 
-export { CrossTabDataBus } from './core/data-bus';
-export type { CrossTabDataBusOptions, DataBusDedupOptions, DataBusDedupStats, DataBusDiagnostics, DataBusFailureSource, DataBusHealthSummary, DataBusLastFailure, DataBusPersistenceHealth, DataBusPersistenceRetryOptions, DataBusReplayOptions } from './core/data-bus';
-export { createIndexedDbReplayPersistence } from './core/replay-persistence';
-export type { DataBusReplayPersistence, IndexedDbReplayPersistenceOptions } from './core/replay-persistence';
+export { CrossTabDataBus } from './core/data-bus.js';
+export type { CrossTabDataBusOptions, DataBusDedupOptions, DataBusDedupStats, DataBusDiagnostics, DataBusFailureSource, DataBusHealthSummary, DataBusLastFailure, DataBusPersistenceHealth, DataBusPersistenceRetryOptions, DataBusReplayOptions } from './core/data-bus.js';
+export { createIndexedDbReplayPersistence } from './core/replay-persistence.js';
+export type { DataBusReplayPersistence, IndexedDbReplayPersistenceOptions } from './core/replay-persistence.js';
 export type {
   DataBusCoordinationTraceEvent,
   DataBusErrorTraceEvent,
@@ -25,27 +25,27 @@ export type {
   DataBusTraceEvent,
   DataBusTraceMode,
   DataBusTraceOptions
-} from './core/trace';
-export { WorkerClusterRuntime } from './core/cluster';
+} from './core/trace.js';
+export { WorkerClusterRuntime } from './core/cluster.js';
 export type {
   WorkerClusterHandlers,
   WorkerClusterOptions,
   WorkerClusterSnapshot
-} from './core/cluster';
-export { createBrowserEnvironment, createStorageEventChannel, getOrCreateTabId } from './core/environment';
-export type { ClusterChannel, ClusterEnvironment, StorageEventWindow, StorageLike } from './core/environment';
-export { createOpaqueKey } from './core/hash';
+} from './core/cluster.js';
+export { createBrowserEnvironment, createStorageEventChannel, getOrCreateTabId } from './core/environment.js';
+export type { ClusterChannel, ClusterEnvironment, StorageEventWindow, StorageLike } from './core/environment.js';
+export { createOpaqueKey } from './core/hash.js';
 export {
   WebSocketTransport,
   createWebSocketDataBus
-} from './websocket';
+} from './websocket.js';
 export type {
   CreateWebSocketDataBusOptions,
   WebSocketDataBusConfig,
   WebSocketLike
-} from './websocket';
-export { selectWorkerBackend } from './worker-mode';
-export type { WorkerAvailability, WorkerBackend, WorkerMode } from './worker-mode';
+} from './websocket.js';
+export { selectWorkerBackend } from './worker-mode.js';
+export type { WorkerAvailability, WorkerBackend, WorkerMode } from './worker-mode.js';
 export {
   DEFAULT_MAX_ACTIVE_WORKERS,
   approximatePayloadBytes,
@@ -56,7 +56,7 @@ export {
   selectLeastLoadedWorker,
   selectRebalanceTarget,
   topicMatchesPattern
-} from './core/routing';
+} from './core/routing.js';
 export type {
   DataBusErrorHandler,
   DataBusMessage,
@@ -80,4 +80,4 @@ export type {
   WorkerRoute,
   WorkerStatus,
   WorkerThroughputSample
-} from './core/types';
+} from './core/types.js';

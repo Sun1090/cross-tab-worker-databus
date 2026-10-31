@@ -16,7 +16,7 @@ import type {
   TAB_VISIBILITY,
   WORKER_ROLE,
   WORKER_STATUS
-} from '../utils/constants';
+} from '../utils/constants.js';
 
 /** Convenience alias for values that may be synchronously returned or as a
  * Promise. Used by the DataBusTransport contract so implementations can be

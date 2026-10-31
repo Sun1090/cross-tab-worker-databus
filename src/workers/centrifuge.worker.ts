@@ -8,8 +8,8 @@
  * per tab, keeping the WebSocket lifecycle off the UI thread.
  */
 
-import type { CentrifugeWorkerInput } from '../centrifuge-protocol';
-import { CentrifugeSession } from '../centrifuge-session';
+import type { CentrifugeWorkerInput } from '../centrifuge-protocol.js';
+import { CentrifugeSession } from '../centrifuge-session.js';
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 // One session per dedicated Worker — this process owns exactly one connection.

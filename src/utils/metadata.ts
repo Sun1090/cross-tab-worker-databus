@@ -6,7 +6,7 @@
  * 实现了一遍 `...(x === undefined ? {} : { x })` 展开，行为容易漂移；统一到此
  * 一处后所有调用方共享同一语义。
  */
-import type { DataBusPublicationMetadata } from '../core/types';
+import type { DataBusPublicationMetadata } from '../core/types.js';
 
 /**
  * Copy defined publication metadata without adding empty enumerable fields.

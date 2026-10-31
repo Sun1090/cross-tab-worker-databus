@@ -5,8 +5,8 @@
  * are merged by key and flushed once via a microtask, with exponential backoff
  * on quota/failure. Keeps the coordination metadata writes off the hot path.
  */
-import type { StorageLike } from './environment';
-import { DEFAULT_STORAGE_PREFIX } from '../utils/constants';
+import type { StorageLike } from './environment.js';
+import { DEFAULT_STORAGE_PREFIX } from '../utils/constants.js';
 
 /** Initial retry delay for a failed storage write (ms). */
 const INITIAL_RETRY_DELAY_MS = 50;

@@ -1,4 +1,4 @@
-import type { DataBusPublication } from './types';
+import type { DataBusPublication } from './types.js';
 
 /**
  * Normalize legacy flat publications, metadata payload envelopes, and the

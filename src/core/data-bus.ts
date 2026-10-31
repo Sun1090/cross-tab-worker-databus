@@ -5,9 +5,9 @@
  * for the real connection. Handles local handler reference counting, subscription
  * queuing, message dispatch, and clean lifecycle management (start/stop/BFCache).
  */
-import { WorkerClusterRuntime } from './cluster';
-import type { WorkerClusterOptions, WorkerClusterSnapshot } from './cluster';
-import { topicMatchesPattern } from './routing';
+import { WorkerClusterRuntime } from './cluster.js';
+import type { WorkerClusterOptions, WorkerClusterSnapshot } from './cluster.js';
+import { topicMatchesPattern } from './routing.js';
 import type {
   DataBusErrorHandler,
   DataBusMessage,
@@ -16,14 +16,14 @@ import type {
   DataBusStatusHandler,
   DataBusTransport,
   WorkerStatus
-} from './types';
-import { DataBusTraceReporter } from './trace';
-import type { DataBusMetricsSnapshot, DataBusTraceOptions } from './trace';
-import type { DataBusReplayPersistence } from './replay-persistence';
-import { PersistenceRetryCancelledError, ReplayManager } from './replay-manager';
-import { DedupManager } from './dedup-manager';
-import type { DataBusDedupOptions, DataBusDedupStats } from './dedup-manager';
-import { SDK_VERSION } from './version';
+} from './types.js';
+import { DataBusTraceReporter } from './trace.js';
+import type { DataBusMetricsSnapshot, DataBusTraceOptions } from './trace.js';
+import type { DataBusReplayPersistence } from './replay-persistence.js';
+import { PersistenceRetryCancelledError, ReplayManager } from './replay-manager.js';
+import { DedupManager } from './dedup-manager.js';
+import type { DataBusDedupOptions, DataBusDedupStats } from './dedup-manager.js';
+import { SDK_VERSION } from './version.js';
 import {
   CONTROL_ACTION,
   DEFAULT_STORAGE_PREFIX,
@@ -40,10 +40,10 @@ import {
   TRACE_LIFECYCLE_ACTION,
   WORKER_ROLE,
   WORKER_STATUS
-} from '../utils/constants';
-import { publicationMetadata } from '../utils/metadata';
-import { describeFailure } from '../utils/error-utils';
-import { assertDedupOptions, assertPublicTopic, assertReplayOptions, assertRecoveryOptions } from '../utils/validation';
+} from '../utils/constants.js';
+import { publicationMetadata } from '../utils/metadata.js';
+import { describeFailure } from '../utils/error-utils.js';
+import { assertDedupOptions, assertPublicTopic, assertReplayOptions, assertRecoveryOptions } from '../utils/validation.js';
 
 /** Default ring size per topic when replay is enabled without a limit. */
 const DEFAULT_REPLAY_MAX_PER_TOPIC = 100;

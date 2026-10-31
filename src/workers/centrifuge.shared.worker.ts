@@ -17,10 +17,10 @@
  * The interval is cleared when the last port is disconnected.
  */
 
-import type { CentrifugeWorkerInput } from '../centrifuge-protocol';
-import { CentrifugeSession } from '../centrifuge-session';
-import { PortReaper } from './port-reaper';
-import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from '../utils/constants';
+import type { CentrifugeWorkerInput } from '../centrifuge-protocol.js';
+import { CentrifugeSession } from '../centrifuge-session.js';
+import { PortReaper } from './port-reaper.js';
+import { CENTRIFUGE_INPUT_TYPE, CENTRIFUGE_OUTPUT_TYPE } from '../utils/constants.js';
 
 const sharedWorkerScope = self as unknown as SharedWorkerGlobalScope;
 // One session per connecting port — each tab gets its own subscription scope.

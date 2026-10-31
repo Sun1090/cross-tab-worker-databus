@@ -6,16 +6,16 @@
  * control messaging. Each DataBus instance owns one Runtime which drives the
  * transport and coordinates with other tabs via localStorage + BroadcastChannel.
  */
-import { canUseStorage, createBrowserEnvironment, getOrCreateTabId } from './environment';
-import type { ClusterChannel, ClusterEnvironment, StorageLike } from './environment';
-import { createOpaqueKey } from './hash';
+import { canUseStorage, createBrowserEnvironment, getOrCreateTabId } from './environment.js';
+import type { ClusterChannel, ClusterEnvironment, StorageLike } from './environment.js';
+import { createOpaqueKey } from './hash.js';
 import {
   DEFAULT_MAX_ACTIVE_WORKERS,
   approximatePayloadBytes,
   selectActiveWorkers,
   selectLeastLoadedWorker,
   topicMatchesPattern
-} from './routing';
+} from './routing.js';
 import type {
   DataBusPublicationMetadata,
   LoadWeightingOptions,
@@ -27,8 +27,8 @@ import type {
   WorkerRoute,
   WorkerStatus,
   WorkerThroughputSample
-} from './types';
-import { BatchingStorageWriter } from './storage-batch';
+} from './types.js';
+import { BatchingStorageWriter } from './storage-batch.js';
 import {
   CLUSTER_MESSAGE_TYPE,
   CONTROL_ACTION,
@@ -37,10 +37,10 @@ import {
   TAB_VISIBILITY,
   WORKER_ROLE,
   WORKER_STATUS
-} from '../utils/constants';
-import { publicationMetadata } from '../utils/metadata';
-import { readAllByPrefix, readJson, writeJson } from '../utils/storage-utils';
-import { assertClusterOptions } from '../utils/validation';
+} from '../utils/constants.js';
+import { publicationMetadata } from '../utils/metadata.js';
+import { readAllByPrefix, readJson, writeJson } from '../utils/storage-utils.js';
+import { assertClusterOptions } from '../utils/validation.js';
 
 /** Callbacks the cluster invokes to drive the transport and lifecycle. */
 export interface WorkerClusterHandlers {

@@ -2,9 +2,9 @@
  * Vue is an optional peer dependency; this module is a separate entry point.
  */
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue';
-import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus';
-import type { DataBusMessage, WorkerStatus } from './core/types';
-import { WORKER_STATUS } from './utils/constants';
+import type { CrossTabDataBus, DataBusHealthSummary } from './core/data-bus.js';
+import type { DataBusMessage, WorkerStatus } from './core/types.js';
+import { WORKER_STATUS } from './utils/constants.js';
 
 export function useCrossTabDataBus<TConfig, TData>(
   create: () => CrossTabDataBus<TConfig, TData>,

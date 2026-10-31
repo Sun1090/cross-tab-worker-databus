@@ -1,5 +1,5 @@
-import type { DataBusMessage } from './types';
-import { PRUNE_STRATEGY } from '../utils/constants';
+import type { DataBusMessage } from './types.js';
+import { PRUNE_STRATEGY } from '../utils/constants.js';
 
 /** Inputs shared by the in-memory ring and durable replay adapters. */
 export interface ReplayPruningOptions {

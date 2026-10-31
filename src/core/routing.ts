@@ -5,8 +5,8 @@
  * owner, and decide when to migrate a topic. All side-effect-free, making
  * them straightforward to test and reason about.
  */
-import type { LoadWeightingOptions, WorkerRecord, WorkerRoute } from './types';
-import { TAB_VISIBILITY, WORKER_STATUS } from '../utils/constants';
+import type { LoadWeightingOptions, WorkerRecord, WorkerRoute } from './types.js';
+import { TAB_VISIBILITY, WORKER_STATUS } from '../utils/constants.js';
 
 /** Default cap on the number of Workers that can own topics concurrently.
  * Limits fan-out breadth: only N workers are eligible to be new-route

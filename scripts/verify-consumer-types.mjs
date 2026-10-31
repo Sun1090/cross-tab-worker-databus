@@ -25,7 +25,7 @@
  *        (defaults to the version of the compiler whose API the other gates drive)
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -58,6 +58,33 @@ const requested = process.argv[2] ?? defaultCompilerVersion;
 
 /** Subpaths whose declarations are checked. The worker entries export nothing. */
 const SUBPATHS = ['.', './centrifuge'];
+
+/**
+ * The resolution modes a consumer can legitimately be in, one `tsc -p` each.
+ *
+ * `bundler` was the only mode until Phase 336, and it is the permissive one: it
+ * resolves extensionless relative imports, which is what `tsc` emits here. A
+ * consumer on `node16`/`nodenext` does not, and the difference is not academic —
+ * measured on the tarball built from `0.21.60`'s source, an ESM consumer with
+ * `moduleResolution: nodenext` and `skipLibCheck: false` reported **16 × TS2834**
+ * from `dist/index.d.ts` alone ("relative import paths need explicit file
+ * extensions"). The fix was to emit extensioned specifiers (`./core/data-bus.js`)
+ * by writing them that way in `src`, and this mode is the gate that keeps them.
+ *
+ * `skipLibCheck: false` everywhere, on purpose: the point is to check *this*
+ * package's declarations, and every mode is expected to pass in that strictest
+ * configuration. The CJS mode has its own fixture directory because the module
+ * format of a `.ts` file under `nodenext` is decided by the nearest
+ * `package.json` `type`, so it needs a `commonjs` one of its own.
+ */
+const MODES = [
+  { id: 'bundler', label: 'bundler', dir: '.', type: 'module', compilerOptions: { module: 'esnext', moduleResolution: 'bundler' } },
+  { id: 'nodenext', label: 'nodenext (ESM)', dir: '.', type: 'module', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } },
+  { id: 'nodenext-cjs', label: 'nodenext (CJS)', dir: 'cjs', type: 'commonjs', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } }
+];
+
+/** `label (version)` per mode that passed, for the one-line summary. */
+const checked = [];
 
 /**
  * A few real calls, so the check is not only "the names resolve": each result is
@@ -106,56 +133,65 @@ try {
   // this package. Installing it is what a consumer of that subpath does.
   run('npm', ['install', `./${tarball}`, 'centrifuge', `typescript@${requested}`, '--silent']);
 
-  for (const subpath of SUBPATHS) {
-    const name = subpath === '.' ? 'root' : subpath.slice(2).replaceAll(/[^A-Za-z0-9]+/g, '-');
-    const specifier = subpath === '.' ? manifest.name : `${manifest.name}/${subpath.slice(2)}`;
-    writeFileSync(join(root, `${name}.ts`), `export * from '${specifier}';\n`);
-  }
-  writeFileSync(join(root, 'usage.ts'), USAGE);
-
-  writeFileSync(
-    join(root, 'tsconfig.json'),
-    `${JSON.stringify(
-      {
-        compilerOptions: {
-          strict: true,
-          target: 'ES2020',
-          module: 'esnext',
-          moduleResolution: 'bundler',
-          noEmit: true,
-          skipLibCheck: false
-        },
-        include: ['*.ts']
-      },
-      null,
-      2
-    )}\n`
-  );
-
   const installed = JSON.parse(readFileSync(join(root, 'node_modules/typescript/package.json'), 'utf8')).version;
-  try {
-    run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', join(root, 'tsconfig.json')]);
-  } catch (error) {
-    // `tsc` reports paths relative to its own cwd, which here is a temp root
-    // several `../` deep. Strip that prefix so the diagnostics read as the
-    // consumer's file names rather than as a path nobody can follow.
-    const output = `${error.stdout ?? ''}${error.stderr ?? ''}`
-      .trim()
-      .split('\n')
-      .map(line => line.replace(/^(?:\.\.[\\/])*.*?cross-tab-consumer-types-[^\\/]+[\\/]/, ''))
-      .join('\n');
-    throw new Error(
-      `[consumer-types] typescript ${installed} could not build a consumer against ` +
-        `${manifest.name}@${manifest.version}. This is a consumer-facing defect: the declarations ` +
-        `were emitted by a compiler that this version refuses to accept, or a public name does not ` +
-        `resolve. Diagnostics:\n${output}`,
-      { cause: error }
+  for (const mode of MODES) {
+    const dir = mode.dir === '.' ? root : join(root, mode.dir);
+    if (mode.dir !== '.') {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ type: mode.type }, null, 2)}\n`);
+    }
+    for (const subpath of SUBPATHS) {
+      const name = subpath === '.' ? 'root' : subpath.slice(2).replaceAll(/[^A-Za-z0-9]+/g, '-');
+      const specifier = subpath === '.' ? manifest.name : `${manifest.name}/${subpath.slice(2)}`;
+      writeFileSync(join(dir, `${name}.ts`), `export * from '${specifier}';\n`);
+    }
+    writeFileSync(join(dir, 'usage.ts'), USAGE);
+
+    const config = join(root, `tsconfig.${mode.id}.json`);
+    writeFileSync(
+      config,
+      `${JSON.stringify(
+        {
+          compilerOptions: {
+            strict: true,
+            target: 'ES2020',
+            ...mode.compilerOptions,
+            noEmit: true,
+            skipLibCheck: false
+          },
+          include: mode.dir === '.' ? ['*.ts'] : [`${mode.dir}/*.ts`]
+        },
+        null,
+        2
+      )}\n`
     );
+
+    try {
+      run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', config]);
+    } catch (error) {
+      // `tsc` reports paths relative to its own cwd, which here is a temp root
+      // several `../` deep. Strip that prefix so the diagnostics read as the
+      // consumer's file names rather than as a path nobody can follow.
+      const output = `${error.stdout ?? ''}${error.stderr ?? ''}`
+        .trim()
+        .split('\n')
+        .map(line => line.replace(/^(?:\.\.[\\/])*.*?cross-tab-consumer-types-[^\\/]+[\\/]/, ''))
+        .join('\n');
+      throw new Error(
+        `[consumer-types] typescript ${installed} could not build a consumer against ` +
+          `${manifest.name}@${manifest.version} under ${mode.label}. This is a consumer-facing ` +
+          `defect: the declarations were emitted by a compiler that this version refuses to accept, ` +
+          `a public name does not resolve, or the subpath's types do not match this resolution mode. ` +
+          `Diagnostics:\n${output}`,
+        { cause: error }
+      );
+    }
+    checked.push(`${mode.label} (${installed})`);
   }
 
   console.log(
     `[consumer-types] ${manifest.name}@${manifest.version}: ${SUBPATHS.length} subpaths and their ` +
-      `signatures typecheck under typescript ${installed}`
+      `signatures typecheck under ${checked.join(', ')}`
   );
 } finally {
   rmSync(root, { recursive: true, force: true });

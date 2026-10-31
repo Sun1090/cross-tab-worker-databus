@@ -5,9 +5,9 @@
  * same Runtime can run in a browser, in a test, or in an embedded context
  * with custom adapters injected via `ClusterEnvironment`.
  */
-import type { TabVisibilityState, WorkerClusterMessage } from './types';
-import { CHANNEL_FALLBACK, STORAGE_CHANNEL_PREFIX, TAB_ID_STORAGE_KEY, TAB_VISIBILITY } from '../utils/constants';
-import type { EVENT_TYPE } from '../utils/constants';
+import type { TabVisibilityState, WorkerClusterMessage } from './types.js';
+import { CHANNEL_FALLBACK, STORAGE_CHANNEL_PREFIX, TAB_ID_STORAGE_KEY, TAB_VISIBILITY } from '../utils/constants.js';
+import type { EVENT_TYPE } from '../utils/constants.js';
 
 /** Minimal storage interface compatible with both localStorage and MemoryStorage. */
 export interface StorageLike {
