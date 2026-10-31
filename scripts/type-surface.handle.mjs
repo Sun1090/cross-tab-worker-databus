@@ -29,12 +29,21 @@ import { basename, join } from 'node:path';
 import { followAlias } from './alias-chain.mjs';
 
 /**
- * @param {{ entryPaths: string[], version: string }} options
+ * @param {{ entryPaths: string[], version: string, specifier?: string }} options
+ *
+ * `specifier` is the module the *root* was loaded from, and the three subpaths
+ * are imported through it rather than through a hard-coded `typescript`. That is
+ * what lets the handle surface run in this repository at all: the package named
+ * `typescript` is the 6.0 compatibility shim (which has no `unstable/*`), while
+ * the 7 compiler lives under a second alias (docs/progress.md Phases 334/335).
+ * Importing the literal `typescript/unstable/sync` here would resolve to the
+ * shim and fail, which is why the surface could previously only be reached by
+ * replacing `node_modules/typescript`.
  */
-export async function createHandleSurface({ entryPaths, version }) {
-  const sync = await import('typescript/unstable/sync');
-  const is = await import('typescript/unstable/ast/is');
-  const ast = await import('typescript/unstable/ast');
+export async function createHandleSurface({ entryPaths, version, specifier = 'typescript' }) {
+  const sync = await import(`${specifier}/unstable/sync`);
+  const is = await import(`${specifier}/unstable/ast/is`);
+  const ast = await import(`${specifier}/unstable/ast`);
 
   const syntax = {
     SyntaxKind: ast.SyntaxKind,

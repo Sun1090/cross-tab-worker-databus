@@ -23,18 +23,25 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { detectCompiler } from './type-surface.mjs';
+import { detectCompiler, specifierFromArgv } from './type-surface.mjs';
 
 const workspace = resolve(import.meta.dirname, '..');
 const GATE = 'scripts/verify-public-types.mjs';
 const LEAK_NAME = 'LeakProbeInternal';
 const LEAK_ENTRY = 'LeakOuter';
 
+// Forwarded to the gate verbatim: the mutations are only evidence about *this*
+// backend, so a sensitivity run that silently drove the other one would be
+// measuring a surface it does not name. See Phase 335.
+const specifier = specifierFromArgv(process.argv.slice(2));
+
 /** Files this script edits. Kept explicit so a restore cannot miss one. */
 const TOUCHED = ['dist/index.d.ts', 'dist/core/types.d.ts', 'src/index.ts'];
 
 const backups = mkdtempSync(join(tmpdir(), 'cross-tab-sensitivity-'));
-const compilerVersion = `typescript ${detectCompiler().version}`;
+const detected = detectCompiler(specifier);
+const compilerVersion =
+  specifier === 'typescript' ? `typescript ${detected.version}` : `typescript ${detected.version} via ${specifier}`;
 
 function backup(relativePath) {
   copyFileSync(join(workspace, relativePath), join(backups, relativePath.replaceAll('/', '__')));
@@ -48,7 +55,11 @@ function restore() {
 
 function runGate() {
   try {
-    const stdout = execFileSync('node', [GATE], { cwd: workspace, encoding: 'utf8', stdio: 'pipe' });
+    const stdout = execFileSync('node', [GATE, `--compiler=${specifier}`], {
+      cwd: workspace,
+      encoding: 'utf8',
+      stdio: 'pipe'
+    });
     return { status: 0, stdout, stderr: '' };
   } catch (error) {
     return {

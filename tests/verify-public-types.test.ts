@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { REQUIRED_COMPILER_API, assertCompilerApi, missingCompilerApi } from '../scripts/compiler-api.mjs';
-import { classify, detectCompiler, unavailableSurfaceMessage } from '../scripts/type-surface.mjs';
+import { classify, detectCompiler, specifierFromArgv, unavailableSurfaceMessage } from '../scripts/type-surface.mjs';
 
 const require = createRequire(import.meta.url);
 const gateSource = readFileSync('scripts/verify-public-types.mjs', 'utf8');
@@ -157,6 +157,46 @@ describe('detectCompiler', () => {
 
   it('does not claim a version it could not read', () => {
     expect(classify({}).version).toBe('unknown');
+  });
+
+  it('loads whichever compiler the caller names, not only the package called typescript', () => {
+    // The whole point of `--compiler`: the package named `typescript` is the 6.0
+    // compatibility shim (docs/progress.md Phase 334), so without a specifier the
+    // handle surface could only be reached by replacing node_modules (Phase 335).
+    // Pin both aliases rather than the mechanism, so removing either one fails
+    // here instead of in a CI job nobody reads.
+    const handle = detectCompiler('@typescript/native');
+    expect(handle.kind).toBe('handle');
+    expect(handle.version).toMatch(/^7\./);
+    expect(handle.specifier).toBe('@typescript/native');
+  });
+
+  it('names the specifier it could not load rather than the default one', () => {
+    // A typo in `--compiler=` must not read as "the installed typescript broke".
+    expect(() => detectCompiler('typescript-does-not-exist')).toThrowError(
+      /unable to load the compiler typescript-does-not-exist/
+    );
+  });
+});
+
+describe('specifierFromArgv', () => {
+  it('defaults to the package the repository depends on as typescript', () => {
+    expect(specifierFromArgv([])).toBe('typescript');
+  });
+
+  it('takes the specifier out of --compiler= and ignores everything else', () => {
+    expect(specifierFromArgv(['--verbose', '--compiler=@typescript/native'])).toBe('@typescript/native');
+  });
+
+  it('lets the last flag win, so a wrapper script can override a default it prepends', () => {
+    expect(specifierFromArgv(['--compiler=first', '--compiler=second'])).toBe('second');
+  });
+
+  it('refuses an empty specifier instead of resolving it as the default', () => {
+    // `--compiler=` with nothing after it would otherwise load the default and
+    // report a green run against a compiler the caller did not ask for.
+    expect(() => specifierFromArgv(['--compiler='])).toThrowError(/--compiler= needs a module specifier/);
+    expect(() => specifierFromArgv(['--compiler=   '])).toThrowError(/--compiler= needs a module specifier/);
   });
 });
 
