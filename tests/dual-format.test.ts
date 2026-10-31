@@ -212,7 +212,13 @@ describe('dual-format build artifacts', () => {
     for (const file of esmDeclarations) {
       const twin = `dist/cjs/${file.replace(/\.d\.ts$/, '.d.cts')}`;
       expect(existsSync(twin), `declaration twin missing: ${twin}`).toBe(true);
-      expect(readFileSync(twin, 'utf8')).not.toMatch(/from\s+['"]\.\.?\/[^'"]*\.js['"]/);
+      // The mirror must stay *derived*: byte-identical to its ESM counterpart
+      // except for the specifier rewrite the build performs. Asserting the
+      // transformation rather than "no `.js` left" pins both directions — a
+      // hand-edited twin and a twin built from a stale declaration both fail.
+      expect(readFileSync(twin, 'utf8'), `mirror drifted: ${twin}`).toBe(
+        readFileSync(`dist/${file}`, 'utf8').replace(/(['"])(\.\.?\/[^'"]*)\.js\1/g, '$1$2.cjs$1')
+      );
     }
   });
 });

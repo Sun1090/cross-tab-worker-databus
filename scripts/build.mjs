@@ -43,6 +43,11 @@ function emitCommonJsDeclarations() {
       return entry.name.endsWith('.d.ts') ? [full] : [];
     });
 
+  // The rewrite is content-wide rather than parser-aware: in these declarations a
+  // quoted relative `.js` string only ever appears as a module specifier (checked
+  // — no JSDoc example uses that shape), and `tests/dual-format.test.ts` asserts
+  // each twin equals its source under exactly this substitution, so a future
+  // comment that did use it would fail a test rather than drift silently.
   const declarations = collect(distPath);
   for (const declaration of declarations) {
     const relative = declaration.slice(distPath.length).replace(/\.d\.ts$/, '.d.cts');
