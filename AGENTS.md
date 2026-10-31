@@ -33,7 +33,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Micro-bench | `pnpm bench` (vitest bench; CI runs it in the verify job, so a non-zero exit does fail the build, but it asserts no thresholds — the thresholds live in `test:perf` and `bench:compare`) |
 | Browser bench + its gate | `pnpm bench:browser` (builds, then drives a real browser and appends to the untracked `bench-results/` archive) → `pnpm bench:compare --fail-above-pct 50`. Deliberately **local-only**: `bench-results/` is not in git, so no CI step can see the archive. `pnpm bench:trend` regenerates `docs/benchmarks.md` + its zh mirror from that archive |
 | Implicit publish hook | `package.json` `prepublishOnly` is `pnpm check`, so **any** `npm publish` (CI's or the checklist's manual no-token path) re-runs the full `typecheck` → `build` → `test` → `test:perf` set inside the publish itself. Nothing in the workflows shows it: the quick-reference gate scans `run: pnpm …` lines, and a lifecycle hook is not one. Measured on release run `40111113635` — a second `> cross-tab-worker-databus@0.21.51 check` with all four sub-steps in the `Publish to npm` step's own log, ~31 s of that step's 37 s. A publish that takes half a minute is not hung. Pinned by `tests/workflows.test.ts`'s "explains that `npm publish` re-runs the whole gate set through prepublishOnly". |
-| Published-consumer gate | `pnpm verify:published` with `PUBLISHED_VERSION=<n>` — installs the *published* package from `registry.npmjs.org` (the registry is pinned in the script; CI's release workflow runs the same step after publishing) |
+| Published-consumer gate | `pnpm verify:published` with `PUBLISHED_VERSION=<n>` — installs the *published* package from `registry.npmjs.org` (the registry is pinned in the script; CI's release workflow runs the same step after publishing), imports every subpath as ESM and CJS at **runtime**, and then typechecks a consumer against it in the **same five modes** `verify:consumer-types` uses. The type half was added after `0.21.60` shipped declarations no `node16` consumer could load while this gate went green: importing a module never reads a `.d.ts`, and the published artifact is the one a defect reaches a consumer through. Verified against that release — `PUBLISHED_VERSION=0.21.60 pnpm verify:published` exits 1 with `TS2834` — while `0.21.61` passes, so the gate rejects exactly the defect it was blind to. Both type legs share one implementation (`scripts/consumer-types.mjs`) rather than two copies that drift apart) |
 | Bundle example vendor deps | `pnpm build:examples` (React for `examples/react`; run by `pnpm examples` and `pnpm test:e2e`) |
 | Run demo | `pnpm examples` → http://localhost:4173/examples/demo/ (adapter pages: `/examples/react/`, `/examples/vue/`) |
 
@@ -460,6 +460,10 @@ The project is feature-complete: follow-up work is verification and deepening of
   `npm view typescript-eslint peerDependencies --registry=https://registry.npmjs.org` — and do not read
   "7 is latest" as "we can move"; this repository's npm is configured to a mirror, so an unqualified
   `npm view` answers a different registry than the one whose release you are timing against.
+  **Re-checked 2026-10-31, immediately after `0.21.61` shipped:** latest is `8.72.1` with peer
+  `typescript >=4.8.4 <6.1.0`, and the `canary` tag is `8.72.2-alpha.4` — a patch-level prerelease of
+  the same minor, not a window. So the block is still (a) upstream and (b) nowhere near opening, which
+  is the state that keeps the compile-on-7/API-on-6 split in place rather than a stopgap to remove.
   **The in-repo half of this block is gone as of 2026-10-31 (Phases 329/330).** It used to read "the
   migration also needs a `verify:types` port first, because 7's root entry no longer exposes the
   in-process object API" — that port is now shipped: `scripts/type-surface.mjs` classifies the installed

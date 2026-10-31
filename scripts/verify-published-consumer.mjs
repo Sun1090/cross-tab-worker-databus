@@ -11,8 +11,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MODES, compileMode, dualFormatSubpaths, resolveTscPath, writeFixtures, writeTsconfig } from './consumer-types.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -96,10 +97,16 @@ async function main() {
     const nodeModules = join(tempRoot, 'node_modules');
     mkdirSync(nodeModules);
     symlinkSync(packageDir, join(nodeModules, packageName), 'dir');
-    for (const dependency of ['react', 'vue', 'centrifuge']) {
+    // Everything a consumer of these subpaths would have installed, plus the two
+    // the *type* legs need: a compiler, and React's types (React ships none).
+    const dependencies = ['react', 'vue', 'centrifuge', '@types/react', 'typescript'];
+    for (const dependency of dependencies) {
       const source = join(workspace, 'node_modules', dependency);
       if (!existsSync(source)) throw new Error(`[npm] Missing workspace dependency required by published consumer: ${dependency}`);
-      symlinkSync(source, join(nodeModules, dependency), 'dir');
+      // Scoped names (`@types/react`) need their scope directory first.
+      const target = join(nodeModules, dependency);
+      mkdirSync(dirname(target), { recursive: true });
+      symlinkSync(source, target, 'dir');
     }
 
     const consumer = `
@@ -145,7 +152,30 @@ async function main() {
       console.error(`[npm] dependency links: ${['react', 'vue', 'centrifuge'].map(name => `${name}=${existsSync(join(nodeModules, name))}`).join(', ')}`);
       throw error;
     }
-    console.log(`[npm] verified published ${packageName}@${version} ESM/CJS consumers`);
+    // The runtime import above is necessary and not sufficient: importing a module
+    // never reads a `.d.ts`, so `0.21.60` shipped declarations no `node16`/
+    // `nodenext` consumer could load while this gate went green. The published
+    // artifact is the one a defect would actually reach a consumer through, so the
+    // same question the packed-tarball gate asks is asked here, of the same modes.
+    const subpaths = dualFormatSubpaths(packageJson);
+    writeFixtures({ root: tempRoot, packageName, subpaths });
+    const { tscPath, version: compilerVersion } = resolveTscPath(join(nodeModules, 'typescript'));
+    const compiled = [];
+    for (const mode of MODES) {
+      compileMode({
+        mode,
+        root: tempRoot,
+        config: writeTsconfig({ root: tempRoot, mode }),
+        tscPath,
+        packageName,
+        installed: compilerVersion
+      });
+      compiled.push(mode.label);
+    }
+    console.log(
+      `[npm] verified published ${packageName}@${version} ESM/CJS consumers, and ${subpaths.length} ` +
+        `subpaths typecheck under ${compiled.join(', ')} (typescript ${compilerVersion})`
+    );
   } finally {
     // Best-effort: a blocked delete (a locked file, or a sandbox that refuses
     // bulk deletes) must not turn a successful verification into a failed
