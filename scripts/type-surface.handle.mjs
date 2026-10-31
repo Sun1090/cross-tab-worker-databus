@@ -26,6 +26,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { followAlias } from './alias-chain.mjs';
 
 /**
  * @param {{ entryPaths: string[], version: string }} options
@@ -147,7 +148,6 @@ export async function createHandleSurface({ entryPaths, version }) {
         },
         nameOf: symbol => symbol.name,
         aliasOf(symbol) {
-          let current = symbol;
           // There is no `getAliasedSymbol` here, and the two obvious substitutes
           // are both wrong: `getExportSymbol()` returns the alias itself
           // (measured: flags still carry `SymbolFlags.Alias`), and
@@ -160,19 +160,16 @@ export async function createHandleSurface({ entryPaths, version }) {
           // This mattered: with `getExportSymbol()` the walk never reached the
           // aliased declaration, so a deliberately leaked type passed the gate on
           // TypeScript 7 while the same tree failed it on 6.0.3.
-          for (let hops = 0; current && current.flags & sync.SymbolFlags.Alias && hops < 16; hops += 1) {
-            let next;
-            try {
-              next = checker.getDeclaredTypeOfSymbol(current)?.getSymbol?.() ?? null;
-            } catch {
-              next = null;
+          return followAlias(symbol, {
+            isAlias: candidate => (candidate.flags & sync.SymbolFlags.Alias) !== 0,
+            follow: candidate => {
+              try {
+                return checker.getDeclaredTypeOfSymbol(candidate)?.getSymbol?.() ?? null;
+              } catch {
+                return null;
+              }
             }
-            // The hop cap is not a guess: an alias chain that long is a cycle,
-            // and this walk runs inside a recursive descent.
-            if (!next || next === current) break;
-            current = next;
-          }
-          return current ?? null;
+          });
         },
         declarationsOf(symbol) {
           const nodes = [];

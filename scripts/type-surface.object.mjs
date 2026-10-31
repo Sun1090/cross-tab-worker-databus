@@ -5,6 +5,7 @@
  * have one shape to call, not because the object API needs interpretation. The
  * commentary is limited to the two places where the facade has to *choose*.
  */
+import { followAlias } from './alias-chain.mjs';
 
 /**
  * @param {any} ts the installed compiler
@@ -63,18 +64,16 @@ export function createObjectSurface(ts, { entryPaths, version }) {
         },
         nameOf: symbol => symbol.getName(),
         aliasOf(symbol) {
-          let current = symbol;
-          while (current?.flags & ts.SymbolFlags.Alias) {
-            let next;
-            try {
-              next = checker.getAliasedSymbol(current);
-            } catch {
-              break;
+          return followAlias(symbol, {
+            isAlias: candidate => (candidate.flags & ts.SymbolFlags.Alias) !== 0,
+            follow: candidate => {
+              try {
+                return checker.getAliasedSymbol(candidate);
+              } catch {
+                return null;
+              }
             }
-            if (!next || next === current) break;
-            current = next;
-          }
-          return current ?? null;
+          });
         },
         declarationsOf: symbol => symbol?.getDeclarations() ?? [],
         symbolAt: node => checker.getSymbolAtLocation(node),

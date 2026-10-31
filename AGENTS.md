@@ -116,6 +116,7 @@ tests/
   bench-trend.test.ts           # bench:trend report generation + which clock stamps a report
   bench-browser.test.ts         # Browser bench env parsing + the documented defaults
   verify-public-types.test.ts    # verify:types compiler-API preflight, the surface selector, and the object surface's call sites
+  alias-chain.test.ts           # the alias-chain walk both verify:types backends share
   bench/cluster.bench.ts        # Cluster coordination micro-benchmarks (`pnpm bench`)
   bench/data-bus.bench.ts       # DataBus hot-path micro-benchmarks
   bench/routing.bench.ts        # Routing micro-benchmarks
