@@ -41,6 +41,28 @@ function hasUnconditionalExportTarget(entry) {
     hasUnconditionalExportTarget(entry.default);
 }
 
+/**
+ * Whether a `types` condition that used to cover a whole entry has been *widened*
+ * into the branches it covered, rather than dropped.
+ *
+ * Phase 337 split each dual-format entry into `import`/`require` branches so a
+ * `node16` CommonJS consumer resolves a CommonJS-format declaration instead of an
+ * ESM one it cannot `require`. That necessarily removes the top-level `types`
+ * key, which the removal check below would otherwise read as "the types condition
+ * is gone" — a false alarm, and one worth answering precisely rather than by
+ * exempting the field: the requirement is that *every* conditional branch now
+ * carries its own declaration, so no configuration resolves fewer types than it
+ * did before. A branch that lost its `types` still fails, which is the case this
+ * allowance exists not to excuse.
+ */
+function typesWidenedIntoBranches(entry) {
+  if (entry == null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  const branches = Object.values(entry).filter(
+    value => value != null && typeof value === 'object' && !Array.isArray(value)
+  );
+  return branches.length > 0 && branches.every(branch => typeof branch.types === 'string');
+}
+
 function assertExportCompatibility(baselineEntry, currentEntry, exportKey, conditionPath = []) {
   if ((typeof baselineEntry === 'string' || Array.isArray(baselineEntry)) &&
       hasUnconditionalExportTarget(baselineEntry) && !hasUnconditionalExportTarget(currentEntry)) {
@@ -52,6 +74,7 @@ function assertExportCompatibility(baselineEntry, currentEntry, exportKey, condi
     if (baselineEntry[field] == null) continue;
     if (currentEntry == null || typeof currentEntry !== 'object' ||
         Array.isArray(currentEntry) || currentEntry[field] == null) {
+      if (field === 'types' && conditionPath.length === 0 && typesWidenedIntoBranches(currentEntry)) continue;
       const condition = [...conditionPath, field].join('.');
       throw new Error(`[compat] removed ${condition} condition from export ${exportKey} since ${baseTag}`);
     }

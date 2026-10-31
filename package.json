@@ -54,14 +54,24 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/cjs/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
     },
     "./centrifuge": {
-      "types": "./dist/centrifuge.d.ts",
-      "import": "./dist/centrifuge.js",
-      "require": "./dist/cjs/centrifuge.cjs"
+      "import": {
+        "types": "./dist/centrifuge.d.ts",
+        "default": "./dist/centrifuge.js"
+      },
+      "require": {
+        "types": "./dist/cjs/centrifuge.d.cts",
+        "default": "./dist/cjs/centrifuge.cjs"
+      }
     },
     "./centrifuge.worker": {
       "types": "./dist/workers/centrifuge.worker.d.ts",
@@ -72,14 +82,24 @@
       "default": "./dist/centrifuge.shared.worker.js"
     },
     "./hooks": {
-      "types": "./dist/hooks.d.ts",
-      "import": "./dist/hooks.js",
-      "require": "./dist/cjs/hooks.cjs"
+      "import": {
+        "types": "./dist/hooks.d.ts",
+        "default": "./dist/hooks.js"
+      },
+      "require": {
+        "types": "./dist/cjs/hooks.d.cts",
+        "default": "./dist/cjs/hooks.cjs"
+      }
     },
     "./vue": {
-      "types": "./dist/vue.d.ts",
-      "import": "./dist/vue.js",
-      "require": "./dist/cjs/vue.cjs"
+      "import": {
+        "types": "./dist/vue.d.ts",
+        "default": "./dist/vue.js"
+      },
+      "require": {
+        "types": "./dist/cjs/vue.d.cts",
+        "default": "./dist/cjs/vue.cjs"
+      }
     },
     "./package.json": "./package.json"
   },

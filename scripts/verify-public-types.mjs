@@ -52,11 +52,26 @@ const pkg = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8'));
 
 // Every entry that ships declarations, taken from the `exports` map so a new
 // subpath is covered the moment it is advertised.
+//
+// The declaration's path is read from the `import` branch when an entry is
+// dual-format. Since Phase 337 such an entry has no top-level `types`: it has
+// one declaration tree per module format (`dist/*.d.ts` for `import`,
+// `dist/cjs/*.d.cts` for `require`), because a `node16` CommonJS consumer
+// refuses an ESM-format declaration. The ESM tree is the one this gate checks —
+// the CJS tree is generated from it by `scripts/build.mjs` and cannot hold a
+// name the ESM tree does not. Falling back only to a top-level string keeps the
+// ESM-only subpaths (`./centrifuge.worker`) working unchanged.
+const declarationPath = entry => {
+  if (typeof entry?.types === 'string') return entry.types;
+  if (typeof entry?.import?.types === 'string') return entry.import.types;
+  return undefined;
+};
+
 const entries = Object.entries(pkg.exports ?? {})
-  .filter(([subpath, entry]) => subpath !== './package.json' && typeof entry?.types === 'string')
+  .filter(([subpath, entry]) => subpath !== './package.json' && declarationPath(entry) !== undefined)
   .map(([subpath, entry]) => {
-    const declaration = join(workspace, entry.types);
-    const source = resolve(workspace, entry.types)
+    const declaration = join(workspace, declarationPath(entry));
+    const source = resolve(workspace, declarationPath(entry))
       .replace(/^.*[\\/]dist[\\/]/, join(workspace, 'src') + '/')
       .replace(/\.d\.ts$/, '.ts');
     return { subpath, declaration, source };

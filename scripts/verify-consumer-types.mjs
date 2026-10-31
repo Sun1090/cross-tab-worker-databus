@@ -73,14 +73,53 @@ const SUBPATHS = ['.', './centrifuge'];
  *
  * `skipLibCheck: false` everywhere, on purpose: the point is to check *this*
  * package's declarations, and every mode is expected to pass in that strictest
- * configuration. The CJS mode has its own fixture directory because the module
- * format of a `.ts` file under `nodenext` is decided by the nearest
- * `package.json` `type`, so it needs a `commonjs` one of its own.
+ * configuration. The CJS modes have their own fixture directory because the
+ * module format of a `.ts` file under `node16`/`nodenext` is decided by the
+ * nearest `package.json` `type`, so each needs a `commonjs` one of its own.
+ *
+ * `node16` is not a synonym for `nodenext`, which is why both are run: `node16`
+ * pins resolution to the Node version the compiler knows about (no `import`
+ * attributes, no `require(esm)` interop), while `nodenext` tracks the newest.
+ * They disagreed often enough during the 6.0 major line that a `tsconfig.json`
+ * naming one cannot be assumed to behave like the other, and a consumer's file
+ * says whichever it says.
+ */
+const RESOLUTION_MODES = ['node16', 'nodenext'];
+
+/**
+ * `expects` is the declaration tree this mode must actually resolve, checked from
+ * the compiler's own `--listFiles`. Compiling is the weaker claim: a manifest that
+ * advertised one tree for both formats compiles in every mode except `node16`
+ * CJS, so "it built" cannot distinguish the fix from the defect. Naming the file
+ * each consumer is supposed to read is what this gate is about.
  */
 const MODES = [
-  { id: 'bundler', label: 'bundler', dir: '.', type: 'module', compilerOptions: { module: 'esnext', moduleResolution: 'bundler' } },
-  { id: 'nodenext', label: 'nodenext (ESM)', dir: '.', type: 'module', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } },
-  { id: 'nodenext-cjs', label: 'nodenext (CJS)', dir: 'cjs', type: 'commonjs', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } }
+  {
+    id: 'bundler',
+    label: 'bundler',
+    dir: '.',
+    type: 'module',
+    compilerOptions: { module: 'esnext', moduleResolution: 'bundler' },
+    expects: 'dist/index.d.ts'
+  },
+  ...RESOLUTION_MODES.flatMap(resolution => [
+    {
+      id: `${resolution}-esm`,
+      label: `${resolution} (ESM)`,
+      dir: '.',
+      type: 'module',
+      compilerOptions: { module: resolution, moduleResolution: resolution },
+      expects: 'dist/index.d.ts'
+    },
+    {
+      id: `${resolution}-cjs`,
+      label: `${resolution} (CJS)`,
+      dir: 'cjs',
+      type: 'commonjs',
+      compilerOptions: { module: resolution, moduleResolution: resolution },
+      expects: 'dist/cjs/index.d.cts'
+    }
+  ])
 ];
 
 /** `label (version)` per mode that passed, for the one-line summary. */
@@ -166,8 +205,14 @@ try {
       )}\n`
     );
 
+    let listed;
     try {
-      run(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', config]);
+      listed = run(process.execPath, [
+        join(root, 'node_modules/typescript/bin/tsc'),
+        '-p',
+        config,
+        '--listFiles'
+      ]);
     } catch (error) {
       // `tsc` reports paths relative to its own cwd, which here is a temp root
       // several `../` deep. Strip that prefix so the diagnostics read as the
@@ -184,6 +229,27 @@ try {
           `a public name does not resolve, or the subpath's types do not match this resolution mode. ` +
           `Diagnostics:\n${output}`,
         { cause: error }
+      );
+    }
+    // `--listFiles` reports every file the program read, absolute and with the
+    // platform's separators. Only the declaration this mode was supposed to reach
+    // is asserted, and only as a suffix, so the temp path never enters a message.
+    const read = listed.split('\n').map(line => line.trim().replaceAll('\\', '/'));
+    const wanted = manifest.name;
+    if (!read.some(file => file.endsWith(`/${mode.expects}`))) {
+      throw new Error(
+        `[consumer-types] typescript ${installed} built the ${mode.label} consumer without reading ` +
+          `${mode.expects}. The consumer compiled, but against a different declaration tree than this ` +
+          `mode is meant to resolve, so the exports map and the module format disagree for ${wanted}. ` +
+          `Declarations read: ${read.filter(f => f.includes('/dist/')).join(', ') || '(none from dist)'}`
+      );
+    }
+    if (mode.expects === 'dist/cjs/index.d.cts' &&
+        read.some(file => file.endsWith('/dist/index.d.ts'))) {
+      throw new Error(
+        `[consumer-types] the ${mode.label} consumer read both declaration trees: it resolved the ` +
+          `CommonJS one and still pulled in dist/index.d.ts. A CommonJS declaration graph must not ` +
+          `cross into the ESM tree — that boundary is TS1479 under node16.`
       );
     }
     checked.push(`${mode.label} (${installed})`);

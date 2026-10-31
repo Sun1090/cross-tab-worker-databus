@@ -26,7 +26,7 @@ It is recommended to create an instance in the application's infrastructure laye
 
 Both module formats are published: ESM (`import`) and CommonJS (`require` / `dist/cjs`), so CJS bundler configurations and `require()` callers work out of the box.
 
-The TypeScript declarations cover both formats and are checked against the packed tarball on every release under three resolution modes — `bundler`, and `node16`/`nodenext` from an ESM consumer and from a CommonJS consumer — with `skipLibCheck: false` in each, so a strict project resolves them without the assumption that library types are skipped. The two newer modes are the reason relative imports inside the declarations carry explicit `.js` extensions.
+The TypeScript declarations cover both formats: `require()` callers resolve a CommonJS-format declaration tree (`dist/cjs/*.d.cts`) and `import` callers the ESM one, so either consumer type resolves types without `skipLibCheck`. Every release checks the packed tarball in five configurations — `bundler`, and both `node16` and `nodenext` from an ESM consumer and from a CommonJS consumer — all with `skipLibCheck: false`. Those stricter modes are why relative imports inside the declarations carry explicit `.js` / `.cjs` extensions.
 
 When consuming the Centrifuge entry as CommonJS in a browser, provide an explicit `workerFactory` (or `sharedWorkerFactory`) if your bundler does not preserve `import.meta.url`; the default module-relative Worker URL is only available in ESM output.
 

@@ -37,11 +37,24 @@ export function collectExportTargets(manifest) {
   if (entries.length === 0) throw new Error('[pack] packed manifest declares no exports');
   const targets = [];
   for (const [subpath, entry] of entries) {
-    const values = typeof entry === 'string' ? [entry] : Object.values(entry ?? {});
+    const values = collectTargetLeaves(entry);
     if (values.length === 0) throw new Error(`[pack] export ${subpath} declares no target`);
     for (const target of values) targets.push({ subpath, target });
   }
   return targets;
+}
+
+/**
+ * Every string leaf of a condition tree.
+ *
+ * A dual-format entry nests its declarations under `import`/`require` (Phase
+ * 337), so a single `Object.values` would hand `exists()` a condition object
+ * instead of a path — and the gate would report a target nobody can `stat`.
+ */
+function collectTargetLeaves(node) {
+  if (typeof node === 'string') return [node];
+  if (node == null || typeof node !== 'object') return [];
+  return Object.values(node).flatMap(collectTargetLeaves);
 }
 
 /** Assert the packed manifest promises a complete, resolvable export surface. */
