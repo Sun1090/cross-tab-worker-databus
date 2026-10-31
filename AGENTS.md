@@ -28,7 +28,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Perf gates | `pnpm test:perf` (own step — absolute-ms ceilings need an unscheduled core) |
 | Watch tests | `pnpm test:watch` |
 | E2E test | `pnpm test:e2e` (Playwright, requires `pnpm build` first) |
-| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:types:sensitivity` (mutates the tree in the two ways `verify:types` exists to catch and requires a failure each time — a clean run proves nothing on its own), `pnpm verify:pack` (imports every entry from the tarball) |
+| Public-surface gates | `pnpm verify:compat` (package.json `exports`/type fields vs the base tag), `pnpm verify:types` (declared export names vs the base tag + type-graph closure; requires `pnpm build`), `pnpm verify:types:sensitivity` (mutates the tree in the two ways `verify:types` exists to catch and requires a failure each time — a clean run proves nothing on its own), `pnpm verify:consumer-types [version]` (packs the tarball and has that compiler build a consumer against it — a different question from either of the above), `pnpm verify:pack` (imports every entry from the tarball) |
 | Dependency audit | `pnpm audit` — a blocking step in CI's verify job, after `bench`. Locally it needs `--registry=https://registry.npmjs.org`: the mirror this repository's npm is configured to serves no audit endpoint, so an unqualified run answers nothing and reads like a clean tree. `pnpm-workspace.yaml` overrides pin the patched ranges; read its output rather than assuming a pass, and note which registry produced it |
 | Micro-bench | `pnpm bench` (vitest bench; CI runs it in the verify job, so a non-zero exit does fail the build, but it asserts no thresholds — the thresholds live in `test:perf` and `bench:compare`) |
 | Browser bench + its gate | `pnpm bench:browser` (builds, then drives a real browser and appends to the untracked `bench-results/` archive) → `pnpm bench:compare --fail-above-pct 50`. Deliberately **local-only**: `bench-results/` is not in git, so no CI step can see the archive. `pnpm bench:trend` regenerates `docs/benchmarks.md` + its zh mirror from that archive |
@@ -467,6 +467,11 @@ The project is feature-complete: follow-up work is verification and deepening of
   and the 7.x CI job, and it was itself regressed — reverting the alias resolution to the original
   `getExportSymbol()` makes it exit 1 with "the gate exited 0 on a mutated tree", which is the only
   evidence that a sensitivity check has any.
+  The *consumer* side is measured separately: `pnpm verify:consumer-types 7.0.2` packs the tarball and has
+  7.0.2 build a consumer that re-exports both public subpaths and calls six declared signatures. Measured
+  on 2026-10-31 against `0.21.60`: zero diagnostics on 6.0.3 **and** on 7.0.2, so a consumer can move
+  before this repository does. Re-derive it rather than quoting it — the claim decays with the next
+  declaration change, which is why both versions run in the `typescript-7` job.
   So the only remaining blocker is the peer range above. Do not re-derive it from this paragraph either.
 
 ### Boundary Review Signals

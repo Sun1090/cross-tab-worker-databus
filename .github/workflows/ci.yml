@@ -134,6 +134,15 @@ jobs:
         # alias itself and so missed a deliberately leaked type while both trees
         # reported `surface closed`.
         run: pnpm verify:types:sensitivity
+      - name: Consumer type check, both compiler versions
+        # The gates above check the declarations with this repository's compiler
+        # and import the tarball at runtime; neither answers "can a consumer's
+        # compiler build against these declarations". Both versions run here
+        # because this job is already the one that installs a compiler, and a
+        # consumer on 6.x is still the common case.
+        run: |
+          pnpm verify:consumer-types 6.0.3
+          pnpm verify:consumer-types 7.0.2
 
   browser:
     runs-on: ubuntu-latest
