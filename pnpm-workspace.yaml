@@ -21,3 +21,15 @@ overrides:
   # peer from the lockfile first.
   "@vitest/mocker": "^5.0.3"
   undici: "^8.12.2"
+  # minimatch <11.0.1 has a moderate denial-of-service via globparts amplification
+  # (GHSA-g3hv-75wg-m249), reached only through eslint > minimatch (dev-only, so no
+  # consumer is exposed). This is the one override here that crosses a **major**,
+  # and it is recorded as such rather than as an incidental: eslint declares
+  # `minimatch: ^10.2.6`, the fix landed in 11.0.1, and there is no patched 10.x —
+  # so the choice is a forced major or a blocking audit failure in CI. What makes
+  # it safe to take is that 11.0.1 still ships dual ESM/CJS with the same
+  # `exports` shape, its engine range (`18 || 20 || >=22`) covers every Node this
+  # repository claims, and the acceptance test is the gate that actually consumes
+  # it: `pnpm lint` over the whole tree exercises eslint's file matching end to
+  # end. Verify that before touching this line.
+  minimatch: "^11.0.1"
