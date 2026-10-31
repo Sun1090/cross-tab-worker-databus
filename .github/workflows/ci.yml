@@ -65,6 +65,48 @@ jobs:
         # patched ranges.
         run: pnpm audit
 
+  typescript-7:
+    # `verify:types` has two backends: TypeScript 6's in-process object API and
+    # 7's snapshot/handle API (scripts/type-surface.mjs). The compiler this
+    # repository installs is 6.x, so without this job the handle backend is never
+    # executed — and a backend that is never executed is a comment, not a gate.
+    # That matters concretely: the handle facade's first alias-resolution
+    # implementation was wrong in a way that made the closure check miss a
+    # deliberately leaked type while the clean tree stayed green on both
+    # compilers (docs/progress.md Phase 330).
+    #
+    # The compiler is replaced in place rather than installed as a second copy,
+    # because the gate resolves `typescript` as a bare specifier from its own
+    # directory. The build runs first, on 6.x, so this job cannot be read as a
+    # claim about emitting declarations with 7.
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The non-removal check diffs against the previous release tag.
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build declarations (TypeScript 6)
+        run: pnpm build
+      - name: Swap in TypeScript 7
+        run: |
+          npm pack typescript@7.0.2 --pack-destination "$RUNNER_TEMP" --silent > /dev/null
+          tar -xzf "$RUNNER_TEMP/typescript-7.0.2.tgz" -C "$RUNNER_TEMP"
+          rm -rf node_modules/typescript
+          mv "$RUNNER_TEMP/package" node_modules/typescript
+          node -p "require('typescript').version"
+      - name: Public type surface on TypeScript 7
+        # Must print the same summary line as the 6.x run in `verify`.
+        run: pnpm verify:types
+
   browser:
     runs-on: ubuntu-latest
     needs: verify

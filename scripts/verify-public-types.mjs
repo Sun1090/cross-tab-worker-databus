@@ -33,21 +33,19 @@
  * describe the previous build. That is the same exposure
  * `tests/dual-format.test.ts` already has, and `pnpm check` (which builds) runs
  * before this in both workflows.
+ *
+ * The two checks are written once, against the facade in `type-surface.mjs`.
+ * That indirection exists because the compiler has two different surfaces now:
+ * TypeScript 6 answers through the in-process object API and TypeScript 7 only
+ * through a snapshot/handle protocol under `unstable/*`. Forking the checks per
+ * compiler would let the two copies disagree about what a leak is, which is the
+ * one thing this gate cannot afford.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { basename, join, relative, resolve } from 'node:path';
 import { assertCompilerApi } from './compiler-api.mjs';
-
-const require = createRequire(import.meta.url);
-const ts = require('typescript');
-
-// Before anything reads `ts`: a compiler that has no object API cannot answer
-// any question this file asks, and the failure without this line is a
-// `TypeError` from inside the syntax walk that names neither the version nor
-// the gate. See scripts/compiler-api.mjs for the measurement behind it.
-assertCompilerApi(ts, { gate: 'verify:types' });
+import { detectCompiler, openSurface } from './type-surface.mjs';
 
 const workspace = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8'));
@@ -72,37 +70,49 @@ if (missing.length) {
   );
 }
 
-function exportedNamesFromSourceText(text, fileName) {
-  const sourceFile = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
+const compiler = detectCompiler();
+// Only the object surface is asserted member-by-member. A compiler without it is
+// not automatically a failure any more — it may be TypeScript 7, whose handle
+// surface lives on a subpath and is checked by `openSurface` when it imports it.
+if (compiler.kind === 'object') assertCompilerApi(compiler.ts, { gate: 'verify:types' });
+
+const surface = await openSurface({
+  ts: compiler.ts,
+  kind: compiler.kind,
+  version: compiler.version,
+  entryPaths: entries.map(entry => entry.declaration)
+});
+const syntax = surface.syntax;
+
+/**
+ * Names a single parsed file exports. `element.name` is what the consumer
+ * writes, so `export { A as B }` contributes B — the alias is the contract, the
+ * target is not.
+ */
+function exportedNamesFromSourceFile(sourceFile, fileName) {
   const names = new Set();
-  for (const statement of sourceFile.statements) {
-    if (ts.isExportDeclaration(statement)) {
+  for (const statement of syntax.statementsOf(sourceFile)) {
+    if (syntax.isExportDeclaration(statement)) {
       if (statement.exportClause == null) {
         throw new Error(`[types] ${fileName} uses 'export *', which this gate cannot reason about`);
       }
-      if (ts.isNamespaceExport(statement.exportClause)) {
+      if (syntax.isNamespaceExport(statement.exportClause)) {
         throw new Error(`[types] ${fileName} uses 'export * as', which this gate cannot reason about`);
       }
-      // `element.name` is what the consumer writes, so `export { A as B }`
-      // contributes B — the alias is the contract, the target is not.
-      for (const element of statement.exportClause.elements) names.add(element.name.text);
+      for (const element of syntax.exportElementsOf(statement)) names.add(element.name.text);
       continue;
     }
-    const modifiers = ts.getModifiers(statement);
-    if (!modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue;
-    if (ts.isVariableStatement(statement)) {
+    const modifiers = syntax.modifiersOf(statement);
+    if (!modifiers.some(modifier => modifier.kind === syntax.SyntaxKind.ExportKeyword)) continue;
+    if (syntax.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         names.add(declaration.name.getText());
       }
-    } else if (statement.name && ts.isIdentifier(statement.name)) {
+    } else if (statement.name && syntax.isIdentifier(statement.name)) {
       names.add(statement.name.text);
     }
   }
   return names;
-}
-
-function currentExportedNames(entry) {
-  return exportedNamesFromSourceText(readFileSync(entry.source, 'utf8'), entry.source);
 }
 
 // --- check 1: non-removal against the previous release tag -------------------
@@ -123,14 +133,11 @@ if (!baseTag) {
   baseTag = tags.find(tag => !headTags.includes(tag)) ?? tags[0];
 }
 
-const removed = [];
-// Counts the names the baseline side of this comparison actually produced. `removed`
-// is built by iterating `baselineNames`, so an empty one means either "nothing was
-// lost" or "the parser found nothing to lose" — and both print the same success line.
-// The parser is the shared suspect: `exportedNamesFromSourceText` feeds the baseline
-// *and* `currentExportedNames` feeds the other side, so a regression in it does not
-// produce a false removal report, it produces a clean run over an empty set.
-let baselineNamesSeen = 0;
+// Both sides are collected first and parsed in one call. The baseline side is
+// text that exists only in git, never on disk, and the TypeScript 7 surface has
+// no parser that accepts text — its facade stages the text into a temp directory
+// and opens it. One call keeps that staging to a single snapshot.
+const sides = [];
 for (const entry of entries) {
   let baselineText;
   try {
@@ -146,8 +153,32 @@ for (const entry of entries) {
     }
     continue;
   }
-  const baselineNames = exportedNamesFromSourceText(baselineText, relative(workspace, entry.source));
-  const now = currentExportedNames(entry);
+  sides.push({ entry, baseline: { fileName: `${baseTag}:${relative(workspace, entry.source)}`, text: baselineText } });
+  sides.push({ entry, current: { fileName: relative(workspace, entry.source), text: readFileSync(entry.source, 'utf8') } });
+}
+
+const parsedTexts = surface.parseSourceFiles(sides.map(side => side.baseline ?? side.current));
+const namesOf = side => {
+  const text = side.baseline ?? side.current;
+  const sourceFile = parsedTexts.get(text.fileName);
+  if (!sourceFile) throw new Error(`[types] nothing was parsed for ${text.fileName}`);
+  return exportedNamesFromSourceFile(sourceFile, text.fileName);
+};
+
+const removed = [];
+// Counts the names the baseline side of this comparison actually produced. `removed`
+// is built by iterating `baselineNames`, so an empty one means either "nothing was
+// lost" or "the parser found nothing to lose" — and both print the same success line.
+// The parser is the shared suspect: `exportedNamesFromSourceFile` feeds the baseline
+// *and* the current side, so a regression in it does not produce a false removal
+// report, it produces a clean run over an empty set.
+let baselineNamesSeen = 0;
+for (let index = 0; index < sides.length; index += 2) {
+  const baselineSide = sides[index];
+  const currentSide = sides[index + 1];
+  const { entry } = baselineSide;
+  const baselineNames = namesOf(baselineSide);
+  const now = namesOf(currentSide);
   baselineNamesSeen += baselineNames.size;
   for (const name of baselineNames) {
     if (!now.has(name)) removed.push(`${entry.subpath}: ${name}`);
@@ -163,58 +194,23 @@ if (baselineNamesSeen <= 50) {
   throw new Error(
     `[types] the baseline scan produced ${baselineNamesSeen} exported name(s) across ${entries.length} ` +
       'public subpaths, which is too few for the non-removal check to have compared anything. ' +
-      'Check exportedNamesFromSourceText before believing any "no removals" line from this script.'
+      'Check exportedNamesFromSourceFile before believing any "no removals" line from this script.'
   );
 }
 
 // --- check 2: closure over the union of public entries ----------------------
 
-const program = ts.createProgram(
-  entries.map(entry => entry.declaration),
-  { strict: true, target: ts.ScriptTarget.ES2020, moduleResolution: ts.ModuleResolutionKind.Bundler }
-);
-const checker = program.getTypeChecker();
+const facade = surface.openProgram();
 const rootOf = file => file.startsWith(join(workspace, 'src')) || file.startsWith(join(workspace, 'dist'));
-
-function resolveAlias(symbol) {
-  let current = symbol;
-  while (current?.flags & ts.SymbolFlags.Alias) {
-    let next;
-    try {
-      next = checker.getAliasedSymbol(current);
-    } catch {
-      break;
-    }
-    if (!next || next === current) break;
-    current = next;
-  }
-  return current;
-}
 
 const importableNames = new Map();
 for (const entry of entries) {
-  const declarationFile = program.getSourceFile(entry.declaration);
-  const moduleSymbol = checker.getSymbolAtLocation(declarationFile);
-  if (!moduleSymbol) throw new Error(`[types] no module symbol for ${entry.declaration}`);
-  for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
-    importableNames.set(symbol.getName(), entry.subpath);
+  for (const symbol of facade.exportsOf(entry.declaration)) {
+    importableNames.set(facade.nameOf(symbol), entry.subpath);
   }
 }
 
 const visited = new Set();
-const moduleExports = new Map();
-
-/** Names a module itself exports, keyed by source file. */
-function exportedFromModule(declarationFile) {
-  const cached = moduleExports.get(declarationFile.fileName);
-  if (cached) return cached;
-  const moduleSymbol = checker.getSymbolAtLocation(declarationFile);
-  const names = new Set(
-    moduleSymbol ? checker.getExportsOfModule(moduleSymbol).map(symbol => symbol.getName()) : []
-  );
-  moduleExports.set(declarationFile.fileName, names);
-  return names;
-}
 
 /**
  * The name of a repository type symbol that its own module exports, or null.
@@ -229,34 +225,28 @@ function exportedFromModule(declarationFile) {
  * then referenced as something a caller has to *write a value of*.
  */
 function declaredTypeName(symbol) {
-  const declaration = (symbol?.getDeclarations() ?? []).find(node =>
-    ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) ||
-    ts.isClassDeclaration(node) || ts.isEnumDeclaration(node));
-  if (!declaration) return null;
-  const file = declaration.getSourceFile();
-  if (!rootOf(file.fileName)) return null;
-  if (file.fileName.includes('node_modules') || basename(file.fileName).startsWith('lib.')) return null;
-  const name = symbol.getName();
-  if (!exportedFromModule(file).has(name)) return null;
-  return { name, file: relative(workspace, file.fileName) };
+  for (const node of facade.declarationsOf(symbol)) {
+    const kind = facade.declaredKindOf(node);
+    if (!kind) continue;
+    const file = facade.fileNameOf(node);
+    if (!rootOf(file)) return null;
+    if (file.includes('node_modules') || basename(file).startsWith('lib.')) return null;
+    const name = facade.nameOf(symbol);
+    if (!facade.exportsOfFile(file).has(name)) return null;
+    return { name, file: relative(workspace, file) };
+  }
+  return null;
 }
 
 function walkReferences(symbol, origin, trail) {
-  const key = `${origin}\u0000${symbol.getName()}`;
+  const key = `${origin}\u0000${facade.nameOf(symbol)}`;
   if (visited.has(key)) return;
   visited.add(key);
-  for (const declaration of symbol.getDeclarations() ?? []) {
-    // Only the declaration surface of a `.d.ts` matters: consumers never see a
-    // body, and `dist/**/*.d.ts` has none for these kinds anyway.
-    visit(declaration);
-  }
 
   function visit(node) {
-    let identifier = null;
-    if (ts.isIdentifier(node)) identifier = node;
-    else if (ts.isQualifiedName(node)) identifier = node.right;
+    const identifier = facade.identifierOf(node);
     if (identifier) {
-      const target = resolveAlias(checker.getSymbolAtLocation(identifier));
+      const target = facade.aliasOf(facade.symbolAt(identifier));
       const named = target ? declaredTypeName(target) : null;
       if (named && !importableNames.has(named.name)) {
         if (!leaked.has(named.name)) {
@@ -268,21 +258,39 @@ function walkReferences(symbol, origin, trail) {
         walkReferences(target, origin, `${trail} > ${named.name}`);
       }
     }
-    ts.forEachChild(node, visit);
+    facade.forEachChild(node, visit);
+  }
+
+  for (const declaration of facade.declarationsOf(symbol)) {
+    // Only the declaration surface of a `.d.ts` matters: consumers never see a
+    // body, and `dist/**/*.d.ts` has none for these kinds anyway.
+    visit(declaration);
   }
 }
 
 const leaked = new Map();
 for (const entry of entries) {
-  const declarationFile = program.getSourceFile(entry.declaration);
-  const moduleSymbol = checker.getSymbolAtLocation(declarationFile);
-  for (const exportSymbol of checker.getExportsOfModule(moduleSymbol)) {
+  for (const exportSymbol of facade.exportsOf(entry.declaration)) {
     // No per-export leak check here: every name this loop visits was just added
     // to `importableNames` from the same export list, so it is importable by
     // construction. Only its *references* can escape the public surface.
-    walkReferences(resolveAlias(exportSymbol), `${entry.subpath} → ${exportSymbol.getName()}`, 'export');
+    walkReferences(facade.aliasOf(exportSymbol), `${entry.subpath} → ${facade.nameOf(exportSymbol)}`, 'export');
   }
 }
+
+// Check 2 prints "surface closed" both when the walk found nothing and when it
+// never ran. `visited` is that distinction: an empty walk means the export
+// enumeration or the child traversal returned nothing, and the facade is the
+// suspect because it is the only part that differs between compilers.
+if (visited.size === 0) {
+  throw new Error(
+    `[types] the closure walk visited no symbols across ${entries.length} public subpaths; ` +
+      `the ${surface.kind} surface returned ${importableNames.size} importable name(s) and no declarations to walk. ` +
+      'Believe no "surface closed" line from this run.'
+  );
+}
+
+surface.close();
 
 const leakLines = [...leaked].map(([name, where]) => `${name}: ${where}`);
 
