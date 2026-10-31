@@ -7,6 +7,7 @@
 | 分类 | 能力 | 状态 | 当前行为 / 边界 |
 |---|---|---|---|
 | 核心 API | 框架无关的 subscribe、unsubscribe、publish 和状态监听 | ✅ 已实现 | 通过 `CrossTabDataBus` 提供统一 API |
+| 核心 API | 通配符订阅（`chat.*`、`*`） | ✅ 已实现 | 在路由、owner 归属与 transport 中，pattern 就是一个字面量 channel——协调面没有任何 pattern 特判——因此 pattern 匹配只发生在判定投递的位置：`cluster.isAssigned()`、`cluster.hasLocalSubscriber()` 与 `CrossTabDataBus.dispatch()` 的 handler 遍历。所以服务端必须以具体 topic 打标签投递（推荐，pattern-aware），或以 pattern 本身投递 |
 | 启动体验 | 创建后自动启动、连接前订阅排队、`ready()` | ✅ 已实现 | 应用无需等待连接即可注册 Topic |
 | Tab 内复用 | 同一 Topic 多 handler 引用计数 | ✅ 已实现 | 第一个 handler 注册，最后一个 handler 释放 |
 | 跨 Tab 协调 | Worker transport + BroadcastChannel 控制面 | ✅ 已实现 | 每个 Tab 默认使用 Dedicated Worker；SharedWorker 模式下同源 Tab 复用 Worker，Topic owner 跨 Tab 共享 |
@@ -32,8 +33,10 @@
 | 消息语义 | 可插拔的 publication 去重 | ✅ 已实现 | 按 `DataBusMessage.messageId` 做可选有界入站抑制；默认关闭，ID 仍由调用方/服务端控制 |
 | 认证 | Worker 内异步凭证刷新桥接 | ✅ 已实现 | `createCentrifugeDataBus` 的可选 `credentialProvider`（`getToken` / `getChannelToken`）。Worker 配置保持结构化可克隆；Worker 通过 TOKEN_REQUEST / TOKEN_RESPONSE 交换向主线程请求每个新凭证，由 provider 从应用上下文提供 |
 | 负载策略 | 按消息速率、字节数或调度滞后自适应加权 | ✅ 已实现 | 可选的 `loadWeighting`（`messageRateWeight`、`byteRateWeight`、`scheduleLagWeight`）：Workers 按窗口采样自身 fan-out 流量与心跳调度超时并随记录发布；新 route 的 owner 选择在 Topic 数之上加入归一化速率与滞后比率。默认（未设置）保持纯按 Topic 数；已有 route 保持 sticky |
+| 适配器 | React hooks 与 Vue 3 composables | ✅ 已实现 | 可选子路径 `cross-tab-worker-databus/hooks` 与 `/vue`，均导出 `useCrossTabDataBus`、`useCrossTabSubscription`、`useCrossTabStatus` 与 `useCrossTabHealth`；React 适配器以 StrictMode 安全的方式管理 bus 生命周期，两者都在卸载时拆除订阅，`react` / `vue` 为可选 peer，核心包保持框架无关 |
 | 可观测性 | owner 确认、迁移和恢复尝试的指标/事件 | ✅ 已实现 | `DataBusReliabilityTraceEvent` 记录有界的 route ack/migration 与 transport recovery；服务端最终确认仍由 transport 决定 |
 | 运行时模型 | SharedWorker / Dedicated Worker transport | ✅ 已实现 | `workerMode` 支持 `dedicated`、`shared` 和 `auto`，默认 `dedicated` |
+| 运行时模型 | 内置原生 WebSocket transport | ✅ 已实现 | 从根入口导出 `createWebSocketDataBus` / `WebSocketTransport`，零运行时依赖：实现五方法 `DataBusTransport` 契约，并把 `publishBatch` 合并为一帧，因此纯 WebSocket 服务端无需额外适配包。仓库自带 demo server 说的就是同一套帧 |
 | 运行时模型 | Service Worker transport | 未实现 | 刻意延后；生命周期与长连接约束见 `docs/zh/architecture.md` |
 | 持久消息 | 向稍后加载的 Tab 回放已发布的 payload | ✅ 已实现 | 需要显式开启：`createIndexedDbReplayPersistence` 保存 publication 自身——包含业务 payload，并以明文 Topic 作为对象仓的 key——下次加载时重新水合，因此历史可以跨越 reload 或页面关闭。这是给订阅方的入站回放，不是投递保证 |
 | 持久消息 | 页面关闭后重发外发发布命令 | 未实现 | 发布命令不会被持久化；已经被丢弃的 publication（transport 断连窗口，或 local-mode 降级）是唯一文档化的不可恢复丢失 |
