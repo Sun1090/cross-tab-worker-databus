@@ -22,7 +22,7 @@
  * single file would be this script's bug, not the package's.
  *
  * Usage: node scripts/verify-consumer-types.mjs [typescript-version]
- *        (defaults to the version this repository has installed)
+ *        (defaults to the version of the compiler whose API the other gates drive)
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -31,9 +31,30 @@ import { join, resolve } from 'node:path';
 
 const workspace = resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8'));
-const requested = process.argv[2] ?? JSON.parse(
-  readFileSync(join(workspace, 'node_modules/typescript/package.json'), 'utf8')
-).version;
+
+/**
+ * The version installed into the consumer when the caller names none.
+ *
+ * Deliberately the version the *loaded API* reports, not the one in
+ * `node_modules/typescript/package.json`. Those stopped being the same answer
+ * when this repository started building with TypeScript 7 while keeping the 6.x
+ * API for its gates (`typescript` is an npm alias to `@typescript/typescript6`;
+ * docs/progress.md Phase 334): that manifest reads `6.0.2` — the shim's own
+ * version — while the API it re-exports is `6.0.3`, and the compiler that emits
+ * `dist/*.d.ts` is 7.x. Defaulting to the shim's version would quietly check a
+ * third compiler that nothing in this repository runs.
+ *
+ * Read through `default` as well as the namespace: `typescript` is CommonJS, and
+ * named-export detection is a lexer heuristic this should not depend on.
+ */
+const loaded = await import('typescript');
+const defaultCompilerVersion = loaded.version ?? loaded.default?.version;
+
+if (defaultCompilerVersion === undefined) {
+  throw new Error('[consumer-types] cannot read the loaded compiler version; pass one explicitly');
+}
+
+const requested = process.argv[2] ?? defaultCompilerVersion;
 
 /** Subpaths whose declarations are checked. The worker entries export nothing. */
 const SUBPATHS = ['.', './centrifuge'];
