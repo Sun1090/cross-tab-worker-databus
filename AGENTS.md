@@ -23,7 +23,7 @@ A framework-agnostic cross-tab data bus with Dedicated/Shared Worker clustering 
 | Type check | `pnpm typecheck` |
 | Unit test | `pnpm test` (vitest; excludes the perf gates) |
 | Lint | `pnpm lint` (`eslint .`) — **not part of `pnpm check`**, and CI runs it as its own blocking step after `check`, so a green `check` says nothing about lint |
-| Aggregate local gate | `pnpm check` = `typecheck` → `build` → `test` → `test:perf`. It does **not** lint, does not run `test:coverage`, and does not run `test:e2e`; the local pair to run before pushing is `pnpm check && pnpm lint`, and the full set adds `test:coverage`, `test:e2e` and the `verify:*` trio |
+| Aggregate local gate | `pnpm check` = `typecheck` → `build` → `test` → `test:perf`. It does **not** lint, does not run `test:coverage`, and does not run `test:e2e`; the local pair to run before pushing is `pnpm check && pnpm lint`, and the full set adds `test:coverage`, `test:e2e` and every `verify:*` command |
 | Coverage / arm ledger | `pnpm test:coverage` (instruments `src/**` only, per `vitest.config.ts`; the zero-count-branch ledger is read from `coverage/coverage-final.json`) |
 | Perf gates | `pnpm test:perf` (own step — absolute-ms ceilings need an unscheduled core) |
 | Watch tests | `pnpm test:watch` |
