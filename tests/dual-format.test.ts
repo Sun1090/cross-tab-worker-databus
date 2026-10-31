@@ -7,7 +7,7 @@
  * promised by package.json `exports` actually exists on disk.
  */
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -167,17 +167,52 @@ describe('dual-format build artifacts', () => {
 
   it('materialises every path declared in package.json exports', () => {
     const pkg = require('../package.json') as {
-      exports: Record<string, Record<string, string> | string>;
+      exports: Record<string, string | Record<string, unknown>>;
     };
+    // Conditions nest (`import: { types, default }`) since Phase 337, so the walk
+    // is recursive: a one-level `Object.values` would put a condition object where
+    // a filename is expected and assert nothing useful about it.
     const targets: string[] = [];
-    for (const value of Object.values(pkg.exports)) {
-      if (typeof value === 'string') targets.push(value);
-      else targets.push(...Object.values(value));
-    }
+    const collect = (node: unknown): void => {
+      if (typeof node === 'string') targets.push(node);
+      else if (node != null && typeof node === 'object') Object.values(node).forEach(collect);
+    };
+    Object.values(pkg.exports).forEach(collect);
     expect(targets.length).toBeGreaterThan(0);
     for (const target of targets) {
       const file = target.replace(/^\.\//, '');
       expect(existsSync(file), `exports target missing: ${file}`).toBe(true);
+    }
+  });
+
+  it('ships a CommonJS declaration twin beside every declaration it mirrors', () => {
+    // `tsc` emits one tree, and it is ESM-format because the root manifest says
+    // `type: module`. A `node16` CommonJS consumer cannot `require` those, so
+    // `scripts/build.mjs` mirrors them into `dist/cjs` as `.d.cts`. This test is
+    // the invariant on that mirror: every public entry that promises a `require`
+    // target resolves types inside the mirror, and the mirror does not point back
+    // out at the ESM tree (which would reinstate the TS1479 this exists to avoid).
+    const pkg = require('../package.json') as {
+      exports: Record<string, { import?: { types?: string }; require?: { types?: string } }>;
+    };
+    const dualFormat = Object.entries(pkg.exports).filter(([, entry]) => entry.require !== undefined);
+    expect(dualFormat.map(([subpath]) => subpath).sort()).toEqual(['.', './centrifuge', './hooks', './vue']);
+
+    for (const [subpath, entry] of dualFormat) {
+      const esmTypes = entry.import?.types;
+      const cjsTypes = entry.require?.types;
+      expect(typeof esmTypes, `${subpath} must keep an ESM declaration`).toBe('string');
+      expect(cjsTypes, `${subpath} must declare types for require`).toMatch(/\.d\.cts$/);
+      expect(existsSync(cjsTypes!.replace(/^\.\//, '')), `${subpath} CJS declaration missing`).toBe(true);
+    }
+
+    const esmDeclarations = readdirSync('dist', { recursive: true, encoding: 'utf8' })
+      .filter(file => file.endsWith('.d.ts') && !file.startsWith('cjs/') && !file.startsWith('workers/'));
+    expect(esmDeclarations.length).toBeGreaterThan(0);
+    for (const file of esmDeclarations) {
+      const twin = `dist/cjs/${file.replace(/\.d\.ts$/, '.d.cts')}`;
+      expect(existsSync(twin), `declaration twin missing: ${twin}`).toBe(true);
+      expect(readFileSync(twin, 'utf8')).not.toMatch(/from\s+['"]\.\.?\/[^'"]*\.js['"]/);
     }
   });
 });

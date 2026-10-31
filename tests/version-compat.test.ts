@@ -158,4 +158,29 @@ describe('version compatibility export gate', () => {
       '.': { types: null, import: './index.js' }
     })).toThrow('removed types condition');
   });
+
+  it('permits widening a types condition into the import and require branches', () => {
+    // Phase 337: a dual-format entry cannot keep one top-level declaration, because
+    // `node16` CommonJS consumers refuse an ESM-format `.d.ts`. Moving `types` into
+    // both branches keeps every configuration typed, so it is not a removal.
+    expect(checkExports(
+      { '.': { types: './index.d.ts', import: './index.js', require: './index.cjs' } },
+      { '.': {
+        import: { types: './index.d.ts', default: './index.js' },
+        require: { types: './cjs/index.d.cts', default: './cjs/index.cjs' }
+      } }
+    )).toContain('preserves public exports');
+  });
+
+  it('rejects a widening that leaves a branch without types', () => {
+    // The allowance above must not become a blanket exemption: one untyped branch
+    // means a configuration that had declarations now resolves none.
+    expect(() => checkExports(
+      { '.': { types: './index.d.ts', import: './index.js', require: './index.cjs' } },
+      { '.': {
+        import: { types: './index.d.ts', default: './index.js' },
+        require: { default: './cjs/index.cjs' }
+      } }
+    )).toThrow('removed types condition');
+  });
 });

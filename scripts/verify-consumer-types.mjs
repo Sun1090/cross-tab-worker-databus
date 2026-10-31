@@ -73,14 +73,37 @@ const SUBPATHS = ['.', './centrifuge'];
  *
  * `skipLibCheck: false` everywhere, on purpose: the point is to check *this*
  * package's declarations, and every mode is expected to pass in that strictest
- * configuration. The CJS mode has its own fixture directory because the module
- * format of a `.ts` file under `nodenext` is decided by the nearest
- * `package.json` `type`, so it needs a `commonjs` one of its own.
+ * configuration. The CJS modes have their own fixture directory because the
+ * module format of a `.ts` file under `node16`/`nodenext` is decided by the
+ * nearest `package.json` `type`, so each needs a `commonjs` one of its own.
+ *
+ * `node16` is not a synonym for `nodenext`, which is why both are run: `node16`
+ * pins resolution to the Node version the compiler knows about (no `import`
+ * attributes, no `require(esm)` interop), while `nodenext` tracks the newest.
+ * They disagreed often enough during the 6.0 major line that a `tsconfig.json`
+ * naming one cannot be assumed to behave like the other, and a consumer's file
+ * says whichever it says.
  */
+const RESOLUTION_MODES = ['node16', 'nodenext'];
+
 const MODES = [
   { id: 'bundler', label: 'bundler', dir: '.', type: 'module', compilerOptions: { module: 'esnext', moduleResolution: 'bundler' } },
-  { id: 'nodenext', label: 'nodenext (ESM)', dir: '.', type: 'module', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } },
-  { id: 'nodenext-cjs', label: 'nodenext (CJS)', dir: 'cjs', type: 'commonjs', compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext' } }
+  ...RESOLUTION_MODES.flatMap(resolution => [
+    {
+      id: `${resolution}-esm`,
+      label: `${resolution} (ESM)`,
+      dir: '.',
+      type: 'module',
+      compilerOptions: { module: resolution, moduleResolution: resolution }
+    },
+    {
+      id: `${resolution}-cjs`,
+      label: `${resolution} (CJS)`,
+      dir: 'cjs',
+      type: 'commonjs',
+      compilerOptions: { module: resolution, moduleResolution: resolution }
+    }
+  ])
 ];
 
 /** `label (version)` per mode that passed, for the one-line summary. */
