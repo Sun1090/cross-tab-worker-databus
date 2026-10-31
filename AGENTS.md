@@ -472,7 +472,36 @@ The project is feature-complete: follow-up work is verification and deepening of
   on 2026-10-31 against `0.21.60`: zero diagnostics on 6.0.3 **and** on 7.0.2, so a consumer can move
   before this repository does. Re-derive it rather than quoting it — the claim decays with the next
   declaration change, which is why both versions run in the `typescript-7` job.
-  So the only remaining blocker is the peer range above. Do not re-derive it from this paragraph either.
+  **The blocking half is gone too, as of 2026-10-31 (Phase 334) — and not in the direction this note
+  predicted.** The note assumed the only way past `typescript-eslint`'s `>=4.8.4 <6.1.0` was for that
+  ceiling to move. It is not: the peer range constrains *which package is named `typescript`*, not *which
+  `tsc` compiles the code*, and TypeScript 7.0 ships no API while 6.0 does, so the two are separable on
+  purpose. The repository now runs them side by side, as the 7.0 announcement recommends:
+  `typescript` is `npm:@typescript/typescript6@^6.0.2` (6.0.x API + `tsc6` bin, satisfies the peer), and
+  `@typescript/native` is `npm:typescript@^7.0.2` (supplies `tsc`). Measured consequence: `pnpm typecheck`
+  73 s → **0.5 s**, `pnpm build` → ~1 s, both zero-diagnostic, and 42 files / 1085 tests still green.
+  The emitted declarations are unchanged except for one file's string-literal quoting
+  (`readonly CONNECTING: "connecting"` → `'connecting'` in `dist/utils/constants.d.ts`), which is why the
+  surface gates read identically — `6 entries, 90 importable names, surface closed`.
+  What still waits on upstream is only the *endgame*, dropping the alias so `typescript` is really 7:
+  measured by installing exactly that combination, where `typescript-eslint` refuses at import with
+  `typescript-eslint does not support TS 7.0.` — a hard error, not a peer warning, and the same refusal on
+  its canary line. Re-derive both sides rather than quoting this paragraph.
+  Three traps this arrangement creates, all measured on 2026-10-31:
+  (1) `node_modules/typescript/package.json` no longer reports the API version — it says `6.0.2` (the
+  shim's own) while the API it re-exports is `6.0.3`, and the compiler that emits `dist` is 7.x. Anything
+  that wants "the compiler these gates drive" must read `import('typescript').version`, which is why
+  `scripts/verify-consumer-types.mjs` defaults to that and not to the manifest.
+  (2) pnpm resolves the `typescript` peer **per package** in its virtual store
+  (`typescript-eslint@8.72.1_@typescript+typescript6@6.0.2_…`), so replacing the root
+  `node_modules/typescript` with the real 7 package does *not* change what `typescript-eslint` sees —
+  `pnpm lint` still passes after that swap. So the `typescript-7` CI job exercises the handle backend and
+  is **not** a rehearsal of removing the alias; do not read its green run as one.
+  (3) The public docs deliberately do not name those two specifiers — `docs/roadmap.md` and the release
+  checklists describe them by function instead. That is not sloppiness: `tests/documentation.test.ts`
+  forbids `@scope/` in `README.md`, `CHANGELOG.md` and everything under `docs/` except `progress.md`, and
+  both aliases match it. This file and `docs/progress.md` are outside that sweep, which is why the exact
+  strings live here. Do not "fix" the public docs by adding them back.
 
 ### Boundary Review Signals
 

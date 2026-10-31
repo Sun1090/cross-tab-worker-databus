@@ -73,18 +73,25 @@ jobs:
 
   typescript-7:
     # `verify:types` has two backends: TypeScript 6's in-process object API and
-    # 7's snapshot/handle API (scripts/type-surface.mjs). The compiler this
-    # repository installs is 6.x, so without this job the handle backend is never
-    # executed — and a backend that is never executed is a comment, not a gate.
-    # That matters concretely: the handle facade's first alias-resolution
-    # implementation was wrong in a way that made the closure check miss a
-    # deliberately leaked type while the clean tree stayed green on both
-    # compilers (docs/progress.md Phase 330).
+    # 7's snapshot/handle API (scripts/type-surface.mjs). Which one runs is
+    # decided by what `import('typescript')` resolves to, and in this repository
+    # that is the 6.0.x alias that typescript-eslint's peer range requires —
+    # `typescript` is `npm:@typescript/typescript6`, while `@typescript/native`
+    # is the 7 package that supplies `tsc` (docs/progress.md Phase 334). So
+    # without this job the handle backend is never executed — and a backend that
+    # is never executed is a comment, not a gate. That matters concretely: the
+    # handle facade's first alias-resolution implementation was wrong in a way
+    # that made the closure check miss a deliberately leaked type while the clean
+    # tree stayed green on both compilers (docs/progress.md Phase 330).
     #
     # The compiler is replaced in place rather than installed as a second copy,
     # because the gate resolves `typescript` as a bare specifier from its own
-    # directory. The build runs first, on 6.x, so this job cannot be read as a
-    # claim about emitting declarations with 7.
+    # directory. The swap is scoped to that directory: it does **not** make
+    # typescript-eslint see 7, because pnpm resolves that peer inside its own
+    # virtual store (`typescript-eslint@8.72.1_@typescript+typescript6@6.0.2_…`).
+    # Measured, not assumed — `pnpm lint` still passes after the swap. So this job
+    # is not a rehearsal of the endgame where the alias is dropped entirely; that
+    # one still dies in `pnpm lint` (Phase 334 has the refusal).
     runs-on: ubuntu-latest
     needs: verify
     steps:
@@ -100,7 +107,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build declarations (TypeScript 6)
+      - name: Build declarations
+        # Emitted by TypeScript 7 here *and* in `verify`: the alias supplies `tsc`
+        # 7 in both jobs, so "built on 6.x" is no longer the difference between
+        # them. Kept as its own step because both gates below read `dist/*.d.ts`.
         run: pnpm build
       - name: Swap in TypeScript 7
         # 7.0.2 is distributed per platform: the `typescript` package alone is

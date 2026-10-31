@@ -1042,7 +1042,7 @@ DataBus 生命周期审计还固定了 initial `transport.start()` 被 `stop()` 
 3. **发布去重**：设计并实现可选、有界的 message-ID 窗口，覆盖本地分发、BroadcastChannel、WebSocket 与 replay，默认行为保持不变；
 4. **适配层与协议对齐**：统一 React/Vue 生命周期和类型契约，补充二进制帧与恢复语义文档，并增加自定义 transport 兼容夹具；
 5. **运维验证**：扩展浏览器和打包消费测试，增加去重/恢复/replay 清理回归基准，Push CI 继续作为发版门禁。
-6. **TypeScript 7 工具链迁移**：阻塞在上游而非本仓库——2026-09-25 重新对着 registry 查过：`typescript-eslint` 最新发布 8.70.1 与最新 canary 8.70.2-alpha.7，两者的 peer 都仍是 `typescript >=4.8.4 <6.1.0`，所以装上 TypeScript 7（最新 7.0.2）会先让 lint 门禁失败，还轮不到我们自己的类型；两条发布通道里都不存在已经接纳 7.x 的版本可供试装。查最新版时请读 `dist-tags.canary`，不要把版本字符串排序：按字符串排会把 `8.9.1-alpha.9` 排到最后，因为 `9` 排在 `70` 之后，而真正需要盯的那条 alpha 线是 8.70.x。等任一条通道放宽上限后，再在独立分支迁移（TS 7 仍提供 `tsc` 可执行入口，`pnpm typecheck` 本身无需改动）。
+6. **TypeScript 7 工具链迁移**：编译器这一半已经完成，只剩"拆掉别名"这一步卡在上游。自 Phase 334（2026-10-31）起，本仓库**用 TypeScript 7 构建与类型检查**，不必等任何一方：`typescript` 是指向 TypeScript 团队 6.0 兼容包的 npm 别名——就是提供 `tsc6` 与 6.0 API 的那个包——既满足 `typescript-eslint` 的 peer 区间，又保留类型门禁驱动的进程内对象 API；另一个别名以另一个名字装上 `typescript@7.0.2`，提供 `tsc` 可执行入口。确切的 specifier 写在 `package.json` 与 `AGENTS.md` 里而不写在这里：本文件在公开文档扫描范围内，而该扫描禁止出现带作用域的包名。实测：`pnpm typecheck` 由 73 秒降到 0.5 秒，`pnpm build` 约 1 秒，产出的声明文件与 6.0.3 构建逐字相同，唯一差别是某个文件里字符串字面量的引号风格。仍然被阻塞的是**终局**——去掉别名、让 `typescript` 本身就是 7——因为 `typescript-eslint@8.72.1`（含其 canary 线）声明 `typescript >=4.8.4 <6.1.0`，并在 import 阶段直接拒绝：`typescript-eslint does not support TS 7.0.`；这个拒绝是实测的，不是从 peer 字符串推断的。请重新核对那个上限，不要核对这句话；查最新版时读 `dist-tags.canary`，不要把版本字符串排序：按字符串排会把 `8.9.1-alpha.9` 排到最后，因为 `9` 排在 `70` 之后。
 
 ## 发版检查清单
 
