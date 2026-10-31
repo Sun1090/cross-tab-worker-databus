@@ -105,6 +105,7 @@
     "verify:compat": "node scripts/verify-version-compat.mjs",
     "verify:types": "node scripts/verify-public-types.mjs",
     "verify:types:sensitivity": "node scripts/verify-type-surface-sensitivity.mjs",
+    "verify:consumer-types": "node scripts/verify-consumer-types.mjs",
     "verify:published": "node scripts/verify-published-consumer.mjs",
     "test:e2e": "pnpm build && pnpm build:examples && playwright test",
     "typecheck": "tsc --noEmit",
