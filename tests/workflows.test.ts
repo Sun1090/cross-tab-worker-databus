@@ -221,4 +221,29 @@ describe('workflow files', () => {
     // scope still reddens it but a single step moving to `npm run` does not.
     expect(gated, 'the workflow scan must read commands out of .github/workflows').toBeGreaterThan(10);
   });
+
+  it('keeps the second compiler backend in CI, not only in the script list', () => {
+    // `verify:types` has two backends and only one of them is the default: the
+    // package named `typescript` is the 6.0 compatibility shim, so the handle
+    // surface runs only when something asks for the 7 alias (docs/progress.md
+    // Phases 334/335). Deleting the job that asks would redden nothing above —
+    // the quick-reference scan compares commands the workflows run against the
+    // table, never the reverse — and the second surface would quietly go back to
+    // being unexecuted. Pin it at the job that carries the obligation.
+    const ci = readWorkflow('ci.yml');
+    const starts = [...ci.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map(match => ({
+      name: match[1]!,
+      at: match.index
+    }));
+    const job = starts.find(candidate => candidate.name === 'typescript-7');
+    expect(job, 'the typescript-7 job is gone; the handle backend would no longer run anywhere').toBeDefined();
+    const following = starts.find(candidate => candidate.at > job!.at);
+    const body = ci.slice(job!.at, following?.at ?? ci.length);
+    expect(body).toMatch(/run: pnpm verify:types:handle/);
+    // The job used to reach the 7 compiler by replacing node_modules; that shape
+    // needed a scratch `npm install`, a per-platform copy and a `rm -rf`, and it
+    // left typescript-eslint on 6 anyway. A revert to it should be a decision
+    // someone makes on purpose.
+    expect(body).not.toMatch(/rm -rf node_modules\/typescript/);
+  });
 });
