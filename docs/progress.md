@@ -10547,6 +10547,15 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
 - **Deferred with numbers, per the standing rule:** no browser benchmark sample this cycle. Load averages **7.04 / 8.42 / 11.04 over 8 cores** at the time of the run, i.e. oversubscribed by definition, so `docs/benchmarks.md` is unchanged and the streak of recorded deferrals continues rather than admitting a loaded sample as the next five releases' baseline.
 - **Verification:** `pnpm check` 0; `pnpm lint` 0; `pnpm test:coverage` 0 — **99.03 / 97.67 / 99.28 / 99.69**; `pnpm bench` 3 files; `pnpm test:e2e` **39 passed**; `verify:compat` 0; `verify:types` 0; `verify:types:sensitivity` 0 (both backends); `verify:types:handle` 0; `verify:pack` 0; `verify:consumer-types` 0 on 6.0.3 and 7.0.2 in five modes each; `pnpm audit --registry=https://registry.npmjs.org` no known vulnerabilities; `npm pack --dry-run` **136 files including 27 `.d.cts`**. **Changed files:** `package.json` (version), `CHANGELOG.md` (the `0.21.61` section), `docs/roadmap.md` + `docs/zh/roadmap.md` (preambles), `docs/progress.md` (this record).
 
+## Phase 339 / The consumer gate covered half the entries it exists for
+
+- **Milestone / version:** post-`0.21.61`, unreleased. Branch `chore/consumer-types-all-subpaths`. No shipped file: `scripts/` is outside `package.json` `files`, so no release is owed.
+- **The hole was two entries wide.** `verify:consumer-types` drove `.` and `./centrifuge` through its five modes, while **four** subpaths nest `types` per condition — `./hooks` and `./vue` shipped a second declaration tree that no mode had ever compiled. The build copied them because it copies everything, and `tests/dual-format.test.ts` asserted the twins existed, so the *files* were covered and the *resolution* was not: two different claims, and only the second one is what a consumer experiences.
+- **Found by compiling the published tarball by hand, not by reading the script.** Verifying `0.21.61` from the registry meant writing four fixture files (one per subpath, since `./hooks` and `./vue` legitimately export the same names and one file would collide — the same reason the script already uses one file per subpath), installing `react`, `@types/react` and `vue` alongside `centrifuge`, and running four configurations. All clean; the gate's own summary line had been claiming completeness over half the surface.
+- **The list is now derived, which is the part that stays fixed.** Dual-format means "has a `require` condition", so `SUBPATHS` is read from `exports` with that filter; a new subpath is covered the moment it is advertised, and the worker entries drop out by the same rule because they declare `types` + `default` and no `require`. The peers a consumer of those subpaths installs are now installed by the gate too (`centrifuge`, `react`, `@types/react`, `vue`), because without them the failure would name the peer rather than this package.
+- **Proven sensitive on a subpath that was previously invisible:** deleting `dist/cjs/hooks.d.cts` now fails the run with `cjs/hooks.ts(1,15): error TS7016: Could not find a declaration file for module 'cross-tab-worker-databus/hooks'` under `node16 (CJS)`. Before this change the same deletion left the gate green, which is the measurement that says the two new fixtures are load-bearing rather than decorative.
+- **Verification:** `pnpm verify:consumer-types` 0 and `pnpm verify:consumer-types 7.0.2` 0, each now reporting **4 subpaths** across five modes (was 2); `npx vitest run tests/documentation.test.ts` 31 passed; `pnpm lint` 0. **Changed files:** `scripts/verify-consumer-types.mjs`, `AGENTS.md`, `docs/progress.md` (this record).
+
 ## Next candidates (project is feature-complete; future work is verification/deepening)
 
 - Track the browser handoff flake: consider raising HANDOFF_TIMEOUT or moving the
@@ -10576,13 +10585,14 @@ retries waiting on `cross-tab-worker-databus@0.21.18` to appear and passed on th
   skips `workers/`. A CommonJS consumer under `node16` that reaches for them
   gets TS1479 about an ESM declaration, which is the truthful answer for a
   subpath with no CommonJS build. Adding one means a `.cjs` bundle, a `require`
-  condition and mirroring `workers/` — a feature, not a cleanup.- Let the consumer-type gate cover every dual-format subpath, not two of four.
-  -> OPEN: `verify:consumer-types` drives `.` and `./centrifuge`, while
-  `./hooks` and `./vue` also nest `types` per condition. Both were compiled by
-  hand against the published `0.21.61` tarball in the four module configurations
-  and are clean, but the gate itself covers half the entries it exists for.
-  Cost is installing `react` + `@types/react` + `vue` into the scratch consumer.
-
+  condition and mirroring `workers/` — a feature, not a cleanup.
+- Let the consumer-type gate cover every dual-format subpath, not two of four.
+  -> DONE in phase 339: the list is derived from `exports` by the `require`
+  condition, so all four are driven through five modes, and the peers a consumer
+  of those subpaths installs (`centrifuge`, `react`, `@types/react`, `vue`) are
+  installed for it. Proven sensitive: deleting `dist/cjs/hooks.d.cts` now fails
+  the `node16 (CJS)` leg with TS7016, where the same deletion used to leave the
+  gate green.
 
 ## Recovery entry
 

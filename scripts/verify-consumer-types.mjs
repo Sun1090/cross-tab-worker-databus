@@ -56,8 +56,36 @@ if (defaultCompilerVersion === undefined) {
 
 const requested = process.argv[2] ?? defaultCompilerVersion;
 
-/** Subpaths whose declarations are checked. The worker entries export nothing. */
-const SUBPATHS = ['.', './centrifuge'];
+/**
+ * Every dual-format subpath, taken from the `exports` map rather than listed.
+ *
+ * A `require` condition is what makes an entry dual-format, and it is also what
+ * carries a second declaration tree — so deriving the list is what keeps this
+ * gate honest when a subpath is added. Until Phase 339 it named `.` and
+ * `./centrifuge` only, which was half of the four entries that ship nested
+ * `types`: `./hooks` and `./vue` were never driven through any mode, and their
+ * mirrors existed because the build copies everything, not because a gate asked.
+ *
+ * The worker entries are excluded by the same rule: they declare `types` and
+ * `default` with no `require`, so there is no second tree to check.
+ */
+const SUBPATHS = Object.entries(manifest.exports ?? {})
+  .filter(([subpath, entry]) => subpath !== './package.json' && entry?.require !== undefined)
+  .map(([subpath]) => subpath);
+
+if (SUBPATHS.length === 0) {
+  throw new Error('[consumer-types] the exports map declares no dual-format subpath to check');
+}
+
+/**
+ * Peers a consumer of those subpaths installs.
+ *
+ * `centrifuge` is an optional peer of `./centrifuge`, and `react` / `vue` of the
+ * two adapter entries; without them those subpaths' declarations cannot resolve
+ * and the failure would name the peer rather than this package. `@types/react`
+ * is separate because React publishes no types of its own.
+ */
+const PEERS = ['centrifuge', 'react', '@types/react', 'vue'];
 
 /**
  * The resolution modes a consumer can legitimately be in, one `tsc -p` each.
@@ -170,7 +198,7 @@ try {
   // `centrifuge` is an optional peer of `./centrifuge`; without it the subpath's
   // declarations cannot resolve, and the failure would name the peer rather than
   // this package. Installing it is what a consumer of that subpath does.
-  run('npm', ['install', `./${tarball}`, 'centrifuge', `typescript@${requested}`, '--silent']);
+  run('npm', ['install', `./${tarball}`, ...PEERS, `typescript@${requested}`, '--silent']);
 
   const installed = JSON.parse(readFileSync(join(root, 'node_modules/typescript/package.json'), 'utf8')).version;
   for (const mode of MODES) {
