@@ -38,9 +38,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, join, relative, resolve } from 'node:path';
+import { assertCompilerApi } from './compiler-api.mjs';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
+
+// Before anything reads `ts`: a compiler that has no object API cannot answer
+// any question this file asks, and the failure without this line is a
+// `TypeError` from inside the syntax walk that names neither the version nor
+// the gate. See scripts/compiler-api.mjs for the measurement behind it.
+assertCompilerApi(ts, { gate: 'verify:types' });
 
 const workspace = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8'));
