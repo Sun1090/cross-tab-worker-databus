@@ -97,12 +97,28 @@ jobs:
       - name: Build declarations (TypeScript 6)
         run: pnpm build
       - name: Swap in TypeScript 7
+        # 7.0.2 is distributed per platform: the `typescript` package alone is
+        # not the compiler, and it resolves `@typescript/typescript-<platform>`
+        # as a sibling. Replacing only node_modules/typescript therefore leaves
+        # the handle API unresolvable — this job's first run failed exactly
+        # there, and the gate's own diagnosis named the missing package instead
+        # of reporting a surface it had not walked.
+        #
+        # npm is used in a scratch directory so it resolves the platform package
+        # itself, and only the two directories are copied into the repository:
+        # running `npm install` against pnpm's node_modules would let npm
+        # recompute an ideal tree over it.
         run: |
-          npm pack typescript@7.0.2 --pack-destination "$RUNNER_TEMP" --silent > /dev/null
-          tar -xzf "$RUNNER_TEMP/typescript-7.0.2.tgz" -C "$RUNNER_TEMP"
-          rm -rf node_modules/typescript
-          mv "$RUNNER_TEMP/package" node_modules/typescript
+          mkdir -p "$RUNNER_TEMP/ts7"
+          cd "$RUNNER_TEMP/ts7"
+          npm init -y > /dev/null
+          npm install typescript@7.0.2 --silent
+          cd "$GITHUB_WORKSPACE"
+          rm -rf node_modules/typescript node_modules/@typescript
+          cp -R "$RUNNER_TEMP/ts7/node_modules/typescript" node_modules/typescript
+          cp -R "$RUNNER_TEMP/ts7/node_modules/@typescript" node_modules/@typescript
           node -p "require('typescript').version"
+          ls node_modules/@typescript
       - name: Public type surface on TypeScript 7
         # Must print the same summary line as the 6.x run in `verify`.
         run: pnpm verify:types
