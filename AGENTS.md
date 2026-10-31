@@ -470,10 +470,15 @@ The project is feature-complete: follow-up work is verification and deepening of
   `getExportSymbol()` makes it exit 1 with "the gate exited 0 on a mutated tree", which is the only
   evidence that a sensitivity check has any.
   The *consumer* side is measured separately: `pnpm verify:consumer-types 7.0.2` packs the tarball and has
-  7.0.2 build a consumer that re-exports both public subpaths and calls six declared signatures. Measured
-  on 2026-10-31 against `0.21.60`: zero diagnostics on 6.0.3 **and** on 7.0.2, so a consumer can move
-  before this repository does. Re-derive it rather than quoting it — the claim decays with the next
-  declaration change, which is why both versions run in the `typescript-7` job.
+  7.0.2 build a consumer that re-exports every dual-format subpath and calls six declared signatures, in
+  each resolution mode and against the declaration tree that mode is supposed to read. Measured on
+  2026-10-31 against `0.21.60`: zero diagnostics on 6.0.3 **and** on 7.0.2 for the two subpaths it then
+  covered, so a consumer can move before this repository does. Re-derive it rather than quoting it — the
+  claim decays with the next declaration change, which is why both versions run in the `typescript-7` job.
+  The subpath list is derived from `exports` by the presence of a `require` condition, not written out:
+  when it *was* written out it named two of the four entries that carry a second declaration tree, so
+  `./hooks` and `./vue` were shipped through five modes without once being built — found by compiling the
+  published tarball by hand (`docs/progress.md` Phases 338/339).
   **The blocking half is gone too, as of 2026-10-31 (Phase 334) — and not in the direction this note
   predicted.** The note assumed the only way past `typescript-eslint`'s `>=4.8.4 <6.1.0` was for that
   ceiling to move. It is not: the peer range constrains *which package is named `typescript`*, not *which
