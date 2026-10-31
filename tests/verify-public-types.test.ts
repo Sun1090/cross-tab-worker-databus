@@ -24,9 +24,13 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { REQUIRED_COMPILER_API, assertCompilerApi, missingCompilerApi } from '../scripts/compiler-api.mjs';
+import { classify, detectCompiler, unavailableSurfaceMessage } from '../scripts/type-surface.mjs';
 
 const require = createRequire(import.meta.url);
 const gateSource = readFileSync('scripts/verify-public-types.mjs', 'utf8');
+// The gate stopped touching `ts.*` when the object and handle surfaces were
+// split; the object surface is where those call sites live now.
+const objectSurfaceSource = readFileSync('scripts/type-surface.object.mjs', 'utf8');
 
 /** A compiler stub carrying every member the gate needs. */
 function completeCompiler(version = '6.0.3') {
@@ -104,20 +108,70 @@ describe('assertCompilerApi', () => {
   });
 });
 
-describe('REQUIRED_COMPILER_API tracks the gate', () => {
-  it('is called before the first compiler-API use', () => {
-    const callAt = gateSource.indexOf('assertCompilerApi(ts');
-    expect(callAt, 'verify-public-types.mjs must call assertCompilerApi(ts, …)').toBeGreaterThan(-1);
-    const uses = [...gateSource.matchAll(/\bts\.([A-Za-z_]+)/g)].map(match => match.index ?? 0);
-    expect(uses.length).toBeGreaterThan(0);
-    expect(callAt).toBeLessThan(Math.min(...uses));
+describe('REQUIRED_COMPILER_API tracks the surface that uses it', () => {
+  it('is asserted before the surface that needs it is opened', () => {
+    const assertAt = gateSource.indexOf('assertCompilerApi(compiler.ts');
+    expect(assertAt, 'verify-public-types.mjs must call assertCompilerApi(compiler.ts, …)').toBeGreaterThan(-1);
+    const openAt = gateSource.indexOf('openSurface(');
+    expect(openAt, 'verify-public-types.mjs must open a surface').toBeGreaterThan(-1);
+    expect(assertAt).toBeLessThan(openAt);
+    // Only the object branch is asserted member-by-member. A compiler without the
+    // object API may still be a working TypeScript 7, and asserting the object
+    // members unconditionally is what would have made the preflight into a
+    // blocker on the migration rather than a diagnostic for it.
+    expect(gateSource).toMatch(/compiler\.kind === 'object'\) assertCompilerApi/);
   });
 
-  it('lists only members the gate actually calls', () => {
+  it('lists only members the object surface actually calls', () => {
     // The reverse direction of the ordering case: a listed member with no call
     // site is a compatibility assertion about TypeScript, not a precondition of
-    // this repository's gate.
-    const unused = REQUIRED_COMPILER_API.filter(name => !new RegExp(`\\bts\\.${name}\\b`).test(gateSource));
+    // this repository's gate. The call sites moved out of the gate and into the
+    // object surface when the two compiler surfaces were split, so this leg is
+    // anchored on the file that now drives `ts`.
+    const unused = REQUIRED_COMPILER_API.filter(name => !new RegExp(`\\bts\\.${name}\\b`).test(objectSurfaceSource));
     expect(unused).toEqual([]);
+  });
+
+  it('is not vacuously satisfied by the gate text alone', () => {
+    // Pins the reason the leg above moved: the gate no longer touches `ts.*`.
+    expect(/\bts\.[A-Za-z_]/.test(gateSource)).toBe(false);
+  });
+});
+
+describe('detectCompiler', () => {
+  it('classifies the installed compiler by the API it actually exposes', () => {
+    const detected = detectCompiler();
+    expect(detected.kind).toBe('object');
+    expect(detected.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(typeof (detected.ts as { createProgram?: unknown }).createProgram).toBe('function');
+  });
+
+  it('reads the version off a compiler that exposes no object API', () => {
+    // The shape `typescript@7.0.2` ships at its root: version metadata only. It
+    // classifies as `handle` — the handle surface is a subpath, not the root —
+    // and the version has to survive so the later diagnosis can name it.
+    const { kind, version } = classify({ version: '7.0.2' });
+    expect(kind).toBe('handle');
+    expect(version).toBe('7.0.2');
+  });
+
+  it('does not claim a version it could not read', () => {
+    expect(classify({}).version).toBe('unknown');
+  });
+});
+
+describe('unavailableSurfaceMessage', () => {
+  const message = unavailableSurfaceMessage('7.0.2', 'Cannot find module typescript/unstable/sync');
+
+  it('names the version and the subpath the program interface moved to', () => {
+    expect(message).toContain('7.0.2');
+    expect(message).toContain('typescript/unstable/sync');
+  });
+
+  it('refuses the verdict reading', () => {
+    // This exit arrives on a dependency bump. `verify:types` exiting non-zero
+    // normally *is* a removal-or-leak verdict, so the message has to say that
+    // this run reached none.
+    expect(message).toMatch(/nothing in this run is evidence about the public type surface/);
   });
 });
